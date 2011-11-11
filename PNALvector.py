@@ -27,6 +27,7 @@ def decode(str):
 
 def init(visastr):
     v=visa.instrument(visastr)
+    #v.write(':format ascii') # default
     v.write(':format REAL,64')
     v.write(':format:border swap')
     return v
@@ -91,12 +92,6 @@ def sel(visaobj, n, channel=1):
 if __name__ == "__main__":
     print visa.get_instruments_list()
     #v=visa.instrument('USB0::0x0957::0x0118::MY49001395')
-    #v.write(':format ascii') # default
-    #v.ask('calc:par:cat?')
-    #v.write('calc:par:sel CH1_S11_1')
-    #x2=v.ask(':calc:data? fdata')
-    #z=fromstring(x2, 'float64', sep=',')
-    #plot(z[::2],z[1::2])
     v=init('USB0::0x0957::0x0118::MY49001395::0::INSTR')
     sel(v, 1)
     xx= getx(v)
@@ -123,6 +118,7 @@ if __name__ == "__main__":
     v.ask(':sense1:class:name?')
     v.ask(':sense1:correction?')
     v.ask('calc1:par:cat?')  # get list of measurements
+    #v.write('calc:par:sel CH1_S11_1')
     v.ask('calc1:par:mnum?') # get/set current measurement number
     v.ask('calc:par:sel?') # get/set current measurement name
     v.ask(':calc1:correction:state?') # for current measurement

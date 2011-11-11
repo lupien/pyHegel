@@ -17,8 +17,16 @@ def decodeblock(str):
    data = np.fromstring(blk,'float64')
    return data
 
+def decode(str):
+   if str[0]=='#':
+      v = decodeblock(str)
+   else:
+      v = fromstring(str, 'float64', sep=',')
+   return v
+
 def init(visastr):
     v=visa.instrument(visastr)
+    #v.write(':format ascii') # default
     v.write(':format REAL,64')
     v.write(':format:border swap')
     return v
@@ -29,11 +37,11 @@ def gettrace(visaobj, n):
         This only returns  the y data. It does not contain x
     """
     str = visaobj.ask(':trace? trace%d'%n)
-    return decodeblock(str)
+    return decode(str)
 
 def generalget(visaobj, n, ask):
     str = visaobj.ask(ask%n)
-    z = decodeblock(str)
+    z = decode(str)
     z.shape=(-1,2)
     z=z.T
     return z
@@ -42,10 +50,7 @@ def fetch0(visaobj):
    """ fetch trace 0 which is a bunch of data
    """
    str = visaobj.ask(':fetch:san0?')
-   if str[0]=='#':
-      v = decodeblock(str)
-   else:
-      v = fromstring(str, 'float64', sep=',')
+   v = decode(str)
    d = dict(margin=v[0]==1,
             Ndb=v[4], avgcount=int(v[5]), npoints=int(v[6]),
             markers=v[10:22])
@@ -71,17 +76,25 @@ def read(visaobj, n):
 if __name__ == "__main__":
     print visa.get_instruments_list()
     #v=visa.instrument('USB0::0x0957::0x0B0B::MY51170142::0::INSTR')
-    #v.write(':format ascii') # default
-    #x2=v.ask('fetch:san?')
-    #z=fromstring(x2,sep=',')
-    #plot(z[::2],z[1::2])
     v=init('USB0::0x0957::0x0B0B::MY51170142::0::INSTR')
     t=S.gettrace(v, 2)
     plot(t)
 
     x,y = fetch(v,3)
     plot(x,y)
-	
+    xy = fetch(v,2)
+    np.savetxt('xy.txt',xy.T)
+    np.savetxt('xy300.txt',xy300.T,delimiter='\t')
+    xy300=S.fetch(v,2)
+    xy77=S.fetch(v,4)
+    x=xy77[0]
+    y77=xy77[1]
+    y300=xy300[1]
+    Y=10.**((y300-y77)/10.)
+    nf=Y/(Y-1) * (1 - 77./290.)
+    plot(x,10*log10(nf))
+    
+    
     v.ask(':detector:trace1?')
     v.ask(':trace2:type?')
     v.ask(':bandwidth?')
