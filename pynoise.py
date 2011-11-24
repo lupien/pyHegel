@@ -22,7 +22,7 @@ class _sweep(instrument.BaseInstrument):
          return
       span = np.linspace(start, stop, npts)
       f = open(filename, 'w')
-      for i in span():
+      for i in span:
           dev.set(i)
           f.write('%f\n'%i)
       f.close()

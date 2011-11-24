@@ -115,7 +115,8 @@ class scpiDevice(BaseDevice):
            else:
               maxtest = True
         state = mintest and maxtest
-        raise ValueError
+        if state == False:
+           raise ValueError
         #return state
 
 class wrapDevice(BaseDevice):
@@ -150,7 +151,7 @@ class visaInstrument(BaseInstrument):
         # need to initialize visa before calling BaseInstrument init
         # which might require access to device
         if type(visa_addr)==int:
-            visa_addr= 'GPIB0::%i:INSTR'%visa_addr
+            visa_addr= 'GPIB0::%i::INSTR'%visa_addr
         self.visa_addr = visa_addr
         self.visa = visa.instrument(visa_addr)
         BaseInstrument.init(self)
@@ -167,8 +168,8 @@ class visaInstrument(BaseInstrument):
     def idn(self):
         return self.ask('*idn?')
     def __repr__(self):
-        ret = 'visa_addr='+self.vias_addr+'\n'
-        ret += BaseInstrument.repr(self)
+        ret = 'visa_addr='+self.visa_addr+'\n'
+        ret += BaseInstrument.__repr__(self)
         return ret
 
 
