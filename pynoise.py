@@ -8,6 +8,9 @@ import numpy as np
 import instrument
 from time import sleep
 import string
+import traces
+
+_figlist = []
 
 class _sweep(instrument.BaseInstrument):
     before = instrument.MemoryDevice()
@@ -33,7 +36,7 @@ class _sweep(instrument.BaseInstrument):
         for dev in l:
             ret.append(dev.get())
         return ret
-    def __call__(self, dev, start, stop, npts, rate, filename):
+    def __call__(self, dev, start, stop, npts, rate=None, filename=None):
         """
             routine pour faire un sweep
              dev est l'objet a varier
@@ -46,7 +49,13 @@ class _sweep(instrument.BaseInstrument):
            print 'Wrong start or stop values. Aborting!'
            return
         span = np.linspace(start, stop, npts)
-        f = open(filename, 'w')
+        t = traces.Trace()
+        _figlist.append(t)
+        t.setLim(span)
+        if filename != None:
+            f = open(filename, 'w')
+        else:
+            f = None
         #TODO get CTRL-C to work properly
         try:
             for i in span:
@@ -56,11 +65,12 @@ class _sweep(instrument.BaseInstrument):
                 vals=self.readall()
                 vals = [i]+vals
                 strs = map(repr,vals)
-                f.write(string.join(strs,'\t')+'\n')
+                if f != None: f.write(string.join(strs,'\t')+'\n')
+                t.addPoint(i, vals)
         except KeyboardInterrupt:
             print 'in here'
             pass
-        f.close()
+        if f != None: f.close()
 
 sweep = _sweep()
 # sleep seems to have 0.001 s resolution on windows at least
