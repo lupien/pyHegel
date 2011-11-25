@@ -9,8 +9,8 @@ class BaseInstrument(object):
         self.create_devs()
         self.init(full=True)
     def devwrap(self, name):
+        setdev = getdev = check = None
         for s in dir(self):
-           setdev = getdev = check = None
            if s == name+'setdev':
               setdev = getattr(self, s)
            if s == name+'getdev':
@@ -35,13 +35,13 @@ class BaseInstrument(object):
         for s in dir(self):
            obj = getattr(self, s)
            if isinstance(obj, BaseDevice):
-               ret += "s = "+repr(obj.getcache())+"\n"
+               ret += s+" = "+repr(obj.getcache())+"\n"
         return ret
     def trig():
         pass
 
 class BaseDevice(object):
-    def __init__(self, parent):
+    def __init__(self, parent=None):
         self.instr = parent
         self.cache = None
     # for cache consistency
@@ -55,6 +55,8 @@ class BaseDevice(object):
         self.cache = ret
         return ret
     def getcache(self):
+        if self.cache==None:
+           return self.get()
         return self.cache
     def setcache(self, val):
         self.cache = val
@@ -64,12 +66,23 @@ class BaseDevice(object):
         else:
            self.set(val)           
 
+    # Implement these in a derived class
     def setdev(self, val):
         raise NotImplementedError
     def getdev(self):
         raise NotImplementedError
     def check(self, val):
         pass
+
+class MemoryDevice(BaseDevice):
+    def __init__(self, initval=None):
+        BaseDevice.__init__()
+        self.cache = initval
+    def get(self):
+        return self.cache
+    def set(self, val):
+        self.cache = val
+    # Can override check member
 
 class scpiDevice(BaseDevice):
     def __init__(self, parent, setstr=None, getstr=None, autoget=True, str_type=None, min=None, max=None, doc=None):
@@ -124,6 +137,7 @@ class wrapDevice(BaseDevice):
         self.setdev = setdev
         self.getdev = getdev
         self.check  = check
+        BaseDevice.__init__(self)
 
 def _decodeblock(str):
    if str[0]!='#':
@@ -195,23 +209,24 @@ class yokogawa(visaInstrument):
         self.level = scpiDevice(self, ':source:level') # can be a voltage, current, MAX, MIN
         self.voltlim = scpiDevice(self, ':source:protection:voltage', str_type=float) #voltage, MIN or MAX
         self.currentlim = scpiDevice(self, ':source:protection:current', str_type=float) #current, MIN or MAX
-        self.level_2 = wrapDevice(self.levelsetdev, self.levelgetdev, self.levelcheck)
+        #self.level_2 = wrapDevice(self.levelsetdev, self.levelgetdev, self.levelcheck)
         self.devwrap('level')
     def levelcheck(self, val):
-        rnge = self.range.getcache()
+        rnge = 1.2*self.range.getcache()
+        if self.function.getcache()=='CURR' and rnge>.2:
+            rnge = .2
         if abs(val) > rnge:
            raise ValueError
     def levelgetdev(self):
-        return self.ask(':source:level?')
+        return float(self.ask(':source:level?'))
     def levelsetdev(self, val):
         self.levelcheck(val)
         self.write(':source:level '+repr(val))
 
 class lia(visaInstrument):
     def init(self, full=False):
-        ## TODO check if this clears the instrument buffers
-        # may be try  gpib device clear
-        self.write('*cls')
+        # This empties the instrument buffers
+        self.visa.clear()
     def create_devs(self):
         self.freq = scpiDevice(self, 'freq', str_type=float)
         self.sens = scpiDevice(self, 'sens', str_type=int)
