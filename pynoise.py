@@ -22,10 +22,12 @@ class _sweep(instrument.BaseInstrument):
         if b:
             exec(b)
     def readall(self):
+        # will will just try to add .get
+        #  this will work for the alias as well
         l = self.out.get()
         if l == None or l==[]:
             return []
-        elif isinstance(l,instrument.BaseDevice):
+        elif not isinstance(l,list):
             l = [l]
         ret = []
         for dev in l:

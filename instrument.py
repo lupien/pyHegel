@@ -1,10 +1,16 @@
 # -*- coding: utf-8 -*-
 #
 
-import visa
+try:
+  import visa
+except ImportError:
+  print 'Error importing visa. You will have reduced functionality.'
 import numpy as np
+import random
+import time
 
 class BaseInstrument(object):
+    alias = None
     def __init__(self):
         self.create_devs()
         self.init(full=True)
@@ -29,12 +35,30 @@ class BaseInstrument(object):
     def init(self, full=False):
         """ Do instrument initialization (full=True)/reset (full=False) here """
         pass
+    # These could probably be replaced by a single getattribute ...
+    def get(self):
+        if self.alias != None:
+           return self.alias.get()
+    def getcache(self):
+        if self.alias != None:
+           return self.alias.getcache()
+    def set(self, val):
+        if self.alias != None:
+           self.alias.set(val)
+    def setcache(self, val):
+        if self.alias != None:
+           self.alias.setcache(val)
+    def check(self, val):
+        if self.alias != None:
+           self.alias.check(val)
     # this should handle print statements ...
     def __repr__(self):
         ret = ''
         for s in dir(self):
            obj = getattr(self, s)
-           if isinstance(obj, BaseDevice):
+           if s != 'alias' and isinstance(obj, BaseDevice):
+               if self.alias == obj:
+                   ret += 'alias = '
                ret += s+" = "+repr(obj.getcache())+"\n"
         return ret
     def trig():
@@ -220,6 +244,7 @@ class yokogawa(visaInstrument):
         self.currentlim = scpiDevice(self, ':source:protection:current', str_type=float) #current, MIN or MAX
         #self.level_2 = wrapDevice(self.levelsetdev, self.levelgetdev, self.levelcheck)
         self.devwrap('level')
+        self.alias = self.level
     def levelcheck(self, val):
         rnge = 1.2*self.range.getcache()
         if self.function.getcache()=='CURR' and rnge>.2:
@@ -249,4 +274,23 @@ class lia(visaInstrument):
         self.r = scpiDevice(self, getstr='outp? 3', str_type=float)
         self.theta = scpiDevice(self, getstr='outp? 4', str_type=float)
         self.xy = scpiDevice(self, getstr='snap? 1,2')
+
+class dummy(BaseInstrument):
+    volt = MemoryDevice(0.)
+    current = MemoryDevice(1.)
+    alias = current
+    def init(self, full=False):
+        self.incr_val = 0
+        self.wait = .1
+    def incrgetdev(self):
+        ret = self.incr_val
+        self.incr_val += 1
+        time.sleep(self.wait)
+        return ret
+    def randgetdev(self):
+        time.sleep(self.wait)
+        return random.normalvariate(0,1.)
+    def create_devs(self):
+        self.devwrap('incr')
+        self.devwrap('rand')
 
