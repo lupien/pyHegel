@@ -154,7 +154,7 @@ class visaInstrument(BaseInstrument):
             visa_addr= 'GPIB0::%i::INSTR'%visa_addr
         self.visa_addr = visa_addr
         self.visa = visa.instrument(visa_addr)
-        BaseInstrument.init(self)
+        BaseInstrument.__init__(self)
     #######
     ## Could implement some locking here ....
     ## for read, write, ask
