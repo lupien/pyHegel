@@ -7,10 +7,30 @@
 import numpy as np
 import instrument
 from time import sleep
+import string
 
 class _sweep(instrument.BaseInstrument):
     before = instrument.MemoryDevice()
+    after = instrument.MemoryDevice()
     out = instrument.MemoryDevice()
+    def execbefore(self):
+        b = self.before.get()
+        if b:
+            exec(b)
+    def execafter(self):
+        b = self.after.get()
+        if b:
+            exec(b)
+    def readall(self):
+        l = self.out.get()
+        if l == None or l==[]:
+            return []
+        elif isinstance(l,instrument.BaseDevice):
+            l = [l]
+        ret = []
+        for dev in l:
+            ret.append(dev.get())
+        return ret
     def __call__(self, dev, start, stop, npts, rate, filename):
         """
             routine pour faire un sweep
@@ -25,9 +45,19 @@ class _sweep(instrument.BaseInstrument):
            return
         span = np.linspace(start, stop, npts)
         f = open(filename, 'w')
-        for i in span:
-            dev.set(i)
-            f.write('%f\n'%i)
+        #TODO get CTRL-C to work properly
+        try:
+            for i in span:
+                self.execbefore()
+                dev.set(i)
+                self.execafter()
+                vals=self.readall()
+                vals = [i]+vals
+                strs = map(repr,vals)
+                f.write(string.join(strs,'\t')+'\n')
+        except KeyboardInterrupt:
+            print 'in here'
+            pass
         f.close()
 
 sweep = _sweep()
