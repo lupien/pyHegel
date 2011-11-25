@@ -69,8 +69,9 @@ class BaseDevice(object):
     #TODO: this should allow assignement: instr.dev = val
     #but it does not work because the device object needs to be
     #assigned in the class, not the instance as is currently the case
+    # It does work for sweep
     def __set__(self, instance, val):
-        print instance
+        #print instance
         self.set(val)
 
     # Implement these in a derived class
