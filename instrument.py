@@ -43,28 +43,35 @@ class BaseInstrument(object):
 class BaseDevice(object):
     def __init__(self, parent=None):
         self.instr = parent
-        self.cache = None
+        self._cache = None
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val):
         self.setdev(val)
         # only change cache after succesfull setdev
-        self.cache = val
+        self._cache = val
     def get(self):
         ret = self.getdev()
-        self.cache = ret
+        self._cache = ret
         return ret
     def getcache(self):
-        if self.cache==None:
+        if self._cache==None:
            return self.get()
-        return self.cache
+        return self._cache
     def setcache(self, val):
-        self.cache = val
+        self._cache = val
     def __call__(self, val=None):
         if val==None:
            return self.getcache()
         else:
-           self.set(val)           
+           self.set(val)
+
+    #TODO: this should allow assignement: instr.dev = val
+    #but it does not work because the device object needs to be
+    #assigned in the class, not the instance as is currently the case
+    def __set__(self, instance, val):
+        print instance
+        self.set(val)
 
     # Implement these in a derived class
     def setdev(self, val):
@@ -76,12 +83,12 @@ class BaseDevice(object):
 
 class MemoryDevice(BaseDevice):
     def __init__(self, initval=None):
-        BaseDevice.__init__()
-        self.cache = initval
+        BaseDevice.__init__(self)
+        self._cache = initval
     def get(self):
-        return self.cache
+        return self._cache
     def set(self, val):
-        self.cache = val
+        self._cache = val
     # Can override check member
 
 class scpiDevice(BaseDevice):
@@ -205,6 +212,7 @@ class yokogawa(visaInstrument):
         self.write('*cls')
     def create_devs(self):
         self.function = scpiDevice(self, ':source:function') # use 'voltage' or 'current'
+        # voltage or current means to add V or A in the string (possibly with multiplier)
         self.range = scpiDevice(self, ':source:range', str_type=float) # can be a voltage, current, MAX, MIN, UP or DOWN
         self.level = scpiDevice(self, ':source:level') # can be a voltage, current, MAX, MIN
         self.voltlim = scpiDevice(self, ':source:protection:voltage', str_type=float) #voltage, MIN or MAX
