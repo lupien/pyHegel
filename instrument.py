@@ -8,6 +8,7 @@ except ImportError:
 import numpy as np
 import random
 import time
+import traces
 
 class BaseInstrument(object):
     alias = None
@@ -52,6 +53,8 @@ class BaseInstrument(object):
         if self.alias != None:
            self.alias.check(val)
     # this should handle print statements ...
+    # except it does not behave properly for sweep.out using an alias
+    #  device. TODO fix it
     def __repr__(self):
         ret = ''
         for s in dir(self):
@@ -89,6 +92,7 @@ class BaseDevice(object):
            return self.getcache()
         else:
            self.set(val)
+    #TODO: produce more meaningful repr (for sweep.out)
 
     #TODO: this should allow assignement: instr.dev = val
     #but it does not work because the device object needs to be
@@ -285,10 +289,10 @@ class dummy(BaseInstrument):
     def incrgetdev(self):
         ret = self.incr_val
         self.incr_val += 1
-        time.sleep(self.wait)
+        traces.wait(self.wait)
         return ret
     def randgetdev(self):
-        time.sleep(self.wait)
+        traces.wait(self.wait)
         return random.normalvariate(0,1.)
     def create_devs(self):
         self.devwrap('incr')

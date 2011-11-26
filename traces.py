@@ -3,6 +3,8 @@
 # python-matplotlib-0.99.1.2-4.fc13.i686 QT backend is missing many
 # key codes compared to gtk so add missing ones needed for FigureManagerQT
 
+import time
+
 from PyQt4 import QtCore, QtGui, uic
 import numpy as np
 from matplotlib import pylab, pyplot, ticker
@@ -14,14 +16,31 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.backends.backend_qt4 import FigureManagerQT
 from matplotlib.figure import Figure
 
+def wait(sec):
+    start = time.time()
+    end = start + sec
+    while time.time() < end:
+        dif = end - time.time()
+        if dif < .01:
+            if dif >0.:
+                time.sleep(dif)
+            return
+        else:
+           QtGui.QApplication.instance().processEvents(
+               QtCore.QEventLoop.AllEvents, dif*1000)
+           dif = end - time.time()
+           if dif < 0:
+               return
+           time.sleep(min(.1, dif))
+
 FigureCanvas.keyvald.update({QtCore.Qt.Key_Left:'left',
-         QtCore.Qt.Key_Right:'right',
-         QtCore.Qt.Key_Up:'up',
-         QtCore.Qt.Key_Down:'down',
-         QtCore.Qt.Key_Escape:'escape',
-         QtCore.Qt.Key_Home:'home',
-         QtCore.Qt.Key_End:'end',
-         QtCore.Qt.Key_Backspace:'backspace'})
+        QtCore.Qt.Key_Right:'right',
+        QtCore.Qt.Key_Up:'up',
+        QtCore.Qt.Key_Down:'down',
+        QtCore.Qt.Key_Escape:'escape',
+        QtCore.Qt.Key_Home:'home',
+        QtCore.Qt.Key_End:'end',
+        QtCore.Qt.Key_Backspace:'backspace'})
 
 class Trace(FigureManagerQT):
     def __init__(self, width=9.00, height=7.00, dpi=72):

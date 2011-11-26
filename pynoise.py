@@ -73,8 +73,8 @@ class _sweep(instrument.BaseInstrument):
         if f != None: f.close()
 
 sweep = _sweep()
-# sleep seems to have 0.001 s resolution on windows at least
-wait = sleep
+
+wait = traces.wait
 
 ###  set overides set builtin function
 def set(dev, value):
