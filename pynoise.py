@@ -8,6 +8,7 @@ import numpy as np
 import os
 from time import sleep
 import string
+import sys
 
 import traces
 import instrument
@@ -113,12 +114,26 @@ def copy(from_meter, to_src):
     val = get(from_meter)
     set(to_src, val)
 
-def spy(dev, interval=1):
+def spy(devs, interval=1):
     """
        dev is read every interval seconds and displayed on screen
        CTRL-C to stop
     """
-    raise NotImplementedError
+    # make sure devs is list like
+    try:
+       dev = devs[0]
+    except TypeError:
+       devs = [devs]
+    try:
+        while True:
+            v=[]
+            for dev in devs:
+                v.append(dev.get())
+            print >>sys.stderr, v
+            wait(interval)
+    except KeyboardInterrupt:
+        print 'Interrupting spy'
+        pass
 
 def record(dev, interval=1, npoints=None, filename=None):
     """
