@@ -69,22 +69,16 @@ class BaseInstrument(object):
     def init(self, full=False):
         """ Do instrument initialization (full=True)/reset (full=False) here """
         pass
-    # These could probably be replaced by a single getattribute ...
-    def get(self):
-        if self.alias != None:
-           return self.alias.get()
-    def getcache(self):
-        if self.alias != None:
-           return self.alias.getcache()
-    def set(self, val):
-        if self.alias != None:
-           self.alias.set(val)
-    def setcache(self, val):
-        if self.alias != None:
-           self.alias.setcache(val)
-    def check(self, val):
-        if self.alias != None:
-           self.alias.check(val)
+    # This allows instr.get() ... to be redirected to instr.alias.get()
+    def __getattr__(self, name):
+        if self.alias == None:
+            raise AttributeError
+        if name in ['get', 'set', 'check', 'getcache', 'setcache']:
+            return getattr(self.alias, name)
+    def __call__(self):
+        if self.alias == None:
+            raise TypeError
+        return self.alias()
     def iprint(self):
         ret = ''
         for s, obj in self.devs_iter():
