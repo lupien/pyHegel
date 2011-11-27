@@ -6,7 +6,7 @@
 
 import numpy as np
 import os
-from time import sleep
+import time
 import string
 import sys
 
@@ -15,6 +15,20 @@ import instrument
 
 _figlist = []
 instrument._globaldict = globals()
+
+class _Clock(instrument.BaseInstrument):
+    def time_getdev(self):
+        """ Get UTC time since epoch in seconds """
+        return time.time()
+    @classmethod
+    def add_class_devs(cls):
+        cls.devwrap('time')
+        cls.alias = cls.time
+clock = _Clock()
+
+def writevec(file_obj, vals_list):
+     strs_list = map(repr, vals_list)
+     file_obj.write(string.join(strs_list,'\t')+'\n')
 
 class _Sweep(instrument.BaseInstrument):
     before = instrument.MemoryDevice()
@@ -72,15 +86,14 @@ class _Sweep(instrument.BaseInstrument):
         #TODO get CTRL-C to work properly
         try:
             for i in span:
+                tme = clock.get()
                 dev.set(i) # TODO replace with move
                 self.execbefore()
                 wait(self.beforewait)
                 vals=self.readall()
                 self.execafter()
                 if f:
-                    allvals = [i]+vals
-                    strs = map(repr, allvals)
-                    f.write(string.join(strs,'\t')+'\n')
+                    writevec(f, [i]+vals+[tme])
                 if graph:
                     #in case nothing is read, do a stupid linear graph
                     if vals == []:
@@ -138,15 +151,46 @@ def spy(devs, interval=1):
         print 'Interrupting spy'
         pass
 
-def record(dev, interval=1, npoints=None, filename=None):
+def record(devs, interval=1, npoints=None, filename=None):
     """
-       record to filename (if not None) the values from dev
+       record to filename (if not None) the values from devs
+         uses sweep.path
        Also display it on a figure
        interval is in seconds
        npoints is max number of points. If None, it will only stop
         on CTRL-C...
     """
-    raise NotImplementedError
+    # make sure devs is list like
+    try:
+       dev = devs[0]
+    except TypeError:
+       devs = [devs]
+    if filename != None:
+        fullpath=os.path.join(sweep.path.get(), filename)
+        # Make it unbuffered
+        f = open(fullpath, 'w', 1)
+    else:
+        f = None
+    t = traces.Trace()
+    _figlist.append(t) # TODO: handle removal from figlist
+    try:
+        i=0
+        while not (npoints <= i): # this also works for npoints=None
+            vals=[]
+            tme = clock.get()
+            for dev in devs:
+                vals.append(dev.get())
+            t.addPoint(tme, vals)
+            if f:
+                writevec(f, [tme]+vals)
+            i += 1
+            if not (npoints <= i):
+                wait(interval)
+    except KeyboardInterrupt:
+        print 'Interrupting spy'
+        pass
+    if f:
+        f.close()
 
 def trace(dev, interval=1):
     """
