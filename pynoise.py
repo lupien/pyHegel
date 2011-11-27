@@ -17,6 +17,7 @@ instrument._globaldict = globals()
 
 class _Sweep(instrument.BaseInstrument):
     before = instrument.MemoryDevice()
+    beforewait = 0.02 # provide a default wait so figures are updated
     after = instrument.MemoryDevice()
     out = instrument.MemoryDevice()
     path = instrument.MemoryDevice('')
@@ -64,7 +65,7 @@ class _Sweep(instrument.BaseInstrument):
         if filename != None:
             fullpath=os.path.join(self.path.get(), filename)
             # Make it unbuffered
-            f = open(fullpath, 'w', 0)
+            f = open(fullpath, 'w', 1)
         else:
             f = None
         #TODO get CTRL-C to work properly
@@ -72,6 +73,7 @@ class _Sweep(instrument.BaseInstrument):
             for i in span:
                 dev.set(i) # TODO replace with move
                 self.execbefore()
+                wait(self.beforewait)
                 vals=self.readall()
                 self.execafter()
                 vals = [i]+vals
