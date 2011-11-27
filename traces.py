@@ -54,6 +54,7 @@ class Trace(FigureManagerQT):
         self.ys = None
         self.legend_strs = None
         self.first_update = True
+        self.twinmode = False
         self.update()
     def setLim(self, minx, maxx=None):
         try:
@@ -86,22 +87,36 @@ class Trace(FigureManagerQT):
            self.draw()
            return
         if self.first_update:
+           if self.ys.shape[1] == 2:
+               self.twinmode = True
+               self.ax2 = self.ax.twinx()
            self.crvs = []
            #self.ax.clear()
         x = self.xs
         for i,y in enumerate(self.ys.T):
+           if self.twinmode and i == 1:
+               ax = self.ax2
+               style = '.-r'
+           else:
+               ax = self.ax
+               style = '.-'
            if self.first_update:
               try:
                  lbl = self.legend_strs[i]
               except TypeError:
                  lbl = 'data '+str(i)
-              self.crvs.append(self.ax.plot(x,y,'.-',label=lbl)[0])
+              self.crvs.append(ax.plot(x, y, style, label=lbl)[0])
            else:
-              self.crvs[i].set_data(x,y)
+              self.crvs[i].set_data(x, y)
         if self.first_update:
-           self.ax.legend()
+            self.ax.legend(loc='upper left')
+            if self.twinmode:
+                self.ax2.legend(loc='upper right')
         self.ax.relim()
         self.ax.autoscale(enable=None)
+        if self.twinmode:
+            self.ax2.relim()
+            self.ax2.autoscale(enable=None)
         self.first_update = False
         self.draw()
     def draw(self):

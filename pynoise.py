@@ -77,14 +77,17 @@ class _Sweep(instrument.BaseInstrument):
                 wait(self.beforewait)
                 vals=self.readall()
                 self.execafter()
-                vals = [i]+vals
-                strs = map(repr,vals)
                 if f:
+                    allvals = [i]+vals
+                    strs = map(repr, allvals)
                     f.write(string.join(strs,'\t')+'\n')
                 if graph:
+                    #in case nothing is read, do a stupid linear graph
+                    if vals == []:
+                        vals = [i]
                     t.addPoint(i, vals)
         except KeyboardInterrupt:
-            print 'in here'
+            print 'Interrupted sweep'
             pass
         if f:
             f.close()
