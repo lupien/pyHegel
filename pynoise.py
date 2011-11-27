@@ -63,7 +63,8 @@ class _Sweep(instrument.BaseInstrument):
             t.setLim(span)
         if filename != None:
             fullpath=os.path.join(self.path.get(), filename)
-            f = open(fullpath, 'w')
+            # Make it unbuffered
+            f = open(fullpath, 'w', 0)
         else:
             f = None
         #TODO get CTRL-C to work properly
