@@ -10,23 +10,38 @@ import random
 import time
 import traces
 
+_globaldict = dict() # This is set in pynoise.py
+
 class BaseInstrument(object):
     alias = None
     def __init__(self):
         self.create_devs()
         self.init(full=True)
+    def find_global_name(self):
+        dic = _globaldict
+        try:
+            return [k for k,v in dic.iteritems() if v == self][0]
+        except IndexError:
+            return "name_not_found"
     def devwrap(self, name):
         setdev = getdev = check = None
         for s in dir(self):
-           if s == name+'setdev':
+           if s == name+'_setdev':
               setdev = getattr(self, s)
-           if s == name+'getdev':
+           if s == name+'_getdev':
               getdev = getattr(self, s)
-           if s == name+'check':
+           if s == name+'_check':
               check = getattr(self, s)
         setattr(self, name, wrapDevice(setdev, getdev, check))
+    def devs_iter(self):
+        for devname in dir(self):
+           obj = getattr(self, devname)
+           if devname != 'alias' and isinstance(obj, BaseDevice):
+               yield devname, obj
     def create_devs(self):
-        pass
+        for devname, obj in self.devs_iter():
+            obj.instr = self
+            obj.name = devname
     def read(self):
         raise NotImplementedError
     def write(self, val):
@@ -52,24 +67,26 @@ class BaseInstrument(object):
     def check(self, val):
         if self.alias != None:
            self.alias.check(val)
-    # this should handle print statements ...
-    # except it does not behave properly for sweep.out using an alias
-    #  device. TODO fix it
-    def __repr__(self):
+    def iprint(self):
         ret = ''
-        for s in dir(self):
-           obj = getattr(self, s)
-           if s != 'alias' and isinstance(obj, BaseDevice):
-               if self.alias == obj:
-                   ret += 'alias = '
-               ret += s+" = "+repr(obj.getcache())+"\n"
+        for s, obj in self.devs_iter():
+            if self.alias == obj:
+                ret += 'alias = '
+            ret += s+" = "+repr(obj.getcache())+"\n"
         return ret
+    def _info(self):
+        return self.find_global_name(), self.__class__.__name__, id(self)
+    def __repr__(self):
+        gn, cn, p = self._info()
+        return '%s = <"%s" instrument at 0x%08x>'%(gn, cn, p)
     def trig():
         pass
 
 class BaseDevice(object):
-    def __init__(self, parent=None):
-        self.instr = parent
+    def __init__(self):
+        # instr and name updated by instrument's create_devs
+        self.instr = None
+        self.name = 'foo'
         self._cache = None
     # for cache consistency
     #    get should return the same thing set uses
@@ -92,7 +109,9 @@ class BaseDevice(object):
            return self.getcache()
         else:
            self.set(val)
-    #TODO: produce more meaningful repr (for sweep.out)
+    def __repr__(self):
+        gn, cn, p = self.instr._info()
+        return '<device "%s" of %s=(class "%s" at 0x%08x)>'%(self.name, gn, cn, p)
 
     #TODO: this should allow assignement: instr.dev = val
     #but it does not work because the device object needs to be
@@ -121,11 +140,11 @@ class MemoryDevice(BaseDevice):
     # Can override check member
 
 class scpiDevice(BaseDevice):
-    def __init__(self, parent, setstr=None, getstr=None, autoget=True, str_type=None, min=None, max=None, doc=None):
+    def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None, min=None, max=None, doc=None):
         """
            str_type can be float, int, None
         """
-        BaseDevice.__init__(self, parent)
+        BaseDevice.__init__(self)
         if setstr == None and getstr == None:
            raise ValueError
         self.setstr = setstr
@@ -140,7 +159,7 @@ class scpiDevice(BaseDevice):
         if self.setstr == None:
            raise NotImplementedError
         if self.type != None:
-           # user repr instead of str to keep full precision
+           # use repr instead of str to keep full precision
            val = repr(val)
         self.instr.write(self.setstr+' '+val)
     def getdev(self):
@@ -170,10 +189,10 @@ class scpiDevice(BaseDevice):
 
 class wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None):
+        BaseDevice.__init__(self)
         self.setdev = setdev
         self.getdev = getdev
         self.check  = check
-        BaseDevice.__init__(self)
 
 def _decodeblock(str):
    if str[0]!='#':
@@ -217,11 +236,9 @@ class visaInstrument(BaseInstrument):
         return self.visa.ask(question)
     def idn(self):
         return self.ask('*idn?')
-    def __repr__(self):
-        ret = 'visa_addr='+self.visa_addr+'\n'
-        ret += BaseInstrument.__repr__(self)
-        return ret
-
+    def _info(self):
+        gn, cn, p = BaseInstrument._info()
+        return gn, cn+'(%s)'%self.visa_addr, p
 
 # use like:
 # yo1 = yokogawa('GPIB0::12::INSTR')
@@ -240,24 +257,24 @@ class yokogawa(visaInstrument):
         # clear event register, extended event register and error queue
         self.write('*cls')
     def create_devs(self):
-        self.function = scpiDevice(self, ':source:function') # use 'voltage' or 'current'
+        self.function = scpiDevice(':source:function') # use 'voltage' or 'current'
         # voltage or current means to add V or A in the string (possibly with multiplier)
-        self.range = scpiDevice(self, ':source:range', str_type=float) # can be a voltage, current, MAX, MIN, UP or DOWN
-        self.level = scpiDevice(self, ':source:level') # can be a voltage, current, MAX, MIN
-        self.voltlim = scpiDevice(self, ':source:protection:voltage', str_type=float) #voltage, MIN or MAX
-        self.currentlim = scpiDevice(self, ':source:protection:current', str_type=float) #current, MIN or MAX
+        self.range = scpiDevice(':source:range', str_type=float) # can be a voltage, current, MAX, MIN, UP or DOWN
+        self.level = scpiDevice(':source:level') # can be a voltage, current, MAX, MIN
+        self.voltlim = scpiDevice(':source:protection:voltage', str_type=float) #voltage, MIN or MAX
+        self.currentlim = scpiDevice(':source:protection:current', str_type=float) #current, MIN or MAX
         #self.level_2 = wrapDevice(self.levelsetdev, self.levelgetdev, self.levelcheck)
         self.devwrap('level')
         self.alias = self.level
-    def levelcheck(self, val):
+    def level_check(self, val):
         rnge = 1.2*self.range.getcache()
         if self.function.getcache()=='CURR' and rnge>.2:
             rnge = .2
         if abs(val) > rnge:
            raise ValueError
-    def levelgetdev(self):
+    def level_getdev(self):
         return float(self.ask(':source:level?'))
-    def levelsetdev(self, val):
+    def level_setdev(self, val):
         self.levelcheck(val)
         self.write(':source:level '+repr(val))
 
@@ -266,18 +283,19 @@ class lia(visaInstrument):
         # This empties the instrument buffers
         self.visa.clear()
     def create_devs(self):
-        self.freq = scpiDevice(self, 'freq', str_type=float)
-        self.sens = scpiDevice(self, 'sens', str_type=int)
-        self.oauxi1 = scpiDevice(self, getstr='oaux? 1', str_type=float)
-        self.srclvl = scpiDevice(self, 'slvl', str_type=float, min=0.004, max=5.)
-        self.harm = scpiDevice(self, 'harm', str_type=int)
-        self.phase = scpiDevice(self, 'phas', str_type=float)
-        self.timeconstant = scpiDevice(self, 'oflt', str_type=int)
-        self.x = scpiDevice(self, getstr='outp? 1', str_type=float)
-        self.y = scpiDevice(self, getstr='outp? 2', str_type=float)
-        self.r = scpiDevice(self, getstr='outp? 3', str_type=float)
-        self.theta = scpiDevice(self, getstr='outp? 4', str_type=float)
-        self.xy = scpiDevice(self, getstr='snap? 1,2')
+        self.freq = scpiDevice('freq', str_type=float)
+        self.sens = scpiDevice('sens', str_type=int)
+        self.oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float)
+        self.srclvl = scpiDevice('slvl', str_type=float, min=0.004, max=5.)
+        self.harm = scpiDevice('harm', str_type=int)
+        self.phase = scpiDevice('phas', str_type=float)
+        self.timeconstant = scpiDevice('oflt', str_type=int)
+        self.x = scpiDevice(getstr='outp? 1', str_type=float)
+        self.y = scpiDevice(getstr='outp? 2', str_type=float)
+        self.r = scpiDevice(getstr='outp? 3', str_type=float)
+        self.theta = scpiDevice(getstr='outp? 4', str_type=float)
+        self.xy = scpiDevice(getstr='snap? 1,2')
+        super(type(self), self).create_devs()
 
 class dummy(BaseInstrument):
     volt = MemoryDevice(0.)
@@ -286,15 +304,16 @@ class dummy(BaseInstrument):
     def init(self, full=False):
         self.incr_val = 0
         self.wait = .1
-    def incrgetdev(self):
+    def incr_getdev(self):
         ret = self.incr_val
         self.incr_val += 1
         traces.wait(self.wait)
         return ret
-    def randgetdev(self):
+    def rand_getdev(self):
         traces.wait(self.wait)
         return random.normalvariate(0,1.)
     def create_devs(self):
         self.devwrap('incr')
         self.devwrap('rand')
+        super(type(self), self).create_devs()
 
