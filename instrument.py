@@ -12,27 +12,45 @@ import traces
 
 _globaldict = dict() # This is set in pynoise.py
 
+
+# Using this metaclass, the class method
+# add_class_devs will be executed at class creation.
+# Hence added devices will be part of the class and will
+# allow the inst.dev=2 syntax 
+#   (Since for the device __set__ to work requires the
+#    object to be part of the class, not the instance)
+class MetaClassInit(type):
+    def __init__(cls, name, bases, dct):
+        cls.add_class_devs()
+        type.__init__(cls, name, bases, dct)
+
 class BaseInstrument(object):
+    __metaclass__ = MetaClassInit
     alias = None
     def __init__(self):
         self.create_devs()
         self.init(full=True)
+    @classmethod
+    def add_class_devs(cls):
+        pass
     def find_global_name(self):
         dic = _globaldict
         try:
             return [k for k,v in dic.iteritems() if v == self and k[0]!='_'][0]
         except IndexError:
             return "name_not_found"
-    def devwrap(self, name):
+    @classmethod
+    def devwrap(cls, name):
         setdev = getdev = check = None
-        for s in dir(self):
+        for s in dir(cls):
            if s == name+'_setdev':
-              setdev = getattr(self, s)
+              setdev = getattr(cls, s)
            if s == name+'_getdev':
-              getdev = getattr(self, s)
+              getdev = getattr(cls, s)
            if s == name+'_check':
-              check = getattr(self, s)
-        setattr(self, name, wrapDevice(setdev, getdev, check))
+              check = getattr(cls, s)
+        wd = wrapDevice(setdev, getdev, check)
+        setattr(cls, name, wd)
     def devs_iter(self):
         for devname in dir(self):
            obj = getattr(self, devname)
@@ -112,11 +130,6 @@ class BaseDevice(object):
     def __repr__(self):
         gn, cn, p = self.instr._info()
         return '<device "%s" of %s=(class "%s" at 0x%08x)>'%(self.name, gn, cn, p)
-
-    #TODO: this should allow assignement: instr.dev = val
-    #but it does not work because the device object needs to be
-    #assigned in the class, not the instance as is currently the case
-    # It does work for sweep
     def __set__(self, instance, val):
         #print instance
         self.set(val)
@@ -190,9 +203,16 @@ class scpiDevice(BaseDevice):
 class wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None):
         BaseDevice.__init__(self)
-        self.setdev = setdev
-        self.getdev = getdev
-        self.check  = check
+        # the methods are unbounded methods.
+        self._setdev = setdev
+        self._getdev = getdev
+        self._check  = check
+    def setdev(self, val):
+        self._setdev(self.instr, val)
+    def getdev(self):
+        return self._getdev(self.instr)
+    def check(self, val):
+        self._check(self.instr, val)
 
 def _decodeblock(str):
    if str[0]!='#':
@@ -307,11 +327,15 @@ class dummy(BaseInstrument):
         self.incr_val += 1
         traces.wait(self.wait)
         return ret
+    def incr_setdev(self, val):
+        self.incr_val = val
+    #incr3 = wrapDevice(incr_setdev, incr_getdev)
+    #incr2 = wrapDevice(getdev=incr_getdev)
     def rand_getdev(self):
         traces.wait(self.wait)
         return random.normalvariate(0,1.)
-    def create_devs(self):
-        self.devwrap('incr')
-        self.devwrap('rand')
-        super(type(self), self).create_devs()
-
+    @classmethod
+    def add_class_devs(cls):
+        cls.devwrap('rand')
+        cls.devwrap('incr')
+    #freq = scpiDevice('freq', str_type=float)
