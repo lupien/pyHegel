@@ -253,16 +253,16 @@ class yokogawa(visaInstrument):
                    'F', 'A', 'Z', 'Y']
     multvals    = [1e24, 1e21, 1e18, 1e15, 1e12, 1e9, 1e6, 1e3, 1e-3, 1e-6, 1e-9, 1e-12,
                    1e-15, 1e-18, 1e-21, 1e-24]
+    function = scpiDevice(':source:function') # use 'voltage' or 'current'
+    # voltage or current means to add V or A in the string (possibly with multiplier)
+    range = scpiDevice(':source:range', str_type=float) # can be a voltage, current, MAX, MIN, UP or DOWN
+    level = scpiDevice(':source:level') # can be a voltage, current, MAX, MIN
+    voltlim = scpiDevice(':source:protection:voltage', str_type=float) #voltage, MIN or MAX
+    currentlim = scpiDevice(':source:protection:current', str_type=float) #current, MIN or MAX
     def init(self, full=False):
         # clear event register, extended event register and error queue
         self.write('*cls')
     def create_devs(self):
-        self.function = scpiDevice(':source:function') # use 'voltage' or 'current'
-        # voltage or current means to add V or A in the string (possibly with multiplier)
-        self.range = scpiDevice(':source:range', str_type=float) # can be a voltage, current, MAX, MIN, UP or DOWN
-        self.level = scpiDevice(':source:level') # can be a voltage, current, MAX, MIN
-        self.voltlim = scpiDevice(':source:protection:voltage', str_type=float) #voltage, MIN or MAX
-        self.currentlim = scpiDevice(':source:protection:current', str_type=float) #current, MIN or MAX
         #self.level_2 = wrapDevice(self.levelsetdev, self.levelgetdev, self.levelcheck)
         self.devwrap('level')
         self.alias = self.level
@@ -279,23 +279,21 @@ class yokogawa(visaInstrument):
         self.write(':source:level '+repr(val))
 
 class lia(visaInstrument):
+    freq = scpiDevice('freq', str_type=float)
+    sens = scpiDevice('sens', str_type=int)
+    oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float)
+    srclvl = scpiDevice('slvl', str_type=float, min=0.004, max=5.)
+    harm = scpiDevice('harm', str_type=int)
+    phase = scpiDevice('phas', str_type=float)
+    timeconstant = scpiDevice('oflt', str_type=int)
+    x = scpiDevice(getstr='outp? 1', str_type=float)
+    y = scpiDevice(getstr='outp? 2', str_type=float)
+    r = scpiDevice(getstr='outp? 3', str_type=float)
+    theta = scpiDevice(getstr='outp? 4', str_type=float)
+    xy = scpiDevice(getstr='snap? 1,2')
     def init(self, full=False):
         # This empties the instrument buffers
         self.visa.clear()
-    def create_devs(self):
-        self.freq = scpiDevice('freq', str_type=float)
-        self.sens = scpiDevice('sens', str_type=int)
-        self.oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float)
-        self.srclvl = scpiDevice('slvl', str_type=float, min=0.004, max=5.)
-        self.harm = scpiDevice('harm', str_type=int)
-        self.phase = scpiDevice('phas', str_type=float)
-        self.timeconstant = scpiDevice('oflt', str_type=int)
-        self.x = scpiDevice(getstr='outp? 1', str_type=float)
-        self.y = scpiDevice(getstr='outp? 2', str_type=float)
-        self.r = scpiDevice(getstr='outp? 3', str_type=float)
-        self.theta = scpiDevice(getstr='outp? 4', str_type=float)
-        self.xy = scpiDevice(getstr='snap? 1,2')
-        super(type(self), self).create_devs()
 
 class dummy(BaseInstrument):
     volt = MemoryDevice(0.)
