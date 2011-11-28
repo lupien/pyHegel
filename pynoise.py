@@ -14,6 +14,11 @@ import traces
 import instrument
 
 _figlist = []
+
+# exec in ipython with run -i otherwise
+#  this globals will not be the same as the command line globals
+#  and default headers will be name_not_found
+
 instrument._globaldict = globals()
 
 class _Clock(instrument.BaseInstrument):
@@ -30,6 +35,9 @@ def writevec(file_obj, vals_list):
      strs_list = map(repr, vals_list)
      file_obj.write(string.join(strs_list,'\t')+'\n')
 
+def getheaders(devs):
+    return [dev.instr.header.get()+'.'+dev.name for dev in devs]
+
 class _Sweep(instrument.BaseInstrument):
     before = instrument.MemoryDevice()
     beforewait = 0.02 # provide a default wait so figures are updated
@@ -45,14 +53,19 @@ class _Sweep(instrument.BaseInstrument):
         b = self.after.get()
         if b:
             exec(b)
-    def readall(self):
-        # will will just try to add .get
-        #  this will work for the alias as well
-        l = self.out.get()
+    def get_alldevs(self):
+        l =  self.out.get()
         if l == None or l==[]:
             return []
         elif not isinstance(l,list):
             l = [l]
+        return l
+    def readall(self):
+        # will will just try to add .get
+        #  this will work for the alias as well
+        l = self.get_alldevs()
+        if l == []:
+            return []
         ret = []
         for dev in l:
             ret.append(dev.get())
@@ -81,6 +94,8 @@ class _Sweep(instrument.BaseInstrument):
             fullpath=os.path.join(self.path.get(), filename)
             # Make it unbuffered
             f = open(fullpath, 'w', 1)
+            hdrs = getheaders([dev]+self.get_alldevs())
+            writevec(f, hdrs+['time'])
         else:
             f = None
         #TODO get CTRL-C to work properly
@@ -169,6 +184,8 @@ def record(devs, interval=1, npoints=None, filename=None):
         fullpath=os.path.join(sweep.path.get(), filename)
         # Make it unbuffered
         f = open(fullpath, 'w', 1)
+        hdrs = getheaders(devs)
+        writevec(f, ['time']+hdrs)
     else:
         f = None
     t = traces.Trace()

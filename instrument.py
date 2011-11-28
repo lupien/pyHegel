@@ -12,88 +12,6 @@ import traces
 
 _globaldict = dict() # This is set in pynoise.py
 
-
-# Using this metaclass, the class method
-# add_class_devs will be executed at class creation.
-# Hence added devices will be part of the class and will
-# allow the inst.dev=2 syntax 
-#   (Since for the device __set__ to work requires the
-#    object to be part of the class, not the instance)
-class MetaClassInit(type):
-    def __init__(cls, name, bases, dct):
-        cls.add_class_devs()
-        type.__init__(cls, name, bases, dct)
-
-class BaseInstrument(object):
-    __metaclass__ = MetaClassInit
-    alias = None
-    def __init__(self):
-        self.create_devs()
-        self.init(full=True)
-    @classmethod
-    def add_class_devs(cls):
-        pass
-    def find_global_name(self):
-        dic = _globaldict
-        try:
-            return [k for k,v in dic.iteritems() if v == self and k[0]!='_'][0]
-        except IndexError:
-            return "name_not_found"
-    @classmethod
-    def devwrap(cls, name):
-        setdev = getdev = check = None
-        for s in dir(cls):
-           if s == name+'_setdev':
-              setdev = getattr(cls, s)
-           if s == name+'_getdev':
-              getdev = getattr(cls, s)
-           if s == name+'_check':
-              check = getattr(cls, s)
-        wd = wrapDevice(setdev, getdev, check)
-        setattr(cls, name, wd)
-    def devs_iter(self):
-        for devname in dir(self):
-           obj = getattr(self, devname)
-           if devname != 'alias' and isinstance(obj, BaseDevice):
-               yield devname, obj
-    def create_devs(self):
-        for devname, obj in self.devs_iter():
-            obj.instr = self
-            obj.name = devname
-    def read(self):
-        raise NotImplementedError
-    def write(self, val):
-        raise NotImplementedError
-    def ask(self, question):
-        raise NotImplementedError
-    def init(self, full=False):
-        """ Do instrument initialization (full=True)/reset (full=False) here """
-        pass
-    # This allows instr.get() ... to be redirected to instr.alias.get()
-    def __getattr__(self, name):
-        if self.alias == None:
-            raise AttributeError
-        if name in ['get', 'set', 'check', 'getcache', 'setcache']:
-            return getattr(self.alias, name)
-    def __call__(self):
-        if self.alias == None:
-            raise TypeError
-        return self.alias()
-    def iprint(self):
-        ret = ''
-        for s, obj in self.devs_iter():
-            if self.alias == obj:
-                ret += 'alias = '
-            ret += s+" = "+repr(obj.getcache())+"\n"
-        return ret
-    def _info(self):
-        return self.find_global_name(), self.__class__.__name__, id(self)
-    def __repr__(self):
-        gn, cn, p = self._info()
-        return '%s = <"%s" instrument at 0x%08x>'%(gn, cn, p)
-    def trig():
-        pass
-
 class BaseDevice(object):
     def __init__(self):
         # instr and name updated by instrument's create_devs
@@ -134,6 +52,110 @@ class BaseDevice(object):
     def getdev(self):
         raise NotImplementedError
     def check(self, val):
+        pass
+
+class wrapDevice(BaseDevice):
+    def __init__(self, setdev=None, getdev=None, check=None):
+        BaseDevice.__init__(self)
+        # the methods are unbounded methods.
+        self._setdev = setdev
+        self._getdev = getdev
+        self._check  = check
+    def setdev(self, val):
+        self._setdev(self.instr, val)
+    def getdev(self):
+        return self._getdev(self.instr)
+    def check(self, val):
+        self._check(self.instr, val)
+
+
+# Using this metaclass, the class method
+# add_class_devs will be executed at class creation.
+# Hence added devices will be part of the class and will
+# allow the inst.dev=2 syntax 
+#   (Since for the device __set__ to work requires the
+#    object to be part of the class, not the instance)
+class MetaClassInit(type):
+    def __init__(cls, name, bases, dct):
+        cls.add_class_devs()
+        type.__init__(cls, name, bases, dct)
+
+class BaseInstrument(object):
+    __metaclass__ = MetaClassInit
+    alias = None
+    def __init__(self):
+        self.header_val = None
+        self.create_devs()
+        self.init(full=True)
+    def find_global_name(self):
+        dic = _globaldict
+        try:
+            return [k for k,v in dic.iteritems() if v == self and k[0]!='_'][0]
+        except IndexError:
+            return "name_not_found"
+    @classmethod
+    def devwrap(cls, name):
+        setdev = getdev = check = None
+        for s in dir(cls):
+           if s == name+'_setdev':
+              setdev = getattr(cls, s)
+           if s == name+'_getdev':
+              getdev = getattr(cls, s)
+           if s == name+'_check':
+              check = getattr(cls, s)
+        wd = wrapDevice(setdev, getdev, check)
+        setattr(cls, name, wd)
+    def devs_iter(self):
+        for devname in dir(self):
+           obj = getattr(self, devname)
+           if devname != 'alias' and isinstance(obj, BaseDevice):
+               yield devname, obj
+    def create_devs(self):
+        for devname, obj in self.devs_iter():
+            obj.instr = self
+            obj.name = devname
+    def read(self):
+        raise NotImplementedError
+    def write(self, val):
+        raise NotImplementedError
+    def ask(self, question):
+        raise NotImplementedError
+    def init(self, full=False):
+        """ Do instrument initialization (full=True)/reset (full=False) here """
+        pass
+    # This allows instr.get() ... to be redirected to instr.alias.get()
+    def __getattr__(self, name):
+        if self.alias == None:
+            raise AttributeError
+        if name in ['get', 'set', 'check', 'getcache', 'setcache', 'instr', 'name']:
+            return getattr(self.alias, name)
+    def __call__(self):
+        if self.alias == None:
+            raise TypeError
+        return self.alias()
+    def iprint(self):
+        ret = ''
+        for s, obj in self.devs_iter():
+            if self.alias == obj:
+                ret += 'alias = '
+            ret += s+" = "+repr(obj.getcache())+"\n"
+        return ret
+    def _info(self):
+        return self.find_global_name(), self.__class__.__name__, id(self)
+    def __repr__(self):
+        gn, cn, p = self._info()
+        return '%s = <"%s" instrument at 0x%08x>'%(gn, cn, p)
+    def header_getdev(self):
+        if self.header_val == None:
+            return self.find_global_name()
+        else:
+            return self.header_val
+    def header_setdev(self, val):
+        self.header_val = val
+    @classmethod
+    def add_class_devs(cls):
+        cls.devwrap('header')
+    def trig():
         pass
 
 class MemoryDevice(BaseDevice):
@@ -193,20 +215,6 @@ class scpiDevice(BaseDevice):
         if state == False:
            raise ValueError
         #return state
-
-class wrapDevice(BaseDevice):
-    def __init__(self, setdev=None, getdev=None, check=None):
-        BaseDevice.__init__(self)
-        # the methods are unbounded methods.
-        self._setdev = setdev
-        self._getdev = getdev
-        self._check  = check
-    def setdev(self, val):
-        self._setdev(self.instr, val)
-    def getdev(self):
-        return self._getdev(self.instr)
-    def check(self, val):
-        self._check(self.instr, val)
 
 def _decodeblock(str):
    if str[0]!='#':
