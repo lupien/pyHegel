@@ -96,6 +96,11 @@ class _Sweep(instrument.BaseInstrument):
             f = open(fullpath, 'w', 1)
             hdrs = getheaders([dev]+self.get_alldevs())
             writevec(f, hdrs+['time'])
+            if graph:
+                i = 1
+                if len(hdrs) == 1:
+                    i = 0
+                t.setlegend(hdrs[i:])
         else:
             f = None
         #TODO get CTRL-C to work properly
@@ -180,16 +185,17 @@ def record(devs, interval=1, npoints=None, filename=None):
        dev = devs[0]
     except TypeError:
        devs = [devs]
+    t = traces.Trace()
+    _figlist.append(t) # TODO: handle removal from figlist
     if filename != None:
         fullpath=os.path.join(sweep.path.get(), filename)
         # Make it unbuffered
         f = open(fullpath, 'w', 1)
         hdrs = getheaders(devs)
         writevec(f, ['time']+hdrs)
+        t.setlegend(hdrs)
     else:
         f = None
-    t = traces.Trace()
-    _figlist.append(t) # TODO: handle removal from figlist
     try:
         i=0
         while not (npoints <= i): # this also works for npoints=None
