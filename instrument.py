@@ -294,13 +294,13 @@ class visaInstrument(BaseInstrument):
         return gn, cn+'(%s)'%self.visa_addr, p
 
 # use like:
-# yo1 = yokogawa('GPIB0::12::INSTR')
+# yo1 = yokogawa_gs200('GPIB0::12::INSTR')
 #   or
-# yo1 = yokogawa('GPIB::12')
+# yo1 = yokogawa_gs200('GPIB::12')
 #   or
-# yo1 = yokogawa(12)
+# yo1 = yokogawa_gs200(12)
 #'USB0::0x0957::0x0118::MY49001395::0::INSTR'
-class yokogawa(visaInstrument):
+class yokogawa_gs200(visaInstrument):
     # case insensitive
     multipliers = ['YO', 'ZE', 'EX', 'PE', 'T', 'G', 'MA', 'K', 'M', 'U', 'N', 'P',
                    'F', 'A', 'Z', 'Y']
@@ -333,7 +333,7 @@ class yokogawa(visaInstrument):
         self.levelcheck(val)
         self.write(':source:level '+repr(val))
 
-class lia(visaInstrument):
+class sr830(visaInstrument):
     def init(self, full=False):
         # This empties the instrument buffers
         self.visa.clear()
@@ -350,6 +350,55 @@ class lia(visaInstrument):
         self.r = scpiDevice(getstr='outp? 3', str_type=float)
         self.theta = scpiDevice(getstr='outp? 4', str_type=float)
         self.xy = scpiDevice(getstr='snap? 1,2')
+        # This needs to be last to complete creation
+        super(type(self),self).create_devs()
+
+class agilent_rf_33522A(visaInstrument):
+    def create_devs(self):
+        self.ampl1 = scpiDevice('SOUR1:VOLT', str_type=float, min=0.001, max=10)
+        self.freq1 = scpiDevice('SOUR1:FREQ', str_type=float, min=1e-6, max=30e6)
+        self.offset1 = scpiDevice('SOUR1:VOLT:OFFS', str_type=float, min=-5, max=5)
+        self.mode1 = scpiDevice('SOUR1:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
+        self.ampl2 = scpiDevice('SOUR2:VOLT', str_type=float, min=0.001, max=10)
+        self.freq2 = scpiDevice('SOUR2:FREQ', str_type=float, min=1e-6, max=30e6)
+        self.offset2 = scpiDevice('SOUR2:VOLT:OFFS', str_type=float, min=-5, max=5)
+        self.mode2 = scpiDevice('SOUR2:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
+        self.alias = self.freq1
+        # This needs to be last to complete creation
+        super(type(self),self).create_devs()
+
+class agilent_multi_34410A(visaInstrument):
+    def create_devs(self):
+        # This needs to be last to complete creation
+        self.mode = scpiDevice('FUNC') # CURR:AC, VOLT:AC, CAP, CONT, CURR, VOLT, DIOD, FREQ, PER, RES, FRES
+        self.read = scpiDevice(getstr='READ?')
+        self.alias = self.read
+        super(type(self),self).create_devs()
+
+class lakeshore_322(visaInstrument):
+    def create_devs(self):
+        self.crdg = scpiDevice(getstr='CRDG?', str_type=float)
+        self.temp = scpiDevice(getstr='TEMP?', str_type=float)
+        self.tb = scpiDevice(getstr='KRDG? B', str_type=float)
+        self.sp = scpiDevice(setstr='SETP 1,', getstr='SETP? 1', str_type=float)
+        self.alias = self.tb
+        # This needs to be last to complete creation
+        super(type(self),self).create_devs()
+
+class infiniiVision_3000(visaInstrument):
+    def create_devs(self):
+        # Note vincent's hegel, uses set to define filename where block data is saved.
+        self.snap = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor') # returns block of data
+        self.inksaver = scpiDevice(':HARDcopy:INKSaver') # ON, OFF 1 or 0
+        self.data = scpiDevice(getstr=':waveform:DATA?') # returns block of data
+          # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
+          #  type (Normal, peak, average, HRes), #points, #avg, xincr, xorg, xref, yincr, yorg, yref
+          #  xconv = xorg+x*xincr, yconv= (y-yref)*yincr + yorg
+        self.format = scpiDevice(':WAVeform:FORMat') # WORD, BYTE, ASC
+        self.points = scpiDevice(':WAVeform:POINts') # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
+        self.mode = scpiDevice(':WAVeform:MODE') # NORM, MAX, RAW
+        self.preamble = scpiDevice(getstr=':waveform:PREamble?')
+        self.source = scpiDevice(':WAVeform:SOURce') # CHAN1, CHAN2, CHAN3, CHAN4
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
 
