@@ -185,7 +185,7 @@ def record(devs, interval=1, npoints=None, filename=None):
        dev = devs[0]
     except TypeError:
        devs = [devs]
-    t = traces.Trace()
+    t = traces.Trace(time_mode=True)
     _figlist.append(t) # TODO: handle removal from figlist
     if filename != None:
         fullpath=os.path.join(sweep.path.get(), filename)

@@ -16,6 +16,19 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.backends.backend_qt4 import FigureManagerQT
 from matplotlib.figure import Figure
 
+# set the timezone for proper display of date/time axis
+# to see available ones: import pytz; pytz.all_timezones
+pylab.rcParams['timezone']='Canada/Eastern'
+#pylab.rc('mathtext', fontset='stixsans')
+
+#  def setXaxis(self, axis):
+#      # set the labels rotation
+#      # the first one in the list is used when adding new labels
+#      lbls = axis.get_xticklabels()
+#      for l in lbls:
+#          l.update(dict(rotation=10, size=9))
+
+
 def wait(sec):
     start = time.time()
     end = start + sec
@@ -43,7 +56,7 @@ FigureCanvas.keyvald.update({QtCore.Qt.Key_Left:'left',
         QtCore.Qt.Key_Backspace:'backspace'})
 
 class Trace(FigureManagerQT):
-    def __init__(self, width=9.00, height=7.00, dpi=72):
+    def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False):
         self.fig = Figure(figsize=(width,height),dpi=dpi)
         self.canvas = FigureCanvas(self.fig)
         FigureManagerQT.__init__(self,self.canvas,-1)
@@ -55,6 +68,11 @@ class Trace(FigureManagerQT):
         self.legend_strs = None
         self.first_update = True
         self.twinmode = False
+        self.time_mode = time_mode
+        if time_mode:
+            lbls = self.ax.get_xticklabels()
+            for l in lbls:
+                l.update(dict(rotation=10, size=9))
         self.update()
     def setLim(self, minx, maxx=None):
         try:
@@ -68,6 +86,9 @@ class Trace(FigureManagerQT):
     def setWindowTitle(self, title):
         self.set_window_title(title)
     def addPoint(self, x, ys):
+        if self.time_mode:
+            # convert from sec since epoch to matplotlib date format
+            x = x/(24.*3600)+pylab.epoch2num(0)
         if self.xs == None:
            self.xs = np.array([x])
         else:  self.xs = np.append(self.xs, x)
@@ -76,6 +97,9 @@ class Trace(FigureManagerQT):
         else:  self.ys = np.append(self.ys, [ys], axis=0)
         self.update()
     def setPoints(self, x, y):
+        if self.time_mode:
+            # convert from sec since epoch to matplotlib date format
+            x = x/(24.*3600)+pylab.epoch2num(0)
         self.xs = np.array(x)
         self.ys = np.array(y)
         self.update()
@@ -96,7 +120,9 @@ class Trace(FigureManagerQT):
         for i,y in enumerate(self.ys.T):
            if self.twinmode and i == 1:
                ax = self.ax2
-               style = '.-r'
+               #style = '.-r'
+               style = '.-'
+               ax._get_lines.color_cycle.next()
            else:
                ax = self.ax
                style = '.-'
@@ -105,7 +131,11 @@ class Trace(FigureManagerQT):
                  lbl = self.legend_strs[i]
               except TypeError:
                  lbl = 'data '+str(i)
-              self.crvs.append(ax.plot(x, y, style, label=lbl)[0])
+              if self.time_mode:
+                  plt = ax.plot_date(x, y, style, label=lbl)[0]
+              else:
+                  plt = ax.plot(x, y, style, label=lbl)[0]
+              self.crvs.append(plt)
            else:
               self.crvs[i].set_data(x, y)
         if self.first_update:
