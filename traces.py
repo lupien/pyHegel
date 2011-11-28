@@ -21,14 +21,6 @@ from matplotlib.figure import Figure
 pylab.rcParams['timezone']='Canada/Eastern'
 #pylab.rc('mathtext', fontset='stixsans')
 
-#  def setXaxis(self, axis):
-#      # set the labels rotation
-#      # the first one in the list is used when adding new labels
-#      lbls = axis.get_xticklabels()
-#      for l in lbls:
-#          l.update(dict(rotation=10, size=9))
-
-
 def wait(sec):
     start = time.time()
     end = start + sec

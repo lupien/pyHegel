@@ -79,6 +79,7 @@ class MetaClassInit(type):
     def __init__(cls, name, bases, dct):
         cls.add_class_devs()
         type.__init__(cls, name, bases, dct)
+#TODO: maybe override classmethod, automatically call add_class_devs for all devices...
 
 class BaseInstrument(object):
     __metaclass__ = MetaClassInit
