@@ -76,7 +76,7 @@ class _Sweep(instrument.BaseInstrument):
         return ret
     def __repr__(self):
         return '<sweep instrument>'
-    def __call__(self, dev, start, stop, npts, rate=None, filename=None):
+    def __call__(self, dev, start, stop, npts, filename, rate=None):
         """
             routine pour faire un sweep
              dev est l'objet a varier
