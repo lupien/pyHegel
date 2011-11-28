@@ -62,12 +62,25 @@ class wrapDevice(BaseDevice):
         self._getdev = getdev
         self._check  = check
     def setdev(self, val):
+        self._setdev(val)
+    def getdev(self):
+        return self._getdev()
+    def check(self, val):
+        self._check(val)
+
+class cls_wrapDevice(BaseDevice):
+    def __init__(self, setdev=None, getdev=None, check=None):
+        BaseDevice.__init__(self)
+        # the methods are unbounded methods.
+        self._setdev = setdev
+        self._getdev = getdev
+        self._check  = check
+    def setdev(self, val):
         self._setdev(self.instr, val)
     def getdev(self):
         return self._getdev(self.instr)
     def check(self, val):
         self._check(self.instr, val)
-
 
 # Using this metaclass, the class method
 # add_class_devs will be executed at class creation.
@@ -95,7 +108,9 @@ class BaseInstrument(object):
         except IndexError:
             return "name_not_found"
     @classmethod
-    def devwrap(cls, name):
+    def cls_devwrap(cls, name):
+        # Only use this if the class will be using only one instance
+        # Otherwise multiple instances will collide (reuse same wrapper)
         setdev = getdev = check = None
         for s in dir(cls):
            if s == name+'_setdev':
@@ -104,14 +119,29 @@ class BaseInstrument(object):
               getdev = getattr(cls, s)
            if s == name+'_check':
               check = getattr(cls, s)
-        wd = wrapDevice(setdev, getdev, check)
+        wd = cls_wrapDevice(setdev, getdev, check)
         setattr(cls, name, wd)
+    def devwrap(self, name):
+        setdev = getdev = check = None
+        for s in dir(self):
+           if s == name+'_setdev':
+              setdev = getattr(self, s)
+           if s == name+'_getdev':
+              getdev = getattr(self, s)
+           if s == name+'_check':
+              check = getattr(self, s)
+        wd = wrapDevice(setdev, getdev, check)
+        setattr(self, name, wd)
     def devs_iter(self):
         for devname in dir(self):
            obj = getattr(self, devname)
            if devname != 'alias' and isinstance(obj, BaseDevice):
                yield devname, obj
     def create_devs(self):
+        # devices need to be created here (not at class level)
+        # because we want each instrument instance to use its own
+        # device instance (otherwise they would share the instance data)
+        self.devwrap('header')
         for devname, obj in self.devs_iter():
             obj.instr = self
             obj.name = devname
@@ -155,7 +185,7 @@ class BaseInstrument(object):
         self.header_val = val
     @classmethod
     def add_class_devs(cls):
-        cls.devwrap('header')
+        pass
     def trig():
         pass
 
@@ -276,19 +306,21 @@ class yokogawa(visaInstrument):
                    'F', 'A', 'Z', 'Y']
     multvals    = [1e24, 1e21, 1e18, 1e15, 1e12, 1e9, 1e6, 1e3, 1e-3, 1e-6, 1e-9, 1e-12,
                    1e-15, 1e-18, 1e-21, 1e-24]
-    function = scpiDevice(':source:function') # use 'voltage' or 'current'
-    # voltage or current means to add V or A in the string (possibly with multiplier)
-    range = scpiDevice(':source:range', str_type=float) # can be a voltage, current, MAX, MIN, UP or DOWN
-    level = scpiDevice(':source:level') # can be a voltage, current, MAX, MIN
-    voltlim = scpiDevice(':source:protection:voltage', str_type=float) #voltage, MIN or MAX
-    currentlim = scpiDevice(':source:protection:current', str_type=float) #current, MIN or MAX
     def init(self, full=False):
         # clear event register, extended event register and error queue
         self.write('*cls')
     def create_devs(self):
         #self.level_2 = wrapDevice(self.levelsetdev, self.levelgetdev, self.levelcheck)
+        self.function = scpiDevice(':source:function') # use 'voltage' or 'current'
+        # voltage or current means to add V or A in the string (possibly with multiplier)
+        self.range = scpiDevice(':source:range', str_type=float) # can be a voltage, current, MAX, MIN, UP or DOWN
+        self.level = scpiDevice(':source:level') # can be a voltage, current, MAX, MIN
+        self.voltlim = scpiDevice(':source:protection:voltage', str_type=float) #voltage, MIN or MAX
+        self.currentlim = scpiDevice(':source:protection:current', str_type=float) #current, MIN or MAX
         self.devwrap('level')
         self.alias = self.level
+        # This needs to be last to complete creation
+        super(type(self),self).create_devs()
     def level_check(self, val):
         rnge = 1.2*self.range.getcache()
         if self.function.getcache()=='CURR' and rnge>.2:
@@ -302,26 +334,26 @@ class yokogawa(visaInstrument):
         self.write(':source:level '+repr(val))
 
 class lia(visaInstrument):
-    freq = scpiDevice('freq', str_type=float)
-    sens = scpiDevice('sens', str_type=int)
-    oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float)
-    srclvl = scpiDevice('slvl', str_type=float, min=0.004, max=5.)
-    harm = scpiDevice('harm', str_type=int)
-    phase = scpiDevice('phas', str_type=float)
-    timeconstant = scpiDevice('oflt', str_type=int)
-    x = scpiDevice(getstr='outp? 1', str_type=float)
-    y = scpiDevice(getstr='outp? 2', str_type=float)
-    r = scpiDevice(getstr='outp? 3', str_type=float)
-    theta = scpiDevice(getstr='outp? 4', str_type=float)
-    xy = scpiDevice(getstr='snap? 1,2')
     def init(self, full=False):
         # This empties the instrument buffers
         self.visa.clear()
+    def create_devs(self):
+        self.freq = scpiDevice('freq', str_type=float)
+        self.sens = scpiDevice('sens', str_type=int)
+        self.oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float)
+        self.srclvl = scpiDevice('slvl', str_type=float, min=0.004, max=5.)
+        self.harm = scpiDevice('harm', str_type=int)
+        self.phase = scpiDevice('phas', str_type=float)
+        self.timeconstant = scpiDevice('oflt', str_type=int)
+        self.x = scpiDevice(getstr='outp? 1', str_type=float)
+        self.y = scpiDevice(getstr='outp? 2', str_type=float)
+        self.r = scpiDevice(getstr='outp? 3', str_type=float)
+        self.theta = scpiDevice(getstr='outp? 4', str_type=float)
+        self.xy = scpiDevice(getstr='snap? 1,2')
+        # This needs to be last to complete creation
+        super(type(self),self).create_devs()
 
 class dummy(BaseInstrument):
-    volt = MemoryDevice(0.)
-    current = MemoryDevice(1.)
-    alias = current
     def init(self, full=False):
         self.incr_val = 0
         self.wait = .1
@@ -337,8 +369,12 @@ class dummy(BaseInstrument):
     def rand_getdev(self):
         traces.wait(self.wait)
         return random.normalvariate(0,1.)
-    @classmethod
-    def add_class_devs(cls):
-        cls.devwrap('rand')
-        cls.devwrap('incr')
-    #freq = scpiDevice('freq', str_type=float)
+    def create_devs(self):
+        self.volt = MemoryDevice(0.)
+        self.current = MemoryDevice(1.)
+        #self.freq = scpiDevice('freq', str_type=float)
+        self.devwrap('rand')
+        self.devwrap('incr')
+        self.alias = self.current
+        # This needs to be last to complete creation
+        super(type(self),self).create_devs()

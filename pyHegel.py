@@ -25,10 +25,11 @@ class _Clock(instrument.BaseInstrument):
     def time_getdev(self):
         """ Get UTC time since epoch in seconds """
         return time.time()
-    @classmethod
-    def add_class_devs(cls):
-        cls.devwrap('time')
-        cls.alias = cls.time
+    def create_devs(self):
+        self.devwrap('time')
+        self.alias = self.time
+        # This needs to be last to complete creation
+        super(type(self),self).create_devs()
 clock = _Clock()
 
 def writevec(file_obj, vals_list):
@@ -39,6 +40,9 @@ def getheaders(devs):
     return [dev.instr.header.get()+'.'+dev.name for dev in devs]
 
 class _Sweep(instrument.BaseInstrument):
+    # This MemoryDevice will be shared among different instances
+    # So there should only be one instance of this class
+    #  Doing it this way allows the instr.dev = val syntax
     before = instrument.MemoryDevice()
     beforewait = 0.02 # provide a default wait so figures are updated
     after = instrument.MemoryDevice()
