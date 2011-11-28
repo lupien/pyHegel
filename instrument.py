@@ -330,8 +330,11 @@ class yokogawa_gs200(visaInstrument):
     def level_getdev(self):
         return float(self.ask(':source:level?'))
     def level_setdev(self, val):
-        self.levelcheck(val)
-        self.write(':source:level '+repr(val))
+        self.level_check(val)
+        # used %.6e instead of repr
+        # repr sometimes sends 0.010999999999999999
+        # which the yokogawa understands as 0.010 instead of 0.011
+        self.write(':source:level %.6e'%val)
 
 class sr830(visaInstrument):
     def init(self, full=False):
