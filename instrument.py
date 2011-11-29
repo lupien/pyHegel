@@ -336,7 +336,7 @@ class yokogawa_gs200(visaInstrument):
         # which the yokogawa understands as 0.010 instead of 0.011
         self.write(':source:level %.6e'%val)
 
-class sr830(visaInstrument):
+class sr830_lia(visaInstrument):
     def init(self, full=False):
         # This empties the instrument buffers
         self.visa.clear()
@@ -356,16 +356,41 @@ class sr830(visaInstrument):
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
 
+class sr384_rf(visaInstrument):
+    # allowed units: amp: dBm, rms, Vpp; freq: GHz, MHz, kHz, Hz; Time: ns, us, ms, s
+    def init(self, full=False):
+        # This empties the instrument buffers
+        #self.visa.clear()
+        pass
+    def create_devs(self):
+        self.freq = scpiDevice('freq',str_type=float)
+        self.offset_low = scpiDevice('ofsl',str_type=float) #volts
+        self.amp_lf_dbm = scpiDevice('ampl',str_type=float)
+        self.amp_rf_dbm = scpiDevice('ampr',str_type=float)
+        self.amp_hf_dbm = scpiDevice('amph',str_type=float) # doubler
+        self.en_lf = scpiDevice('enbl') # 0 is off, 1 is on, read value depends on freq
+        self.en_rf = scpiDevice('enbr') # 0 is off, 1 is on, read value depends on freq
+        self.en_hf = scpiDevice('enbh') # 0 is off, 1 is on, read value depends on freq
+        self.phase = scpiDevice('phas',str_type=float, min=-360, max=360) # deg, only change by 360
+        self.mod_en = scpiDevice('modl') # 0 is off, 1 is on
+        # This needs to be last to complete creation
+        super(type(self),self).create_devs()
+
 class agilent_rf_33522A(visaInstrument):
     def create_devs(self):
+        # voltage unit depends on front panel/remote selection (sourc1:voltage:unit) vpp, vrms, dbm
         self.ampl1 = scpiDevice('SOUR1:VOLT', str_type=float, min=0.001, max=10)
         self.freq1 = scpiDevice('SOUR1:FREQ', str_type=float, min=1e-6, max=30e6)
         self.offset1 = scpiDevice('SOUR1:VOLT:OFFS', str_type=float, min=-5, max=5)
+        self.phase1 = scpiDevice('SOURce1:PHASe', str_type=float, min=-360, max=360) # in deg unless changed by unit:angle
         self.mode1 = scpiDevice('SOUR1:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
+        self.out_en1 = scpiDevice('OUTPut1') #OFF,0 or ON,1
         self.ampl2 = scpiDevice('SOUR2:VOLT', str_type=float, min=0.001, max=10)
         self.freq2 = scpiDevice('SOUR2:FREQ', str_type=float, min=1e-6, max=30e6)
+        self.phase2 = scpiDevice('SOURce2:PHASe', str_type=float, min=-360, max=360) # in deg unless changed by unit:angle
         self.offset2 = scpiDevice('SOUR2:VOLT:OFFS', str_type=float, min=-5, max=5)
         self.mode2 = scpiDevice('SOUR2:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
+        self.out_en2 = scpiDevice('OUTPut2') #OFF,0 or ON,1
         self.alias = self.freq1
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
@@ -374,8 +399,8 @@ class agilent_multi_34410A(visaInstrument):
     def create_devs(self):
         # This needs to be last to complete creation
         self.mode = scpiDevice('FUNC') # CURR:AC, VOLT:AC, CAP, CONT, CURR, VOLT, DIOD, FREQ, PER, RES, FRES
-        self.read = scpiDevice(getstr='READ?')
-        self.alias = self.read
+        self.readval = scpiDevice(getstr='READ?')
+        self.alias = self.readval
         super(type(self),self).create_devs()
 
 class lakeshore_322(visaInstrument):
