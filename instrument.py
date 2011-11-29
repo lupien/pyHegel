@@ -359,8 +359,8 @@ class sr830_lia(visaInstrument):
 class sr384_rf(visaInstrument):
     # allowed units: amp: dBm, rms, Vpp; freq: GHz, MHz, kHz, Hz; Time: ns, us, ms, s
     def init(self, full=False):
-        # This empties the instrument buffers
-        #self.visa.clear()
+        # This clears the error state
+        self.write('*cls')
         pass
     def create_devs(self):
         self.freq = scpiDevice('freq',str_type=float)
@@ -391,6 +391,7 @@ class agilent_rf_33522A(visaInstrument):
         self.offset2 = scpiDevice('SOUR2:VOLT:OFFS', str_type=float, min=-5, max=5)
         self.mode2 = scpiDevice('SOUR2:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
         self.out_en2 = scpiDevice('OUTPut2') #OFF,0 or ON,1
+        self.phase_sync = scpiDevice('PHASe:SYNChronize', autoget=False)
         self.alias = self.freq1
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
@@ -406,8 +407,16 @@ class agilent_multi_34410A(visaInstrument):
 class lakeshore_322(visaInstrument):
     def create_devs(self):
         self.crdg = scpiDevice(getstr='CRDG?', str_type=float)
-        self.temp = scpiDevice(getstr='TEMP?', str_type=float)
-        self.tb = scpiDevice(getstr='KRDG? B', str_type=float)
+        self.thermocouple = scpiDevice(getstr='TEMP?', str_type=float)
+        self.ta = scpiDevice(getstr='KRDG? A', str_type=float) #in Kelvin
+        self.tb = scpiDevice(getstr='KRDG? B', str_type=float) #in Kelvin
+        self.sa = scpiDevice(getstr='SRDG? A', str_type=float) #in sensor unit: Ohm, V or mV
+        self.sb = scpiDevice(getstr='SRDG? B', str_type=float) #in sensor unit
+        self.status_a = scpiDevice(getstr='RDGST? A', str_type=int) #flags 1(0)=invalid, 16(4)=temp underrange, 
+                               #32(5)=temp overrange, 64(6)=sensor under (<0), 128(7)=sensor overrange
+                               # 000 = valid
+        self.status_b = scpiDevice(getstr='RDGST? b', str_type=int)
+        self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in %
         self.sp = scpiDevice(setstr='SETP 1,', getstr='SETP? 1', str_type=float)
         self.alias = self.tb
         # This needs to be last to complete creation
