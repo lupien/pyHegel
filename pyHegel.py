@@ -12,6 +12,7 @@ import sys
 
 import traces
 import instrument
+import local_config
 
 _figlist = []
 
@@ -267,6 +268,20 @@ def sleep(sec):
        See also wait
     """
     raise NotImplementedError
+
+# overrides pylab load (which is no longer implemented anyway)
+def load(name, newname=None):
+    """
+       Uses definitions in local_config to open devices by there
+       standard names. By default it produces a variable with that
+       name in the global space. If newname is given, it is the name used
+       for that new instrument.
+    """
+    instr, param = local_config.conf[name]
+    if newname == None:
+        newname = name
+    i = instr(*param)
+    exec('global '+newname+';'+newname+'=i')
 
 #alias: replaced by assignement instr1=instr2, dev=instr.devx
 #forget: replaced by del instr1
