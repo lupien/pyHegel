@@ -3,8 +3,12 @@
 
 try:
   import visa
+  vpp43 = visa.vpp43
 except ImportError:
   print 'Error importing visa. You will have reduced functionality.'
+#can list instruments with : 	visa.get_instruments_list()
+#     or :                      visa.get_instruments_list(use_aliases=True)
+
 import numpy as np
 import random
 import time
@@ -276,11 +280,25 @@ class visaInstrument(BaseInstrument):
             visa_addr= 'GPIB0::%i::INSTR'%visa_addr
         self.visa_addr = visa_addr
         self.visa = visa.instrument(visa_addr)
+        #self.visa.timeout = 3 # in seconds
         BaseInstrument.__init__(self)
     #######
     ## Could implement some locking here ....
     ## for read, write, ask
     #######
+    def read_status_byte(self):
+        return vpp43.read_stb(self.visa.vi)
+    def control_remotelocal(self, local_lock_out=False):
+        if local_lock_out:
+            val = vpp43.VI_GPIB_REN_ASSERT
+        else:
+            val = vpp43.VI_GPIB_REN_DEASSERT
+        #VI_GPIB_REN_DEASSERT_GTL
+        #VI_GPIB_REN_ASSERT_ADDRESS
+        #VI_GPIB_REN_ASSERT_LLO
+        #VI_GPIB_REN_ASSERT_ADDRESS_LLO
+        #VI_GPIB_REN_ADDRESS_GTL
+        return vpp43.gpib_control_ren((self.visa.vi, val)
     def read(self):
         return self.visa.read()
     def write(self, val):
@@ -395,6 +413,8 @@ class agilent_rf_33522A(visaInstrument):
         self.alias = self.freq1
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
+    def phase_sync(self):
+        self.write('PHASe:SYNChronize')
 
 class agilent_multi_34410A(visaInstrument):
     def create_devs(self):
