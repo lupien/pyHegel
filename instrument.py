@@ -104,7 +104,7 @@ class BaseInstrument(object):
     def find_global_name(self):
         dic = _globaldict
         try:
-            return [k for k,v in dic.iteritems() if v == self and k[0]!='_'][0]
+            return [k for k,v in dic.iteritems() if v is self and k[0]!='_'][0]
         except IndexError:
             return "name_not_found"
     @classmethod
