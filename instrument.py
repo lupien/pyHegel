@@ -298,7 +298,7 @@ class visaInstrument(BaseInstrument):
         #VI_GPIB_REN_ASSERT_LLO
         #VI_GPIB_REN_ASSERT_ADDRESS_LLO
         #VI_GPIB_REN_ADDRESS_GTL
-        return vpp43.gpib_control_ren((self.visa.vi, val)
+        return vpp43.gpib_control_ren(self.visa.vi, val)
     def read(self):
         return self.visa.read()
     def write(self, val):
