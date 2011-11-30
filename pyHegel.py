@@ -32,9 +32,9 @@ class _Clock(instrument.BaseInstrument):
         super(type(self),self).create_devs()
 clock = _Clock()
 
-def writevec(file_obj, vals_list):
+def writevec(file_obj, vals_list, pre_str=''):
      strs_list = map(repr, vals_list)
-     file_obj.write(string.join(strs_list,'\t')+'\n')
+     file_obj.write(pre_str+string.join(strs_list,'\t')+'\n')
 
 def getheaders(devs):
     return [dev.instr.header.get()+'.'+dev.name for dev in devs]
@@ -99,7 +99,7 @@ class _Sweep(instrument.BaseInstrument):
             # Make it unbuffered
             f = open(fullpath, 'w', 1)
             hdrs = getheaders([dev]+self.get_alldevs())
-            writevec(f, hdrs+['time'])
+            writevec(f, hdrs+['time'], pre_str='#')
             if graph:
                 i = 1
                 if len(hdrs) == 1:
@@ -196,7 +196,7 @@ def record(devs, interval=1, npoints=None, filename=None):
         # Make it unbuffered
         f = open(fullpath, 'w', 1)
         hdrs = getheaders(devs)
-        writevec(f, ['time']+hdrs)
+        writevec(f, ['time']+hdrs, pre_str='#')
         t.setlegend(hdrs)
     else:
         f = None

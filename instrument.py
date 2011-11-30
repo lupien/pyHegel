@@ -288,16 +288,27 @@ class visaInstrument(BaseInstrument):
     #######
     def read_status_byte(self):
         return vpp43.read_stb(self.visa.vi)
-    def control_remotelocal(self, local_lock_out=False):
-        if local_lock_out:
-            val = vpp43.VI_GPIB_REN_ASSERT
+    def control_remotelocal(self, remote=False, local_lock_out=False, all=False):
+        if all:
+            # all instruments go local, or all instrument will go remote
+            # when called
+            if remote:
+                val = vpp43.VI_GPIB_REN_ASSERT
+            else:
+                val = vpp43.VI_GPIB_REN_DEASSERT
+        elif local_lock_out:
+            # only instrument will got to remote with local lock out
+            if remote:
+                val = vpp43.VI_GPIB_REN_ASSERT_ADDRESS_LLO
+            else:
+                val = vpp43.VI_GPIB_REN_DEASSERT_GTL
         else:
-            val = vpp43.VI_GPIB_REN_DEASSERT
-        #VI_GPIB_REN_DEASSERT_GTL
-        #VI_GPIB_REN_ASSERT_ADDRESS
+            # only instrument goes to remote/local but with no local lock out
+            if remote:
+                val = vpp43.VI_GPIB_REN_ASSERT_ADDRESS
+            else:
+                val = vpp43.VI_GPIB_REN_ADDRESS_GTL
         #VI_GPIB_REN_ASSERT_LLO
-        #VI_GPIB_REN_ASSERT_ADDRESS_LLO
-        #VI_GPIB_REN_ADDRESS_GTL
         return vpp43.gpib_control_ren(self.visa.vi, val)
     def read(self):
         return self.visa.read()
@@ -308,7 +319,7 @@ class visaInstrument(BaseInstrument):
     def idn(self):
         return self.ask('*idn?')
     def _info(self):
-        gn, cn, p = BaseInstrument._info()
+        gn, cn, p = BaseInstrument._info(self)
         return gn, cn+'(%s)'%self.visa_addr, p
 
 # use like:
@@ -420,7 +431,7 @@ class agilent_multi_34410A(visaInstrument):
     def create_devs(self):
         # This needs to be last to complete creation
         self.mode = scpiDevice('FUNC') # CURR:AC, VOLT:AC, CAP, CONT, CURR, VOLT, DIOD, FREQ, PER, RES, FRES
-        self.readval = scpiDevice(getstr='READ?')
+        self.readval = scpiDevice(getstr='READ?',str_type=float)
         self.alias = self.readval
         super(type(self),self).create_devs()
 
