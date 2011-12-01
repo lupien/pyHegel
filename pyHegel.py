@@ -16,6 +16,15 @@ import local_config
 
 _figlist = []
 
+def reset_pyNoise():
+    """
+       Resets pyHegel
+       You need to reload instruments and reassign to sweep
+    """
+    reload(instrument)
+    reload(local_config)
+    execfile('pyHegel.py')
+
 # exec in ipython with run -i otherwise
 #  this globals will not be the same as the command line globals
 #  and default headers will be name_not_found
