@@ -270,18 +270,27 @@ def sleep(sec):
     raise NotImplementedError
 
 # overrides pylab load (which is no longer implemented anyway)
-def load(name, newname=None):
+def load(names, newnames=None):
     """
        Uses definitions in local_config to open devices by there
        standard names. By default it produces a variable with that
        name in the global space. If newname is given, it is the name used
        for that new instrument.
+       names and newnames can be a string or a list of strings
     """
-    instr, param = local_config.conf[name]
-    if newname == None:
-        newname = name
-    i = instr(*param)
-    exec('global '+newname+';'+newname+'=i')
+    if isinstance(names, basestring):
+        names = [names]
+        newnames = [newnames]
+    if newnames == None:
+        newnames = [None]
+    if len(newnames) < len(names):
+        newnames = newnames + [None]*(len(names)-len(newnames))
+    for name, newname in zip(names, newnames):
+        instr, param = local_config.conf[name]
+        if newname == None:
+            newname = name
+        i = instr(*param)
+        exec('global '+newname+';'+newname+'=i')
 
 #alias: replaced by assignement instr1=instr2, dev=instr.devx
 #forget: replaced by del instr1
