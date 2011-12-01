@@ -291,19 +291,21 @@ class visaInstrument(BaseInstrument):
     #######
     def read_status_byte(self):
         return vpp43.read_stb(self.visa.vi)
-    def control_remotelocal(self, remote=False, local_lock_out=False, all=False):
+    def control_remotelocal(self, remote=False, local_lockout=False, all=False):
         if all:
-            # all instruments go local, or all instrument will go remote
+            # all instruments go local (and clear the lockout), or all instrument will go remote
             # when called
             if remote:
                 val = vpp43.VI_GPIB_REN_ASSERT
             else:
                 val = vpp43.VI_GPIB_REN_DEASSERT
         elif local_lock_out:
-            # only instrument will got to remote with local lock out
+            # all instruments on bus go to lockout state (physical device local key disabled)
+            # instruments selected will go to remote, others stay in current state.
             if remote:
                 val = vpp43.VI_GPIB_REN_ASSERT_ADDRESS_LLO
             else:
+                # probably twiddle this back on after
                 val = vpp43.VI_GPIB_REN_DEASSERT_GTL
         else:
             # only instrument goes to remote/local but with no local lock out
@@ -312,6 +314,8 @@ class visaInstrument(BaseInstrument):
             else:
                 val = vpp43.VI_GPIB_REN_ADDRESS_GTL
         #VI_GPIB_REN_ASSERT_LLO
+        #VI_GPIB_REN_DEASSERT_GTL # don't how usefull this is seems
+        #                           to result in the saem as VI_GPIB_REN_DEASSERT
         return vpp43.gpib_control_ren(self.visa.vi, val)
     def read(self):
         return self.visa.read()
