@@ -97,8 +97,8 @@ class _Sweep(instrument.BaseInstrument):
             t.setLim(span)
         if filename != None:
             fullpath=os.path.join(self.path.get(), filename)
-            # Make it unbuffered
-            f = open(fullpath, 'w', 1)
+            # Make it unbuffered, windows does not handle line buffer correctly
+            f = open(fullpath, 'w', 0)
             hdrs = getheaders([dev]+self.get_alldevs())
             writevec(f, hdrs+['time'], pre_str='#')
             if graph:
@@ -194,8 +194,8 @@ def record(devs, interval=1, npoints=None, filename=None):
     _figlist.append(t) # TODO: handle removal from figlist
     if filename != None:
         fullpath=os.path.join(sweep.path.get(), filename)
-        # Make it unbuffered
-        f = open(fullpath, 'w', 1)
+        # Make it unbuffered, windows does not handle line buffer correctly
+        f = open(fullpath, 'w', 0)
         hdrs = getheaders(devs)
         writevec(f, ['time']+hdrs, pre_str='#')
         t.setlegend(hdrs)
