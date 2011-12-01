@@ -33,8 +33,14 @@ class _Clock(instrument.BaseInstrument):
         super(type(self),self).create_devs()
 clock = _Clock()
 
+def repr_or_string(val):
+    if isinstance(val, basestring):
+        return val
+    else:
+        return repr(val)
+
 def writevec(file_obj, vals_list, pre_str=''):
-     strs_list = map(repr, vals_list)
+     strs_list = map(repr_or_string, vals_list)
      file_obj.write(pre_str+string.join(strs_list,'\t')+'\n')
 
 def getheaders(devs):
