@@ -25,6 +25,7 @@ class BaseDevice(object):
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val):
+        self.check(val)
         self.setdev(val)
         # only change cache after succesfull setdev
         self._cache = val
