@@ -17,11 +17,12 @@ import traces
 _globaldict = dict() # This is set in pynoise.py
 
 class BaseDevice(object):
-    def __init__(self):
+    def __init__(self, autoinit=True):
         # instr and name updated by instrument's create_devs
         self.instr = None
         self.name = 'foo'
         self._cache = None
+        self._autoinit = autoinit
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val):
@@ -34,7 +35,7 @@ class BaseDevice(object):
         self._cache = ret
         return ret
     def getcache(self):
-        if self._cache==None:
+        if self._cache==None and self._autoinit:
            return self.get()
         return self._cache
     def setcache(self, val):
@@ -60,8 +61,8 @@ class BaseDevice(object):
         pass
 
 class wrapDevice(BaseDevice):
-    def __init__(self, setdev=None, getdev=None, check=None):
-        BaseDevice.__init__(self)
+    def __init__(self, setdev=None, getdev=None, check=None, *extrap, **extrak):
+        BaseDevice.__init__(self, *extrap, **extrak)
         # the methods are unbounded methods.
         self._setdev = setdev
         self._getdev = getdev
@@ -74,8 +75,8 @@ class wrapDevice(BaseDevice):
         self._check(val)
 
 class cls_wrapDevice(BaseDevice):
-    def __init__(self, setdev=None, getdev=None, check=None):
-        BaseDevice.__init__(self)
+    def __init__(self, setdev=None, getdev=None, check=None, *extrap, **extrak):
+        BaseDevice.__init__(self, *extrap, **extrak)
         # the methods are unbounded methods.
         self._setdev = setdev
         self._getdev = getdev
@@ -195,8 +196,8 @@ class BaseInstrument(object):
         pass
 
 class MemoryDevice(BaseDevice):
-    def __init__(self, initval=None):
-        BaseDevice.__init__(self)
+    def __init__(self, initval=None, *extrap, **extrak):
+        BaseDevice.__init__(self, *extrap, **extrak)
         self._cache = initval
     def get(self):
         return self._cache
@@ -205,11 +206,12 @@ class MemoryDevice(BaseDevice):
     # Can override check member
 
 class scpiDevice(BaseDevice):
-    def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None, min=None, max=None, doc=None):
+    def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None,
+                  min=None, max=None, doc=None, *extrap, **extrak):
         """
            str_type can be float, int, None
         """
-        BaseDevice.__init__(self)
+        BaseDevice.__init__(self, *extrap, **extrak)
         if setstr == None and getstr == None:
            raise ValueError
         self.setstr = setstr
@@ -490,6 +492,7 @@ class dummy(BaseInstrument):
     def create_devs(self):
         self.volt = MemoryDevice(0.)
         self.current = MemoryDevice(1.)
+        self.other = MemoryDevice(autoinit=False)
         #self.freq = scpiDevice('freq', str_type=float)
         self.devwrap('rand')
         self.devwrap('incr')
