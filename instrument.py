@@ -18,23 +18,40 @@ _globaldict = dict() # This is set in pynoise.py
 CHECKING = False
 
 class BaseDevice(object):
-    def __init__(self, autoinit=True):
+    """
+        ----------------
+        All devices provide get, set, check method
+        Both get and set use a cache variable which is accessible
+        with getcache, setcache methods
+        The gets have no parameters.
+        The sets and check have one parameter, which is the value.
+
+        The device dev can be called as
+         dev() which is the same as getcache
+         dev(val) which is the same as set(val)
+    """
+    def __init__(self, autoinit=True, doc=''):
         # instr and name updated by instrument's create_devs
         self.instr = None
         self.name = 'foo'
         self._cache = None
         self._autoinit = autoinit
+        self.__doc__ = doc+BaseDevice.__doc__
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val):
         self.check(val)
         if not CHECKING:
             self.setdev(val)
+        elif self.__class__.setdev == BaseDevice.setdev:
+            raise NotImplementedError, 'This device does not handle setdev'
         # only change cache after succesfull setdev
         self._cache = val
     def get(self):
         if not CHECKING:
             ret = self.getdev()
+        elif self.__class__.getdev == BaseDevice.getdev:
+            raise NotImplementedError, 'This device does not handle getdev'
         else:
             ret = self._cache
         self._cache = ret
@@ -59,9 +76,9 @@ class BaseDevice(object):
 
     # Implement these in a derived class
     def setdev(self, val):
-        raise NotImplementedError
+        raise NotImplementedError, 'This device does not handle setdev'
     def getdev(self):
-        raise NotImplementedError
+        raise NotImplementedError, 'This device does not handle getdev'
     def check(self, val):
         pass
 
@@ -133,7 +150,7 @@ class BaseInstrument(object):
               check = getattr(cls, s)
         wd = cls_wrapDevice(setdev, getdev, check)
         setattr(cls, name, wd)
-    def devwrap(self, name):
+    def devwrap(self, name, *extrap, **extrak):
         setdev = getdev = check = None
         for s in dir(self):
            if s == name+'_setdev':
@@ -142,7 +159,7 @@ class BaseInstrument(object):
               getdev = getattr(self, s)
            if s == name+'_check':
               check = getattr(self, s)
-        wd = wrapDevice(setdev, getdev, check)
+        wd = wrapDevice(setdev, getdev, check, *extrap, **extrak)
         setattr(self, name, wd)
     def devs_iter(self):
         for devname in dir(self):
@@ -158,23 +175,25 @@ class BaseInstrument(object):
             obj.instr = self
             obj.name = devname
     def read(self):
-        raise NotImplementedError
+        raise NotImplementedError, 'This instrument class does not implement read'
     def write(self, val):
-        raise NotImplementedError
+        raise NotImplementedError, 'This instrument class does not implement write'
     def ask(self, question):
-        raise NotImplementedError
+        raise NotImplementedError, 'This instrument class does not implement ask'
     def init(self, full=False):
         """ Do instrument initialization (full=True)/reset (full=False) here """
         pass
     # This allows instr.get() ... to be redirected to instr.alias.get()
     def __getattr__(self, name):
-        if self.alias == None:
-            raise AttributeError
         if name in ['get', 'set', 'check', 'getcache', 'setcache', 'instr', 'name']:
+            if self.alias == None:
+                raise AttributeError, 'This instrument does not have an alias for get, set, check ...'
             return getattr(self.alias, name)
+        else:
+            raise AttributeError, '%s is not an attribute of this instrument'%name
     def __call__(self):
         if self.alias == None:
-            raise TypeError
+            raise TypeError, 'This instrument does not have an alias for call'
         return self.alias()
     def iprint(self):
         ret = ''
@@ -202,13 +221,18 @@ class BaseInstrument(object):
         pass
 
 class MemoryDevice(BaseDevice):
-    def __init__(self, initval=None, *extrap, **extrak):
+    def __init__(self, initval=None, *extrap,**extrak):
         BaseDevice.__init__(self, *extrap, **extrak)
         self._cache = initval
     def get(self):
         return self._cache
     def set(self, val):
         self._cache = val
+    # we redefine setdev, getdev so CHECKING on device works.
+    # but because we have redefined set and get above. 
+    # they sould never be called
+    def setdev(self, val): pass
+    def getdev(self, val): pass
     # Can override check member
 
 class scpiDevice(BaseDevice):
@@ -217,9 +241,9 @@ class scpiDevice(BaseDevice):
         """
            str_type can be float, int, None
         """
-        BaseDevice.__init__(self, *extrap, **extrak)
         if setstr == None and getstr == None:
-           raise ValueError
+           raise ValueError, 'At least one of setstr or getstr needs to be specified'
+        BaseDevice.__init__(self, *extrap, **extrak)
         self.setstr = setstr
         if getstr == None and autoget:
             getstr = setstr+'?'
@@ -228,16 +252,18 @@ class scpiDevice(BaseDevice):
         self.min = min
         self.max = max
         self.__doc__ = doc
+    # TODO: these redefinition will prevent check from detecting a problem
+    #       with a non existing device
     def setdev(self, val):
         if self.setstr == None:
-           raise NotImplementedError
+           raise NotImplementedError, 'This device does not handle setdev'
         if self.type != None:
            # use repr instead of str to keep full precision
            val = repr(val)
         self.instr.write(self.setstr+' '+val)
     def getdev(self):
         if self.getstr == None:
-           raise NotImplementedError
+           raise NotImplementedError, 'This device does not handle getdev'
         ret = self.instr.ask(self.getstr)
         if self.type != None:
            # here we assume self.type can convert a string
@@ -245,7 +271,7 @@ class scpiDevice(BaseDevice):
         return ret
     def check(self, val):
         if self.setstr == None:
-           raise NotImplementedError
+           raise NotImplementedError, 'This device does not handle check'
         if self.type == float or self.type == int:
            if self.min != None:
               mintest = val >= self.min
@@ -259,7 +285,7 @@ class scpiDevice(BaseDevice):
         else:
            state = True
         if state == False:
-           raise ValueError
+           raise ValueError, 'Values is out of bounds'
         #return state
 
 def _decodeblock(str):
@@ -393,7 +419,7 @@ class yokogawa_gs200(visaInstrument):
         if self.function.getcache()=='CURR' and rnge>.2:
             rnge = .2
         if abs(val) > rnge:
-           raise ValueError
+           raise ValueError, 'level is invalid'
     def level_getdev(self):
         return float(self.ask(':source:level?'))
     def level_setdev(self, val):
@@ -503,9 +529,9 @@ class lakeshore_322(visaInstrument):
 class infiniiVision_3000(visaInstrument):
     def create_devs(self):
         # Note vincent's hegel, uses set to define filename where block data is saved.
-        self.snap = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor') # returns block of data
+        self.snap = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', autoinit=False) # returns block of data
         self.inksaver = scpiDevice(':HARDcopy:INKSaver') # ON, OFF 1 or 0
-        self.data = scpiDevice(getstr=':waveform:DATA?') # returns block of data
+        self.data = scpiDevice(getstr=':waveform:DATA?', autoinit=False) # returns block of data
           # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
           #  type (Normal, peak, average, HRes), #points, #avg, xincr, xorg, xref, yincr, yorg, yref
           #  xconv = xorg+x*xincr, yconv= (y-yref)*yincr + yorg
@@ -528,9 +554,9 @@ class agilent_EXA(visaInstrument):
         self.average_count = scpiDevice(getstr=':average:count?',str_type=float)
         self.freq_start = scpiDevice(':freq:start', str_type=float, min=10e6, max=12.6e9)
         self.freq_stop = scpiDevice(':freq:stop', str_type=float, min=10e6, max=12.6e9)
-        self.trace1 = scpiDevice(getstr=':trace? trace1')
-        self.fetch1 = scpiDevice(getstr=':fetch:san1?')
-        self.read1 = scpiDevice(getstr=':read:san1?')
+        self.trace1 = scpiDevice(getstr=':trace? trace1', autoinit=False)
+        self.fetch1 = scpiDevice(getstr=':fetch:san1?', autoinit=False)
+        self.read1 = scpiDevice(getstr=':read:san1?', autoinit=False)
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
 
@@ -544,9 +570,9 @@ class agilent_PNAL(visaInstrument):
         self.freq_start = scpiDevice(':sense:freq:start', str_type=float, min=10e6, max=40e9)
         self.freq_stop = scpiDevice(':sense:freq:stop', str_type=float, min=10e6, max=40e9)
         self.x1 = scpiDevice(getstr=':sense1:X?')
-        self.curx1 = scpiDevice(getstr=':calc1:X?')
-        self.cur_data = scpiDevice(getstr=':calc1:data? fdata')
-        self.cur_cplxdata = scpiDevice(getstr=':calc1:data? sdata')
+        self.curx1 = scpiDevice(getstr=':calc1:X?', autoinit=False)
+        self.cur_data = scpiDevice(getstr=':calc1:data? fdata', autoinit=False)
+        self.cur_cplxdata = scpiDevice(getstr=':calc1:data? sdata', autoinit=False)
         self.select_m = scpiDevice(':calc1:par:mnum')
         self.select_i = scpiDevice(':calc1:par:sel')
         self.select_w = scpiDevice(getstr=':syst:meas1:window?')
@@ -571,11 +597,11 @@ class dummy(BaseInstrument):
         traces.wait(self.wait)
         return random.normalvariate(0,1.)
     def create_devs(self):
-        self.volt = MemoryDevice(0.)
-        self.current = MemoryDevice(1.)
-        self.other = MemoryDevice(autoinit=False)
+        self.volt = MemoryDevice(0., doc='This is a memory voltage, a float')
+        self.current = MemoryDevice(1., doc='This is a memory current, a float')
+        self.other = MemoryDevice(autoinit=False, doc='This takes a boolean')
         #self.freq = scpiDevice('freq', str_type=float)
-        self.devwrap('rand')
+        self.devwrap('rand', doc='This returns a random value. There is not set.')
         self.devwrap('incr')
         self.alias = self.current
         # This needs to be last to complete creation
