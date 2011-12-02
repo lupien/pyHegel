@@ -281,6 +281,23 @@ def check(batch):
     """
     raise NotImplementedError
 
+def batch(batch):
+    """
+       Runs the batch file.
+       On ipython command line this can be called
+        ;batch long file name with spaces
+
+       It will also try the batch name with .py added if the direct name does
+       not work.
+
+       You can also use run -i, but that seems to block the graphic output
+         unless the names ends with a .ipy
+    """
+    try:
+        execfile(batch)
+    except IOError:
+        execfile(batch+'.py')
+
 def sleep(sec):
     """
        wait seconds... Can be paused.
