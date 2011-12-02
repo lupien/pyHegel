@@ -130,6 +130,9 @@ class _Sweep(instrument.BaseInstrument):
         else:
             f = None
         #TODO get CTRL-C to work properly
+        ###############################
+        # Start of loop
+        ###############################
         try:
             for i in span:
                 tme = clock.get()
