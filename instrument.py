@@ -249,7 +249,9 @@ class scpiDevice(BaseDevice):
               maxtest = val <= self.max
            else:
               maxtest = True
-        state = mintest and maxtest
+           state = mintest and maxtest
+        else:
+           state = True
         if state == False:
            raise ValueError
         #return state
@@ -516,6 +518,26 @@ class agilent_EXA(visaInstrument):
         self.trace1 = scpiDevice(getstr=':trace? trace1')
         self.fetch1 = scpiDevice(getstr=':fetch:san1?')
         self.read1 = scpiDevice(getstr=':read:san1?')
+        # This needs to be last to complete creation
+        super(type(self),self).create_devs()
+
+class agilent_PNAL(visaInstrument):
+    def init(self, full=False):
+        self.write(':format REAL,64')
+        self.write(':format:border swap')
+    def create_devs(self):
+        self.bandwith = scpiDevice(':sense1:bandwidth',str_type=float)
+        self.average_count = scpiDevice(getstr=':sense:average:count?',str_type=int)
+        self.freq_start = scpiDevice(':sense:freq:start', str_type=float, min=10e6, max=40e9)
+        self.freq_stop = scpiDevice(':sense:freq:stop', str_type=float, min=10e6, max=40e9)
+        self.x1 = scpiDevice(getstr=':sense1:X?')
+        self.curx1 = scpiDevice(getstr=':calc1:X?')
+        self.cur_data = scpiDevice(getstr=':calc1:data? fdata')
+        self.cur_cplxdata = scpiDevice(getstr=':calc1:data? sdata')
+        self.select_m = scpiDevice(':calc1:par:mnum')
+        self.select_i = scpiDevice(':calc1:par:sel')
+        self.select_w = scpiDevice(getstr=':syst:meas1:window?')
+        self.select_t = scpiDevice(getstr=':syst:meas1:trace?')
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
 
