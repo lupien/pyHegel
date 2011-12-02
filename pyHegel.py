@@ -134,17 +134,18 @@ class _Sweep(instrument.BaseInstrument):
             for i in span:
                 tme = clock.get()
                 dev.set(i) # TODO replace with move
+                iv = dev.getcache() # in case the instrument changed the value
                 self.execbefore()
                 wait(self.beforewait)
                 vals=self.readall()
                 self.execafter()
                 if f:
-                    writevec(f, [i]+vals+[tme])
+                    writevec(f, [iv]+vals+[tme])
                 if graph:
                     #in case nothing is read, do a stupid linear graph
                     if vals == []:
-                        vals = [i]
-                    t.addPoint(i, vals)
+                        vals = [iv]
+                    t.addPoint(iv, vals)
         except KeyboardInterrupt:
             print 'Interrupted sweep'
             pass

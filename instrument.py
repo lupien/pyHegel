@@ -30,8 +30,12 @@ class BaseDevice(object):
          dev() which is the same as getcache
          dev(val) which is the same as set(val)
     """
-    def __init__(self, autoinit=True, doc=''):
+    def __init__(self, autoinit=True, doc='', setget=False):
         # instr and name updated by instrument's create_devs
+        # doc is inserted before the above doc
+        # setget makes us get the value after setting in
+        #  this is usefull for instruments that could change the value
+        #  under us.
         self.instr = None
         self.name = 'foo'
         self._cache = None
@@ -39,12 +43,15 @@ class BaseDevice(object):
         self.__doc__ = doc+BaseDevice.__doc__
         self._setdev = None
         self._getdev = None
+        self._setget = setget
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val):
         self.check(val)
         if not CHECKING:
             self.setdev(val)
+            if self._setget:
+                val = self.get()
         elif self._setdev == None:
             raise NotImplementedError, self.perror('This device does not handle setdev')
         # only change cache after succesfull setdev
@@ -428,11 +435,11 @@ class yokogawa_gs200(visaInstrument):
         #self.level_2 = wrapDevice(self.levelsetdev, self.levelgetdev, self.levelcheck)
         self.function = scpiDevice(':source:function') # use 'voltage' or 'current'
         # voltage or current means to add V or A in the string (possibly with multiplier)
-        self.range = scpiDevice(':source:range', str_type=float) # can be a voltage, current, MAX, MIN, UP or DOWN
+        self.range = scpiDevice(':source:range', str_type=float, setget=True) # can be a voltage, current, MAX, MIN, UP or DOWN
         self.level = scpiDevice(':source:level') # can be a voltage, current, MAX, MIN
-        self.voltlim = scpiDevice(':source:protection:voltage', str_type=float) #voltage, MIN or MAX
-        self.currentlim = scpiDevice(':source:protection:current', str_type=float) #current, MIN or MAX
-        self.devwrap('level')
+        self.voltlim = scpiDevice(':source:protection:voltage', str_type=float, setget=True) #voltage, MIN or MAX
+        self.currentlim = scpiDevice(':source:protection:current', str_type=float, setget=True) #current, MIN or MAX
+        self.devwrap('level', setget=True)
         self.alias = self.level
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
@@ -445,7 +452,6 @@ class yokogawa_gs200(visaInstrument):
     def level_getdev(self):
         return float(self.ask(':source:level?'))
     def level_setdev(self, val):
-        self.level_check(val)
         # used %.6e instead of repr
         # repr sometimes sends 0.010999999999999999
         # which the yokogawa understands as 0.010 instead of 0.011
