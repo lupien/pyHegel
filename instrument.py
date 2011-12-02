@@ -465,7 +465,14 @@ class agilent_multi_34410A(visaInstrument):
     def create_devs(self):
         # This needs to be last to complete creation
         self.mode = scpiDevice('FUNC') # CURR:AC, VOLT:AC, CAP, CONT, CURR, VOLT, DIOD, FREQ, PER, RES, FRES
-        self.readval = scpiDevice(getstr='READ?',str_type=float)
+        self.readval = scpiDevice(getstr='READ?',str_type=float) # similar to INItiate followed by FETCh (TODO verify init forces immediate restart)
+        self.fetchval = scpiDevice(getstr='FETCh?',str_type=float)
+        self.volt_nplc = scpiDevice('VOLTage:NPLC', str_type=float) # DC 0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100
+        self.volt_aperture = scpiDevice('VOLTage:APERture', str_type=float) # DC in seconds (max~1?TODO check), also MIN, MAX, DEF
+        self.volt_aperture_en = scpiDevice('VOLTage:APERture:ENabled') # TODO: check if question only
+        self.current_aperture = scpiDevice('CURRent:APERture', str_type=float) # DC in seconds
+        self.res_aperture = scpiDevice('RESistance:APERture', str_type=float)
+        self.four_res_aperture = scpiDevice('FRESistance:APERture', str_type=float)
         self.alias = self.readval
         super(type(self),self).create_devs()
 
