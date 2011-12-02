@@ -37,20 +37,22 @@ class BaseDevice(object):
         self._cache = None
         self._autoinit = autoinit
         self.__doc__ = doc+BaseDevice.__doc__
+        self._setdev = None
+        self._getdev = None
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val):
         self.check(val)
         if not CHECKING:
             self.setdev(val)
-        elif self.__class__.setdev == BaseDevice.setdev:
+        elif self._setdev == None:
             raise NotImplementedError, 'This device does not handle setdev'
         # only change cache after succesfull setdev
         self._cache = val
     def get(self):
         if not CHECKING:
             ret = self.getdev()
-        elif self.__class__.getdev == BaseDevice.getdev:
+        elif self._getdev == None:
             raise NotImplementedError, 'This device does not handle getdev'
         else:
             ret = self._cache
@@ -90,11 +92,18 @@ class wrapDevice(BaseDevice):
         self._getdev = getdev
         self._check  = check
     def setdev(self, val):
-        self._setdev(val)
+        if self._setdev != None:
+            self._setdev(val)
+        else:
+            raise NotImplementedError, 'This device does not handle setdev'
     def getdev(self):
-        return self._getdev()
+        if self._getdev != None:
+            return self._getdev()
+        else:
+            raise NotImplementedError, 'This device does not handle getdev'
     def check(self, val):
-        self._check(val)
+        if self._check != None:
+            self._check(val)
 
 class cls_wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, *extrap, **extrak):
@@ -104,11 +113,18 @@ class cls_wrapDevice(BaseDevice):
         self._getdev = getdev
         self._check  = check
     def setdev(self, val):
-        self._setdev(self.instr, val)
+        if self._setdev != None:
+            self._setdev(self.instr, val)
+        else:
+            raise NotImplementedError, 'This device does not handle setdev'
     def getdev(self):
-        return self._getdev(self.instr)
+        if self._getdev != None:
+            return self._getdev(self.instr)
+        else:
+            raise NotImplementedError, 'This device does not handle getdev'
     def check(self, val):
-        self._check(self.instr, val)
+        if self._check != None:
+            self._check(self.instr, val)
 
 # Using this metaclass, the class method
 # add_class_devs will be executed at class creation.
@@ -244,10 +260,10 @@ class scpiDevice(BaseDevice):
         if setstr == None and getstr == None:
            raise ValueError, 'At least one of setstr or getstr needs to be specified'
         BaseDevice.__init__(self, *extrap, **extrak)
-        self.setstr = setstr
+        self._setdev = setstr
         if getstr == None and autoget:
             getstr = setstr+'?'
-        self.getstr = getstr
+        self._getdev = getstr
         self.type = str_type
         self.min = min
         self.max = max
@@ -255,14 +271,14 @@ class scpiDevice(BaseDevice):
     # TODO: these redefinition will prevent check from detecting a problem
     #       with a non existing device
     def setdev(self, val):
-        if self.setstr == None:
+        if self._setdev == None:
            raise NotImplementedError, 'This device does not handle setdev'
         if self.type != None:
            # use repr instead of str to keep full precision
            val = repr(val)
         self.instr.write(self.setstr+' '+val)
     def getdev(self):
-        if self.getstr == None:
+        if self._getdev == None:
            raise NotImplementedError, 'This device does not handle getdev'
         ret = self.instr.ask(self.getstr)
         if self.type != None:
@@ -316,7 +332,8 @@ class visaInstrument(BaseInstrument):
         if type(visa_addr)==int:
             visa_addr= 'GPIB0::%i::INSTR'%visa_addr
         self.visa_addr = visa_addr
-        self.visa = visa.instrument(visa_addr)
+        if not CHECKING:
+            self.visa = visa.instrument(visa_addr)
         #self.visa.timeout = 3 # in seconds
         BaseInstrument.__init__(self)
     #######
