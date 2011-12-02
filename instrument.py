@@ -15,6 +15,7 @@ import time
 import traces
 
 _globaldict = dict() # This is set in pynoise.py
+CHECKING = False
 
 class BaseDevice(object):
     def __init__(self, autoinit=True):
@@ -27,11 +28,15 @@ class BaseDevice(object):
     #    get should return the same thing set uses
     def set(self, val):
         self.check(val)
-        self.setdev(val)
+        if not CHECKING:
+            self.setdev(val)
         # only change cache after succesfull setdev
         self._cache = val
     def get(self):
-        ret = self.getdev()
+        if not CHECKING:
+            ret = self.getdev()
+        else:
+            ret = self._cache
         self._cache = ret
         return ret
     def getcache(self):
@@ -106,7 +111,8 @@ class BaseInstrument(object):
     def __init__(self):
         self.header_val = None
         self.create_devs()
-        self.init(full=True)
+        if not CHECKING:
+            self.init(full=True)
     def find_global_name(self):
         dic = _globaldict
         try:

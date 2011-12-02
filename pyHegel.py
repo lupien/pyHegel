@@ -71,11 +71,11 @@ class _Sweep(instrument.BaseInstrument):
     def execbefore(self):
         b = self.before.get()
         if b:
-            exec(b)
+            exec b
     def execafter(self):
         b = self.after.get()
         if b:
-            exec(b)
+            exec b
     def get_alldevs(self):
         l =  self.out.get()
         if l == None or l==[]:
@@ -108,6 +108,9 @@ class _Sweep(instrument.BaseInstrument):
            print 'Wrong start or stop values. Aborting!'
            return
         span = np.linspace(start, stop, npts)
+        if instrument.CHECKING:
+            # For checking only take first and last values
+            span = span[[0,-1]]
         graph = self.graph.get()
         if graph:
             t = traces.Trace()
@@ -275,13 +278,20 @@ def ilist():
             lst += name
     #return lst
 
-def check(batch):
+def check(batchfile):
     """
        Run batch without talking to devices.
+       Otherwise it is the same as the batch command
     """
-    raise NotImplementedError
+    instrument.CHECKING = True
+    try:
+        batch(batchfile)
+    except:
+        instrument.CHECKING = True
+        raise
+    instrument.CHECKING = True
 
-def batch(batch):
+def batch(batchfile):
     """
        Runs the batch file.
        On ipython command line this can be called
@@ -294,9 +304,9 @@ def batch(batch):
          unless the names ends with a .ipy
     """
     try:
-        execfile(batch)
+        execfile(batchfile)
     except IOError:
-        execfile(batch+'.py')
+        execfile(batchfile+'.py')
 
 def sleep(sec):
     """
@@ -334,7 +344,7 @@ def load(names, newnames=None):
         if newname == None:
             newname = name
         i = instr(*param)
-        exec('global '+newname+';'+newname+'=i')
+        exec 'global '+newname+';'+newname+'=i'
 
 #alias: replaced by assignement instr1=instr2, dev=instr.devx
 #forget: replaced by del instr1
