@@ -278,18 +278,28 @@ def ilist():
             lst += name
     #return lst
 
+def checkmode(state=None):
+    """
+       Called with no arguments, returns current checking mode state
+       With a boolean, sets the check state
+    """
+    if state == None:
+        return instrument.CHECKING
+    instrument.CHECKING = state
+
 def check(batchfile):
     """
        Run batch without talking to devices.
        Otherwise it is the same as the batch command
     """
-    instrument.CHECKING = True
+    before = checkmode()
+    checkmode(True)
     try:
         batch(batchfile)
     except:
-        instrument.CHECKING = True
+        checkmode(before)
         raise
-    instrument.CHECKING = True
+    checkmode(before)
 
 def batch(batchfile):
     """
