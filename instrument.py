@@ -502,6 +502,21 @@ class infiniiVision_3000(visaInstrument):
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
 
+class agilent_EXA(visaInstrument):
+    def init(self):
+        self.write(':format REAL,64')
+        self.write(':format:border swap')
+    def create_devs(self):
+        self.bandwith = scpiDevice(':bandwidth',str_type=float)
+        self.mark1x = scpiDevice(':calc:mark1:x',str_type=float)
+        self.mark1y = scpiDevice(getstr=':calc:mark1:y?',str_type=float)
+        self.average_count = scpiDevice(getstr=':average:count?',str_type=float)
+        self.freq_start = scpiDevice(':freq:start', str_type=float, min=10e6, max=12.6e9)
+        self.freq_stop = scpiDevice(':freq:stop', str_type=float, min=10e6, max=12.6e9)
+        self.trace1 = scpiDevice(getstr=':trace? trace1')
+        self.fetch1 = scpiDevice(getstr=':fetch:san1?')
+        self.read1 = scpiDevice(getstr=':read:san1?')
+
 class dummy(BaseInstrument):
     def init(self, full=False):
         self.incr_val = 0
