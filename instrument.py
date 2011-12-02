@@ -46,14 +46,14 @@ class BaseDevice(object):
         if not CHECKING:
             self.setdev(val)
         elif self._setdev == None:
-            raise NotImplementedError, 'This device does not handle setdev'
+            raise NotImplementedError, self.perror('This device does not handle setdev')
         # only change cache after succesfull setdev
         self._cache = val
     def get(self):
         if not CHECKING:
             ret = self.getdev()
         elif self._getdev == None:
-            raise NotImplementedError, 'This device does not handle getdev'
+            raise NotImplementedError, self.perror('This device does not handle getdev')
         else:
             ret = self._cache
         self._cache = ret
@@ -75,12 +75,14 @@ class BaseDevice(object):
     def __set__(self, instance, val):
         #print instance
         self.set(val)
-
+    def perror(self, error_str='', **dic):
+        dic.update(name=self.name, instr=self.instr, gname=self.instr.find_global_name())
+        return ('{gname}.{name}: '+error_str).format(**dic)
     # Implement these in a derived class
     def setdev(self, val):
-        raise NotImplementedError, 'This device does not handle setdev'
+        raise NotImplementedError, self.perror('This device does not handle setdev')
     def getdev(self):
-        raise NotImplementedError, 'This device does not handle getdev'
+        raise NotImplementedError, self.perror('This device does not handle getdev')
     def check(self, val):
         pass
 
@@ -95,12 +97,12 @@ class wrapDevice(BaseDevice):
         if self._setdev != None:
             self._setdev(val)
         else:
-            raise NotImplementedError, 'This device does not handle setdev'
+            raise NotImplementedError, self.perror('This device does not handle setdev')
     def getdev(self):
         if self._getdev != None:
             return self._getdev()
         else:
-            raise NotImplementedError, 'This device does not handle getdev'
+            raise NotImplementedError, self.perror('This device does not handle getdev')
     def check(self, val):
         if self._check != None:
             self._check(val)
@@ -116,12 +118,12 @@ class cls_wrapDevice(BaseDevice):
         if self._setdev != None:
             self._setdev(self.instr, val)
         else:
-            raise NotImplementedError, 'This device does not handle setdev'
+            raise NotImplementedError, self.perror('This device does not handle setdev')
     def getdev(self):
         if self._getdev != None:
             return self._getdev(self.instr)
         else:
-            raise NotImplementedError, 'This device does not handle getdev'
+            raise NotImplementedError, self.perror('This device does not handle getdev')
     def check(self, val):
         if self._check != None:
             self._check(self.instr, val)
@@ -191,11 +193,11 @@ class BaseInstrument(object):
             obj.instr = self
             obj.name = devname
     def read(self):
-        raise NotImplementedError, 'This instrument class does not implement read'
+        raise NotImplementedError, self.perror('This instrument class does not implement read')
     def write(self, val):
-        raise NotImplementedError, 'This instrument class does not implement write'
+        raise NotImplementedError, self.perror('This instrument class does not implement write')
     def ask(self, question):
-        raise NotImplementedError, 'This instrument class does not implement ask'
+        raise NotImplementedError, self.perror('This instrument class does not implement ask')
     def init(self, full=False):
         """ Do instrument initialization (full=True)/reset (full=False) here """
         pass
@@ -203,13 +205,13 @@ class BaseInstrument(object):
     def __getattr__(self, name):
         if name in ['get', 'set', 'check', 'getcache', 'setcache', 'instr', 'name']:
             if self.alias == None:
-                raise AttributeError, 'This instrument does not have an alias for get, set, check ...'
+                raise AttributeError, self.perror('This instrument does not have an alias for {nm}', nm=name)
             return getattr(self.alias, name)
         else:
-            raise AttributeError, '%s is not an attribute of this instrument'%name
+            raise AttributeError, self.perror('{nm} is not an attribute of this instrument', nm=name)
     def __call__(self):
         if self.alias == None:
-            raise TypeError, 'This instrument does not have an alias for call'
+            raise TypeError, self.perror('This instrument does not have an alias for call')
         return self.alias()
     def iprint(self):
         ret = ''
@@ -223,6 +225,9 @@ class BaseInstrument(object):
     def __repr__(self):
         gn, cn, p = self._info()
         return '%s = <"%s" instrument at 0x%08x>'%(gn, cn, p)
+    def perror(self, error_str='', **dic):
+        dic.update(instr=self, gname=self.find_global_name())
+        return ('{gname}: '+error_str).format(**dic)
     def header_getdev(self):
         if self.header_val == None:
             return self.find_global_name()
@@ -272,14 +277,14 @@ class scpiDevice(BaseDevice):
     #       with a non existing device
     def setdev(self, val):
         if self._setdev == None:
-           raise NotImplementedError, 'This device does not handle setdev'
+           raise NotImplementedError, self.perror('This device does not handle setdev')
         if self.type != None:
            # use repr instead of str to keep full precision
            val = repr(val)
         self.instr.write(self.setstr+' '+val)
     def getdev(self):
         if self._getdev == None:
-           raise NotImplementedError, 'This device does not handle getdev'
+           raise NotImplementedError, self.perror('This device does not handle getdev')
         ret = self.instr.ask(self.getstr)
         if self.type != None:
            # here we assume self.type can convert a string
@@ -287,7 +292,7 @@ class scpiDevice(BaseDevice):
         return ret
     def check(self, val):
         if self.setstr == None:
-           raise NotImplementedError, 'This device does not handle check'
+           raise NotImplementedError, self.perror('This device does not handle check')
         if self.type == float or self.type == int:
            if self.min != None:
               mintest = val >= self.min
@@ -301,7 +306,7 @@ class scpiDevice(BaseDevice):
         else:
            state = True
         if state == False:
-           raise ValueError, 'Values is out of bounds'
+           raise ValueError, self.perror('Values is out of bounds')
         #return state
 
 def _decodeblock(str):
@@ -436,7 +441,7 @@ class yokogawa_gs200(visaInstrument):
         if self.function.getcache()=='CURR' and rnge>.2:
             rnge = .2
         if abs(val) > rnge:
-           raise ValueError, 'level is invalid'
+           raise ValueError, self.perror('level is invalid')
     def level_getdev(self):
         return float(self.ask(':source:level?'))
     def level_setdev(self, val):
