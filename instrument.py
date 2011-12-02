@@ -292,31 +292,54 @@ class visaInstrument(BaseInstrument):
     def read_status_byte(self):
         return vpp43.read_stb(self.visa.vi)
     def control_remotelocal(self, remote=False, local_lockout=False, all=False):
+        """
+        For all=True:
+           remote=True: REN line is asserted -> when instruments are addressed
+                                                 they will go remote
+           remote=False: REN line is deasserted -> All instruments go local and
+                                               will NOT go remote when addressed
+                                               This also clears lockout state
+        For local_lockout=True:
+           remote=True: All instruments on the bus go to local lockout state
+                        Also current instrument goes remote.
+           remote=False:  Same as all=True, remote=False followed by
+                                  all=True, remote=True
+        local lockout state means the local button is disabled on the instrument.
+        The instrument can be switch for local to remote by gpib interface but
+        cannot be switched from remote to local using the instrument local button.
+        Not all instruments implement this lockout.
+
+        Otherwise:
+           remote=True: only this instrument goes into remote state.
+           remote=False: only this instrument goes into local state.
+              The instrument keeps its lockout state unchanged.
+        """
+        # False for both all and local_lockout(first part) should proceed in a same way
+        # Here I use a different instruction but I think they both do the same
+        # i.e. VI_GPIB_REN_DEASSERT == VI_GPIB_REN_DEASSERT_GTL
+        #  possibly they might behave differently on some other bus (gpib, tcp?)
+        #  or for instruments that don't conform to proper 488.2 rules
+        #  For those reason I keep the 2 different so it can be tested later.
+        # Unused state:
+        #   VI_GPIB_REN_ASSERT_LLO : lockout only (no addressing)
         if all:
-            # all instruments go local (and clear the lockout), or all instrument will go remote
-            # when called
             if remote:
                 val = vpp43.VI_GPIB_REN_ASSERT
             else:
                 val = vpp43.VI_GPIB_REN_DEASSERT
-        elif local_lock_out:
-            # all instruments on bus go to lockout state (physical device local key disabled)
-            # instruments selected will go to remote, others stay in current state.
+        elif local_lockout:
             if remote:
                 val = vpp43.VI_GPIB_REN_ASSERT_ADDRESS_LLO
             else:
-                # probably twiddle this back on after
                 val = vpp43.VI_GPIB_REN_DEASSERT_GTL
+                vpp43.gpib_control_ren(self.visa.vi, val)
+                val = vpp43.VI_GPIB_REN_ASSERT
         else:
-            # only instrument goes to remote/local but with no local lock out
             if remote:
                 val = vpp43.VI_GPIB_REN_ASSERT_ADDRESS
             else:
                 val = vpp43.VI_GPIB_REN_ADDRESS_GTL
-        #VI_GPIB_REN_ASSERT_LLO
-        #VI_GPIB_REN_DEASSERT_GTL # don't how usefull this is seems
-        #                           to result in the saem as VI_GPIB_REN_DEASSERT
-        return vpp43.gpib_control_ren(self.visa.vi, val)
+        vpp43.gpib_control_ren(self.visa.vi, val)
     def read(self):
         return self.visa.read()
     def write(self, val):
@@ -393,6 +416,8 @@ class sr830_lia(visaInstrument):
         super(type(self),self).create_devs()
 
 class sr384_rf(visaInstrument):
+    # This instruments needs to be on local state or to pass through local state
+    #  after a local_lockout to actually turn off the local key.
     # allowed units: amp: dBm, rms, Vpp; freq: GHz, MHz, kHz, Hz; Time: ns, us, ms, s
     def init(self, full=False):
         # This clears the error state
