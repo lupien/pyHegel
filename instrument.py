@@ -503,7 +503,7 @@ class infiniiVision_3000(visaInstrument):
         super(type(self),self).create_devs()
 
 class agilent_EXA(visaInstrument):
-    def init(self):
+    def init(self, full=False):
         self.write(':format REAL,64')
         self.write(':format:border swap')
     def create_devs(self):
@@ -516,6 +516,8 @@ class agilent_EXA(visaInstrument):
         self.trace1 = scpiDevice(getstr=':trace? trace1')
         self.fetch1 = scpiDevice(getstr=':fetch:san1?')
         self.read1 = scpiDevice(getstr=':read:san1?')
+        # This needs to be last to complete creation
+        super(type(self),self).create_devs()
 
 class dummy(BaseInstrument):
     def init(self, full=False):

@@ -17,8 +17,9 @@ conf = dict( yo1 = (instrument.yokogawa_gs200, (10,)),
              rf2 = (instrument.sr384_rf, (27,)),
              foo1 = (instrument.dummy, ()),
              foo2 = (instrument.dummy, ()),
+             # EXA is gpib 8
              exa1 = (instrument.agilent_EXA, ('USB::0x0957::0x0B0B::MY51170142',)),
 #             exa1 = (instrument.agilent_EXA, ('USB0::0x0957::0x0B0B::MY51170142::0::INSTR',)),
         )
 
-# EXA, 8, PNAL, 16, Scope=USB
+# PNAL, 16, Scope=USB
