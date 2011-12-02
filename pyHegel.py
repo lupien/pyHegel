@@ -19,7 +19,10 @@ _figlist = []
 def reset_pyNoise():
     """
        Resets pyHegel
-       You need to reload instruments and reassign to sweep
+       You need to reload instruments and reassign to sweep after calling this.
+
+       can be called in ipython command line like:
+         /reset_pyNoise
     """
     reload(instrument)
     reload(local_config)
@@ -259,6 +262,9 @@ def ilist():
        print the list of instruments
         this will not include aliased devices (dev=instr,devx)
         but will include aliased instruments (instr1=instr2)
+
+       can be called in ipython command line like:
+         /ilist
     """
     lst = []
     for name, value in globals().iteritems():
@@ -292,10 +298,16 @@ def load(names, newnames=None):
        name in the global space. If newname is given, it is the name used
        for that new instrument.
        names and newnames can be a string or a list of strings
+       They can alse be a string with multiname names separated by spaces
+        Therefore it can be called like this in ipython
+          ,load instr1 newname1
+          ;load instr1 instr2 instr3 ....
     """
     if isinstance(names, basestring):
-        names = [names]
-        newnames = [newnames]
+        # this always returns list
+        names = names.split(' ')
+    if isinstance(newnames, basestring):
+        newnames = newnames.split(' ')
     if newnames == None:
         newnames = [None]
     if len(newnames) < len(names):
