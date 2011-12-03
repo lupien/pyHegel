@@ -16,7 +16,7 @@ import local_config
 
 _figlist = []
 
-def reset_pyNoise():
+def reset_pyHegel():
     """
        Resets pyHegel
        You need to reload instruments and reassign to sweep after calling this.
@@ -26,7 +26,7 @@ def reset_pyNoise():
     """
     reload(instrument)
     reload(local_config)
-    execfile('pyHegel.py')
+    execfile('pyHegel.py', globals())
 
 # exec in ipython with run -i otherwise
 #  this globals will not be the same as the command line globals
@@ -261,8 +261,13 @@ def get(dev):
     except KeyboardInterrupt:
        print 'CTRL-C pressed!!!!!!' 
 
-def iprint(instrument):
-    print instrument.iprint()
+def iprint(instrument, force=False):
+    """
+       Prints the value of all the device inside instrument.
+       If force is True, use get instead of getcache for
+       all autoinit devices.
+    """
+    print instrument.iprint(force=force)
 
 def ilist():
     """

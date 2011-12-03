@@ -221,12 +221,16 @@ class BaseInstrument(object):
         if self.alias == None:
             raise TypeError, self.perror('This instrument does not have an alias for call')
         return self.alias()
-    def iprint(self):
+    def iprint(self, force=False):
         ret = ''
         for s, obj in self.devs_iter():
             if self.alias == obj:
                 ret += 'alias = '
-            ret += s+" = "+repr(obj.getcache())+"\n"
+            if force and obj._autoinit:
+                val = obj.get()
+            else:
+                val = obj.getcache()
+            ret += s+" = "+repr(val)+"\n"
         return ret
     def _info(self):
         return self.find_global_name(), self.__class__.__name__, id(self)
@@ -280,6 +284,7 @@ class scpiDevice(BaseDevice):
         self.type = str_type
         self.min = min
         self.max = max
+        self.choices = choices
         self.__doc__ = doc
     def _tostr(self, val):
         # This function converts from val to a str for the command
@@ -306,14 +311,14 @@ class scpiDevice(BaseDevice):
         if self._setdev == None:
            raise NotImplementedError, self.perror('This device does not handle setdev')
         val = self._tostr(val)
-        self.instr.write(self.setstr+' '+val)
+        self.instr.write(self._setdev+' '+val)
     def getdev(self):
         if self._getdev == None:
            raise NotImplementedError, self.perror('This device does not handle getdev')
-        ret = self.instr.ask(self.getstr)
+        ret = self.instr.ask(self._getdev)
         return self._fromstr(ret)
     def check(self, val):
-        if self.setstr == None:
+        if self._setdev == None:
             raise NotImplementedError, self.perror('This device does not handle check')
         mintest = maxtest = choicetest = True
         if self.min != None:
@@ -393,6 +398,8 @@ class ChoiceStrings(object):
         return self.long[self.index(x)]
     def normalizeshort(self, x):
         return self.short[self.index(x)].upper()
+    def __repr__(self):
+        return repr(self.values)
 
 class visaInstrument(BaseInstrument):
     def __init__(self, visa_addr):
@@ -468,6 +475,10 @@ class visaInstrument(BaseInstrument):
         return self.visa.ask(question)
     def idn(self):
         return self.ask('*idn?')
+    def _clear(self):
+        self.visa.clear()
+    def _set_timeout(self, seconds):
+        self.visa.timeout = seconds
     def _info(self):
         gn, cn, p = BaseInstrument._info(self)
         return gn, cn+'(%s)'%self.visa_addr, p
@@ -521,7 +532,7 @@ class yokogawa_gs200(visaInstrument):
 class sr830_lia(visaInstrument):
     def init(self, full=False):
         # This empties the instrument buffers
-        self.visa.clear()
+        self._clear()
     def create_devs(self):
         self.freq = scpiDevice('freq', str_type=float)
         self.sens = scpiDevice('sens', str_type=int)
@@ -545,7 +556,6 @@ class sr384_rf(visaInstrument):
     def init(self, full=False):
         # This clears the error state
         self.write('*cls')
-        pass
     def create_devs(self):
         self.freq = scpiDevice('freq',str_type=float)
         self.offset_low = scpiDevice('ofsl',str_type=float) #volts
@@ -582,15 +592,18 @@ class agilent_rf_33522A(visaInstrument):
         self.write('PHASe:SYNChronize')
 
 class agilent_multi_34410A(visaInstrument):
+    def init(self, full=False):
+        # This clears the error state
+        self.write('*cls')
     def create_devs(self):
         # This needs to be last to complete creation
         self.mode = scpiDevice('FUNC') # CURR:AC, VOLT:AC, CAP, CONT, CURR, VOLT, DIOD, FREQ, PER, RES, FRES
         self.readval = scpiDevice(getstr='READ?',str_type=float) # similar to INItiate followed by FETCh (TODO verify init forces immediate restart)
-        self.fetchval = scpiDevice(getstr='FETCh?',str_type=float)
-        self.volt_nplc = scpiDevice('VOLTage:NPLC', str_type=float) # DC 0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100
-        self.volt_aperture = scpiDevice('VOLTage:APERture', str_type=float) # DC in seconds (max~1?TODO check), also MIN, MAX, DEF
-        self.volt_aperture_en = scpiDevice('VOLTage:APERture:ENabled', str_type=bool) # TODO: check if question only
-        self.current_aperture = scpiDevice('CURRent:APERture', str_type=float) # DC in seconds
+        self.fetchval = scpiDevice(getstr='FETCh?',str_type=float, autoinit=False) #You can't ask for fetch after an aperture change. You need to read some data first.
+        self.volt_nplc = scpiDevice('VOLTage:NPLC', str_type=float, choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100]) # DC
+        self.volt_aperture = scpiDevice('VOLTage:APERture', str_type=float) # DC, in seconds (max~1s), also MIN, MAX, DEF
+        self.volt_aperture_en = scpiDevice('VOLTage:APERture:ENabled', str_type=bool)
+        self.current_aperture = scpiDevice('CURRent:APERture', str_type=float) # DC, in seconds
         self.res_aperture = scpiDevice('RESistance:APERture', str_type=float)
         self.four_res_aperture = scpiDevice('FRESistance:APERture', str_type=float)
         self.alias = self.readval
