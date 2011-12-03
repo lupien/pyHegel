@@ -10,6 +10,7 @@ except ImportError:
 #     or :                      visa.get_instruments_list(use_aliases=True)
 
 import numpy as np
+import string
 import random
 import time
 import traces
@@ -265,7 +266,7 @@ class MemoryDevice(BaseDevice):
 
 class scpiDevice(BaseDevice):
     def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None,
-                  min=None, max=None, doc=None, *extrap, **extrak):
+                  min=None, max=None, choices=None, doc=None, *extrap, **extrak):
         """
            str_type can be float, int, None
         """
@@ -299,21 +300,23 @@ class scpiDevice(BaseDevice):
         return ret
     def check(self, val):
         if self.setstr == None:
-           raise NotImplementedError, self.perror('This device does not handle check')
-        if self.type == float or self.type == int:
-           if self.min != None:
-              mintest = val >= self.min
-           else:
-              mintest = True
-           if self.max != None:
-              maxtest = val <= self.max
-           else:
-              maxtest = True
-           state = mintest and maxtest
-        else:
-           state = True
+            raise NotImplementedError, self.perror('This device does not handle check')
+        mintest = maxtest = choicetest = True
+        if self.min != None:
+            mintest = val >= self.min
+        if self.max != None:
+            maxtest = val <= self.max
+        if self.choices:
+            choicetest = val in self.choices
+        state = mintest and maxtest and choicetest
         if state == False:
-           raise ValueError, self.perror('Values is out of bounds')
+           if not mintest:
+               err='invalid MIN'
+           if not maxtest:
+               err='invalid MAX'
+           if not choicetest:
+               err='invalid value(%s): use one of %s'%(val, repr(self.choices))
+           raise ValueError, self.perror('Failed check: '+err)
         #return state
 
 def _decodeblock(str):
@@ -336,6 +339,46 @@ def _decode(str):
       v = np.fromstring(str, 'float64', sep=',')
    return v
 
+
+class ChoiceStrings(object):
+    """
+       Initialize the class with a list of strings
+        s=ChoiceStrings('Aa', 'Bb', ..)
+       then 'A' in s  or 'aa' in s will return True
+       irrespective of capitalization.
+       The elements need to have the following format:
+          ABCdef
+       where: ABC is known has the short name and
+              abcdef is known has the long name.
+       When using in or searching with index method
+             both long and short names are looked for
+       normalizelong and normalizeshort return the above
+         (short is upper, long is lower)
+       Long and short name can be the same.
+    """
+    def __init__(self, *values):
+        self.values = values
+        self.short = [v.rstrip(string.ascii_lowercase).lower() for v in values]
+        self.long = [v.lower() for v in values]
+        # for short having '', use the long name instead
+        # this happens for a string all in lower cap.
+        self.short = [ s if s!='' else l for s,l in zip(self.short, self.long)]
+    def __contains__(self, x): # performs x in y; with y=Choice()
+        xl = x.lower()
+        inshort = xl in self.short
+        inlong = xl in self.long
+        return inshort or inlong
+    def index(self, value):
+        xl = value.lower()
+        try:
+            return self.short.index(xl)
+        except ValueError:
+            pass
+        return self.long.index(xl)
+    def normalizelong(self, x):
+        return self.long[self.index(x)]
+    def normalizeshort(self, x):
+        return self.short[self.index(x)].upper()
 
 class visaInstrument(BaseInstrument):
     def __init__(self, visa_addr):
@@ -423,6 +466,10 @@ class visaInstrument(BaseInstrument):
 # yo1 = yokogawa_gs200(12)
 #'USB0::0x0957::0x0118::MY49001395::0::INSTR'
 class yokogawa_gs200(visaInstrument):
+    # TODO: implement multipliers, units. The multiplier
+    #      should be the same for all instruments, and be stripped
+    #      before writing and going to the cache (in BaseDevice)
+    #      This is probably not needed. Just use 1e3
     # case insensitive
     multipliers = ['YO', 'ZE', 'EX', 'PE', 'T', 'G', 'MA', 'K', 'M', 'U', 'N', 'P',
                    'F', 'A', 'Z', 'Y']
@@ -433,7 +480,7 @@ class yokogawa_gs200(visaInstrument):
         self.write('*cls')
     def create_devs(self):
         #self.level_2 = wrapDevice(self.levelsetdev, self.levelgetdev, self.levelcheck)
-        self.function = scpiDevice(':source:function') # use 'voltage' or 'current'
+        self.function = scpiDevice(':source:function', choices=ChoiceStrings('VOLT', 'CURRent')) # use 'voltage' or 'current'
         # voltage or current means to add V or A in the string (possibly with multiplier)
         self.range = scpiDevice(':source:range', str_type=float, setget=True) # can be a voltage, current, MAX, MIN, UP or DOWN
         self.level = scpiDevice(':source:level') # can be a voltage, current, MAX, MIN
