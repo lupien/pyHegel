@@ -111,22 +111,21 @@ class _Sweep(instrument.BaseInstrument):
         if instrument.CHECKING:
             # For checking only take first and last values
             span = span[[0,-1]]
+        hdrs = getheaders([dev]+self.get_alldevs())
         graph = self.graph.get()
         if graph:
             t = traces.Trace()
             _figlist.append(t) # TODO: handle removal from figlist
             t.setLim(span)
+            if len(hdrs) == 1:
+                t.setlegend(hdrs)
+            else:
+                t.setlegend(hdrs[1:])
         if filename != None:
             fullpath=os.path.join(self.path.get(), filename)
             # Make it unbuffered, windows does not handle line buffer correctly
             f = open(fullpath, 'w', 0)
-            hdrs = getheaders([dev]+self.get_alldevs())
             writevec(f, hdrs+['time'], pre_str='#')
-            if graph:
-                i = 1
-                if len(hdrs) == 1:
-                    i = 0
-                t.setlegend(hdrs[i:])
         else:
             f = None
         #TODO get CTRL-C to work properly
