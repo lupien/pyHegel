@@ -281,23 +281,37 @@ class scpiDevice(BaseDevice):
         self.min = min
         self.max = max
         self.__doc__ = doc
-    # TODO: these redefinition will prevent check from detecting a problem
-    #       with a non existing device
+    def _tostr(self, val):
+        # This function converts from val to a str for the command
+        t = self.type
+        if t == bool: # True= 1 or ON, False= 0 or OFF
+            return str(int(bool(val)))
+        if t == float or t == int:
+            # use repr instead of str to keep full precision
+            return repr(val)
+        if t == None or issubclass(t, basestring):
+            return val
+        return t._tostr(val)
+    def _fromstr(self, valstr):
+        # This function converts from the query result to a value
+        t = self.type
+        if t == bool: # it is '1' or '2'
+            return bool(int(valstr))
+        if t == float or t == int:
+            return t(valstr)
+        if t == None or issubclass(t, basestring):
+            return valstr
+        return t._fromstr(valstr)
     def setdev(self, val):
         if self._setdev == None:
            raise NotImplementedError, self.perror('This device does not handle setdev')
-        if self.type != None:
-           # use repr instead of str to keep full precision
-           val = repr(val)
+        val = self._tostr(val)
         self.instr.write(self.setstr+' '+val)
     def getdev(self):
         if self._getdev == None:
            raise NotImplementedError, self.perror('This device does not handle getdev')
         ret = self.instr.ask(self.getstr)
-        if self.type != None:
-           # here we assume self.type can convert a string
-           ret = self.type(ret)
-        return ret
+        return self._fromstr(ret)
     def check(self, val):
         if self.setstr == None:
             raise NotImplementedError, self.perror('This device does not handle check')
@@ -538,11 +552,11 @@ class sr384_rf(visaInstrument):
         self.amp_lf_dbm = scpiDevice('ampl',str_type=float)
         self.amp_rf_dbm = scpiDevice('ampr',str_type=float)
         self.amp_hf_dbm = scpiDevice('amph',str_type=float) # doubler
-        self.en_lf = scpiDevice('enbl') # 0 is off, 1 is on, read value depends on freq
-        self.en_rf = scpiDevice('enbr') # 0 is off, 1 is on, read value depends on freq
-        self.en_hf = scpiDevice('enbh') # 0 is off, 1 is on, read value depends on freq
+        self.en_lf = scpiDevice('enbl', str_type=bool) # 0 is off, 1 is on, read value depends on freq
+        self.en_rf = scpiDevice('enbr', str_type=bool) # 0 is off, 1 is on, read value depends on freq
+        self.en_hf = scpiDevice('enbh', str_type=bool) # 0 is off, 1 is on, read value depends on freq
         self.phase = scpiDevice('phas',str_type=float, min=-360, max=360) # deg, only change by 360
-        self.mod_en = scpiDevice('modl') # 0 is off, 1 is on
+        self.mod_en = scpiDevice('modl', str_type=bool) # 0 is off, 1 is on
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
 
@@ -554,14 +568,13 @@ class agilent_rf_33522A(visaInstrument):
         self.offset1 = scpiDevice('SOUR1:VOLT:OFFS', str_type=float, min=-5, max=5)
         self.phase1 = scpiDevice('SOURce1:PHASe', str_type=float, min=-360, max=360) # in deg unless changed by unit:angle
         self.mode1 = scpiDevice('SOUR1:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
-        self.out_en1 = scpiDevice('OUTPut1') #OFF,0 or ON,1
+        self.out_en1 = scpiDevice('OUTPut1', str_type=bool) #OFF,0 or ON,1
         self.ampl2 = scpiDevice('SOUR2:VOLT', str_type=float, min=0.001, max=10)
         self.freq2 = scpiDevice('SOUR2:FREQ', str_type=float, min=1e-6, max=30e6)
         self.phase2 = scpiDevice('SOURce2:PHASe', str_type=float, min=-360, max=360) # in deg unless changed by unit:angle
         self.offset2 = scpiDevice('SOUR2:VOLT:OFFS', str_type=float, min=-5, max=5)
         self.mode2 = scpiDevice('SOUR2:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
-        self.out_en2 = scpiDevice('OUTPut2') #OFF,0 or ON,1
-        self.phase_sync = scpiDevice('PHASe:SYNChronize', autoget=False)
+        self.out_en2 = scpiDevice('OUTPut2', str_type=bool) #OFF,0 or ON,1
         self.alias = self.freq1
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
@@ -576,7 +589,7 @@ class agilent_multi_34410A(visaInstrument):
         self.fetchval = scpiDevice(getstr='FETCh?',str_type=float)
         self.volt_nplc = scpiDevice('VOLTage:NPLC', str_type=float) # DC 0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100
         self.volt_aperture = scpiDevice('VOLTage:APERture', str_type=float) # DC in seconds (max~1?TODO check), also MIN, MAX, DEF
-        self.volt_aperture_en = scpiDevice('VOLTage:APERture:ENabled') # TODO: check if question only
+        self.volt_aperture_en = scpiDevice('VOLTage:APERture:ENabled', str_type=bool) # TODO: check if question only
         self.current_aperture = scpiDevice('CURRent:APERture', str_type=float) # DC in seconds
         self.res_aperture = scpiDevice('RESistance:APERture', str_type=float)
         self.four_res_aperture = scpiDevice('FRESistance:APERture', str_type=float)
@@ -605,7 +618,7 @@ class infiniiVision_3000(visaInstrument):
     def create_devs(self):
         # Note vincent's hegel, uses set to define filename where block data is saved.
         self.snap = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', autoinit=False) # returns block of data
-        self.inksaver = scpiDevice(':HARDcopy:INKSaver') # ON, OFF 1 or 0
+        self.inksaver = scpiDevice(':HARDcopy:INKSaver', str_type=bool) # ON, OFF 1 or 0
         self.data = scpiDevice(getstr=':waveform:DATA?', autoinit=False) # returns block of data
           # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
           #  type (Normal, peak, average, HRes), #points, #avg, xincr, xorg, xref, yincr, yorg, yref
