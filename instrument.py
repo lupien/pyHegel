@@ -606,6 +606,26 @@ class agilent_multi_34410A(visaInstrument):
         self.current_aperture = scpiDevice('CURRent:APERture', str_type=float) # DC, in seconds
         self.res_aperture = scpiDevice('RESistance:APERture', str_type=float)
         self.four_res_aperture = scpiDevice('FRESistance:APERture', str_type=float)
+        # Auto zero doubles the time to take each point
+        self.zero = scpiDevice('VOLTage:ZERO:AUTO', str_type=bool) # Also use ONCE (immediate zero, then off)
+        self.autorange = scpiDevice('VOLTage:RANGE:AUTO', str_type=bool) # Also use ONCE (immediate zero, then off)
+        self.range = scpiDevice('VOLTage:RANGE', str_type=float, choices=[.1, 1., 10., 100., 1000.]) # Setting this disables auto range
+        self.null_en = scpiDevice('VOLTage:NULL', str_type=bool)
+        self.null_val = scpiDevice('VOLTage:NULL:VALue', str_type=float)
+        self.mathfunc = scpiDevice('CALCulate:FUNCtion', choices=ChoiceStrings('DB', 'DBM', 'AVERage', 'LIMit'))
+        self.math_state = scpiDevice('CALCulate:STATe', str_type=bool)
+        self.math_avg = scpiDevice(getstr='CALCulate:AVERage:AVERage?', str_type=float)
+        self.math_count = scpiDevice(getstr='CALCulate:AVERage:COUNt?', str_type=int)
+        self.math_max = scpiDevice(getstr='CALCulate:AVERage:MAXimum?', str_type=float)
+        self.math_min = scpiDevice(getstr='CALCulate:AVERage:MINimum?', str_type=float)
+        self.math_ptp = scpiDevice(getstr='CALCulate:AVERage:PTPeak?', str_type=float)
+        self.math_sdev = scpiDevice(getstr='CALCulate:AVERage:SDEViation?', str_type=float)
+        self.math_clear = scpiDevice(setstr='CALCulate:AVERage:CLEar')
+        self.geterror = scpiDevice(getstr='SYSTem:ERRor?')
+        self.trig_src = scpiDevice('TRIGger:SOURce', choices=ChoiceStrings('IMMediate', 'BUS', 'EXTernal'))
+        self.trig_delay = scpiDevice('TRIGger:DELay', str_type=float) # seconds
+        self.trig_count = scpiDevice('TRIGger:COUNt', str_type=int) # seconds
+        self.trig_delayauto = scpiDevice('TRIGger:DELay:AUTO', str_type=bool)
         self.alias = self.readval
         super(type(self),self).create_devs()
 
