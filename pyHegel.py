@@ -286,6 +286,9 @@ def ilist():
             lst += name
     #return lst
 
+def find_all_instruments():
+    return instrument.find_all_instruments()
+
 def checkmode(state=None):
     """
        Called with no arguments, returns current checking mode state

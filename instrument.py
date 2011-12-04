@@ -18,6 +18,9 @@ import traces
 _globaldict = dict() # This is set in pynoise.py
 CHECKING = False
 
+def find_all_instruments():
+    return visa.get_instruments_list()
+
 class BaseDevice(object):
     """
         ----------------
@@ -250,7 +253,7 @@ class BaseInstrument(object):
     @classmethod
     def add_class_devs(cls):
         pass
-    def trig():
+    def trigger():
         pass
 
 class MemoryDevice(BaseDevice):
@@ -270,13 +273,15 @@ class MemoryDevice(BaseDevice):
 
 class scpiDevice(BaseDevice):
     def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None,
-                  min=None, max=None, choices=None, doc=None, *extrap, **extrak):
+                  min=None, max=None, choices=None, doc='', *extrap, **extrak):
         """
            str_type can be float, int, None
         """
         if setstr == None and getstr == None:
            raise ValueError, 'At least one of setstr or getstr needs to be specified'
-        BaseDevice.__init__(self, *extrap, **extrak)
+        if choices:
+            doc+='-------------\n Possible value to set: %s'%repr(choices)
+        BaseDevice.__init__(self, *extrap, doc=doc, **extrak)
         self._setdev = setstr
         if getstr == None and autoget:
             getstr = setstr+'?'
@@ -285,7 +290,6 @@ class scpiDevice(BaseDevice):
         self.min = min
         self.max = max
         self.choices = choices
-        self.__doc__ = doc
     def _tostr(self, val):
         # This function converts from val to a str for the command
         t = self.type
@@ -473,15 +477,22 @@ class visaInstrument(BaseInstrument):
         self.visa.write(val)
     def ask(self, question):
         return self.visa.ask(question)
-    def idn(self):
+    def _idn(self):
         return self.ask('*idn?')
     def _clear(self):
         self.visa.clear()
     def _set_timeout(self, seconds):
         self.visa.timeout = seconds
+    def _get_error(self):
+        return self.ask('SYSTem:ERRor?')
     def _info(self):
         gn, cn, p = BaseInstrument._info(self)
         return gn, cn+'(%s)'%self.visa_addr, p
+    def trigger(self):
+        # This should produce the hardware GET on gpib
+        #  Another option would be to use the *TRG 488.2 command
+        self.visa.trigger()
+#TODO implement the visa close of device
 
 # use like:
 # yo1 = yokogawa_gs200('GPIB0::12::INSTR')
@@ -597,8 +608,9 @@ class agilent_multi_34410A(visaInstrument):
         self.write('*cls')
     def create_devs(self):
         # This needs to be last to complete creation
+        # fetch and read return sample_count*trig_count data values (comma sep)
         self.mode = scpiDevice('FUNC') # CURR:AC, VOLT:AC, CAP, CONT, CURR, VOLT, DIOD, FREQ, PER, RES, FRES
-        self.readval = scpiDevice(getstr='READ?',str_type=float) # similar to INItiate followed by FETCh (TODO verify init forces immediate restart)
+        self.readval = scpiDevice(getstr='READ?',str_type=float) # similar to INItiate followed by FETCh.
         self.fetchval = scpiDevice(getstr='FETCh?',str_type=float, autoinit=False) #You can't ask for fetch after an aperture change. You need to read some data first.
         self.volt_nplc = scpiDevice('VOLTage:NPLC', str_type=float, choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100]) # DC
         self.volt_aperture = scpiDevice('VOLTage:APERture', str_type=float) # DC, in seconds (max~1s), also MIN, MAX, DEF
@@ -615,19 +627,54 @@ class agilent_multi_34410A(visaInstrument):
         self.mathfunc = scpiDevice('CALCulate:FUNCtion', choices=ChoiceStrings('DB', 'DBM', 'AVERage', 'LIMit'))
         self.math_state = scpiDevice('CALCulate:STATe', str_type=bool)
         self.math_avg = scpiDevice(getstr='CALCulate:AVERage:AVERage?', str_type=float)
-        self.math_count = scpiDevice(getstr='CALCulate:AVERage:COUNt?', str_type=int)
+        self.math_count = scpiDevice(getstr='CALCulate:AVERage:COUNt?', str_type=float)
         self.math_max = scpiDevice(getstr='CALCulate:AVERage:MAXimum?', str_type=float)
         self.math_min = scpiDevice(getstr='CALCulate:AVERage:MINimum?', str_type=float)
         self.math_ptp = scpiDevice(getstr='CALCulate:AVERage:PTPeak?', str_type=float)
         self.math_sdev = scpiDevice(getstr='CALCulate:AVERage:SDEViation?', str_type=float)
         self.math_clear = scpiDevice(setstr='CALCulate:AVERage:CLEar')
-        self.geterror = scpiDevice(getstr='SYSTem:ERRor?')
         self.trig_src = scpiDevice('TRIGger:SOURce', choices=ChoiceStrings('IMMediate', 'BUS', 'EXTernal'))
         self.trig_delay = scpiDevice('TRIGger:DELay', str_type=float) # seconds
-        self.trig_count = scpiDevice('TRIGger:COUNt', str_type=int) # seconds
+        self.trig_count = scpiDevice('TRIGger:COUNt', str_type=float)
+        self.sample_count = scpiDevice('SAMPle:COUNt', str_type=int)
+        self.sample_src = scpiDevice('SAMPle:SOURce', choices=ChoiceStrings('IMMediate', 'TIMer'))
+        self.sample_timer = scpiDevice('SAMPle:TIMer', str_type=float) # seconds
         self.trig_delayauto = scpiDevice('TRIGger:DELay:AUTO', str_type=bool)
         self.alias = self.readval
         super(type(self),self).create_devs()
+        # For INITiate: need to wait for completion of triggered measurement before calling it again
+        # for trigger: *trg and visa.trigger seem to do the same. Can only be called after INItiate and 
+        #   during measurement.
+        # To get completion stats: write('INITiate;*OPC') and check results from *esr? bit 0
+        #   enable with *ese 1 then check *stb bit 5 (32) (and clear *ese?)
+        # Could also ask for data and look at bit 4 (16) output buffer ready
+        #dmm1.mathfunc.set('average');dmm1.math_state.set(True)
+        #dmm1.write('*ese 1;*sre 32')
+        #dmm1.write('init;*opc')
+        #dmm1.read_status_byte()
+        #dmm1.ask('*stb?;*esr?')
+        #dmm1.math_count.get(); dmm1.math_avg.get() # no need to reset count, init does that
+        #visa.vpp43.enable_event(dmm1.visa.vi, visa.vpp43.VI_EVENT_SERVICE_REQ, visa.vpp43.VI_QUEUE)
+        #dmm1.write('init;*opc')
+        #dmm1.read_status_byte()
+        #visa.vpp43.wait_on_event(dmm1.visa.vi, visa.vpp43.VI_EVENT_SERVICE_REQ, 10000)
+        #dmm1.read_status_byte()
+        #dmm1.ask('*stb?;*esr?')
+        #  For installing handler (only seems to work with USB not GPIB for NI visa library. Seems to work fine with Agilent IO visa)
+        #   def event_handler(vi, event_type, context, use_handle): stb = visa.vpp43.read_stb(vi);  print 'helo 0x%x'%stb, event_type==visa.vpp43.VI_EVENT_SERVICE_REQ, context, use_handle; return visa.vpp43.VI_SUCCESS
+        #   def event_handler(vi, event_type, context, use_handle): stb = visa.vpp43.read_stb(vi);  print 'HELLO 0x%x'%stb,vi; return visa.vpp43.VI_SUCCESS
+        #   visa.vpp43.install_handler(dmm1.visa.vi, visa.vpp43.VI_EVENT_SERVICE_REQ, event_handler)
+        #   visa.vpp43.enable_event(dmm1.visa.vi, visa.vpp43.VI_EVENT_SERVICE_REQ, visa.vpp43.VI_HNDLR)
+        #   The handler is called for all srq on the bus (not necessarily the instrument we want)
+        #     the vi parameter refers to the installed handler, not the actual srq source
+        #The wait_on_event seems to be handling only event from src, not affecting the other instruments srq
+        # reading the status is not necessary after wait to clear srq (cleared during wait internal handler) for agilent visa
+        #  but it is necessary for NI visa (it will receive the SRQ like for agilent but will not transmit
+        #      the next ones to the wait queue until acknowledged)
+        #      there seems to be some inteligent buffering going on, which is different in agilent and NI visas
+        # When wait_on_event timesout, it produces the VisaIOError (VI_ERROR_TMO) exception
+        #        the error code is available as VisaIOErrorInstance.error_code
+
 
 class lakeshore_322(visaInstrument):
     def create_devs(self):
@@ -650,15 +697,15 @@ class lakeshore_322(visaInstrument):
 class infiniiVision_3000(visaInstrument):
     def create_devs(self):
         # Note vincent's hegel, uses set to define filename where block data is saved.
-        self.snap = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', autoinit=False) # returns block of data
+        self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', autoinit=False) # returns block of data(always bin with # header)
         self.inksaver = scpiDevice(':HARDcopy:INKSaver', str_type=bool) # ON, OFF 1 or 0
-        self.data = scpiDevice(getstr=':waveform:DATA?', autoinit=False) # returns block of data
+        self.data = scpiDevice(getstr=':waveform:DATA?', autoinit=False) # returns block of data (always header# for asci byte and word)
           # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
           #  type (Normal, peak, average, HRes), #points, #avg, xincr, xorg, xref, yincr, yorg, yref
           #  xconv = xorg+x*xincr, yconv= (y-yref)*yincr + yorg
         self.format = scpiDevice(':WAVeform:FORMat') # WORD, BYTE, ASC
         self.points = scpiDevice(':WAVeform:POINts') # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
-        self.mode = scpiDevice(':WAVeform:MODE') # NORM, MAX, RAW
+        self.mode = scpiDevice(':WAVeform:POINts:MODE', choices=ChoiceStrings('NORMal', 'MAXimum', 'RAW'))
         self.preamble = scpiDevice(getstr=':waveform:PREamble?')
         self.source = scpiDevice(':WAVeform:SOURce') # CHAN1, CHAN2, CHAN3, CHAN4
         # This needs to be last to complete creation
