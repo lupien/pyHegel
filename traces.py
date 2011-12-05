@@ -7,7 +7,7 @@ import time
 
 from PyQt4 import QtCore, QtGui, uic
 import numpy as np
-from matplotlib import pylab, pyplot, ticker
+from matplotlib import pylab, pyplot, ticker, rcParams
 
 # same as in fullmpcanvas.py
 # follows new_figure_manager
@@ -86,6 +86,7 @@ class Trace(FigureManagerQT):
         FigureManagerQT.__init__(self,self.canvas,-1)
         self.MainWidget = self.window
         self.setWindowTitle('Trace...')
+        self.isclosed = False
         self.ax = self.fig.add_subplot(111)
         self.xs = None
         self.ys = None
@@ -100,6 +101,11 @@ class Trace(FigureManagerQT):
         self.update()
         self.canvas.mpl_connect('key_press_event', self.mykey_press)
         _figlist.append(self)
+        self.window.connect(self.window, QtCore.SIGNAL('destroyed()'),
+             self.close_slot)
+    def close_slot(self):
+        self.isclosed = True
+        _figlist.remove(self)
     def mykey_press(self, event):
         # TODO add a Rescale
         # based on FigureManagerBase.key_press
@@ -196,10 +202,16 @@ class Trace(FigureManagerQT):
         self.first_update = False
         self.draw()
     def draw(self):
+        if self.isclosed:
+            return
         self.canvas.draw()
     def show(self):
+        if self.isclosed:
+            return
         self.fig.canvas.window().show()
     def hide(self):
+        if self.isclosed:
+            return
         self.fig.canvas.window().hide()
     def savefig(self,*args,**kwargs):
         self.fig.savefig(*args, **kwargs)
