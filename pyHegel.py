@@ -56,6 +56,10 @@ def writevec(file_obj, vals_list, pre_str=''):
 def getheaders(devs):
     return [dev.instr.header.get()+'.'+dev.name for dev in devs]
 
+def _checkTracePause(trace):
+    while trace.pause_enabled:
+        wait(.1)
+
 class _Sweep(instrument.BaseInstrument):
     # This MemoryDevice will be shared among different instances
     # So there should only be one instance of this class
@@ -145,6 +149,7 @@ class _Sweep(instrument.BaseInstrument):
                     if vals == []:
                         vals = [iv]
                     t.addPoint(iv, vals)
+                    _checkTracePause(t)
         except KeyboardInterrupt:
             print 'Interrupted sweep'
             pass
@@ -234,6 +239,7 @@ def record(devs, interval=1, npoints=None, filename=None):
             i += 1
             if not (npoints <= i):
                 wait(interval)
+            _checkTracePause(t)
     except KeyboardInterrupt:
         print 'Interrupting spy'
         pass

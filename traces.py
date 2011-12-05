@@ -39,7 +39,7 @@ When over an axis:
   x log/linear (k, L)
   pan/zoom all axes (a)
   pan/zoom one axis (1-9)
-           This also selects the axis used to display values in status bar.
+     Added: This also selects the axis used to display values in status bar.
 
 Mouse:
  in pan mode:
@@ -99,13 +99,25 @@ class Trace(FigureManagerQT):
             for l in lbls:
                 l.update(dict(rotation=10, size=9))
         self.update()
+        # handle status better for twinx (pressing 1 or 2 selects axis)
         self.canvas.mpl_connect('key_press_event', self.mykey_press)
+        ######### Add button to toolbar
+        self.pause_button = QtGui.QPushButton('Pause')
+        self.pause_enabled = False
+        self.pause_button.setCheckable(True)
+        self.toolbar.addSeparator()
+        self.toolbar.addWidget(self.pause_button)
+        self.pause_button.connect(self.pause_button, 
+              QtCore.SIGNAL('toggled(bool)'), self.pause_button_press)
+        #########
         _figlist.append(self)
         self.window.connect(self.window, QtCore.SIGNAL('destroyed()'),
              self.close_slot)
     def close_slot(self):
         self.isclosed = True
         _figlist.remove(self)
+    def pause_button_press(self, state):
+        self.pause_enabled = state
     def mykey_press(self, event):
         # TODO add a Rescale
         # based on FigureManagerBase.key_press
