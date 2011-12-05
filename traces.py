@@ -16,10 +16,42 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.backends.backend_qt4 import FigureManagerQT
 from matplotlib.figure import Figure
 
+_figlist = []
+
 # set the timezone for proper display of date/time axis
 # to see available ones: import pytz; pytz.all_timezones
 pylab.rcParams['timezone']='Canada/Eastern'
 #pylab.rc('mathtext', fontset='stixsans')
+
+"""
+The figure handles many hot keys. They can be changed using rcParams (keymap...)
+They are:
+  fullscreen ( default: f)
+  home (home, h, r)
+  backward (left, backspace, c)
+  forward (right, v)
+  pan (p)
+  zoom (o)
+  save (s)
+When over an axis:
+  grid (g)
+  y log/linear (l)
+  x log/linear (k, L)
+  pan/zoom all axes (a)
+  pan/zoom one axis (1-9)
+           This also selects the axis used to display values in status bar.
+
+Mouse:
+ in pan mode:
+   left button: moves
+   right button: scales in/out while dragging
+ in zoom mode:
+   left button: zoom in on rectangle
+   right button: zoom out of rectangle
+   press x or y while zooming to limit the zooming to the x or y scale
+
+"""
+
 
 def wait(sec):
     start = time.time()
@@ -66,6 +98,28 @@ class Trace(FigureManagerQT):
             for l in lbls:
                 l.update(dict(rotation=10, size=9))
         self.update()
+        self.canvas.mpl_connect('key_press_event', self.mykey_press)
+        _figlist.append(self)
+    def mykey_press(self, event):
+        # TODO add a Rescale
+        # based on FigureManagerBase.key_press
+        all = rcParams['keymap.all_axes']
+        if event.inaxes is None:
+            return
+        if (event.key.isdigit() and event.key!='0') or event.key in all:
+              # if it was the axes, where the event was raised
+            if not (event.key in all):
+                n = int(event.key)-1
+            for i, a in enumerate(self.canvas.figure.get_axes()):
+                # consider axes, in which the event was raised
+                # FIXME: Why only this axes?
+                if event.x is not None and event.y is not None \
+                       and a.in_axes(event):
+                    if event.key in all:
+                        a.zorder = 0
+                    else:
+                        a.zorder = 1 if i==n else 0
+
     def setLim(self, minx, maxx=None):
         try:
             if len(minx)>1:
@@ -149,4 +203,110 @@ class Trace(FigureManagerQT):
         self.fig.canvas.window().hide()
     def savefig(self,*args,**kwargs):
         self.fig.savefig(*args, **kwargs)
+
+
+class Sleeper(QtGui.QWidget):
+    """
+       Start sleeper with
+        sl=Sleeper()
+        sl.start_sleep(1) # 1 min
+       Stop by closing:
+        sl.close()
+    """
+    def __init__(self, sleep=1.): # default 1 min
+        super(type(self),self).__init__()
+        self.bar = QtGui.QProgressBar()
+        self.bar.setMaximum(1000)
+        self.pause_button = QtGui.QPushButton('Pause')
+        self.pause_button.setCheckable(True)
+        self.skip_button = QtGui.QPushButton('End Pause Now')
+        self.elapsed = QtGui.QLabel('0 min')
+        self.sleep_length = QtGui.QDoubleSpinBox()
+        self.sleep_length.setRange(0.01, 60*24*2) # 2 days max
+        self.sleep_length.setDecimals(2)
+        self.sleep_length.setKeyboardTracking(False)
+        self.sleep_length.setSuffix(' min')
+        hboxlay1 = QtGui.QHBoxLayout()
+        hboxlay1.addWidget(self.bar)
+        hboxlay1.addWidget(self.elapsed)
+        hboxlay2 = QtGui.QHBoxLayout()
+        hboxlay2.addWidget(self.pause_button)
+        hboxlay2.addWidget(self.sleep_length)
+        hboxlay2.addStretch()
+        hboxlay2.addWidget(self.skip_button)
+        vboxlay = QtGui.QVBoxLayout()
+        vboxlay.addLayout(hboxlay1)
+        vboxlay.addLayout(hboxlay2)
+        self.setLayout(vboxlay)
+        self.update_timer = QtCore.QTimer(self)
+        self.update_timer.setInterval(1000) #ms
+        self.start_time = time.time()
+        self.pause_length = 0.
+        self.finished = True
+        self.pause_start = self.start_time
+        # start in pause mode
+        self.pause_button.setChecked(True)
+        self.connect(self.sleep_length, QtCore.SIGNAL('valueChanged(double)'),
+                     self.sleep_length_change)
+        self.connect(self.update_timer, QtCore.SIGNAL('timeout()'),
+                     self.update_elapsed)
+        self.connect(self.skip_button, QtCore.SIGNAL('clicked()'),
+                     self, QtCore.SLOT('close()'))
+        self.connect(self.pause_button, QtCore.SIGNAL('toggled(bool)'),
+                     self.pause)
+        self.sleep_length.setValue(sleep)
+    def sleep_length_change(self, val):
+        self.update_elapsed()
+    def closeEvent(self, event):
+        self.update_timer.stop()
+        # Turn on pause in case we ever want to continue the Sleep
+        self.pause_button.setChecked(True)
+        self.finished = True
+        event.accept()
+    def update_elapsed(self):
+        full = self.sleep_length.value()*60. # in seconds
+        val = time.time() - self.start_time - self.pause_length
+        if self.pause_button.isChecked():
+            val -= time.time()-self.pause_start
+        elif val>full:
+            self.close()
+        self.elapsed.setText('%.2f min'%max((val/60.),0))
+        self.bar.setValue(min(int(val/full*1000),1000))
+    def start_sleep(self, length=None):
+        self.finished = False
+        self.start_time = time.time()
+        self.pause_length = 0.
+        self.pause_start = self.start_time
+        self.pause_button.setChecked(False)
+        if length != None:
+            self.sleep_length.setValue(length)
+        self.pause(False)
+        # They above two might not have produced a change
+        # so now make sure display is updated
+        self.update_elapsed()
+        self.show()
+    def pause(self, checked):
+        if checked:
+            self.pause_start = time.time()
+            self.update_timer.stop()
+            self.update_elapsed()
+        else:
+            self.pause_length += time.time()-self.pause_start
+            self.update_elapsed()
+            self.update_timer.start()
+
+sleeper = Sleeper()
+
+def sleep(sec):
+    sleeper.start_sleep(sec/60.)
+    start = time.time()
+    end = start + sec
+    try:
+        while not sleeper.finished:
+            QtGui.QApplication.instance().processEvents(
+                   QtCore.QEventLoop.AllEvents)
+            time.sleep(.1)
+    except KeyboardInterrupt:
+        sleeper.close()
+        raise
 

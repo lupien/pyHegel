@@ -14,8 +14,6 @@ import traces
 import instrument
 import local_config
 
-_figlist = []
-
 def reset_pyHegel():
     """
        Resets pyHegel
@@ -115,7 +113,6 @@ class _Sweep(instrument.BaseInstrument):
         graph = self.graph.get()
         if graph:
             t = traces.Trace()
-            _figlist.append(t) # TODO: handle removal from figlist
             t.setLim(span)
             if len(hdrs) == 1:
                 t.setlegend(hdrs)
@@ -215,7 +212,6 @@ def record(devs, interval=1, npoints=None, filename=None):
     except TypeError:
        devs = [devs]
     t = traces.Trace(time_mode=True)
-    _figlist.append(t) # TODO: handle removal from figlist
     if filename != None:
         fullpath=os.path.join(sweep.path.get(), filename)
         # Make it unbuffered, windows does not handle line buffer correctly
@@ -336,7 +332,7 @@ def sleep(sec):
           wait will be pause+sec)
        See also wait
     """
-    raise NotImplementedError
+    traces.sleep(sec)
 
 # overrides pylab load (which is no longer implemented anyway)
 def load(names, newnames=None):
