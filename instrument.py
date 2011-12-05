@@ -11,6 +11,7 @@ except ImportError:
 
 import numpy as np
 import string
+import functools
 import random
 import time
 import traces
@@ -342,26 +343,51 @@ class scpiDevice(BaseDevice):
            raise ValueError, self.perror('Failed check: '+err)
         #return state
 
-def _decodeblock(str):
-   if str[0]!='#':
-       return
-   nh = int(str[1])
-   nbytes = int(str[2:2+nh])
-   blk = str[2+nh:]
-   if len(blk) != nbytes:
-       print "Missing data"
-       return
-   # we assume real 64, swap
-   data = np.fromstring(blk,'float64')
-   return data
+def _decode_block_header(s):
+    """
+       Takes a string with the scpi block header
+        #niiiiivvvvvvvvvv
+        where n gives then number of i and i gives the number of bytes v
+       It returns slice, nbytes, nheaders
+       i.e. a slice on the str to return the data
+       a value for the number of bytes
+       and a value for the length of the header
+       If the strings does not start with a block format
+       returns a full slice (:), nbytes=-1, 0
+    """
+    if str[0] != '#':
+        return slice(None), -1, 0
+    nh = int(s[1])
+    nbytes = int(str[2:2+nh])
+    return slice(2+nh, None), nbytes, 2+nh
 
-def _decode(str):
-   if str[0]=='#':
-      v = _decodeblock(str)
-   else:
-      v = np.fromstring(str, 'float64', sep=',')
-   return v
+def _decode_block(s, t=np.float64, sep=None):
+    """
+        sep can be None for binaray encoding or ',' for ascii csv encoding
+        type can be np.float64 float32 int8 int16 int32 uint8 uint16 ...
+              or it can be entered as a string like 'float64'
+    """
+    sl, nb, nh = _decode_block_header(s)
+    block = s[sl]
+    lb = len(block)
+    if nb != -1:
+        if lb < nb :
+            raise IndexError, 'Missing data for decoding. Got %i, expected %i'%(lb, nb)
+        elif lb > nb :
+            raise IndexError, 'Extra data in for decoding. Got %i ("%s ..."), expected %i'%(lb, block[nb:nb+10], nb)
+    return np.fromstring(block, t, sep=sep)
 
+def _decode_block_auto(s, t=np.float64):
+    if s[0] == '#':
+        sep = None
+    else:
+        sep = ','
+   return _decode_block(str, t, sep=sep)
+
+_decode_float64 = functools.partial(_decode_block_auto, t=np.float64)
+_decode_float32 = functools.partial(_decode_block_auto, t=np.float32)
+_decode_uint8_bin = functools.partial(_decode_block, t=np.uint8)
+_decode_uint16_bin = functools.partial(_decode_block, t=np.uint16)
 
 class ChoiceStrings(object):
     """
