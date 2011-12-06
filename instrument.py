@@ -382,7 +382,7 @@ def _decode_block_auto(s, t=np.float64):
         sep = None
     else:
         sep = ','
-   return _decode_block(str, t, sep=sep)
+    return _decode_block(str, t, sep=sep)
 
 _decode_float64 = functools.partial(_decode_block_auto, t=np.float64)
 _decode_float32 = functools.partial(_decode_block_auto, t=np.float32)
