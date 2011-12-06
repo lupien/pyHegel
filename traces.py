@@ -79,6 +79,12 @@ FigureCanvas.keyvald.update({QtCore.Qt.Key_Left:'left',
         QtCore.Qt.Key_End:'end',
         QtCore.Qt.Key_Backspace:'backspace'})
 
+def get_last_trace():
+    return _figlist[-1]
+
+def close_last_trace():
+    get_last_trace().window.close()
+
 class Trace(FigureManagerQT):
     def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False):
         self.fig = Figure(figsize=(width,height),dpi=dpi)

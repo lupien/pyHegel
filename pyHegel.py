@@ -97,7 +97,8 @@ class _Sweep(instrument.BaseInstrument):
         return ret
     def __repr__(self):
         return '<sweep instrument>'
-    def __call__(self, dev, start, stop, npts, filename, rate=None):
+    def __call__(self, dev, start, stop, npts, filename, rate=None, 
+                  close_after=False):
         """
             routine pour faire un sweep
              dev est l'objet a varier
@@ -155,6 +156,8 @@ class _Sweep(instrument.BaseInstrument):
             pass
         if f:
             f.close()
+        if graph and close_after:
+            t.window.close()
 
 sweep = _Sweep()
 
