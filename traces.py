@@ -153,6 +153,8 @@ class Trace(FigureManagerQT):
             pass
         self.ax.set_xlim(minx, maxx, auto=False)
         self.update()
+    def set_xlabel(self, label):
+        self.ax.set_xlabel(label)
     def setWindowTitle(self, title):
         self.set_window_title(title)
     def addPoint(self, x, ys):

@@ -99,7 +99,7 @@ class _Sweep(instrument.BaseInstrument):
     def __repr__(self):
         return '<sweep instrument>'
     def __call__(self, dev, start, stop, npts, filename, rate=None, 
-                  close_after=False):
+                  close_after=False, title=''):
         """
             routine pour faire un sweep
              dev est l'objet a varier
@@ -119,11 +119,13 @@ class _Sweep(instrument.BaseInstrument):
         graph = self.graph.get()
         if graph:
             t = traces.Trace()
+            t.setWindowTitle('Sweep: '+title)
             t.setLim(span)
             if len(hdrs) == 1:
                 t.setlegend(hdrs)
             else:
                 t.setlegend(hdrs[1:])
+            t.set_xlabel(hdrs[0])
         if filename != None:
             fullpath=os.path.join(self.path.get(), filename)
             # Make it unbuffered, windows does not handle line buffer correctly
@@ -206,7 +208,7 @@ def spy(devs, interval=1):
         print 'Interrupting spy'
         pass
 
-def record(devs, interval=1, npoints=None, filename=None):
+def record(devs, interval=1, npoints=None, filename=None, title=''):
     """
        record to filename (if not None) the values from devs
          uses sweep.path
@@ -221,6 +223,7 @@ def record(devs, interval=1, npoints=None, filename=None):
     except TypeError:
        devs = [devs]
     t = traces.Trace(time_mode=True)
+    t.setWindowTitle('Record: '+title)
     if filename != None:
         fullpath=os.path.join(sweep.path.get(), filename)
         # Make it unbuffered, windows does not handle line buffer correctly
@@ -241,20 +244,20 @@ def record(devs, interval=1, npoints=None, filename=None):
             if f:
                 writevec(f, [tme]+vals)
             i += 1
-            if not (npoints <= i):
+            if npoints == None or i < npoints:
                 wait(interval)
             _checkTracePause(t)
     except KeyboardInterrupt:
-        print 'Interrupting spy'
+        print 'Interrupting record'
         pass
     if f:
         f.close()
 
-def trace(dev, interval=1):
+def trace(dev, interval=1, title=''):
     """
        same as record(dev, interval, npoints=1000, filename='trace.dat')
     """
-    record(dev, interval, npoints=1000, filename='trace.dat')
+    record(dev, interval, npoints=1000, filename='trace.dat', title=title)
 
 ### get overides get the mathplotlib
 def get(dev):
