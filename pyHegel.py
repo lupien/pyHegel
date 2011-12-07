@@ -9,6 +9,7 @@ import os
 import time
 import string
 import sys
+import threading
 
 import traces
 import instrument
@@ -398,6 +399,33 @@ def load(names=None, newnames=None):
             newname = name
         i = instr(*param)
         exec 'global '+newname+';'+newname+'=i'
+
+class task(threading.Thread):
+    def __init__(self, func, args=None, kwargs=None, count=None, 
+           interval=None, **extra):
+        # func can be a function or a callable class instance.
+        super(type(self), self).__init__(**extra)
+        self.args = args
+        self.kwargs = kwargs
+        self.count = count
+        self.interval = interval
+        self.func = func
+        self.stopit = False
+        # TODO: handle a list of tasks
+        self.start()
+    def run(self):
+        i = 0
+        while not self.itstop:
+            self.func(*self.args, **self.kwargs)
+            i += 1
+            if self.count != None and i >= self.count:
+                break;
+            elif self.interval != None:
+                time.sleep(self.interval)
+    def stop(self):
+        self.stopit = True
+
+         
 
 #alias: replaced by assignement instr1=instr2, dev=instr.devx
 #forget: replaced by del instr1
