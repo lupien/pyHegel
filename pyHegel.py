@@ -7,6 +7,7 @@
 import numpy as np
 import os
 import time
+import re
 import string
 import sys
 import threading
@@ -60,6 +61,32 @@ def getheaders(devs):
 def _checkTracePause(trace):
     while trace.pause_enabled:
         wait(.1)
+
+#
+# TODO
+#    out can be: dev1
+#                [dev1, dev2, ..]
+#                (dev1, dict(arg1=...))
+#                [dev1, (dev2, dict()), ...
+#    Also for every dev
+#        if dev.get returns a large object and we are not
+#        told otherwise, we save it to a standard name
+#           filename(-ext)+'inst_dev %02i'+ext
+#        we put the point number in the output filename
+#        and nothing on the graph
+#        otherwise, the device tells us what to do
+#        from dev.getformat(dict)
+#        which should return a dict containing
+#          file=True  (send the filename to device, it will save it)
+#                     then device returns None and we output index number instead
+#                     or give the number to put in main file. No grpahing here
+#          multi=['head1', 'head2']   Used when device returns multiple values
+#                                     This says so, gives the number of them and their names
+#                                     for headers and graphing
+#          graph=[1,2]                When using multi, this selects the values to gerpah.to graph
+#
+#   Also handle getasync
+
 
 class _Sweep(instrument.BaseInstrument):
     # This MemoryDevice will be shared among different instances
@@ -259,15 +286,30 @@ def trace(dev, interval=1, title=''):
     """
     record(dev, interval, npoints=1000, filename='trace.dat', title=title)
 
+
+_get_filename_i = 0
 ### get overides get the mathplotlib
-def get(dev):
+def get(dev, filename=None, **extrap):
     """
-       Obtien la valeur de get
+       Get a value from device
+       if filename is given and contains a %i (or %04i)
+       then it will replace the %i with and integer that
+       increments to prevent collision.
     """
+    if filename != None:
+        if re.search(r'%[\d].i', filename):
+            # Note that there is a possible race condition here
+            # it is still possible to overwrite a file if it
+            # is created between the check and the file creation
+            while os.path.exists(filename%_get_filename_i):
+               _get_filename_i += 1
+            filename = filename % _get_filename_i
+            print 'Using filename: '+filename
+        extrap.update(filename=filename)
     try:
-       return dev.get()
+        return dev.get()
     except KeyboardInterrupt:
-       print 'CTRL-C pressed!!!!!!' 
+        print 'CTRL-C pressed!!!!!!' 
 
 def iprint(instrument, force=False):
     """
