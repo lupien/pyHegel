@@ -234,6 +234,27 @@ class Trace(FigureManagerQT):
     def savefig(self,*args,**kwargs):
         self.fig.savefig(*args, **kwargs)
 
+def plot_time(x, *extrap, **extrak):
+    """
+       The same as plot_date, but takes in the time in sec since epoch
+       instead of the matplotlib date format.
+       (It can use the result of time.time())
+       Added Parameter:
+        xrotation: which rotates the x ticks (defautls to 10 deg)
+        xticksize: changes x axis thick size (defaults to 9)
+    """
+    # uses the timezone set by pylab.rcParams['timezone']
+    x = x/(24.*3600)+pylab.epoch2num(0)
+    xrotation = extrak.pop('xrotation', 10)
+    xticksize = extrak.pop('xticksize', 9)
+    ret = pylab.plot_date(x, *extrap, **extrak)
+    ax = ret[0].axes
+    # Rotate axes ticks
+    lbls = ax.get_xticklabels()
+    for l in lbls:
+        l.update(dict(rotation=xrotation, size=xticksize))
+    pylab.draw()
+    return ret
 
 class Sleeper(QtGui.QWidget):
     """
