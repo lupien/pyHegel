@@ -804,30 +804,31 @@ class dummy(BaseInstrument):
 class ScalingDevice(BaseDevice):
     """
        This class provides a wrapper around a device.
-       On reading, it returns basedev.get()*scale_factor
-       On writing it will write basedev.set(val/scale_factor)
+       On reading, it returns basedev.get()*scale_factor + offset
+       On writing it will write basedev.set((val - offset)/scale_factor)
        setget option does nothing here.
     """
-    def __init__(self, basedev, scale_factor, doc='', autoinit=None, **extrak):
+    def __init__(self, basedev, scale_factor, offset=0., doc='', autoinit=None, **extrak):
         if isinstance(basedev, BaseInstrument):
             basedev = basedev.alias
         self._basedev = basedev
-        self._scale = scale_factor
-        doc+= self.__doc__+doc+'basedev=%s\nscale_factor=%e (initial)'%(
-               repr(basedev), scale_factor)
+        self._scale = float(scale_factor)
+        self._offset = offset
+        doc+= self.__doc__+doc+'basedev=%s\nscale_factor=%g (initial)\noffset=%g'%(
+               repr(basedev), scale_factor, offset)
         if autoinit == None:
             autoinit = basedev._autoinit
         BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
         self.instr = basedev.instr
         self.name = basedev.name+'.scale'
     def get(self):
-        val = self._basedev.get() * self._scale
+        val = self._basedev.get() * self._scale + self._offset
         self._cache = val
         return val
     def set(self, val):
-        self._basedev.set(val / self._scale)
+        self._basedev.set((val - self._offset) / self._scale)
         # read basedev cache, in case the values is changed by setget mode.
-        self._cache = self._basedev.getcache() * self._scale
+        self._cache = self._basedev.getcache() * self._scale + self._offset
     def check(self, val):
-        self._basedev.check(val / self._scale)
+        self._basedev.check((val - self._offset) / self._scale)
 
