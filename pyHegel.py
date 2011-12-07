@@ -231,7 +231,7 @@ def record(devs, interval=1, npoints=None, filename=None):
         f = None
     try:
         i=0
-        while not (npoints <= i): # this also works for npoints=None
+        while npoints == None or i < npoints: # this also works for npoints=None
             vals=[]
             tme = clock.get()
             for dev in devs:
