@@ -363,7 +363,7 @@ def sleep(sec):
     traces.sleep(sec)
 
 # overrides pylab load (which is no longer implemented anyway)
-def load(names, newnames=None):
+def load(names=None, newnames=None):
     """
        Uses definitions in local_config to open devices by there
        standard names. By default it produces a variable with that
@@ -374,7 +374,15 @@ def load(names, newnames=None):
         Therefore it can be called like this in ipython
           ,load instr1 newname1
           ;load instr1 instr2 instr3 ....
+
+       Called with no arguments to get a list of currently
+       configured devices
     """
+    if names == None:
+        for name, (instr, para) in sorted(local_config.conf.items()):
+           instr = instr.__name__
+           print '{:>10s}: {:25s} {:s}'.format(name, instr, para)
+        return
     if isinstance(names, basestring):
         # this always returns list
         names = names.split(' ')
@@ -393,7 +401,7 @@ def load(names, newnames=None):
 
 #alias: replaced by assignement instr1=instr2, dev=instr.devx
 #forget: replaced by del instr1
-#open, close instrument: replaced by object instantation and deletion
+#open, close instrument: replaced by object instantation (and load) and deletion
 #call: replaced by run or execfile
 #no: replaced by pass
 # % replaced by #
