@@ -276,8 +276,9 @@ def iprint(instrument, force=False):
 def ilist():
     """
        print the list of instruments
-        this will not include aliased devices (dev=instr,devx)
+        this will not include aliased devices (dev=instr.devx)
         but will include aliased instruments (instr1=instr2)
+       see dlist for those
 
        can be called in ipython command line like:
          /ilist
@@ -287,6 +288,24 @@ def ilist():
         if name[0] == '_':
             continue
         if isinstance(value, instrument.BaseInstrument):
+            print name
+            lst += name
+    #return lst
+
+def dlist():
+    """
+       print the list of devices 
+        this will not include instruments
+       see ilist for those
+
+       can be called in ipython command line like:
+         /dlist
+    """
+    lst = []
+    for name, value in globals().iteritems():
+        if name[0] == '_':
+            continue
+        if isinstance(value, instrument.BaseDevice):
             print name
             lst += name
     #return lst

@@ -99,8 +99,8 @@ class BaseDevice(object):
         pass
 
 class wrapDevice(BaseDevice):
-    def __init__(self, setdev=None, getdev=None, check=None, *extrap, **extrak):
-        BaseDevice.__init__(self, *extrap, **extrak)
+    def __init__(self, setdev=None, getdev=None, check=None, **extrak):
+        BaseDevice.__init__(self, **extrak)
         # the methods are unbounded methods.
         self._setdev = setdev
         self._getdev = getdev
@@ -120,8 +120,8 @@ class wrapDevice(BaseDevice):
             self._check(val)
 
 class cls_wrapDevice(BaseDevice):
-    def __init__(self, setdev=None, getdev=None, check=None, *extrap, **extrak):
-        BaseDevice.__init__(self, *extrap, **extrak)
+    def __init__(self, setdev=None, getdev=None, check=None, **extrak):
+        BaseDevice.__init__(self, **extrak)
         # the methods are unbounded methods.
         self._setdev = setdev
         self._getdev = getdev
@@ -180,7 +180,7 @@ class BaseInstrument(object):
               check = getattr(cls, s)
         wd = cls_wrapDevice(setdev, getdev, check)
         setattr(cls, name, wd)
-    def devwrap(self, name, *extrap, **extrak):
+    def devwrap(self, name, **extrak):
         setdev = getdev = check = None
         for s in dir(self):
            if s == name+'_setdev':
@@ -189,7 +189,7 @@ class BaseInstrument(object):
               getdev = getattr(self, s)
            if s == name+'_check':
               check = getattr(self, s)
-        wd = wrapDevice(setdev, getdev, check, *extrap, **extrak)
+        wd = wrapDevice(setdev, getdev, check, **extrak)
         setattr(self, name, wd)
     def devs_iter(self):
         for devname in dir(self):
@@ -258,23 +258,17 @@ class BaseInstrument(object):
         pass
 
 class MemoryDevice(BaseDevice):
-    def __init__(self, initval=None, *extrap,**extrak):
-        BaseDevice.__init__(self, *extrap, **extrak)
+    def __init__(self, initval=None, **extrak):
+        BaseDevice.__init__(self, **extrak)
         self._cache = initval
     def get(self):
         return self._cache
     def set(self, val):
         self._cache = val
-    # we redefine setdev, getdev so CHECKING on device works.
-    # but because we have redefined set and get above. 
-    # they sould never be called
-    def setdev(self, val): pass
-    def getdev(self, val): pass
-    # Can override check member
 
 class scpiDevice(BaseDevice):
     def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None,
-                  min=None, max=None, choices=None, doc='', *extrap, **extrak):
+                  min=None, max=None, choices=None, doc='', **extrak):
         """
            str_type can be float, int, None
         """
@@ -282,7 +276,7 @@ class scpiDevice(BaseDevice):
            raise ValueError, 'At least one of setstr or getstr needs to be specified'
         if choices:
             doc+='-------------\n Possible value to set: %s'%repr(choices)
-        BaseDevice.__init__(self, *extrap, doc=doc, **extrak)
+        BaseDevice.__init__(self, doc=doc, **extrak)
         self._setdev = setstr
         if getstr == None and autoget:
             getstr = setstr+'?'
@@ -432,6 +426,16 @@ class ChoiceStrings(object):
         return repr(self.values)
 
 class visaInstrument(BaseInstrument):
+    """
+        Open visa instrument with a visa address.
+        If the address is an integer, it is taken as the
+        gpib address of the instrument on the first gpib bus.
+        Otherwise use a visa string like:
+          'GPIB0::12::INSTR'
+          'GPIB::12'
+          'USB0::0x0957::0x0118::MY49001395::0::INSTR'
+          'USB::0x0957::0x0118::MY49001395'
+    """
     def __init__(self, visa_addr):
         # need to initialize visa before calling BaseInstrument init
         # which might require access to device
@@ -520,13 +524,9 @@ class visaInstrument(BaseInstrument):
         self.visa.trigger()
 #TODO implement the visa close of device
 
-# use like:
-# yo1 = yokogawa_gs200('GPIB0::12::INSTR')
-#   or
-# yo1 = yokogawa_gs200('GPIB::12')
-#   or
-# yo1 = yokogawa_gs200(12)
-#'USB0::0x0957::0x0118::MY49001395::0::INSTR'
+
+
+
 class yokogawa_gs200(visaInstrument):
     # TODO: implement multipliers, units. The multiplier
     #      should be the same for all instruments, and be stripped
@@ -800,3 +800,34 @@ class dummy(BaseInstrument):
         self.alias = self.current
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
+
+class ScalingDevice(BaseDevice):
+    """
+       This class provides a wrapper around a device.
+       On reading, it returns basedev.get()*scale_factor
+       On writing it will write basedev.set(val/scale_factor)
+       setget option does nothing here.
+    """
+    def __init__(self, basedev, scale_factor, doc='', autoinit=None, **extrak):
+        if isinstance(basedev, BaseInstrument):
+            basedev = basedev.alias
+        self._basedev = basedev
+        self._scale = scale_factor
+        doc+= self.__doc__+doc+'basedev=%s\nscale_factor=%e (initial)'%(
+               repr(basedev), scale_factor)
+        if autoinit == None:
+            autoinit = basedev._autoinit
+        BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
+        self.instr = basedev.instr
+        self.name = basedev.name+'.scale'
+    def get(self):
+        val = self._basedev.get() * self._scale
+        self._cache = val
+        return val
+    def set(self, val):
+        self._basedev.set(val / self._scale)
+        # read basedev cache, in case the values is changed by setget mode.
+        self._cache = self._basedev.getcache() * self._scale
+    def check(self, val):
+        self._basedev.check(val / self._scale)
+
