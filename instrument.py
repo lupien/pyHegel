@@ -35,7 +35,8 @@ class BaseDevice(object):
          dev() which is the same as getcache
          dev(val) which is the same as set(val)
     """
-    def __init__(self, autoinit=True, doc='', setget=False):
+    def __init__(self, autoinit=True, doc='', setget=False,
+                  min=None, max=None, choices=None):
         # instr and name updated by instrument's create_devs
         # doc is inserted before the above doc
         # setget makes us get the value after setting in
@@ -49,6 +50,8 @@ class BaseDevice(object):
         self._setdev = None
         self._getdev = None
         self._setget = setget
+        self.min = min
+        self.max = max
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val):
@@ -96,7 +99,25 @@ class BaseDevice(object):
     def getdev(self):
         raise NotImplementedError, self.perror('This device does not handle getdev')
     def check(self, val):
-        pass
+        if self._setdev == None:
+            raise NotImplementedError, self.perror('This device does not handle check')
+        mintest = maxtest = choicetest = True
+        if self.min != None:
+            mintest = val >= self.min
+        if self.max != None:
+            maxtest = val <= self.max
+        if self.choices:
+            choicetest = val in self.choices
+        state = mintest and maxtest and choicetest
+        if state == False:
+           if not mintest:
+               err='invalid MIN'
+           if not maxtest:
+               err='invalid MAX'
+           if not choicetest:
+               err='invalid value(%s): use one of %s'%(val, repr(self.choices))
+           raise ValueError, self.perror('Failed check: '+err)
+        #return state
 
 class wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, **extrak):
@@ -118,6 +139,8 @@ class wrapDevice(BaseDevice):
     def check(self, val):
         if self._check != None:
             self._check(val)
+        else:
+            super(type(self), self).check(val)
 
 class cls_wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, **extrak):
@@ -139,6 +162,8 @@ class cls_wrapDevice(BaseDevice):
     def check(self, val):
         if self._check != None:
             self._check(self.instr, val)
+        else:
+            super(type(self), self).check(val)
 
 # Using this metaclass, the class method
 # add_class_devs will be executed at class creation.
@@ -261,6 +286,7 @@ class MemoryDevice(BaseDevice):
     def __init__(self, initval=None, **extrak):
         BaseDevice.__init__(self, **extrak)
         self._cache = initval
+        self._setdev = True # needed to enable BaseDevice Check
     def get(self):
         return self._cache
     def set(self, val):
@@ -268,7 +294,7 @@ class MemoryDevice(BaseDevice):
 
 class scpiDevice(BaseDevice):
     def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None,
-                  min=None, max=None, choices=None, doc='', **extrak):
+                  doc='', **extrak):
         """
            str_type can be float, int, None
         """
@@ -282,9 +308,6 @@ class scpiDevice(BaseDevice):
             getstr = setstr+'?'
         self._getdev = getstr
         self.type = str_type
-        self.min = min
-        self.max = max
-        self.choices = choices
     def _tostr(self, val):
         # This function converts from val to a str for the command
         t = self.type
@@ -305,7 +328,7 @@ class scpiDevice(BaseDevice):
             return t(valstr)
         if t == None or issubclass(t, basestring):
             return valstr
-        return t._fromstr(valstr)
+        return t(valstr)
     def setdev(self, val):
         if self._setdev == None:
            raise NotImplementedError, self.perror('This device does not handle setdev')
@@ -316,26 +339,6 @@ class scpiDevice(BaseDevice):
            raise NotImplementedError, self.perror('This device does not handle getdev')
         ret = self.instr.ask(self._getdev)
         return self._fromstr(ret)
-    def check(self, val):
-        if self._setdev == None:
-            raise NotImplementedError, self.perror('This device does not handle check')
-        mintest = maxtest = choicetest = True
-        if self.min != None:
-            mintest = val >= self.min
-        if self.max != None:
-            maxtest = val <= self.max
-        if self.choices:
-            choicetest = val in self.choices
-        state = mintest and maxtest and choicetest
-        if state == False:
-           if not mintest:
-               err='invalid MIN'
-           if not maxtest:
-               err='invalid MAX'
-           if not choicetest:
-               err='invalid value(%s): use one of %s'%(val, repr(self.choices))
-           raise ValueError, self.perror('Failed check: '+err)
-        #return state
 
 def _decode_block_header(s):
     """
@@ -422,6 +425,12 @@ class ChoiceStrings(object):
         return self.long[self.index(x)]
     def normalizeshort(self, x):
         return self.short[self.index(x)].upper()
+    def __call__(self, input_str):
+        # this is called by dev._fromstr to convert a string to the needed format
+        return self.normalizelong(input_str)
+    def _tostr(self, input_choice):
+        # this is called by dev._tostr to convert a choice to the format needed by instrument
+        return input_choice  # no need to change. Already a string.
     def __repr__(self):
         return repr(self.values)
 
@@ -635,9 +644,11 @@ class agilent_multi_34410A(visaInstrument):
     def create_devs(self):
         # This needs to be last to complete creation
         # fetch and read return sample_count*trig_count data values (comma sep)
-        self.mode = scpiDevice('FUNC') # CURR:AC, VOLT:AC, CAP, CONT, CURR, VOLT, DIOD, FREQ, PER, RES, FRES
+        self.mode = scpiDevice('FUNC', str_type=ChoiceStrings, choices=ChoiceStrings(
+          'CURRent:AC', 'VOLTage:AC', 'CAPacitance', 'CONTinuity', 'CURRent', 'VOLTage',
+          'DIODe', 'FREQuency', 'PERiod', 'RESistance', 'FRESistance', 'TEMPerature'))
         self.readval = scpiDevice(getstr='READ?',str_type=float) # similar to INItiate followed by FETCh.
-        self.fetchval = scpiDevice(getstr='FETCh?',str_type=float, autoinit=False) #You can't ask for fetch after an aperture change. You need to read some data first.
+        self.fetchval = scpiDevice(getstr='FETCh?',str_type=_decode_float64, autoinit=False) #You can't ask for fetch after an aperture change. You need to read some data first.
         self.volt_nplc = scpiDevice('VOLTage:NPLC', str_type=float, choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100]) # DC
         self.volt_aperture = scpiDevice('VOLTage:APERture', str_type=float) # DC, in seconds (max~1s), also MIN, MAX, DEF
         self.volt_aperture_en = scpiDevice('VOLTage:APERture:ENabled', str_type=bool)
@@ -650,7 +661,7 @@ class agilent_multi_34410A(visaInstrument):
         self.range = scpiDevice('VOLTage:RANGE', str_type=float, choices=[.1, 1., 10., 100., 1000.]) # Setting this disables auto range
         self.null_en = scpiDevice('VOLTage:NULL', str_type=bool)
         self.null_val = scpiDevice('VOLTage:NULL:VALue', str_type=float)
-        self.mathfunc = scpiDevice('CALCulate:FUNCtion', choices=ChoiceStrings('DB', 'DBM', 'AVERage', 'LIMit'))
+        self.mathfunc = scpiDevice('CALCulate:FUNCtion', str_type=ChoiceStrings, choices=ChoiceStrings('DB', 'DBM', 'AVERage', 'LIMit'))
         self.math_state = scpiDevice('CALCulate:STATe', str_type=bool)
         self.math_avg = scpiDevice(getstr='CALCulate:AVERage:AVERage?', str_type=float)
         self.math_count = scpiDevice(getstr='CALCulate:AVERage:COUNt?', str_type=float)
@@ -659,11 +670,11 @@ class agilent_multi_34410A(visaInstrument):
         self.math_ptp = scpiDevice(getstr='CALCulate:AVERage:PTPeak?', str_type=float)
         self.math_sdev = scpiDevice(getstr='CALCulate:AVERage:SDEViation?', str_type=float)
         self.math_clear = scpiDevice(setstr='CALCulate:AVERage:CLEar')
-        self.trig_src = scpiDevice('TRIGger:SOURce', choices=ChoiceStrings('IMMediate', 'BUS', 'EXTernal'))
+        self.trig_src = scpiDevice('TRIGger:SOURce', str_type=ChoiceStrings, choices=ChoiceStrings('IMMediate', 'BUS', 'EXTernal'))
         self.trig_delay = scpiDevice('TRIGger:DELay', str_type=float) # seconds
         self.trig_count = scpiDevice('TRIGger:COUNt', str_type=float)
         self.sample_count = scpiDevice('SAMPle:COUNt', str_type=int)
-        self.sample_src = scpiDevice('SAMPle:SOURce', choices=ChoiceStrings('IMMediate', 'TIMer'))
+        self.sample_src = scpiDevice('SAMPle:SOURce', str_type=ChoiceStrings, choices=ChoiceStrings('IMMediate', 'TIMer'))
         self.sample_timer = scpiDevice('SAMPle:TIMer', str_type=float) # seconds
         self.trig_delayauto = scpiDevice('TRIGger:DELay:AUTO', str_type=bool)
         self.alias = self.readval
