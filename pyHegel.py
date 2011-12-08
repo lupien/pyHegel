@@ -307,7 +307,7 @@ def get(dev, filename=None, **extrap):
             print 'Using filename: '+filename
         extrap.update(filename=filename)
     try:
-        return dev.get()
+        return dev.get(**extrap)
     except KeyboardInterrupt:
         print 'CTRL-C pressed!!!!!!' 
 
