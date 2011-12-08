@@ -424,7 +424,7 @@ def load(names=None, newnames=None):
        Called with no arguments to get a list of currently
        configured devices
     """
-    if names == None:
+    if names == None or (isinstance(names, basestring) and names == ''):
         for name, (instr, para) in sorted(local_config.conf.items()):
            instr = instr.__name__
            print '{:>10s}: {:25s} {:s}'.format(name, instr, para)
