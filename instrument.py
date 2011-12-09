@@ -549,6 +549,10 @@ class visaInstrument(BaseInstrument):
         return self.ask('*idn?')
     def _clear(self):
         self.visa.clear()
+    @property
+    def _set_timeout(self):
+        return self.visa.timeout
+    @_set_timeout.setter
     def _set_timeout(self, seconds):
         self.visa.timeout = seconds
     def _get_error(self):
