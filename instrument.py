@@ -634,6 +634,7 @@ class sr830_lia(visaInstrument):
         self.theta = scpiDevice(getstr='outp? 4', str_type=float)
         self.xy = scpiDevice(getstr='snap? 1,2')
         self.devwrap('snap')
+        self.alias = self.snap
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
 
