@@ -73,7 +73,7 @@ def getheaders(setdev=None, getdevs=[]):
             kwarg = dev[1]
             dev = dev[0]
         hdr = _getheaderhelper(dev)
-        f = dev.getformat(**kwarg)
+        f = dev.getformat(**kwarg).copy()
         formats.append(f)
         if f['file'] == True or f['multi'] == True:
             hdrs.append(hdr)
@@ -92,6 +92,13 @@ def getheaders(setdev=None, getdevs=[]):
             graphsel.append(count)
             count += 1
     return hdrs, graphsel, formats
+
+def _dev_filename(root, dev_name, maxn):
+    root = os.path.abspath(root)
+    root, ext = os.path.splitext(root)
+    dev_name = dev_name.replace('.', '_')
+    n = int(log10(maxn))+1
+    return root + '_'+ dev_name+'_%0'+('%ii'%n)+ext
 
 def _readall(devs, formats, i):
     if devs == []:
