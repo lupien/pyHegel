@@ -93,6 +93,32 @@ def getheaders(setdev=None, getdevs=[]):
             count += 1
     return hdrs, graphsel, formats
 
+def _readall(devs, formats, i):
+    if devs == []:
+        return []
+    ret = []
+    for dev, fmt in zip(devs, formats):
+        kwarg={}
+        if isinstance(dev, tuple):
+            kwarg = dev[1]
+            dev = dev[0]
+        if fmt['file']:
+            # TODO: find a proper filename
+            kwarg['filename']='something.txt'%i
+        val = dev.get(**kwarg)
+        if val == None:
+            val = i
+        if isinstance(val, list) or isinstance(val, tuple) or \
+           isinstance(val, np.ndarray):
+            if isinstance(fmt['multi'], list):
+                ret.extend(val)
+            else:
+                ret.append(i)
+                # TODO implement the data waving here!
+        else:
+            ret.append(val)
+    return ret
+
 def _checkTracePause(trace):
     while trace.pause_enabled:
         wait(.1)
@@ -157,34 +183,6 @@ class _Sweep(instrument.BaseInstrument):
         elif not isinstance(l,list):
             l = [l]
         return l
-    def readall(self, i):
-        # will will just try to add .get
-        #  this will work for the alias as well
-        l = self.get_alldevs()
-        if l == []:
-            return []
-        ret = []
-        for dev,fmt in zip(l, self.formats):
-            kwarg={}
-            if isinstance(dev, tuple):
-                kwarg = dev[1]
-                dev = dev[0]
-            if fmt['file']:
-                # TODO: find a proper filename
-                kwarg['filename']='something.txt'%i
-            val = dev.get(**kwarg)
-            if val == None:
-                val = i
-            if isinstance(val, list) or isinstance(val, tuple) or \
-               isinstance(val, np.ndarray):
-                if isinstance(fmt['multi'], list):
-                    ret.extend(val)
-                else:
-                    ret.append(i)
-                    # TODO implement the data waving here!
-            else:
-                ret.append(val)
-        return ret
     def __repr__(self):
         return '<sweep instrument>'
     def __call__(self, dev, start, stop, npts, filename, rate=None, 
@@ -200,11 +198,15 @@ class _Sweep(instrument.BaseInstrument):
         except ValueError:
            print 'Wrong start or stop values. Aborting!'
            return
+        npts = int(npts)
+        if npts < 2:
+           raise ValueError, 'npts needs to be at least 2'
         span = np.linspace(start, stop, npts)
         if instrument.CHECKING:
             # For checking only take first and last values
             span = span[[0,-1]]
-        hdrs, graphsel, self.formats = getheaders(dev, self.get_alldevs())
+        devs = self.get_alldevs()
+        hdrs, graphsel, formats = getheaders(dev, devs)
         graph = self.graph.get()
         if graph:
             t = traces.Trace()
@@ -234,7 +236,7 @@ class _Sweep(instrument.BaseInstrument):
                 iv = dev.getcache() # in case the instrument changed the value
                 self.execbefore()
                 wait(self.beforewait)
-                vals=self.readall(i)
+                vals = _readall(devs, formats, i)
                 self.execafter()
                 if f:
                     writevec(f, [iv]+vals+[tme])
@@ -311,23 +313,26 @@ def record(devs, interval=1, npoints=None, filename=None, title=''):
        devs = [devs]
     t = traces.Trace(time_mode=True)
     t.setWindowTitle('Record: '+title)
+    hdrs, graphsel, formats = getheaders(getdevs=devs)
+    if graphsel == []:
+        # nothing selected to graph so pick first dev
+        # It probably will be the loop index i
+        graphsel=[0]
+    gsel = _itemgetter(*graphsel)
+    t.setlegend(gsel(hdrs))
     if filename != None:
         fullpath=os.path.join(sweep.path.get(), filename)
         # Make it unbuffered, windows does not handle line buffer correctly
         f = open(fullpath, 'w', 0)
-        hdrs = getheaders(devs)
         writevec(f, ['time']+hdrs, pre_str='#')
-        t.setlegend(hdrs)
     else:
         f = None
     try:
         i=0
-        while npoints == None or i < npoints: # this also works for npoints=None
-            vals=[]
+        while npoints == None or i < npoints:
             tme = clock.get()
-            for dev in devs:
-                vals.append(dev.get())
-            t.addPoint(tme, vals)
+            vals = _readall(devs, formats, i)
+            t.addPoint(tme, gsel(vals))
             if f:
                 writevec(f, [tme]+vals)
             i += 1
