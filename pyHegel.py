@@ -307,10 +307,8 @@ def record(devs, interval=1, npoints=None, filename=None, title=''):
         on CTRL-C...
     """
     # make sure devs is list like
-    try:
-       dev = devs[0]
-    except TypeError:
-       devs = [devs]
+    if not isinstance(devs, list):
+        devs = [devs]
     t = traces.Trace(time_mode=True)
     t.setWindowTitle('Record: '+title)
     hdrs, graphsel, formats = getheaders(getdevs=devs)
