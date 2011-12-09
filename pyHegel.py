@@ -505,7 +505,7 @@ def load(names=None, newnames=None):
         i = instr(*param)
         exec 'global '+newname+';'+newname+'=i'
 
-class task(threading.Thread):
+class Hegel_Task(threading.Thread):
     def __init__(self, func, args=(), kwargs={}, count=None,
            interval=None, **extra):
         # func can be a function or a callable class instance.
@@ -517,7 +517,7 @@ class task(threading.Thread):
         self.func = func
         self.stopit = False
         # TODO: handle a list of tasks
-        self.sta
+        self.start()
     def run(self):
         i = 0
         while not self.stopit:
@@ -526,11 +526,35 @@ class task(threading.Thread):
             if self.count != None and i >= self.count:
                 break;
             elif self.interval != None:
-                time.sleep(self.interval)
+                #Unblock every 1s
+                start_time = time.time()
+                diff = 0.
+                while diff < self.interval:
+                    time.sleep(min(1, self.interval-diff))
+                    if self.stopit:
+                        break
+                    diff = time.time()-start_time
     def stop(self):
         self.stopit = True
 
-         
+def task(*arg, **kwarg):
+    Hegel_Task(*arg, **kwarg)
+
+def top():
+    # All threads count: threading.active_count()
+    for t in threading.enumerate():
+        if isinstance(t, Hegel_Task):
+            print '%5i %s'%(t.ident, t)
+
+def kill(n):
+    # stop thread with number given by top
+    for t in threading.enumerate():
+        if isinstance(t, Hegel_Task) and t.ident==n:
+            print 'Stopping task and waiting'
+            t.stop()
+            t.join()
+            print 'Stopped task'
+
 
 #alias: replaced by assignement instr1=instr2, dev=instr.devx
 #forget: replaced by del instr1
@@ -539,11 +563,7 @@ class task(threading.Thread):
 #no: replaced by pass
 # % replaced by #
 
-# To implement
-#top: list task
-#task(action, interval, count, start_delay=0)
 # handle locking of devices...
-# some wait to stop tasks
 
 #var: adds a variable to an instrument
 #      maybe the same as: instr.newvar = instrument.MemoryDevice()
