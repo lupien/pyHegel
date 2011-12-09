@@ -506,7 +506,7 @@ def load(names=None, newnames=None):
         exec 'global '+newname+';'+newname+'=i'
 
 class task(threading.Thread):
-    def __init__(self, func, args=None, kwargs=None, count=None, 
+    def __init__(self, func, args=(), kwargs={}, count=None,
            interval=None, **extra):
         # func can be a function or a callable class instance.
         super(type(self), self).__init__(**extra)
@@ -517,10 +517,10 @@ class task(threading.Thread):
         self.func = func
         self.stopit = False
         # TODO: handle a list of tasks
-        self.start()
+        self.sta
     def run(self):
         i = 0
-        while not self.itstop:
+        while not self.stopit:
             self.func(*self.args, **self.kwargs)
             i += 1
             if self.count != None and i >= self.count:
