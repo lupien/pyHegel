@@ -11,6 +11,7 @@ import re
 import string
 import sys
 import threading
+import operator
 
 import traces
 import instrument
@@ -55,15 +56,48 @@ def writevec(file_obj, vals_list, pre_str=''):
      strs_list = map(repr_or_string, vals_list)
      file_obj.write(pre_str+string.join(strs_list,'\t')+'\n')
 
-def getheaders(devs):
-    return [dev.instr.header.get()+'.'+dev.name for dev in devs]
+def _getheaderhelper(dev):
+    return dev.instr.header.get()+'.'+dev.name
+
+def getheaders(setdev=None, getdevs=[]):
+    hdrs = []
+    graphsel = []
+    count = 0
+    formats = []
+    if setdev != None:
+        hdrs.append(_getheaderhelper(setdev))
+        count += 1
+    for dev in getdevs:
+        kwarg = {}
+        if isinstance(dev, tuple):
+            kwarg = dev[1]
+            dev = dev[0]
+        hdr = _getheaderhelper(dev)
+        f = dev.getformat(**kwarg)
+        formats.append(f)
+        if f['file'] == True or f['multi'] == True:
+            hdrs.append(hdr)
+            if f['file'] == True and f['graph'] == True:
+                graphsel.append(count)
+            count += 1
+        elif f['multi']: # it is a list of header names
+            hdr_list = [ hdr+'.'+h for h in f['multi']]
+            c = len(hdr_list)
+            hdrs.extend(hdr_list)
+            graph_list = [ g+count for g in f['graph']]
+            graphsel.extend(graph_list)
+            count += c
+        else: # file==False and multi==False
+            hdrs.append(hdr)
+            graphsel.append(count)
+            count += 1
+    return hdrs, graphsel, formats
 
 def _checkTracePause(trace):
     while trace.pause_enabled:
         wait(.1)
 
 #
-# TODO
 #    out can be: dev1
 #                [dev1, dev2, ..]
 #                (dev1, dict(arg1=...))
@@ -79,14 +113,24 @@ def _checkTracePause(trace):
 #        which should return a dict containing
 #          file=True  (send the filename to device, it will save it)
 #                     then device returns None and we output index number instead
-#                     or give the number to put in main file. No grpahing here
+#                     or give the number to put in main file. No graphing here
+#          multi=False      Says the device only return single values (default)
+#          multi=True       Says the device returns many values and we need to save
+#                            them to a file
 #          multi=['head1', 'head2']   Used when device returns multiple values
 #                                     This says so, gives the number of them and their names
 #                                     for headers and graphing
-#          graph=[1,2]                When using multi, this selects the values to gerpah.to graph
+#          graph=[1,2]                When using multi, this selects the values to graph
+#          graph=True/False           When file is True, This says to graph the return value or not
 #
 #   Also handle getasync
 
+def _itemgetter(*args):
+    # similar to operator.itemgetter except always returns a list
+    ig = operator.itemgetter(*args)
+    if len(args) == 1:
+        return lambda x: [ig(x)]
+    return ig
 
 class _Sweep(instrument.BaseInstrument):
     # This MemoryDevice will be shared among different instances
@@ -113,15 +157,33 @@ class _Sweep(instrument.BaseInstrument):
         elif not isinstance(l,list):
             l = [l]
         return l
-    def readall(self):
+    def readall(self, i):
         # will will just try to add .get
         #  this will work for the alias as well
         l = self.get_alldevs()
         if l == []:
             return []
         ret = []
-        for dev in l:
-            ret.append(dev.get())
+        for dev,fmt in zip(l, self.formats):
+            kwarg={}
+            if isinstance(dev, tuple):
+                kwarg = dev[1]
+                dev = dev[0]
+            if fmt['file']:
+                # TODO: find a proper filename
+                kwarg['filename']='something.txt'%i
+            val = dev.get(**kwarg)
+            if val == None:
+                val = i
+            if isinstance(val, list) or isinstance(val, tuple) or \
+               isinstance(val, np.ndarray):
+                if isinstance(fmt['multi'], list):
+                    ret.extend(val)
+                else:
+                    ret.append(i)
+                    # TODO implement the data waving here!
+            else:
+                ret.append(val)
         return ret
     def __repr__(self):
         return '<sweep instrument>'
@@ -142,16 +204,17 @@ class _Sweep(instrument.BaseInstrument):
         if instrument.CHECKING:
             # For checking only take first and last values
             span = span[[0,-1]]
-        hdrs = getheaders([dev]+self.get_alldevs())
+        hdrs, graphsel, self.formats = getheaders(dev, self.get_alldevs())
         graph = self.graph.get()
         if graph:
             t = traces.Trace()
             t.setWindowTitle('Sweep: '+title)
             t.setLim(span)
             if len(hdrs) == 1:
-                t.setlegend(hdrs)
+                gsel = _itemgetter(0)
             else:
-                t.setlegend(hdrs[1:])
+                gsel = _itemgetter(*graphsel)
+            t.setlegend(gsel(hdrs))
             t.set_xlabel(hdrs[0])
         if filename != None:
             fullpath=os.path.join(self.path.get(), filename)
@@ -165,21 +228,18 @@ class _Sweep(instrument.BaseInstrument):
         # Start of loop
         ###############################
         try:
-            for i in span:
+            for i,v in enumerate(span):
                 tme = clock.get()
-                dev.set(i) # TODO replace with move
+                dev.set(v) # TODO replace with move
                 iv = dev.getcache() # in case the instrument changed the value
                 self.execbefore()
                 wait(self.beforewait)
-                vals=self.readall()
+                vals=self.readall(i)
                 self.execafter()
                 if f:
                     writevec(f, [iv]+vals+[tme])
                 if graph:
-                    #in case nothing is read, do a stupid linear graph
-                    if vals == []:
-                        vals = [iv]
-                    t.addPoint(iv, vals)
+                    t.addPoint(iv, gsel([iv]+vals))
                     _checkTracePause(t)
         except KeyboardInterrupt:
             print 'Interrupted sweep'

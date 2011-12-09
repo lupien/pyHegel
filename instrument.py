@@ -36,7 +36,7 @@ class BaseDevice(object):
          dev(val) which is the same as set(val)
     """
     def __init__(self, autoinit=True, doc='', setget=False,
-                  min=None, max=None, choices=None):
+                  min=None, max=None, choices=None, multi=False):
         # instr and name updated by instrument's create_devs
         # doc is inserted before the above doc
         # setget makes us get the value after setting in
@@ -55,6 +55,7 @@ class BaseDevice(object):
         if choices:
             doc+='-------------\n Possible value to set: %s'%repr(choices)
         self.__doc__ = doc+BaseDevice.__doc__
+        self._format = dict(file=False, multi=multi, graph=[])
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val):
@@ -122,7 +123,7 @@ class BaseDevice(object):
            raise ValueError, self.perror('Failed check: '+err)
         #return state
     def getformat(self):
-        return None
+        return self._format
 
 class wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
@@ -149,9 +150,9 @@ class wrapDevice(BaseDevice):
             super(type(self), self).check(val)
     def getformat(self, **kwarg):
         if self._getformat != None:
-            self._getformat(**kwarg)
+            return self._getformat(**kwarg)
         else:
-            super(type(self), self)._getformat(**kwarg)
+            return super(type(self), self).getformat(**kwarg)
 
 class cls_wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
@@ -178,9 +179,9 @@ class cls_wrapDevice(BaseDevice):
             super(type(self), self).check(val)
     def getformat(self, **kwarg):
         if self._getformat != None:
-            self._getformat(self.instr, **kwarg)
+            return self._getformat(self.instr, **kwarg)
         else:
-            super(type(self), self)._getformat(self.instr, **kwarg)
+            return super(type(self), self).getformat(self.instr, **kwarg)
 
 # Using this metaclass, the class method
 # add_class_devs will be executed at class creation.
@@ -212,7 +213,7 @@ class BaseInstrument(object):
     def cls_devwrap(cls, name):
         # Only use this if the class will be using only one instance
         # Otherwise multiple instances will collide (reuse same wrapper)
-        setdev = getdev = check = None
+        setdev = getdev = check = getformat = None
         for s in dir(cls):
            if s == name+'_setdev':
               setdev = getattr(cls, s)
@@ -220,10 +221,12 @@ class BaseInstrument(object):
               getdev = getattr(cls, s)
            if s == name+'_check':
               check = getattr(cls, s)
-        wd = cls_wrapDevice(setdev, getdev, check)
+           if s == name+'_getformat':
+              check = getattr(cls, s)
+        wd = cls_wrapDevice(setdev, getdev, check, getformat)
         setattr(cls, name, wd)
     def devwrap(self, name, **extrak):
-        setdev = getdev = check = None
+        setdev = getdev = check = getformat = None
         for s in dir(self):
            if s == name+'_setdev':
               setdev = getattr(self, s)
@@ -231,7 +234,9 @@ class BaseInstrument(object):
               getdev = getattr(self, s)
            if s == name+'_check':
               check = getattr(self, s)
-        wd = wrapDevice(setdev, getdev, check, **extrak)
+           if s == name+'_getformat':
+              getformat = getattr(self, s)
+        wd = wrapDevice(setdev, getdev, check, getformat, **extrak)
         setattr(self, name, wd)
     def devs_iter(self):
         for devname in dir(self):
@@ -257,7 +262,7 @@ class BaseInstrument(object):
         pass
     # This allows instr.get() ... to be redirected to instr.alias.get()
     def __getattr__(self, name):
-        if name in ['get', 'set', 'check', 'getcache', 'setcache', 'instr', 'name']:
+        if name in ['get', 'set', 'check', 'getcache', 'setcache', 'instr', 'name', 'getformat']:
             if self.alias == None:
                 raise AttributeError, self.perror('This instrument does not have an alias for {nm}', nm=name)
             return getattr(self.alias, name)
@@ -555,8 +560,6 @@ class visaInstrument(BaseInstrument):
         # This should produce the hardware GET on gpib
         #  Another option would be to use the *TRG 488.2 command
         self.visa.trigger()
-#TODO implement the visa close of device
-
 
 
 
@@ -615,7 +618,7 @@ class sr830_lia(visaInstrument):
         return _decode_float64(self.ask('snap? '+string.join(sel,sep=',')))
     def snap_getformat(self, sel=[1,2]):
         self._check_snapsel(sel)
-        headers = [ _snap_type[i] for i in sel]
+        headers = [ self._snap_type[i] for i in sel]
         return dict(file=False, multi=headers, graph=range(len(sel)))
     def create_devs(self):
         self.freq = scpiDevice('freq', str_type=float)
@@ -803,7 +806,7 @@ class agilent_EXA(visaInstrument):
         self.average_count = scpiDevice(getstr=':average:count?',str_type=float)
         self.freq_start = scpiDevice(':freq:start', str_type=float, min=10e6, max=12.6e9)
         self.freq_stop = scpiDevice(':freq:stop', str_type=float, min=10e6, max=12.6e9)
-        self.trace1 = scpiDevice(getstr=':trace? trace1', autoinit=False)
+        self.trace1 = scpiDevice(getstr=':trace? trace1', str_type=_decode_float64, multi=True, autoinit=False)
         self.fetch1 = scpiDevice(getstr=':fetch:san1?', autoinit=False)
         self.read1 = scpiDevice(getstr=':read:san1?', autoinit=False)
         # This needs to be last to complete creation
@@ -875,11 +878,14 @@ class ScalingDevice(BaseDevice):
             autoinit = basedev._autoinit
         BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
         self.instr = basedev.instr
-        self.name = basedev.name+'.scale'
+        self.name = basedev.name
+        self._format['multi'] = ['scale', 'raw']
+        self._format['graph'] = [0]
     def get(self):
-        val = self._basedev.get() * self._scale + self._offset
-        self._cache = val
-        return val
+        raw = self._basedev.get()
+        val = raw * self._scale + self._offset
+        self._cache = val, raw
+        return val, raw
     def set(self, val):
         self._basedev.set((val - self._offset) / self._scale)
         # read basedev cache, in case the values is changed by setget mode.
