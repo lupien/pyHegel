@@ -68,6 +68,8 @@ def getheaders(setdev=None, getdevs=[], root=None, npts=None):
         hdr = _getheaderhelper(dev)
         f = dev.getformat(**kwarg).copy()
         f['basename'] = _dev_filename(root, hdr, npts, append=f['append'])
+        f['base_conf'] = instrument._get_conf_header(f)
+        f['base_hdr_name'] = hdr
         formats.append(f)
         if f['file'] == True or f['multi'] == True:
             hdrs.append(hdr)
@@ -163,7 +165,10 @@ def _checkTracePause(trace):
 #          graph=True/False           When file is True, This says to graph the return value or not
 #          append=True                Dump the data on a line in the file
 #          header=['line1', 'line2']  Stuff to dump at head of new file
-#          bin=True/False             Dump data in binary form (.npy) should not use header/append with it for now
+#                                       it can also be a function that returns the proper list of strings
+#          bin=False/'.npy'/'.raw'/'.png' Dump data in binary form. npy is numpy format
+#                                      All of the changes the extension of the file except
+#                                      if you use 'ext', then the original extension is kept
 #
 #   Also handle getasync
 
@@ -173,6 +178,17 @@ def _itemgetter(*args):
     if len(args) == 1:
         return lambda x: [ig(x)]
     return ig
+
+def _write_conf(f, formats):
+    for fmt in formats:
+        conf = fmt['base_conf']
+        hdr = fmt['base_hdr_name']
+        if conf:
+            f.write('#'+hdr+':=')
+            for c in conf:
+                f.write(' '+c+';')
+            f.write('\n')
+
 
 class _Sweep(instrument.BaseInstrument):
     # This MemoryDevice will be shared among different instances
@@ -247,6 +263,7 @@ class _Sweep(instrument.BaseInstrument):
         if filename != None:
             # Make it unbuffered, windows does not handle line buffer correctly
             f = open(fullpath, 'w', 0)
+            _write_conf(f, formats)
             writevec(f, hdrs+['time'], pre_str='#')
         else:
             f = None
@@ -356,6 +373,7 @@ def record(devs, interval=1, npoints=None, filename=None, title=None):
     if filename != None:
         # Make it unbuffered, windows does not handle line buffer correctly
         f = open(fullpath, 'w', 0)
+        _write_conf(f, formats)
         writevec(f, ['time']+hdrs, pre_str='#')
     else:
         f = None

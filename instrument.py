@@ -33,12 +33,20 @@ def _writevec(file_obj, vals_list, pre_str=''):
      strs_list = map(_repr_or_string, vals_list)
      file_obj.write(pre_str+string.join(strs_list,'\t')+'\n')
 
-# header can be None, '' or False for no output
+# header or header() can be None, '' or False for no output
 # otherwise it can be a single string for a single line or
 #  a list of strings. Don't include the comment character or the newline.
+def _get_conf_header(format):
+    header = format['header']
+    if callable(header):
+        header = header(format['obj'], format['options'])
+    if header : # if either is not None or not ''
+        if isinstance(header, basestring):
+            header=[header]
+    return header
+
 def _write_dev(val, filename, format=format, first=False):
     append = format['append']
-    header = format['header']
     bin = format['bin']
     if append and not first:
         open_mode = 'a'
@@ -49,9 +57,8 @@ def _write_dev(val, filename, format=format, first=False):
         if bin != '.ext':
             filename = os.path.splitext(filename)[0]+bin
     f=open(filename, open_mode)
+    header = _get_conf_header(format)
     if header : # if either is not None or not ''
-        if isinstance(header, basestring):
-            header=[header]
         for h in header:
             f.write('#'+h+'\n')
     if append:
@@ -106,7 +113,8 @@ class BaseDevice(object):
             doc+='-------------\n Possible value to set: %s'%repr(choices)
         self.__doc__ = doc+BaseDevice.__doc__
         self._format = dict(file=False, multi=multi, graph=[],
-                            append=False, header=None, bin=False)
+                            append=False, header=None, bin=False,
+                            options={}, obj=self)
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val, **kwarg):
@@ -183,7 +191,8 @@ class BaseDevice(object):
                err='invalid value(%s): use one of %s'%(val, repr(self.choices))
            raise ValueError, self.perror('Failed check: '+err)
         #return state
-    def getformat(self, filename=None): # we need to absorb any filename argument
+    def getformat(self, filename=None, **kwarg): # we need to absorb any filename argument
+        self._format['options'] = kwarg
         return self._format
 
 class wrapDevice(BaseDevice):
@@ -308,10 +317,28 @@ class BaseInstrument(object):
         # devices need to be created here (not at class level)
         # because we want each instrument instance to use its own
         # device instance (otherwise they would share the instance data)
+        #
+        # if instrument had a _current_config function and the device does
+        # not specify anything for header in its format string than
+        # we assign it.
         self.devwrap('header')
+        if hasattr(self, '_current_config'):
+            conf = self._current_config
+        else:
+            conf = None
         for devname, obj in self.devs_iter():
             obj.instr = self
             obj.name = devname
+            if conf and not obj._format['header']:
+                obj._format['header'] = conf
+#    def _current_config(self, dev_obj, get_options):
+#        pass
+    def _conf_helper(self, *devnames):
+        ret = []
+        for devname in devnames:
+            val = _repr_or_string(getattr(self, devname).getcache())
+            ret.append('%s=%s'%(devname, val))
+        return ret
     def read(self):
         raise NotImplementedError, self.perror('This instrument class does not implement read')
     def write(self, val):
@@ -688,7 +715,9 @@ class sr830_lia(visaInstrument):
         headers = [ self._snap_type[i] for i in sel]
         d = self.snap._format
         d.update(multi=headers, graph=range(len(sel)))
-        return d
+        return BaseDevice.getformat(self.snap, sel=sel)
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase')
     def create_devs(self):
         self.freq = scpiDevice('freq', str_type=float)
         self.sens = scpiDevice('sens', str_type=int)
@@ -870,8 +899,10 @@ class agilent_EXA(visaInstrument):
     def init(self, full=False):
         self.write(':format REAL,64')
         self.write(':format:border swap')
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('bandwidth', 'freq_start', 'freq_stop','average_count')
     def create_devs(self):
-        self.bandwith = scpiDevice(':bandwidth',str_type=float)
+        self.bandwidth = scpiDevice(':bandwidth',str_type=float)
         self.mark1x = scpiDevice(':calc:mark1:x',str_type=float)
         self.mark1y = scpiDevice(getstr=':calc:mark1:y?',str_type=float)
         self.average_count = scpiDevice(getstr=':average:count?',str_type=float)
