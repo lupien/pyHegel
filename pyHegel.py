@@ -281,11 +281,11 @@ sweep = _Sweep()
 wait = traces.wait
 
 ###  set overides set builtin function
-def set(dev, value):
+def set(dev, value, **kwarg):
     """
        Change la valeur de dev
     """
-    dev.set(value)
+    dev.set(value, **kwarg)
 
 def move(dev, value, rate):
     """

@@ -98,12 +98,12 @@ class BaseDevice(object):
                             append=False, header=None, bin=False)
     # for cache consistency
     #    get should return the same thing set uses
-    def set(self, val):
-        self.check(val)
+    def set(self, val, **kwarg):
+        self.check(val, **kwarg)
         if not CHECKING:
-            self.setdev(val)
+            self.setdev(val, **kwarg)
             if self._setget:
-                val = self.get()
+                val = self.get(**kwarg)
         elif self._setdev == None:
             raise NotImplementedError, self.perror('This device does not handle setdev')
         # only change cache after succesfull setdev
@@ -183,9 +183,9 @@ class wrapDevice(BaseDevice):
         self._getdev = getdev
         self._check  = check
         self._getformat  = getformat
-    def setdev(self, val):
+    def setdev(self, val, **kwarg):
         if self._setdev != None:
-            self._setdev(val)
+            self._setdev(val, **kwarg)
         else:
             raise NotImplementedError, self.perror('This device does not handle setdev')
     def getdev(self, **kwarg):
@@ -193,9 +193,9 @@ class wrapDevice(BaseDevice):
             return self._getdev(**kwarg)
         else:
             raise NotImplementedError, self.perror('This device does not handle getdev')
-    def check(self, val):
+    def check(self, val, **kwarg):
         if self._check != None:
-            self._check(val)
+            self._check(val, **kwarg)
         else:
             super(type(self), self).check(val)
     def getformat(self, **kwarg):
@@ -212,9 +212,9 @@ class cls_wrapDevice(BaseDevice):
         self._getdev = getdev
         self._check  = check
         self._getformat  = getformat
-    def setdev(self, val):
+    def setdev(self, val, **kwarg):
         if self._setdev != None:
-            self._setdev(self.instr, val)
+            self._setdev(self.instr, val, **kwarg)
         else:
             raise NotImplementedError, self.perror('This device does not handle setdev')
     def getdev(self, **kwarg):
