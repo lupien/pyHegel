@@ -100,7 +100,7 @@ def _dev_filename(root, dev_name, npts, append=False):
     dev_name = dev_name.replace('.', '_')
     if append:
         return root + '_'+ dev_name + ext
-    n = int(log10(maxn))+1
+    n = int(np.log10(maxn))+1
     return root + '_'+ dev_name+'_%0'+('%ii'%n)+ext
 
 
@@ -554,7 +554,6 @@ class Hegel_Task(threading.Thread):
         self.interval = interval
         self.func = func
         self.stopit = False
-        # TODO: handle a list of tasks
         self.start()
     def run(self):
         i = 0
