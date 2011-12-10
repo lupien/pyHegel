@@ -12,6 +12,7 @@ import string
 import sys
 import threading
 import operator
+from gc import collect as collect_garbage
 
 import traces
 import instrument
@@ -46,20 +47,12 @@ class _Clock(instrument.BaseInstrument):
         super(type(self),self).create_devs()
 clock = _Clock()
 
-def repr_or_string(val):
-    if isinstance(val, basestring):
-        return val
-    else:
-        return repr(val)
-
-def writevec(file_obj, vals_list, pre_str=''):
-     strs_list = map(repr_or_string, vals_list)
-     file_obj.write(pre_str+string.join(strs_list,'\t')+'\n')
+writevec = instrument._writevec
 
 def _getheaderhelper(dev):
     return dev.instr.header.get()+'.'+dev.name
 
-def getheaders(setdev=None, getdevs=[]):
+def getheaders(setdev=None, getdevs=[], root=None, npts=None):
     hdrs = []
     graphsel = []
     count = 0
@@ -74,6 +67,7 @@ def getheaders(setdev=None, getdevs=[]):
             dev = dev[0]
         hdr = _getheaderhelper(dev)
         f = dev.getformat(**kwarg).copy()
+        f['basename'] = _dev_filename(root, hdr, npts, append=f['append'])
         formats.append(f)
         if f['file'] == True or f['multi'] == True:
             hdrs.append(hdr)
@@ -93,12 +87,22 @@ def getheaders(setdev=None, getdevs=[]):
             count += 1
     return hdrs, graphsel, formats
 
-def _dev_filename(root, dev_name, maxn):
+def _dev_filename(root, dev_name, npts, append=False):
+    if root==None:
+        name = time.strftime('%Y%m%d-%H%M%S.txt')
+        root=os.path.join(sweep.path.get(), name)
+    if npts == None:
+        maxn = 99999
+    else:
+        maxn = npts-1
     root = os.path.abspath(root)
     root, ext = os.path.splitext(root)
     dev_name = dev_name.replace('.', '_')
+    if append:
+        return root + '_'+ dev_name + ext
     n = int(log10(maxn))+1
     return root + '_'+ dev_name+'_%0'+('%ii'%n)+ext
+
 
 def _readall(devs, formats, i):
     if devs == []:
@@ -109,9 +113,11 @@ def _readall(devs, formats, i):
         if isinstance(dev, tuple):
             kwarg = dev[1]
             dev = dev[0]
+        filename = fmt['basename']
+        if not fmt['append']:
+             filename = filename % i
         if fmt['file']:
-            # TODO: find a proper filename
-            kwarg['filename']='something.txt'%i
+            kwarg['filename']= filename
         val = dev.get(**kwarg)
         if val == None:
             val = i
@@ -121,7 +127,7 @@ def _readall(devs, formats, i):
                 ret.extend(val)
             else:
                 ret.append(i)
-                # TODO implement the data waving here!
+                instrument._write_dev(val, filename, format=fmt, first= i==0)
         else:
             ret.append(val)
     return ret
@@ -155,6 +161,9 @@ def _checkTracePause(trace):
 #                                     for headers and graphing
 #          graph=[1,2]                When using multi, this selects the values to graph
 #          graph=True/False           When file is True, This says to graph the return value or not
+#          append=True                Dump the data on a line in the file
+#          header=['line1', 'line2']  Stuff to dump at head of new file
+#          bin=True/False             Dump data in binary form (.npy) should not use header/append with it for now
 #
 #   Also handle getasync
 
@@ -213,7 +222,10 @@ class _Sweep(instrument.BaseInstrument):
             # For checking only take first and last values
             span = span[[0,-1]]
         devs = self.get_alldevs()
-        hdrs, graphsel, formats = getheaders(dev, devs)
+        fullpath = None
+        if filename != None:
+            fullpath=os.path.join(self.path.get(), filename)
+        hdrs, graphsel, formats = getheaders(dev, devs, fullpath, npts)
         graph = self.graph.get()
         if graph:
             t = traces.Trace()
@@ -226,7 +238,6 @@ class _Sweep(instrument.BaseInstrument):
             t.setlegend(gsel(hdrs))
             t.set_xlabel(hdrs[0])
         if filename != None:
-            fullpath=os.path.join(self.path.get(), filename)
             # Make it unbuffered, windows does not handle line buffer correctly
             f = open(fullpath, 'w', 0)
             writevec(f, hdrs+['time'], pre_str='#')
@@ -318,7 +329,10 @@ def record(devs, interval=1, npoints=None, filename=None, title=''):
         devs = [devs]
     t = traces.Trace(time_mode=True)
     t.setWindowTitle('Record: '+title)
-    hdrs, graphsel, formats = getheaders(getdevs=devs)
+    fullpath = None
+    if filename != None:
+        fullpath=os.path.join(sweep.path.get(), filename)
+    hdrs, graphsel, formats = getheaders(getdevs=devs, root=fullpath, npts=npoints)
     if graphsel == []:
         # nothing selected to graph so pick first dev
         # It probably will be the loop index i
@@ -326,7 +340,6 @@ def record(devs, interval=1, npoints=None, filename=None, title=''):
     gsel = _itemgetter(*graphsel)
     t.setlegend(gsel(hdrs))
     if filename != None:
-        fullpath=os.path.join(sweep.path.get(), filename)
         # Make it unbuffered, windows does not handle line buffer correctly
         f = open(fullpath, 'w', 0)
         writevec(f, ['time']+hdrs, pre_str='#')
@@ -366,6 +379,7 @@ def get(dev, filename=None, **extrap):
        then it will replace the %i with and integer that
        increments to prevent collision.
     """
+    global _get_filename_i
     if filename != None:
         if re.search(r'%[\d].i', filename):
             # Note that there is a possible race condition here

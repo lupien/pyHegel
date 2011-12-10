@@ -22,6 +22,45 @@ CHECKING = False
 def find_all_instruments():
     return visa.get_instruments_list()
 
+def _repr_or_string(val):
+    if isinstance(val, basestring):
+        return val
+    else:
+        return repr(val)
+
+def _writevec(file_obj, vals_list, pre_str=''):
+     strs_list = map(_repr_or_string, vals_list)
+     file_obj.write(pre_str+string.join(strs_list,'\t')+'\n')
+
+# header can be None, '' or False for no output
+# otherwise it can be a single string for a single line or
+#  a list of strings. Don't include the comment character or the newline.
+def _write_dev(val, filename, format=format, first=False):
+    append = format['append']
+    header = format['header']
+    bin = format['bin']
+    if append and not first:
+        f=open(filename, 'a')
+    else:
+        f=open(filename, 'w')
+        if header : # if either is not None or not ''
+            if isinstance(header, basestring):
+                header=[header]
+            for h in header:
+                f.write('#'+h+'\n')
+    if append:
+        _writevec(f, val)
+    else:
+        # we assume val is array like
+        #  remember that float64 as 53 bits (~16 digits) of precision
+        # for v of shape (100,2) this will output 2 columns and 100 lines
+        if bin:
+            np.save(f, val)
+        else:
+            np.savetxt(f, val, fmt='%.18g')
+    f.close()
+
+
 class BaseDevice(object):
     """
         ----------------
@@ -55,7 +94,8 @@ class BaseDevice(object):
         if choices:
             doc+='-------------\n Possible value to set: %s'%repr(choices)
         self.__doc__ = doc+BaseDevice.__doc__
-        self._format = dict(file=False, multi=multi, graph=[])
+        self._format = dict(file=False, multi=multi, graph=[],
+                            append=False, header=None, bin=False)
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val):
@@ -70,7 +110,17 @@ class BaseDevice(object):
         self._cache = val
     def get(self, **kwarg):
         if not CHECKING:
-            ret = self.getdev(**kwarg)
+            format = self.getformat(**kwarg)
+            if kwarg.get('filename', False) and not format['file']:
+                #we did not ask for a filename but got one.
+                #since getdev probably does not understand filename
+                #we handle it here
+                filename = kwarg.pop('filename')
+                ret = self.getdev(**kwarg)
+                _write_dev(ret, filename, format=format)
+                ret = None
+            else:
+                ret = self.getdev(**kwarg)
         elif self._getdev == None:
             raise NotImplementedError, self.perror('This device does not handle getdev')
         else:
@@ -122,7 +172,7 @@ class BaseDevice(object):
                err='invalid value(%s): use one of %s'%(val, repr(self.choices))
            raise ValueError, self.perror('Failed check: '+err)
         #return state
-    def getformat(self):
+    def getformat(self, filename=None): # we need to absorb any filename argument
         return self._format
 
 class wrapDevice(BaseDevice):
@@ -392,6 +442,8 @@ def _decode_block(s, t=np.float64, sep=None):
             raise IndexError, 'Missing data for decoding. Got %i, expected %i'%(lb, nb)
         elif lb > nb :
             raise IndexError, 'Extra data in for decoding. Got %i ("%s ..."), expected %i'%(lb, block[nb:nb+10], nb)
+    if sep == None:
+        return np.fromstring(block, t)
     return np.fromstring(block, t, sep=sep)
 
 def _decode_block_auto(s, t=np.float64):
@@ -620,10 +672,12 @@ class sr830_lia(visaInstrument):
         self._check_snapsel(sel)
         sel = map(str, sel)
         return _decode_float64(self.ask('snap? '+string.join(sel,sep=',')))
-    def snap_getformat(self, sel=[1,2]):
+    def snap_getformat(self, sel=[1,2], filename=None):
         self._check_snapsel(sel)
         headers = [ self._snap_type[i] for i in sel]
-        return dict(file=False, multi=headers, graph=range(len(sel)))
+        d = self.snap._format
+        d.update(multi=headers, graph=range(len(sel)))
+        return d
     def create_devs(self):
         self.freq = scpiDevice('freq', str_type=float)
         self.sens = scpiDevice('sens', str_type=int)
