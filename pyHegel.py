@@ -199,10 +199,12 @@ class _Sweep(instrument.BaseInstrument):
         elif not isinstance(l,list):
             l = [l]
         return l
+    def init(self, full=False):
+        self._sweep_trace_num = 0
     def __repr__(self):
         return '<sweep instrument>'
     def __call__(self, dev, start, stop, npts, filename, rate=None, 
-                  close_after=False, title=''):
+                  close_after=False, title=None):
         """
             routine pour faire un sweep
              dev est l'objet a varier
@@ -229,6 +231,11 @@ class _Sweep(instrument.BaseInstrument):
         graph = self.graph.get()
         if graph:
             t = traces.Trace()
+            if title == None:
+                title = filename
+            if title == None:
+                title = str(self._sweep_trace_num)
+            self._sweep_trace_num += 1
             t.setWindowTitle('Sweep: '+title)
             t.setLim(span)
             if len(hdrs) == 1:
@@ -315,7 +322,8 @@ def spy(devs, interval=1):
         print 'Interrupting spy'
         pass
 
-def record(devs, interval=1, npoints=None, filename=None, title=''):
+_record_trace_num = 0
+def record(devs, interval=1, npoints=None, filename=None, title=None):
     """
        record to filename (if not None) the values from devs
          uses sweep.path
@@ -324,10 +332,16 @@ def record(devs, interval=1, npoints=None, filename=None, title=''):
        npoints is max number of points. If None, it will only stop
         on CTRL-C...
     """
+    global _record_trace_num
     # make sure devs is list like
     if not isinstance(devs, list):
         devs = [devs]
     t = traces.Trace(time_mode=True)
+    if title == None:
+        title = filename
+    if title == None:
+        title = str(_record_trace_num)
+    _record_trace_num += 1
     t.setWindowTitle('Record: '+title)
     fullpath = None
     if filename != None:
