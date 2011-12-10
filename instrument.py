@@ -13,6 +13,7 @@ import numpy as np
 import string
 import functools
 import random
+import os
 import time
 import traces
 
@@ -40,22 +41,29 @@ def _write_dev(val, filename, format=format, first=False):
     header = format['header']
     bin = format['bin']
     if append and not first:
-        f=open(filename, 'a')
+        open_mode = 'a'
     else:
-        f=open(filename, 'w')
-        if header : # if either is not None or not ''
-            if isinstance(header, basestring):
-                header=[header]
-            for h in header:
-                f.write('#'+h+'\n')
+        open_mode = 'w'
+    if bin:
+        open_mode += 'b'
+        if bin != '.ext':
+            filename = os.path.splitext(filename)[0]+bin
+    f=open(filename, open_mode)
+    if header : # if either is not None or not ''
+        if isinstance(header, basestring):
+            header=[header]
+        for h in header:
+            f.write('#'+h+'\n')
     if append:
         _writevec(f, val)
     else:
         # we assume val is array like
-        #  remember that float64 as 53 bits (~16 digits) of precision
+        #  remember that float64 has 53 bits (~16 digits) of precision
         # for v of shape (100,2) this will output 2 columns and 100 lines
-        if bin:
+        if bin == '.npy':
             np.save(f, val)
+        elif bin:
+            val.tofile(f)
         else:
             np.savetxt(f, val, fmt='%.18g')
     f.close()
@@ -841,6 +849,7 @@ class infiniiVision_3000(visaInstrument):
     def create_devs(self):
         # Note vincent's hegel, uses set to define filename where block data is saved.
         self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', autoinit=False) # returns block of data(always bin with # header)
+        self.snap._format['bin']='.png'
         self.inksaver = scpiDevice(':HARDcopy:INKSaver', str_type=bool) # ON, OFF 1 or 0
         self.data = scpiDevice(getstr=':waveform:DATA?', autoinit=False) # returns block of data (always header# for asci byte and word)
           # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
