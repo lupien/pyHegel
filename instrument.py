@@ -57,13 +57,16 @@ def _write_dev(val, filename, format=format, first=False):
     if append:
         _writevec(f, val)
     else:
-        # we assume val is array like
+        # we assume val is array like, except for bin where it can also be a string
         #  remember that float64 has 53 bits (~16 digits) of precision
         # for v of shape (100,2) this will output 2 columns and 100 lines
         if bin == '.npy':
             np.save(f, val)
         elif bin:
-            val.tofile(f)
+            if isinstance(val, basestring):
+                f.write(val)
+            else:
+                val.tofile(f)
         else:
             np.savetxt(f, val, fmt='%.18g')
     f.close()
