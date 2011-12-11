@@ -52,14 +52,22 @@ writevec = instrument._writevec
 def _getheaderhelper(dev):
     return dev.instr.header.get()+'.'+dev.name
 
-def getheaders(setdev=None, getdevs=[], root=None, npts=None):
+def getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     hdrs = []
     graphsel = []
     count = 0
     formats = []
+    if extra_conf != None and not isinstance(extra_conf, list):
+        extra_conf = [extra_conf]
+    elif extra_conf == None:
+        extra_conf = []
     if setdev != None:
         hdrs.append(_getheaderhelper(setdev))
         count += 1
+        extra_conf.append(setdev)
+
+    if extra_conf != None and not isinstance(extra_conf, list):
+        extra_conf = [extra_conf]
     for dev in getdevs:
         kwarg = {}
         if isinstance(dev, tuple):
@@ -87,6 +95,12 @@ def getheaders(setdev=None, getdevs=[], root=None, npts=None):
             hdrs.append(hdr)
             graphsel.append(count)
             count += 1
+    for x in extra_conf:
+        hdr = _getheaderhelper(x)
+        f = x.getformat(**kwarg).copy()
+        f['base_conf'] = instrument._get_conf_header(f)
+        f['base_hdr_name'] = hdr
+        formats.append(f)
     return hdrs, graphsel, formats
 
 def _dev_filename(root, dev_name, npts, append=False):
@@ -208,19 +222,20 @@ class _Sweep(instrument.BaseInstrument):
         b = self.after.get()
         if b:
             exec b
-    def get_alldevs(self):
-        l =  self.out.get()
-        if l == None or l==[]:
+    def get_alldevs(self, out=None):
+        if out == None:
+            out =  self.out.get()
+        if out == None or out==[]:
             return []
-        elif not isinstance(l,list):
-            l = [l]
-        return l
+        elif not isinstance(out, list):
+            out = [out]
+        return out
     def init(self, full=False):
         self._sweep_trace_num = 0
     def __repr__(self):
         return '<sweep instrument>'
     def __call__(self, dev, start, stop, npts, filename, rate=None, 
-                  close_after=False, title=None):
+                  close_after=False, title=None, out=None, extra_conf=None):
         """
             routine pour faire un sweep
              dev est l'objet a varier
@@ -239,11 +254,11 @@ class _Sweep(instrument.BaseInstrument):
         if instrument.CHECKING:
             # For checking only take first and last values
             span = span[[0,-1]]
-        devs = self.get_alldevs()
+        devs = self.get_alldevs(out)
         fullpath = None
         if filename != None:
             fullpath=os.path.join(self.path.get(), filename)
-        hdrs, graphsel, formats = getheaders(dev, devs, fullpath, npts)
+        hdrs, graphsel, formats = getheaders(dev, devs, fullpath, npts, extra_conf=extra_conf)
         graph = self.graph.get()
         if graph:
             t = traces.Trace()
@@ -340,7 +355,7 @@ def spy(devs, interval=1):
         pass
 
 _record_trace_num = 0
-def record(devs, interval=1, npoints=None, filename=None, title=None):
+def record(devs, interval=1, npoints=None, filename=None, title=None, extra_conf=None):
     """
        record to filename (if not None) the values from devs
          uses sweep.path
@@ -363,7 +378,7 @@ def record(devs, interval=1, npoints=None, filename=None, title=None):
     fullpath = None
     if filename != None:
         fullpath=os.path.join(sweep.path.get(), filename)
-    hdrs, graphsel, formats = getheaders(getdevs=devs, root=fullpath, npts=npoints)
+    hdrs, graphsel, formats = getheaders(getdevs=devs, root=fullpath, npts=npoints, extra_conf=extra_conf)
     if graphsel == []:
         # nothing selected to graph so pick first dev
         # It probably will be the loop index i

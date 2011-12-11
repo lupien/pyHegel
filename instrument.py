@@ -670,12 +670,14 @@ class yokogawa_gs200(visaInstrument):
     def init(self, full=False):
         # clear event register, extended event register and error queue
         self.write('*cls')
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('function', 'range', 'level')
     def create_devs(self):
         #self.level_2 = wrapDevice(self.levelsetdev, self.levelgetdev, self.levelcheck)
         self.function = scpiDevice(':source:function', choices=ChoiceStrings('VOLT', 'CURRent')) # use 'voltage' or 'current'
         # voltage or current means to add V or A in the string (possibly with multiplier)
         self.range = scpiDevice(':source:range', str_type=float, setget=True) # can be a voltage, current, MAX, MIN, UP or DOWN
-        self.level = scpiDevice(':source:level') # can be a voltage, current, MAX, MIN
+        #self.level = scpiDevice(':source:level') # can be a voltage, current, MAX, MIN
         self.voltlim = scpiDevice(':source:protection:voltage', str_type=float, setget=True) #voltage, MIN or MAX
         self.currentlim = scpiDevice(':source:protection:current', str_type=float, setget=True) #current, MIN or MAX
         self.devwrap('level', setget=True)
@@ -717,7 +719,7 @@ class sr830_lia(visaInstrument):
         d.update(multi=headers, graph=range(len(sel)))
         return BaseDevice.getformat(self.snap, sel=sel)
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase')
+        return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant')
     def create_devs(self):
         self.freq = scpiDevice('freq', str_type=float)
         self.sens = scpiDevice('sens', str_type=int)
