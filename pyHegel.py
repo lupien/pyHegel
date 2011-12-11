@@ -209,7 +209,7 @@ class _Sweep(instrument.BaseInstrument):
     # So there should only be one instance of this class
     #  Doing it this way allows the instr.dev = val syntax
     before = instrument.MemoryDevice()
-    beforewait = 0.02 # provide a default wait so figures are updated
+    beforewait = instrument.MemoryDevice(0.02) # provide a default wait so figures are updated
     after = instrument.MemoryDevice()
     out = instrument.MemoryDevice()
     path = instrument.MemoryDevice('')
@@ -232,6 +232,8 @@ class _Sweep(instrument.BaseInstrument):
         return out
     def init(self, full=False):
         self._sweep_trace_num = 0
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('before', 'after', 'beforewait')
     def __repr__(self):
         return '<sweep instrument>'
     def __call__(self, dev, start, stop, npts, filename='%T.txt', rate=None,
@@ -259,6 +261,12 @@ class _Sweep(instrument.BaseInstrument):
         if filename != None:
             filename = _process_filename(filename)
             fullpath=os.path.join(self.path.get(), filename)
+        if extra_conf == None:
+            extra_conf = [sweep.out]
+        elif not isinstance(extra_conf, list):
+            extra_conf = [extra_conf, sweep.out]
+        else:
+            extra_conf.append(sweep.out)
         hdrs, graphsel, formats = getheaders(dev, devs, fullpath, npts, extra_conf=extra_conf)
         graph = self.graph.get()
         if graph:
@@ -293,7 +301,7 @@ class _Sweep(instrument.BaseInstrument):
                 dev.set(v) # TODO replace with move
                 iv = dev.getcache() # in case the instrument changed the value
                 self.execbefore()
-                wait(self.beforewait)
+                wait(self.beforewait.get())
                 vals = _readall(devs, formats, i)
                 self.execafter()
                 if f:
