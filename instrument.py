@@ -786,6 +786,12 @@ class agilent_multi_34410A(visaInstrument):
         self.write('*cls')
     def math_clear(self):
         self.write('CALCulate:AVERage:CLEar')
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('mode', 'volt_nplc', 'volt_aperture',
+                                 'volt_aperture_en', 'zero', 'autorange',
+                                 'trig_src', 'trig_delay', 'trig_count',
+                                 'sample_count', 'sample_src', 'sample_timer',
+                                 'trig_delayauto')
     def create_devs(self):
         # This needs to be last to complete creation
         # fetch and read return sample_count*trig_count data values (comma sep)
