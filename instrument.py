@@ -33,17 +33,23 @@ def _writevec(file_obj, vals_list, pre_str=''):
      strs_list = map(_repr_or_string, vals_list)
      file_obj.write(pre_str+string.join(strs_list,'\t')+'\n')
 
+
+def _get_conf_header_util(header, obj, options):
+    if callable(header):
+        header = header(obj, options)
+    if header: # if either is not None or not ''
+        if isinstance(header, basestring):
+            header=[header]
+    return header
+
 # header or header() can be None, '' or False for no output
 # otherwise it can be a single string for a single line or
 #  a list of strings. Don't include the comment character or the newline.
 def _get_conf_header(format):
     header = format['header']
-    if callable(header):
-        header = header(format['obj'], format['options'])
-    if header : # if either is not None or not ''
-        if isinstance(header, basestring):
-            header=[header]
-    return header
+    obj = format['obj']
+    options = format['options']
+    return _get_conf_header_util(header, obj, options)
 
 def _write_dev(val, filename, format=format, first=False):
     append = format['append']
@@ -991,6 +997,14 @@ class ScalingDevice(BaseDevice):
         self.name = basedev.name
         self._format['multi'] = ['scale', 'raw']
         self._format['graph'] = [0]
+        self._format['header'] = self._current_config
+    def _current_config(self, dev_obj=None, options={}):
+        ret = ['Scaling:: fact=%r offset=%r'%(self._scale, self._offset)]
+        frmt = self._basedev.getformat()
+        base = _get_conf_header_util(frmt['header'], dev_obj, options)
+        if base != None:
+            ret.extend(base)
+        return ret
     def get(self):
         raw = self._basedev.get()
         val = raw * self._scale + self._offset
