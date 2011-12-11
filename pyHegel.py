@@ -234,7 +234,7 @@ class _Sweep(instrument.BaseInstrument):
         self._sweep_trace_num = 0
     def __repr__(self):
         return '<sweep instrument>'
-    def __call__(self, dev, start, stop, npts, filename, rate=None, 
+    def __call__(self, dev, start, stop, npts, filename='%T.txt', rate=None,
                   close_after=False, title=None, out=None, extra_conf=None):
         """
             routine pour faire un sweep
@@ -257,6 +257,7 @@ class _Sweep(instrument.BaseInstrument):
         devs = self.get_alldevs(out)
         fullpath = None
         if filename != None:
+            filename = _process_filename(filename)
             fullpath=os.path.join(self.path.get(), filename)
         hdrs, graphsel, formats = getheaders(dev, devs, fullpath, npts, extra_conf=extra_conf)
         graph = self.graph.get()
@@ -355,7 +356,7 @@ def spy(devs, interval=1):
         pass
 
 _record_trace_num = 0
-def record(devs, interval=1, npoints=None, filename=None, title=None, extra_conf=None):
+def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_conf=None):
     """
        record to filename (if not None) the values from devs
          uses sweep.path
@@ -369,15 +370,16 @@ def record(devs, interval=1, npoints=None, filename=None, title=None, extra_conf
     if not isinstance(devs, list):
         devs = [devs]
     t = traces.Trace(time_mode=True)
+    fullpath = None
+    if filename != None:
+        filename = _process_filename(filename)
+        fullpath=os.path.join(sweep.path.get(), filename)
     if title == None:
         title = filename
     if title == None:
         title = str(_record_trace_num)
     _record_trace_num += 1
     t.setWindowTitle('Record: '+title)
-    fullpath = None
-    if filename != None:
-        fullpath=os.path.join(sweep.path.get(), filename)
     hdrs, graphsel, formats = getheaders(getdevs=devs, root=fullpath, npts=npoints, extra_conf=extra_conf)
     if graphsel == []:
         # nothing selected to graph so pick first dev
@@ -418,6 +420,26 @@ def trace(dev, interval=1, title=''):
 
 
 _get_filename_i = 0
+def _process_filename(filename):
+    global _get_filename_i
+    timestamp = time.strftime('%Y%m%d-%H%M%S')
+    changed = False
+    if '%T' in filename:
+        filename = filename.replace('%T', timestamp)
+        changed = True
+    if re.search(r'%[\d].i', filename):
+        # Note that there is a possible race condition here
+        # it is still possible to overwrite a file if it
+        # is created between the check and the file creation
+        while os.path.exists(filename%_get_filename_i):
+           _get_filename_i += 1
+        filename = filename % _get_filename_i
+        changed = True
+    if changed:
+        print 'Using filename: '+filename
+    return filename
+
+
 ### get overides get the mathplotlib
 def get(dev, filename=None, **extrap):
     """
@@ -425,17 +447,10 @@ def get(dev, filename=None, **extrap):
        if filename is given and contains a %i (or %04i)
        then it will replace the %i with and integer that
        increments to prevent collision.
+       If the strings contains %T, it will be replaced by a timestamp
     """
-    global _get_filename_i
     if filename != None:
-        if re.search(r'%[\d].i', filename):
-            # Note that there is a possible race condition here
-            # it is still possible to overwrite a file if it
-            # is created between the check and the file creation
-            while os.path.exists(filename%_get_filename_i):
-               _get_filename_i += 1
-            filename = filename % _get_filename_i
-            print 'Using filename: '+filename
+        filename = _process_filename(filename)
         extrap.update(filename=filename)
     try:
         return dev.get(**extrap)
