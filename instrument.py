@@ -85,6 +85,25 @@ def _write_dev(val, filename, format=format, first=False):
     f.close()
 
 
+#To implement async get:
+#    need multi level get
+#    0: is initialization (Telling system what to read and to prepare it if necessary)
+#          dmm1 could do :init here if bus/ext trigger
+#       Also start one or multiple threads to capture and save data
+#         Should turn on a flag saying we are busy
+#       Be carefull with locking if more than one thread per instrument
+#       setup srq listening in init or here
+#         The end of the thread could decide to disable the srq
+#    1: is trigger step. For dmm1 do trigger, or :init: if trigger is immediate
+#       Also setup of producing signal to finish measurment (like *OPC or for dmm1 fetch?) and prevent
+#       other level 0: commands
+#    2: Check if data has been read
+#    3: get cache
+# trigger/flags can be per instrument (visa) or device(acq card)
+#Enable basic async for any device (like sr830) by allowing a delay before performing mesurement
+#Allow to chain one device on completion of another one.
+
+
 class BaseDevice(object):
     """
         ----------------
@@ -108,6 +127,7 @@ class BaseDevice(object):
         self.instr = None
         self.name = 'foo'
         self._cache = None
+        self._lastget = None
         self._autoinit = autoinit
         self._setdev = None
         self._getdev = None
@@ -143,6 +163,7 @@ class BaseDevice(object):
                 filename = kwarg.pop('filename')
                 ret = self.getdev(**kwarg)
                 _write_dev(ret, filename, format=format)
+                self._lastget = ret
                 ret = None
             else:
                 ret = self.getdev(**kwarg)
