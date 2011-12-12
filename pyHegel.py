@@ -436,7 +436,7 @@ def _process_filename(filename):
     if '%T' in filename:
         filename = filename.replace('%T', timestamp)
         changed = True
-    if re.search(r'%[\d].i', filename):
+    if re.search(r'%[\d]*i', filename):
         # Note that there is a possible race condition here
         # it is still possible to overwrite a file if it
         # is created between the check and the file creation
