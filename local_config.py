@@ -1,4 +1,5 @@
 import instrument
+import acq_board_instrument
 
 conf = dict( yo1 = (instrument.yokogawa_gs200, (10,)),
              yo2 = (instrument.yokogawa_gs200, (13,)),
@@ -23,4 +24,6 @@ conf = dict( yo1 = (instrument.yokogawa_gs200, (10,)),
              pna1 = (instrument.agilent_PNAL, ('USB0::0x0957::0x0118::MY49001395',)),
              # scope is USB only
              scope = (instrument.infiniiVision_3000, ('USB0::2391::6050::MY51135769::INSTR',)),
+             # acq board
+             acq1 = (acq_board_instrument.Acq_Board_Instrument, ('127.0.0.1', 50000))
         )

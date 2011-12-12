@@ -27,7 +27,9 @@ def reset_pyHegel():
        can be called in ipython command line like:
          /reset_pyNoise
     """
-    reload(instrument)
+    reload(traces)
+    reload(local_config.instrument)
+    reload(local_config.acq_board_instrument)
     reload(local_config)
     execfile('pyHegel.py', globals())
 
