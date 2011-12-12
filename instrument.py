@@ -120,7 +120,7 @@ class asyncThread(threading.Thread):
         self._async_delay = new_delay
     def change_trig(self, new_trig):
         self._async_trig = new_trig
-    def change_trig(self, new_detect):
+    def change_detect(self, new_detect):
         self._async_detect = new_detect
     def run(self):
         delay = self._async_delay
@@ -138,7 +138,7 @@ class asyncThread(threading.Thread):
         if self._async_trig:
             self._async_trig()
         if self._async_detect != None:
-            while self._async_detect():
+            while not self._async_detect():
                if self._stop:
                    break
         if self._stop:
@@ -915,18 +915,18 @@ class agilent_multi_34410A(visaInstrument):
     def _get_esr(self):
         return int(self.ask('*esr?'))
     def _async_detect(self):
-        ec_type = context = None
+        ev_type = context = None
         try:  # for 500 ms
             ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 500)
-        except VisaIOError, e:
+        except visa.VisaIOError, e:
             if e.error_code != vpp43.VI_ERROR_TMO:
                 raise
         if context != None:
-            vpp43.close(context)
-            # only reset SRQ flag. We know the bit that is set already
-            self.read_status_byte()
             # only reset event flag. We know the bit that is set already (OPC)
             self._get_esr()
+            # only reset SRQ flag. We know the bit that is set already
+            self.read_status_byte()
+            vpp43.close(context)
             return True
         return False
     def _async_trig(self):
