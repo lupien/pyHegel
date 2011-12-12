@@ -124,7 +124,7 @@ class asyncThread(threading.Thread):
         self._async_detect = new_detect
     def run(self):
         delay = self._async_delay
-        if delay:
+        if delay and not CHECKING:
             diff = 0.
             start_time = time.time()
             while diff < delay:
@@ -135,7 +135,7 @@ class asyncThread(threading.Thread):
                diff = time.time() - start_time
         if self._stop:
             return
-        if self._async_trig:
+        if self._async_trig and not CHECKING:
             self._async_trig()
         if self._async_detect != None:
             while not self._async_detect():
