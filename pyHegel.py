@@ -1,5 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+# vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 #
 # Programme principale pour remplacer Hegel
 #
@@ -464,6 +465,24 @@ def get(dev, filename=None, **extrap):
         return dev.get(**extrap)
     except KeyboardInterrupt:
         print 'CTRL-C pressed!!!!!!' 
+
+def getasync(devs, filename=None, **kwarg):
+    if filename != None:
+        filename = _process_filename(filename)
+        kwarg.update(filename=filename)
+    if not isinstance(devs, list):
+        devs = [devs]
+    for dev in devs:
+        dev.getasync(async=0, **kwarg)
+    for dev in devs:
+        dev.getasync(async=1, **kwarg)
+    for dev in devs:
+        dev.getasync(async=2, **kwarg)
+    ret = []
+    for dev in devs:
+        ret.append(dev.getasync(async=3, **kwarg))
+    return ret
+
 
 def iprint(instrument, force=False):
     """

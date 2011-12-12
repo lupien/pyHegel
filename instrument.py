@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-#
+# vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 
 try:
   import visa
@@ -15,6 +15,9 @@ import functools
 import random
 import os
 import time
+import threading
+from PyQt4 import QtGui, QtCore
+
 import traces
 
 _globaldict = dict() # This is set in pynoise.py
@@ -94,7 +97,8 @@ def _write_dev(val, filename, format=format, first=False):
 #       Be carefull with locking if more than one thread per instrument
 #       setup srq listening in init or here
 #         The end of the thread could decide to disable the srq
-#    1: is trigger step. For dmm1 do trigger, or :init: if trigger is immediate
+#    1: is to start the task
+#     is trigger step. For dmm1 do trigger, or :init: if trigger is immediate
 #       Also setup of producing signal to finish measurment (like *OPC or for dmm1 fetch?) and prevent
 #       other level 0: commands
 #    2: Check if data has been read
@@ -103,6 +107,54 @@ def _write_dev(val, filename, format=format, first=False):
 #Enable basic async for any device (like sr830) by allowing a delay before performing mesurement
 #Allow to chain one device on completion of another one.
 
+class asyncThread(threading.Thread):
+    def __init__(self, operations, detect=None, delay=0., trig=None):
+        super(type(self), self).__init__()
+        self.daemon = True
+        self._stop = False
+        self._async_delay = delay
+        self._async_trig = trig
+        self._async_detect = detect
+        self._operations = operations
+    def change_delay(self, new_delay):
+        self._async_delay = new_delay
+    def change_trig(self, new_trig):
+        self._async_trig = new_trig
+    def change_trig(self, new_detect):
+        self._async_detect = new_detect
+    def run(self):
+        delay = self._async_delay
+        if delay:
+            diff = 0.
+            start_time = time.time()
+            while diff < delay:
+               left = delay - diff
+               time.sleep(min(left, 0.1))
+               if self._stop:
+                   break
+               diff = time.time() - start_time
+        if self._stop:
+            return
+        if self._async_trig:
+            self._async_trig()
+        if self._async_detect != None:
+            while self._async_detect():
+               if self._stop:
+                   break
+        if self._stop:
+            return
+        for func, kwarg in self._operations:
+            func(**kwarg)
+    def cancel(self):
+        self._stop = True
+    def wait(self, timeout=None):
+        self.join(timeout)
+        return not self.is_alive()
+
+def wait_on_event(task_or_event):
+    while not task_or_event.wait(0.2):
+        QtGui.QApplication.instance().processEvents(
+             QtCore.QEventLoop.AllEvents, 20) # 20 ms max
 
 class BaseDevice(object):
     """
@@ -118,7 +170,8 @@ class BaseDevice(object):
          dev(val) which is the same as set(val)
     """
     def __init__(self, autoinit=True, doc='', setget=False,
-                  min=None, max=None, choices=None, multi=False):
+                  min=None, max=None, choices=None, multi=False,
+                  trig=False, delay=False):
         # instr and name updated by instrument's create_devs
         # doc is inserted before the above doc
         # setget makes us get the value after setting in
@@ -132,6 +185,8 @@ class BaseDevice(object):
         self._setdev = None
         self._getdev = None
         self._setget = setget
+        self._trig = trig
+        self._delay = delay
         self.min = min
         self.max = max
         self.choices = choices
@@ -177,6 +232,9 @@ class BaseDevice(object):
         if self._cache==None and self._autoinit:
            return self.get()
         return self._cache
+    def getasync(self, async, **kwarg):
+        return self.instr._get_async(async, self,
+                           trig=self._trig, delay=self._delay, **kwarg)
     def setcache(self, val):
         self._cache = val
     def __call__(self, val=None):
@@ -298,8 +356,46 @@ class BaseInstrument(object):
     def __init__(self):
         self.header_val = None
         self.create_devs()
+        self._async_list = []
+        self._async_level = -1
+        self.async_delay = 0.
+        self._async_task = None
         if not CHECKING:
             self.init(full=True)
+    def _async_detect(self):
+        return True
+    def _async_trig(self):
+        pass
+    def _get_async(self, async, obj, **kwarg):
+        if async != 3 and not (async == 2 and self._async_level == -1) and (
+          async < self._async_level or async > self._async_level + 1):
+            if self._async_level > 1:
+                self._async_task.cancel()
+            self._async_level = -1
+            raise ValueError, 'Async in the wrong order'
+        if async == 0:  # setup async task
+            if self._async_level == -1: # first time through
+                self._async_list = []
+                self._async_task = asyncThread(self._async_list)
+                self._async_level = 0
+            delay = kwarg.pop('delay', False)
+            if delay:
+                self._async_task.change_delay(self.async_delay)
+            trig = kwarg.pop('trig', False)
+            if trig:
+                self._async_task.change_detect(self._async_detect)
+                self._async_task.change_trig(self._async_trig)
+            self._async_list.append((obj.get, kwarg))
+        elif async == 1:  # Start async task (only once)
+            if self._async_level == 0: # First time through
+                self._async_task.start()
+                self._async_level = 1
+        elif async == 2:  # Wait for task to finish
+            if self._async_level == 1: # First time through (no need to wait for sunsequent calls)
+                wait_on_event(self._async_task)
+                self._async_level = -1
+        elif async == 3: # get values
+            return obj.getcache()
     def find_global_name(self):
         dic = _globaldict
         try:
@@ -377,7 +473,7 @@ class BaseInstrument(object):
         pass
     # This allows instr.get() ... to be redirected to instr.alias.get()
     def __getattr__(self, name):
-        if name in ['get', 'set', 'check', 'getcache', 'setcache', 'instr', 'name', 'getformat']:
+        if name in ['get', 'set', 'check', 'getcache', 'setcache', 'instr', 'name', 'getformat', 'getasync']:
             if self.alias == None:
                 raise AttributeError, self.perror('This instrument does not have an alias for {nm}', nm=name)
             return getattr(self.alias, name)
@@ -807,10 +903,44 @@ class agilent_rf_33522A(visaInstrument):
     def phase_sync(self):
         self.write('PHASe:SYNChronize')
 
+#TODO: handle multiconf stuff VOLT, CURR nlpc ...
 class agilent_multi_34410A(visaInstrument):
     def init(self, full=False):
-        # This clears the error state
+        # This clears the error state, and status/event flags?
         self.write('*cls')
+        if full:
+            self.write('*ese 1;*sre 32') # OPC flag
+            vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+                               vpp43.VI_QUEUE)
+    def _get_esr(self):
+        return int(self.ask('*esr?'))
+    def _async_detect(self):
+        ec_type = context = None
+        try:  # for 500 ms
+            ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 500)
+        except VisaIOError, e:
+            if e.error_code != vpp43.VI_ERROR_TMO:
+                raise
+        if context != None:
+            vpp43.close(context)
+            # only reset SRQ flag. We know the bit that is set already
+            self.read_status_byte()
+            # only reset event flag. We know the bit that is set already (OPC)
+            self._get_esr()
+            return True
+        return False
+    def _async_trig(self):
+        if self._get_esr() & 0x01:
+            print 'Unread event byte!'
+        while self.read_status_byte() & 0x40:
+            print 'Unread status byte!'
+        try:
+            while True:
+                foo = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 0)
+                print 'Unread event queue!'
+        except:
+            pass
+        self.write('INITiate;*OPC') # this assume trig_src is immediate
     def math_clear(self):
         self.write('CALCulate:AVERage:CLEar')
     def _current_config(self, dev_obj=None, options={}):
@@ -827,7 +957,7 @@ class agilent_multi_34410A(visaInstrument):
           'DIODe', 'FREQuency', 'PERiod', 'RESistance', 'FRESistance', 'TEMPerature', quotes=True)
         self.mode = scpiDevice('FUNC', str_type=ch, choices=ch)
         self.readval = scpiDevice(getstr='READ?',str_type=float) # similar to INItiate followed by FETCh.
-        self.fetchval = scpiDevice(getstr='FETCh?',str_type=_decode_float64, autoinit=False) #You can't ask for fetch after an aperture change. You need to read some data first.
+        self.fetchval = scpiDevice(getstr='FETCh?',str_type=_decode_float64, autoinit=False, trig=True) #You can't ask for fetch after an aperture change. You need to read some data first.
         self.volt_nplc = scpiDevice('VOLTage:NPLC', str_type=float, choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100]) # DC
         self.volt_aperture = scpiDevice('VOLTage:APERture', str_type=float) # DC, in seconds (max~1s), also MIN, MAX, DEF
         self.volt_aperture_en = scpiDevice('VOLTage:APERture:ENabled', str_type=bool)
@@ -843,7 +973,7 @@ class agilent_multi_34410A(visaInstrument):
         ch = ChoiceStrings('NULL', 'DB', 'DBM', 'AVERage', 'LIMit')
         self.math_func = scpiDevice('CALCulate:FUNCtion', str_type=ch, choices=ch)
         self.math_state = scpiDevice('CALCulate:STATe', str_type=bool)
-        self.math_avg = scpiDevice(getstr='CALCulate:AVERage:AVERage?', str_type=float)
+        self.math_avg = scpiDevice(getstr='CALCulate:AVERage:AVERage?', str_type=float, trig=True)
         self.math_count = scpiDevice(getstr='CALCulate:AVERage:COUNt?', str_type=float)
         self.math_max = scpiDevice(getstr='CALCulate:AVERage:MAXimum?', str_type=float)
         self.math_min = scpiDevice(getstr='CALCulate:AVERage:MINimum?', str_type=float)
@@ -990,7 +1120,7 @@ class dummy(BaseInstrument):
         self.current = MemoryDevice(1., doc='This is a memory current, a float')
         self.other = MemoryDevice(autoinit=False, doc='This takes a boolean')
         #self.freq = scpiDevice('freq', str_type=float)
-        self.devwrap('rand', doc='This returns a random value. There is not set.')
+        self.devwrap('rand', doc='This returns a random value. There is not set.', delay=True)
         self.devwrap('incr')
         self.alias = self.current
         # This needs to be last to complete creation
