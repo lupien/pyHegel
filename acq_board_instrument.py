@@ -10,6 +10,7 @@ import socket
 import select
 import threading
 import math
+import numpy as np
 
 # user made import
 import instrument
@@ -79,7 +80,7 @@ class Listen_thread(threading.Thread):
             new_stuff = self.acq_instr.s.recv(128)
             old_stuff += new_stuff
             trames = old_stuff.split('\n', 1)
-            old_stuff = trames.po'DATA:HIST:DATA?'p()
+            old_stuff = trames.pop()
             while trames != []:
                 trame = trames[0]
                 if trame[0] != '@' and trame[0] != '#':

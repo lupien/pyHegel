@@ -958,7 +958,7 @@ class agilent_multi_34410A(visaInstrument):
            count = 1
            width = time
            if not force:
-               width = line_period*round(width/lineperiod)
+               width = line_period*round(width/line_period)
         self.aperture.set(width)
         self.sample_count.set(count)
     def create_devs(self):
