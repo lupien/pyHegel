@@ -970,7 +970,7 @@ class agilent_multi_34410A(visaInstrument):
         self.mode = scpiDevice('FUNC', str_type=ch, choices=ch)
         self.readval = scpiDevice(getstr='READ?',str_type=float) # similar to INItiate followed by FETCh.
         self.fetchval = scpiDevice(getstr='FETCh?',str_type=_decode_float64, autoinit=False, trig=True) #You can't ask for fetch after an aperture change. You need to read some data first.
-        self.line_freq = scpiDevice(getstr='SYSTem:LFRequency', str_type=float) # see also SYST:LFR:ACTual?
+        self.line_freq = scpiDevice(getstr='SYSTem:LFRequency?', str_type=float) # see also SYST:LFR:ACTual?
         self.volt_nplc = scpiDevice('VOLTage:NPLC', str_type=float, choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100]) # DC
         self.volt_aperture = scpiDevice('VOLTage:APERture', str_type=float) # DC, in seconds (max~1s), also MIN, MAX, DEF
         self.volt_aperture_en = scpiDevice('VOLTage:APERture:ENabled', str_type=bool)
