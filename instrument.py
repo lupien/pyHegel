@@ -367,6 +367,10 @@ class BaseInstrument(object):
     def _async_trig(self):
         pass
     def _get_async(self, async, obj, **kwarg):
+        if async == -1: # we reset task
+            if self._async_level > 1:
+                self._async_task.cancel()
+            self._async_level = -1
         if async != 3 and not (async == 2 and self._async_level == -1) and (
           async < self._async_level or async > self._async_level + 1):
             if self._async_level > 1:

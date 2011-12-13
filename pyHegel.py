@@ -156,10 +156,14 @@ def _readall(devs, formats, i, async=None):
     return ret
 
 def _readall_async(devs, formats, i):
-    _readall(devs, formats, i, async=0)
-    _readall(devs, formats, i, async=1)
-    _readall(devs, formats, i, async=2)
-    return _readall(devs, formats, i, async=3)
+    try:
+        _readall(devs, formats, i, async=0)
+        _readall(devs, formats, i, async=1)
+        _readall(devs, formats, i, async=2)
+        return _readall(devs, formats, i, async=3)
+    except KeyboardInterrupt:
+        _readall(devs, formats, i, async=-1)
+        raise
 
 def _checkTracePause(trace):
     while trace.pause_enabled:
