@@ -1071,7 +1071,7 @@ class infiniiVision_3000(visaInstrument):
     def create_devs(self):
         # Note vincent's hegel, uses set to define filename where block data is saved.
         self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', autoinit=False) # returns block of data(always bin with # header)
-        self.snap._format['bin']='.png'
+        self.snap_png._format['bin']='.png'
         self.inksaver = scpiDevice(':HARDcopy:INKSaver', str_type=bool) # ON, OFF 1 or 0
         self.data = scpiDevice(getstr=':waveform:DATA?', autoinit=False) # returns block of data (always header# for asci byte and word)
           # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),

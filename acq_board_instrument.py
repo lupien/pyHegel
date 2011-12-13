@@ -191,7 +191,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
 
     def fetch_getformat(self, filename=None):
         self.fetch._format.update(file=True)
-    def fetch_getdev(self, filename=None):
+    def fetch_getdev(self, filename=None, ch=[1]):
         self.fetch._event_flag.clear()
         mode = self.op_mode.getcache()
         if mode == 'Hist':
