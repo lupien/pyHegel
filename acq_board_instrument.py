@@ -55,6 +55,7 @@ class Listen_thread(threading.Thread):
         bin_mode = False
         block_length = 0
         total_byte = 0
+        acq = self.acq_instr
         while not self._stop:
             try:
                 r, _, _ = select.select(select_list, [], [], socket_timeout)
@@ -64,20 +65,25 @@ class Listen_thread(threading.Thread):
                 break
             if bin_mode:
                 if len(old_stuff) != 0:
-                    new_stuff = self.acq_instr.s.recv(block_length-len(old_stuff))
+                    new_stuff = acq.s.recv(block_length-len(old_stuff))
                     new_stuff = old_stuff+new_stuff
                     old_stuff = ''
                 else:
-                    new_stuff = self.acq_instr.s.recv(block_length)
+                    new_stuff = acq.s.recv(block_length)
                 total_byte -= len(new_stuff)
+                if total_byte < 0:
+                    old_stuff = new_stuff[total_byte:]
+                    new_stuff = new_stuff[:total_byte]
+                if acq.fetch._dump_file != None:
+                    acq.fetch._dump_file.write(new_stuff)
+                    acq.fetch._rcv_val = None
+                else:
+                    acq.fetch._rcv_val += new_stuff
                 if total_byte <= 0:
-                    byte_mode = False
-                    if total_byte < 0:
-                        old_stuff = new_stuff[total_byte:]
-                        new_stuff = new_stuff[:total_byte]
-                #TODO: handle the new_stuff ....
+                    bin_mode = False
+                    acq.fetch._event_flag.set()
                 continue
-            new_stuff = self.acq_instr.s.recv(128)
+            new_stuff = acq.s.recv(128)
             old_stuff += new_stuff
             trames = old_stuff.split('\n', 1)
             old_stuff = trames.pop()
@@ -90,31 +96,37 @@ class Listen_thread(threading.Thread):
                     head, val = trame.split(' ', 1)
                     if head.startswith('ERROR:'):
                         if head == 'ERROR:STD':
-                            self.instr._errors_list.append('STD: '+val)
+                            acq._errors_list.append('STD: '+val)
                             print 'Error: ', val
                         elif head == 'ERROR:CRITICAL':
-                            self.instr._errors_list.append('CRITICAL: '+val)
+                            acq._errors_list.append('CRITICAL: '+val)
                             print '!!!!!!!!!!!\n!!!!!CRITICAL ERROR!!!!!: ', val,'\n!!!!!!!!!!!!!'
                         else:
-                            self.instr._errors_list.append('Unknown: '+val)
+                            acq._errors_list.append('Unknown: '+val)
                             print 'Unkown error', head, val
-                    obj = self.acq_instr._objdict.get(head, None)
-                    if obj == None:
-                        self.instr._errors_list.append('Unknown @'+head+' val:'+val)
-                        print 'Listen Thread: unkown @header:',head, 'val=', val
                     else:
-                        obj._rcv_val = val
-                        obj._event_flag.set()
+                        obj = acq._objdict.get(head, None)
+                        if obj == None:
+                            acq._errors_list.append('Unknown @'+head+' val:'+val)
+                            print 'Listen Thread: unknown @header:',head, 'val=', val
+                        else:
+                            obj._rcv_val = val
+                            obj._event_flag.set()
                 else: # trame[0]=='#'
                     trame = trame[1:]
                     head, val = trame.split(' ', 1)
                     location, typ, val = val.split(' ', 2)
                     if location == 'Local':
                         filename = val
+                        acq.fetch._rcv_val = None
+                        acq.fetch._event_flag.set()
                         #TODO: handle
                     else: # location == 'Remote'
+                        acq.fetch._rcv_val = ''
                         bin_mode = True
                         block_length, total_byte = val.split(' ')
+                        block_length = int(block_length)
+                        total_byte = int(total_byte)
                         break;
                 trames = old_stuff.split('\n', 1)
                 old_stuff = trames.pop()
@@ -191,9 +203,11 @@ class Acq_Board_Instrument(instrument.visaInstrument):
 
     def fetch_getformat(self, filename=None):
         self.fetch._format.update(file=True)
+        return instrument.BaseDevice.getformat(self.fetch)
     def fetch_getdev(self, filename=None, ch=[1]):
         self.fetch._event_flag.clear()
         mode = self.op_mode.getcache()
+        self.fetch._dump_file = None
         if mode == 'Hist':
             s = 'DATA:HIST:DATA?'
             if filename != None:
@@ -211,6 +225,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         clock_source_str = ['Internal', 'External', 'USB']
         chan_mode_str = ['Single','Dual']
         osc_slope_str = ['Rising','Falling']
+        format_location_str = ['Local','Remote']
+        format_type_str = ['Default','ASCII','NPZ']
         
         #device init
         # Configuration
@@ -242,9 +258,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.osc_trig_source = acq_device('CONFIG:OSC_TRIG_SOURCE', str_type=int,  min=1, max=2)
         
         if self.board_type == 'ADC8':
-            self.net_signal_freq = acq_device('CONFIG:SIGNAL_FREQ', str_type=float,  min=0, max=375000000)
+            self.net_signal_freq = acq_device('CONFIG:NET_SIGNAL_FREQ', str_type=float,  min=0, max=375000000)
         elif self.board_type == 'ADC14':
-            self.net_signal_freq = acq_device('CONFIG:SIGNAL_FREQ', str_type=float,  min=0, max=50000000)
+            self.net_signal_freq = acq_device('CONFIG:NET_SIGNAL_FREQ', str_type=float,  min=0, max=50000000)
         
         self.lock_in_square = acq_device('CONFIG:LOCK_IN_SQUARE', str_type=acq_bool()) 
         self.nb_tau = acq_device('CONFIG:NB_TAU', str_type=int,  min=0, max=50)
@@ -261,6 +277,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.board_status = acq_device(getstr='STATUS:STATE?',str_type=str)
         self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?',str_type=acq_bool())
         
+        self.format_location = acq_device('CONFIG:FORMAT:LOCATION', str_type=str, choices=format_location_str)
+        self.format_type = acq_device('CONFIG:FORMAT:TYPE',str_type=str, choices=format_type_str)
+        self.format_block_length = acq_device('CONFIG:FORMAT:BLOCK_LENGTH',str_type = int, min=1, max=4294967296)
+
         # Results
         self.hist_m1 = acq_device(getstr = 'DATA:HIST:M1?', str_type = float, autoinit=False)
         self.hist_m2 = acq_device(getstr = 'DATA:HIST:M2?', str_type = float, autoinit=False)
@@ -275,7 +295,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.custom_result3 = acq_device(getstr = 'DATA:CUST:RESULT3?',str_type = float, autoinit=False)
         self.custom_result4 = acq_device(getstr = 'DATA:CUST:RESULT4?',str_type = float, autoinit=False)
 
-        self.devwrap('fetch')        
+        self.devwrap('fetch', autoinit=False)
         self.fetch._event_flag = threading.Event()
         self.fetch._rcv_val = None
         
@@ -326,7 +346,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         # check if the configuration are ok
         
         # check if nb_sample fit the op_mode
-        if self.op_mode.getcache() == 'Hist' or self.op_mode.getcache() == 'Corr':
+        """if self.op_mode.getcache() == 'Hist' or self.op_mode.getcache() == 'Corr':
             if self.board_type == 'ADC8':
                 quotien = float(self.nb_Msample.getcache())/8192
                 frac = math.modf(quotien)
@@ -369,17 +389,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                         new_sampling_rate = self.min_usb_clock_freq
                     self.sampling_rate.set(new_sampling_rate)
                 raise ValueError, 'Warning sampling_rate not a multiple of 5, value corrected to nearest possible value : ' + str(new_sampling_rate)
-                
-        
-                    
-                    
-                    
-                
-                
-        
-        
-        
-        
+                """
         self.write('STATUS:CONFIG_OK True')
         self.write('RUN')
         
