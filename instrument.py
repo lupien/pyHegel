@@ -949,6 +949,15 @@ class agilent_multi_34410A(visaInstrument):
                                  'trig_src', 'trig_delay', 'trig_count',
                                  'sample_count', 'sample_src', 'sample_timer',
                                  'trig_delayauto')
+    def set_long_avg(self, time):
+        if time > 1.:
+            width = .1
+            count = int(time/.099999999)
+        else:
+           width = time
+           count = 1
+        self.aperture.set(width)
+        self.sample_count.set(count)
     def create_devs(self):
         # This needs to be last to complete creation
         # fetch and read return sample_count*trig_count data values (comma sep)
@@ -1022,6 +1031,18 @@ class agilent_multi_34410A(visaInstrument):
         #      there seems to be some inteligent buffering going on, which is different in agilent and NI visas
         # When wait_on_event timesout, it produces the VisaIOError (VI_ERROR_TMO) exception
         #        the error code is available as VisaIOErrorInstance.error_code
+        # in [sense:] subsystem:
+        #  VOLTage:AC:BANDwidth, CURRent:AC:BANDwidth
+        #  (VOLTage:AC, VOLTage[:DC], CURRent:AC, CURRent[:DC], RESistance, FRESistance, FREQuency, PERiod, TEMPerature, CAPacitance):NULL
+        #  :RANGe (all except Temperature)
+        #  :NLPC, APERture:ENABled (only VOLTage[:DC], CURRent[:DC], RES, FRES, TEMP)
+        #  :APERture (only VOLTage[:DC], CURRent[:DC], RES, FRES, FREQ, PERiod, TEMP)
+        # IMPedance:AUTO (VOLTage[:DC])
+        # ZERO:AUTO ((VOLTage[:DC], CURRent[:DC], RES, TEMP)
+        # OCOMpensated (RES and FRES)
+        #  FRES and RES parameters are the same.
+
+
 
 
 class lakeshore_322(visaInstrument):
