@@ -27,7 +27,9 @@ def reset_pyHegel():
        can be called in ipython command line like:
          /reset_pyNoise
     """
-    reload(instrument)
+    reload(traces)
+    reload(local_config.instrument)
+    reload(local_config.acq_board_instrument)
     reload(local_config)
     execfile('pyHegel.py', globals())
 
@@ -120,8 +122,7 @@ def _dev_filename(root, dev_name, npts, append=False):
     n = int(np.log10(maxn))+1
     return root + '_'+ dev_name+'_%0'+('%ii'%n)+ext
 
-
-def _readall(devs, formats, i):
+def _readall(devs, formats, i, async=None):
     if devs == []:
         return []
     ret = []
@@ -135,7 +136,12 @@ def _readall(devs, formats, i):
              filename = filename % i
         if fmt['file']:
             kwarg['filename']= filename
-        val = dev.get(**kwarg)
+        if async != None:
+            val = dev.getasync(async=async, **kwarg)
+            if async != 3:
+                continue
+        else:
+            val = dev.get(**kwarg)
         if val == None:
             val = i
         if isinstance(val, list) or isinstance(val, tuple) or \
@@ -148,6 +154,12 @@ def _readall(devs, formats, i):
         else:
             ret.append(val)
     return ret
+
+def _readall_async(devs, formats, i):
+    _readall(devs, formats, i, async=0)
+    _readall(devs, formats, i, async=1)
+    _readall(devs, formats, i, async=2)
+    return _readall(devs, formats, i, async=3)
 
 def _checkTracePause(trace):
     while trace.pause_enabled:
@@ -238,7 +250,8 @@ class _Sweep(instrument.BaseInstrument):
     def __repr__(self):
         return '<sweep instrument>'
     def __call__(self, dev, start, stop, npts, filename='%T.txt', rate=None,
-                  close_after=False, title=None, out=None, extra_conf=None):
+                  close_after=False, title=None, out=None, extra_conf=None,
+                  async=False):
         """
             routine pour faire un sweep
              dev est l'objet a varier
@@ -303,7 +316,10 @@ class _Sweep(instrument.BaseInstrument):
                 iv = dev.getcache() # in case the instrument changed the value
                 self.execbefore()
                 wait(self.beforewait.get())
-                vals = _readall(devs, formats, i)
+                if async:
+                    vals = _readall_async(devs, formats, i)
+                else:
+                    vals = _readall(devs, formats, i)
                 self.execafter()
                 if f:
                     writevec(f, [iv]+vals+[tme])
@@ -365,7 +381,7 @@ def spy(devs, interval=1):
         pass
 
 _record_trace_num = 0
-def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_conf=None):
+def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_conf=None, async=False):
     """
        record to filename (if not None) the values from devs
          uses sweep.path
@@ -407,7 +423,10 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
         i=0
         while npoints == None or i < npoints:
             tme = clock.get()
-            vals = _readall(devs, formats, i)
+            if async:
+                vals = _readall_async(devs, formats, i)
+            else:
+                vals = _readall(devs, formats, i)
             t.addPoint(tme, gsel(vals))
             if f:
                 writevec(f, [tme]+vals)
@@ -436,7 +455,7 @@ def _process_filename(filename):
     if '%T' in filename:
         filename = filename.replace('%T', timestamp)
         changed = True
-    if re.search(r'%[\d].i', filename):
+    if re.search(r'%[\d]*i', filename):
         # Note that there is a possible race condition here
         # it is still possible to overwrite a file if it
         # is created between the check and the file creation
