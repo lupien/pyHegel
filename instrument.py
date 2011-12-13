@@ -593,12 +593,7 @@ def _decode_block_header(s):
     nbytes = int(s[2:2+nh])
     return slice(2+nh, None), nbytes, 2+nh
 
-def _decode_block(s, t=np.float64, sep=None):
-    """
-        sep can be None for binaray encoding or ',' for ascii csv encoding
-        type can be np.float64 float32 int8 int16 int32 uint8 uint16 ...
-              or it can be entered as a string like 'float64'
-    """
+def _decode_block_base(s):
     sl, nb, nh = _decode_block_header(s)
     block = s[sl]
     lb = len(block)
@@ -607,6 +602,15 @@ def _decode_block(s, t=np.float64, sep=None):
             raise IndexError, 'Missing data for decoding. Got %i, expected %i'%(lb, nb)
         elif lb > nb :
             raise IndexError, 'Extra data in for decoding. Got %i ("%s ..."), expected %i'%(lb, block[nb:nb+10], nb)
+    return block
+
+def _decode_block(s, t=np.float64, sep=None):
+    """
+        sep can be None for binaray encoding or ',' for ascii csv encoding
+        type can be np.float64 float32 int8 int16 int32 uint8 uint16 ...
+              or it can be entered as a string like 'float64'
+    """
+    block = _decode_block_base(s)
     if sep == None:
         return np.fromstring(block, t)
     return np.fromstring(block, t, sep=sep)
@@ -1074,10 +1078,10 @@ class lakeshore_322(visaInstrument):
 class infiniiVision_3000(visaInstrument):
     def create_devs(self):
         # Note vincent's hegel, uses set to define filename where block data is saved.
-        self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', autoinit=False) # returns block of data(always bin with # header)
+        self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', str_type=_decode_block_base, autoinit=False) # returns block of data(always bin with # header)
         self.snap_png._format['bin']='.png'
         self.inksaver = scpiDevice(':HARDcopy:INKSaver', str_type=bool) # ON, OFF 1 or 0
-        self.data = scpiDevice(getstr=':waveform:DATA?', autoinit=False) # returns block of data (always header# for asci byte and word)
+        self.data = scpiDevice(getstr=':waveform:DATA?', str_type=_decode_uint8_bin, autoinit=False) # returns block of data (always header# for asci byte and word)
           # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
           #  type (Normal, peak, average, HRes), #points, #avg, xincr, xorg, xref, yincr, yorg, yref
           #  xconv = xorg+x*xincr, yconv= (y-yref)*yincr + yorg
