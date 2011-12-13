@@ -9,6 +9,7 @@ Created on Fri Dec 09 13:39:09 2011
 import socket
 import select
 import threading
+import math
 
 # user made import
 import instrument
@@ -50,6 +51,9 @@ class Listen_thread(threading.Thread):
         select_list = [self.acq_instr.s]
         socket_timeout = 0.1
         old_stuff = ''
+        bin_mode = False
+        block_length = 0
+        total_byte = 0
         while not self._stop:
             try:
                 r, _, _ = select.select(select_list, [], [], socket_timeout)
@@ -57,18 +61,62 @@ class Listen_thread(threading.Thread):
                     continue
             except socket.error:
                 break
+            if bin_mode:
+                if len(old_stuff) != 0:
+                    new_stuff = self.acq_instr.s.recv(block_length-len(old_stuff))
+                    new_stuff = old_stuff+new_stuff
+                    old_stuff = ''
+                else:
+                    new_stuff = self.acq_instr.s.recv(block_length)
+                total_byte -= len(new_stuff)
+                if total_byte <= 0:
+                    byte_mode = False
+                    if total_byte < 0:
+                        old_stuff = new_stuff[total_byte:]
+                        new_stuff = new_stuff[:total_byte]
+                #TODO: handle the new_stuff ....
+                continue
             new_stuff = self.acq_instr.s.recv(128)
             old_stuff += new_stuff
-            trames = old_stuff.split('\n')
-            old_stuff = trames.pop()
-            for trame in trames:
-                if trame[0] != '@':
+            trames = old_stuff.split('\n', 1)
+            old_stuff = trames.po'DATA:HIST:DATA?'p()
+            while trames != []:
+                trame = trames[0]
+                if trame[0] != '@' and trame[0] != '#':
                     continue
-                trame = trame[1:]
-                head, val = trame.split(' ', 1)
-                obj = self.acq_instr._objdict[head]
-                obj._rcv_val = val
-                obj._event_flag.set()
+                if trame[0] == '@':
+                    trame = trame[1:]
+                    head, val = trame.split(' ', 1)
+                    if head.startswith('ERROR:'):
+                        if head == 'ERROR:STD':
+                            self.instr._errors_list.append('STD: '+val)
+                            print 'Error: ', val
+                        elif head == 'ERROR:CRITICAL':
+                            self.instr._errors_list.append('CRITICAL: '+val)
+                            print '!!!!!!!!!!!\n!!!!!CRITICAL ERROR!!!!!: ', val,'\n!!!!!!!!!!!!!'
+                        else:
+                            self.instr._errors_list.append('Unknown: '+val)
+                            print 'Unkown error', head, val
+                    obj = self.acq_instr._objdict.get(head, None)
+                    if obj == None:
+                        self.instr._errors_list.append('Unknown @'+head+' val:'+val)
+                        print 'Listen Thread: unkown @header:',head, 'val=', val
+                    else:
+                        obj._rcv_val = val
+                        obj._event_flag.set()
+                else: # trame[0]=='#'
+                    trame = trame[1:]
+                    head, val = trame.split(' ', 1)
+                    location, typ, val = val.split(' ', 2)
+                    if location == 'Local':
+                        filename = val
+                        #TODO: handle
+                    else: # location == 'Remote'
+                        bin_mode = True
+                        block_length, total_byte = val.split(' ')
+                        break;
+                trames = old_stuff.split('\n', 1)
+                old_stuff = trames.pop()
     def cancel(self):
         self._stop = True
     def wait(self, timeout=None):
@@ -80,10 +128,22 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     
     def __init__(self, ip_adress, port_nb):
         self._listen_thread = None
+        self._errors_list = []
+        
         # init the server member
         self.host = ip_adress
         self.port = port_nb
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        
+        # maximum value
+        self.max_sampling_adc8 = 3000
+        self.min_sampling_adc8 = 1000
+        self.max_sampling_adc14 = 400
+        self.min_sampling_adc14 = 20
+        self.min_usb_clock_freq = 200
+        self.min_nb_Msample = 32
+        self.max_nb_Msample = 4294967295
+        
         
         # try connect to the server
         self.s.connect((self.host, self.port))
@@ -101,6 +161,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         # init the parent class
         instrument.BaseInstrument.__init__(self)
 
+    def _idn(self):
+        return 'Acq card,,SERIAL#'
+    def _get_error(self):
+        if self._errors_list == []:
+            return 'No more errors'
+        return self._errors_list.pop()
     def _set_timeout(self):
         pass
     def __del__(self):
@@ -108,7 +174,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self._listen_thread.cancel()
             self._listen_thread.wait()
         self.s.close()
-        
+    
     def init(self,full = False):
         if full == True:
             self._objdict = {}
@@ -121,7 +187,21 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.board_serial.get()
         self.board_status.get()
         self.result_available.get()        
-        
+
+    def fetch_getformat(self, filename=None):
+        self.fetch._format.update(file=True)
+    def fetch_getdev(self, filename=None):
+        self.fetch._event_flag.clear()
+        mode = self.op_mode.getcache()
+        if mode == 'Hist':
+            s = 'DATA:HIST:DATA?'
+            if filename != None:
+                s += ' '+filename
+            self.write(s)
+            instrument.wait_on_event(self.fetch._event_flag)
+            if self.fetch._rcv_val == None:
+                return None
+            return np.fromstring(self.fetch._rcv_val, np.uint64)
         #device member
     def create_devs(self):
 
@@ -136,13 +216,13 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.op_mode = acq_device('CONFIG:OP_MODE', str_type=str, choices=op_mode_str)
         
         if self.board_type == 'ADC8':
-            self.sampling_rate = acq_device('CONFIG:SAMPLING_RATE', str_type=float,  min=1000, max=3000)
+            self.sampling_rate = acq_device('CONFIG:SAMPLING_RATE', str_type=float,  min=self.min_sampling_adc8, max=self.max_sampling_adc8)
         elif self.board_type == 'ADC14':
-            self.sampling_rate = acq_device('CONFIG:SAMPLING_RATE', str_type=float,  min=20, max=400)
+            self.sampling_rate = acq_device('CONFIG:SAMPLING_RATE', str_type=float,  min=self.min_sampling_adc14, max=self.max_sampling_adc14)
         
         self.test_mode = acq_device('CONFIG:TEST_MODE', str_type=acq_bool())
         self.clock_source = acq_device('CONFIG:CLOCK_SOURCE', str_type=str, choices=clock_source_str)
-        self.nb_Msample = acq_device('CONFIG:NB_MSAMPLE', str_type=int,  min=32, max=65535)
+        self.nb_Msample = acq_device('CONFIG:NB_MSAMPLE', str_type=int,  min=self.min_nb_Msample, max=self.max_nb_Msample)
         self.chan_mode = acq_device('CONFIG:CHAN_MODE', str_type=str, choices=chan_mode_str)
         self.chan_nb = acq_device('CONFIG:CHAN_NB', str_type=int,  min=1, max=2)
         self.trigger_invert = acq_device('CONFIG:TRIGGER_INVERT', str_type=acq_bool())
@@ -165,7 +245,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         elif self.board_type == 'ADC14':
             self.net_signal_freq = acq_device('CONFIG:SIGNAL_FREQ', str_type=float,  min=0, max=50000000)
         
-        self.lock_in_square = acq_device('CONFIG:LOCK_IN_SQUARE', str_type=bool) 
+        self.lock_in_square = acq_device('CONFIG:LOCK_IN_SQUARE', str_type=acq_bool()) 
         self.nb_tau = acq_device('CONFIG:NB_TAU', str_type=int,  min=0, max=50)
         self.autocorr_mode = acq_device('CONFIG:AUTOCORR_MODE', str_type=acq_bool())
         self.corr_mode = acq_device('CONFIG:CORR_MODE', str_type=acq_bool())
@@ -193,6 +273,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.custom_result2 = acq_device(getstr = 'DATA:CUST:RESULT2?',str_type = float, autoinit=False)
         self.custom_result3 = acq_device(getstr = 'DATA:CUST:RESULT3?',str_type = float, autoinit=False)
         self.custom_result4 = acq_device(getstr = 'DATA:CUST:RESULT4?',str_type = float, autoinit=False)
+
+        self.devwrap('fetch')        
+        self.fetch._event_flag = threading.Event()
+        self.fetch._rcv_val = None
         
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
@@ -235,11 +319,66 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_edge_en.set(False)
         self.trigger_await.set(False)
         self.trigger_create.set(False)
-        self.cust_param1.set(10.0)
         
         
     def run(self):
         # check if the configuration are ok
+        
+        # check if nb_sample fit the op_mode
+        if self.op_mode.getcache() == 'Hist' or self.op_mode.getcache() == 'Corr':
+            if self.board_type == 'ADC8':
+                quotien = float(self.nb_Msample.getcache())/8192
+                frac = math.modf(quotien)
+            
+                if frac != 0.0:
+                    new_nb_Msample = int(math.ceil(quotien))*8192
+                    if new_nb_Msample > (self.max_nb_Msample - 8192):
+                        new_nb_Msample = self.max_nb_Msample - 8192
+                        self.nb_Msample.set(new_nb_Msample)
+                    raise ValueError, 'Warning nb_Msample not a multiple of 8192, value corrected to nearest possible value : ' + str(new_nb_Msample)
+            
+            #self.board_type == 'ADC14':
+                
+                    
+                    
+                
+        
+        #check if clock freq is a multiple of 5 Mhz when in USB clock mode
+        if self.clock_source.getcache() == 'USB':
+            if self.board_type == 'ADC8':
+                clock_freq = self.sampling_rate.getcache()/2
+            else:
+                clock_freq = self.sampling_rate.getcache()
+                
+            quotien = clock_freq/5.0
+            
+            frac = math.modf(quotien)
+            
+            if frac != 0.0:
+                if self.board_type == 'ADC8':
+                    new_sampling_rate =  2* math.ceil(quotien) * 5
+                    if new_sampling_rate > self.max_sampling_adc8:
+                        new_sampling_rate = self.max_sampling_adc8
+                    self.sampling_rate.set(new_sampling_rate)
+                else:
+                    new_sampling_rate = math.ceil(quotien) * 5
+                    if new_sampling_rate > self.max_sampling_adc14:
+                        new_sampling_rate = self.max_sampling_adc14
+                    elif new_sampling_rate < self.min_usb_clock_freq:
+                        new_sampling_rate = self.min_usb_clock_freq
+                    self.sampling_rate.set(new_sampling_rate)
+                raise ValueError, 'Warning sampling_rate not a multiple of 5, value corrected to nearest possible value : ' + str(new_sampling_rate)
+                
+        
+                    
+                    
+                    
+                
+                
+        
+        
+        
+        
         self.write('STATUS:CONFIG_OK True')
         self.write('RUN')
         
