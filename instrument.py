@@ -1240,7 +1240,7 @@ class CopyDevice(BaseDevice):
     def _current_config(self, dev_obj=None, options={}):
         ret = ['Copy:: %r'%(self._basedevs)]
         for dev in self._basedevs:
-            frmt = self.dev.getformat()
+            frmt = dev.getformat()
             base = _get_conf_header_util(frmt['header'], dev_obj, options)
             if base != None:
                 ret.extend(base)

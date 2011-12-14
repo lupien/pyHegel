@@ -359,7 +359,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.net_ch1_imag = acq_device(getstr = 'DATA:NET:CH1_IMAG?',str_type = float, autoinit=False)
         self.net_ch2_imag = acq_device(getstr = 'DATA:NET:CH2_IMAG?',str_type = float, autoinit=False)
         self.net_att = acq_device(getstr = 'DATA:NET:ATT?',str_type = float, autoinit=False)
-        self.net_phase_diff = acq_device(getstr = 'DATA:NET:PHASE_DIFF?',str_type = float, autoinit=False)
+        self.net_phase_diff = acq_device(getstr = 'DATA:NET:PHASE_DIFF?',str_type = float, autoinit=False, trig=True)
 
         self.devwrap('fetch', autoinit=False)
         self.fetch._event_flag = threading.Event()
