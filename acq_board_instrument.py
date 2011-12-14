@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 """
 Created on Fri Dec 09 13:39:09 2011
 
@@ -39,7 +40,7 @@ class acq_device(instrument.scpiDevice):
            raise NotImplementedError, self.perror('This device does not handle getdev')
         self._event_flag.clear()
         self.instr.write(self._getdev)
-        instrument.wait_on_event(self._event_flag)
+        instrument.wait_on_event(self._event_flag, check_state=self.instr)
         return self._fromstr(self._rcv_val)
 
 class Listen_thread(threading.Thread):
@@ -104,6 +105,7 @@ class Listen_thread(threading.Thread):
                         else:
                             acq._errors_list.append('Unknown: '+val)
                             print 'Unkown error', head, val
+                        acq._error_state = True
                     else:
                         obj = acq._objdict.get(head, None)
                         if obj == None:
@@ -112,6 +114,11 @@ class Listen_thread(threading.Thread):
                         else:
                             obj._rcv_val = val
                             obj._event_flag.set()
+                            # update _cache for STATUS result
+                            if obj == acq.board_status or obj == acq.result_available:
+                                obj._cache = obj._fromstr(val)
+                            if obj == acq.result_available:
+                                acq._run_finished.set()
                 else: # trame[0]=='#'
                     trame = trame[1:]
                     head, val = trame.split(' ', 1)
@@ -120,7 +127,6 @@ class Listen_thread(threading.Thread):
                         filename = val
                         acq.fetch._rcv_val = None
                         acq.fetch._event_flag.set()
-                        #TODO: handle
                     else: # location == 'Remote'
                         acq.fetch._rcv_val = ''
                         bin_mode = True
@@ -142,6 +148,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def __init__(self, ip_adress, port_nb):
         self._listen_thread = None
         self._errors_list = []
+        self._error_state = False
         
         # init the server member
         self.host = ip_adress
@@ -167,6 +174,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if not self.board_type in ['ADC8', 'ADC14']:
             raise ValueError, 'Invalid board_type'
         self.visa_addr = self.board_type
+        self._run_finished = threading.Event() # starts in clear state
 
         self._listen_thread = Listen_thread(self)
         self._listen_thread.start()     
@@ -175,19 +183,44 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         instrument.BaseInstrument.__init__(self)
 
     def _idn(self):
-        return 'Acq card,,SERIAL#'
+        # Should be: Manufacturer,Model#,Serial#,firmware
+        model = self.board_type
+        serial = self.board_serial.getcache()
+        return 'Acq card,%s,%s,1.0'%(model, serial)
+    def _cls(self):
+        """ Clear error buffer and status
+        """
+        self._error_state = False
+        self._errors_list = []
+    def _check_error(self):
+        if self._error_state:
+            raise ValueError, 'Acq Board currently in error state. clear it with _get_error.'
     def _get_error(self):
         if self._errors_list == []:
-            return 'No more errors'
+            self._error_state = False
+            return '+0,"No error"'
         return self._errors_list.pop()
     def _set_timeout(self):
+        # Workaround for some bug because of visaInstrument _set_timeout property
+        # TODO: find proper fix
         pass
     def __del__(self):
+        # TODO  find a proper way to shut down connection
+        # self.shutdown() (stop thread then send shutdown...)
         if self._listen_thread:
             self._listen_thread.cancel()
             self._listen_thread.wait()
         self.s.close()
-    
+
+    def _async_trig(self):
+        self._run_finished.clear()
+        self.run()
+    def _async_detect(self):
+        return instrument.wait_on_event(self._run_finished, check_state, max_time=.5)
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('op_mode', 'sampling_rate', 'clock_source',
+                'nb_Msample', 'chan_mode', 'chan_nb')
+
     def init(self,full = False):
         if full == True:
             self._objdict = {}
@@ -196,7 +229,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                     name = obj._getdev[:-1]
                     self._objdict[name] = obj
         # if full = true do one time
-        # get the board type and porgram state
+        # get the board type and program state
         self.board_serial.get()
         self.board_status.get()
         self.result_available.get()        
@@ -213,10 +246,21 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if filename != None:
                 s += ' '+filename
             self.write(s)
-            instrument.wait_on_event(self.fetch._event_flag)
+            instrument.wait_on_event(self.fetch._event_flag, check_state=self)
             if self.fetch._rcv_val == None:
                 return None
             return np.fromstring(self.fetch._rcv_val, np.uint64)
+
+    def read_getdev(self, **kwarg):
+        # TODO may need to check if trigger is already in progress
+        self._async_trig()
+        while not self._async_detect():
+            pass
+        return self.fetch.get()
+    def read_getformat(self, **kwarg):
+        return self.fetch.getformat(**kwarg)
+    # TODO redirect read to fetch when doing async
+
         #device member
     def create_devs(self):
 
@@ -298,15 +342,18 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.devwrap('fetch', autoinit=False)
         self.fetch._event_flag = threading.Event()
         self.fetch._rcv_val = None
+        self.devwrap('read', autoinit=False)
         
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
         
     #class methode     
     def write(self, val):
+        self._check_error()
         val = '@' + val + '\n'
         self.s.send(val)
 
+    # only use read, ask before starting listen thread.
     def read(self):
         return self.s.recv(128)
 
