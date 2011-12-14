@@ -136,6 +136,8 @@ class Listen_thread(threading.Thread):
                         break;
                 trames = old_stuff.split('\n', 1)
                 old_stuff = trames.pop()
+        print 'Thread Ending....'
+
     def cancel(self):
         self._stop = True
     def wait(self, timeout=None):
@@ -205,6 +207,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         # TODO: find proper fix
         pass
     def __del__(self):
+        print 'deleting acq1'
         # TODO  find a proper way to shut down connection
         # self.shutdown() (stop thread then send shutdown...)
         if self._listen_thread:
@@ -326,6 +329,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.format_block_length = acq_device('CONFIG:FORMAT:BLOCK_LENGTH',str_type = int, min=1, max=4294967296)
 
         # Results
+        #histogram result
         self.hist_m1 = acq_device(getstr = 'DATA:HIST:M1?', str_type = float, autoinit=False)
         self.hist_m2 = acq_device(getstr = 'DATA:HIST:M2?', str_type = float, autoinit=False)
         self.hist_m3 = acq_device(getstr = 'DATA:HIST:M3?', str_type = float, autoinit=False)
@@ -334,10 +338,24 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         #TODO correlation result
         #TODO 
         
+        # network analyzer result
         self.custom_result1 = acq_device(getstr = 'DATA:CUST:RESULT1?',str_type = float, autoinit=False)
         self.custom_result2 = acq_device(getstr = 'DATA:CUST:RESULT2?',str_type = float, autoinit=False)
         self.custom_result3 = acq_device(getstr = 'DATA:CUST:RESULT3?',str_type = float, autoinit=False)
         self.custom_result4 = acq_device(getstr = 'DATA:CUST:RESULT4?',str_type = float, autoinit=False)
+        
+        self.net_ch1_freq = acq_device(getstr = 'DATA:NET:CH1_FREQ?',str_type = float, autoinit=False)
+        self.net_ch2_freq = acq_device(getstr = 'DATA:NET:CH2_FREQ?',str_type = float, autoinit=False)
+        self.net_ch1_ampl = acq_device(getstr = 'DATA:NET:CH1_AMPL?',str_type = float, autoinit=False)
+        self.net_ch2_ampl = acq_device(getstr = 'DATA:NET:CH2_AMPL?',str_type = float, autoinit=False)
+        self.net_ch1_phase = acq_device(getstr = 'DATA:NET:CH1_PHASE?',str_type = float, autoinit=False)
+        self.net_ch2_phase = acq_device(getstr = 'DATA:NET:CH2_PHASE?',str_type = float, autoinit=False)
+        self.net_ch1_real = acq_device(getstr = 'DATA:NET:CH1_REAL?',str_type = float, autoinit=False)
+        self.net_ch2_real = acq_device(getstr = 'DATA:NET:CH2_REAL?',str_type = float, autoinit=False)
+        self.net_ch1_imag = acq_device(getstr = 'DATA:NET:CH1_IMAG?',str_type = float, autoinit=False)
+        self.net_ch2_imag = acq_device(getstr = 'DATA:NET:CH2_IMAG?',str_type = float, autoinit=False)
+        self.net_att = acq_device(getstr = 'DATA:NET:ATT?',str_type = float, autoinit=False)
+        self.net_phase_diff = acq_device(getstr = 'DATA:NET:PHASE_DIFF?',str_type = float, autoinit=False)
 
         self.devwrap('fetch', autoinit=False)
         self.fetch._event_flag = threading.Event()
@@ -373,8 +391,15 @@ class Acq_Board_Instrument(instrument.visaInstrument):
            raise ValueError, 'Critical Error:'+val
        else:
            raise ValueError, 'Unknow problem:'+base+' :: '+val
-
            
+           
+    def stop(self):
+        self.write('STOP')
+        
+    def disconnect(self):
+        self.write('DISCONNECT')
+        
+        
     def set_histogram(self, nb_Msample, sampling_rate, chan_nb, clock_source):
         self.op_mode.set('Hist')
         self.sampling_rate.set(sampling_rate)
@@ -388,6 +413,19 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_await.set(False)
         self.trigger_create.set(False)
         
+    def set_network_analyzer(self, nb_Msample, sampling_rate, signal_freq, lock_in_square, clock_source):
+        self.op_mode.set('Net')
+        self.sampling_rate.set(sampling_rate)
+        self.test_mode.set(False)
+        self.clock_source.set(clock_source)
+        self.nb_Msample.set(nb_Msample)
+        self.chan_mode.set('Dual')
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        self.net_signal_freq.set(signal_freq)
+        self.lock_in_square.set(lock_in_square)
         
     def run(self):
         # check if the configuration are ok
@@ -396,7 +434,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if self.board_status.getcache() == 'Running':
             raise ValueError, 'ERROR Board already Running'
         
-        # check if nb_sample fit the op_mode
+        # check if nb_Msample fit the op_mode
         if self.op_mode.getcache() == 'Hist' or self.op_mode.getcache() == 'Corr':
             
             if self.board_type == 'ADC14' and self.op_mode.getcache() == 'Hist':
@@ -408,7 +446,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                     if new_nb_Msample > (self.max_nb_Msample - 512):
                         new_nb_Msample = self.max_nb_Msample - 512
                         self.nb_Msample.set(new_nb_Msample)
-                    raise ValueError, 'Warning nb_Msample not a multiple of 512, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                    raise ValueError, 'Warning nb_Msample must be a multiple of 512 in Hist ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
             else:
                 quotien = float(self.nb_Msample.getcache())/8192
                 frac,entier = math.modf(quotien)
@@ -418,7 +456,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                     if new_nb_Msample > (self.max_nb_Msample - 8192):
                         new_nb_Msample = self.max_nb_Msample - 8192
                         self.nb_Msample.set(new_nb_Msample)
-                    raise ValueError, 'Warning nb_Msample not a multiple of 8192, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                    raise ValueError, 'Warning nb_Msample must be a multiple of 8192 in Corr and Hist ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                    
+        if self.op_mode.getcache() == 'Net':
+            if self.nb_Msample.getcache() > 64:
+                self.nb_Msample.set(64)
+                raise ValueError, 'Warning nb_Msample must be between 32 and 64 in Net mode, value corrected to nearest possible value : ' + str(self.nb_Msample.getcache())
             
             
         #check if clock freq is a multiple of 5 Mhz when in USB clock mode
