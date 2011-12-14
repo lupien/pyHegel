@@ -85,6 +85,8 @@ def get_last_trace():
 def close_last_trace():
     get_last_trace().window.close()
 
+#TODO: add rescale button, abort button.
+
 class Trace(FigureManagerQT):
     def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False):
         self.fig = Figure(figsize=(width,height),dpi=dpi)

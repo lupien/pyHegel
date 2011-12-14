@@ -221,6 +221,8 @@ def _write_conf(f, formats):
                 f.write(' '+c+';')
             f.write('\n')
 
+# TODO: add a sweep up down.
+#       could save in 2 files but display on same trace
 
 class _Sweep(instrument.BaseInstrument):
     # This MemoryDevice will be shared among different instances
@@ -256,7 +258,7 @@ class _Sweep(instrument.BaseInstrument):
         return '<sweep instrument>'
     def __call__(self, dev, start, stop, npts, filename='%T.txt', rate=None,
                   close_after=False, title=None, out=None, extra_conf=None,
-                  async=False):
+                  async=False, reset=False):
         """
             routine pour faire un sweep
              dev est l'objet a varier
@@ -338,6 +340,9 @@ class _Sweep(instrument.BaseInstrument):
             f.close()
         if graph and close_after:
             t.window.close()
+        if reset: # return to first value
+            dev.set(span[0]) # TODO replace with move
+            
 
 sweep = _Sweep()
 
