@@ -151,8 +151,15 @@ class asyncThread(threading.Thread):
         self.join(timeout)
         return not self.is_alive()
 
-def wait_on_event(task_or_event):
-    while not task_or_event.wait(0.2):
+def wait_on_event(task_or_event, check_state = None, max_time=None):
+    start_time = time.time()
+    while True:
+        if task_or_event.wait(0.2):
+            return True
+        if max_time != None and time.time()-start_time > max_time:
+            return False
+        if check_state != None and check_state._error_state:
+            break
         QtGui.QApplication.instance().processEvents(
              QtCore.QEventLoop.AllEvents, 20) # 20 ms max
 

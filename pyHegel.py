@@ -439,6 +439,8 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
                 wait(interval)
             _checkTracePause(t)
     except KeyboardInterrupt:
+        # TODO proper file closing in case of error.
+        #      on windows sometimes the file stays locked.
         print 'Interrupting record'
         pass
     if f:
