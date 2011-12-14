@@ -101,11 +101,11 @@ class Listen_thread(threading.Thread):
                             print 'Error: ', val
                         elif head == 'ERROR:CRITICAL':
                             acq._errors_list.append('CRITICAL: '+val)
+                            acq._error_state = True
                             print '!!!!!!!!!!!\n!!!!!CRITICAL ERROR!!!!!: ', val,'\n!!!!!!!!!!!!!'
                         else:
                             acq._errors_list.append('Unknown: '+val)
                             print 'Unkown error', head, val
-                        acq._error_state = True
                     else:
                         obj = acq._objdict.get(head, None)
                         if obj == None:
@@ -216,7 +216,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self._run_finished.clear()
         self.run()
     def _async_detect(self):
-        return instrument.wait_on_event(self._run_finished, check_state, max_time=.5)
+        return instrument.wait_on_event(self._run_finished, check_state=self, max_time=.5)
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('op_mode', 'sampling_rate', 'clock_source',
                 'nb_Msample', 'chan_mode', 'chan_nb')
@@ -251,13 +251,13 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return None
             return np.fromstring(self.fetch._rcv_val, np.uint64)
 
-    def read_getdev(self, **kwarg):
+    def readval_getdev(self, **kwarg):
         # TODO may need to check if trigger is already in progress
         self._async_trig()
         while not self._async_detect():
             pass
         return self.fetch.get()
-    def read_getformat(self, **kwarg):
+    def readval_getformat(self, **kwarg):
         return self.fetch.getformat(**kwarg)
     # TODO redirect read to fetch when doing async
 
@@ -342,7 +342,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.devwrap('fetch', autoinit=False)
         self.fetch._event_flag = threading.Event()
         self.fetch._rcv_val = None
-        self.devwrap('read', autoinit=False)
+        self.devwrap('readval', autoinit=False)
         
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
@@ -393,7 +393,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         # check if the configuration are ok
         
         #check if board is Idle
-        if self.board_status.getcatch() == 'Running':
+        if self.board_status.getcache() == 'Running':
             raise ValueError, 'ERROR Board already Running'
         
         # check if nb_sample fit the op_mode
