@@ -299,7 +299,7 @@ class _Sweep(instrument.BaseInstrument):
             self._sweep_trace_num += 1
             t.setWindowTitle('Sweep: '+title)
             t.setLim(span)
-            if len(hdrs) == 1:
+            if len(graphsel) == 0:
                 gsel = _itemgetter(0)
             else:
                 gsel = _itemgetter(*graphsel)
