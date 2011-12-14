@@ -183,11 +183,22 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         instrument.BaseInstrument.__init__(self)
 
     def _idn(self):
-        return 'Acq card,,SERIAL#'
+        # Should be: Manufacturer,Model#,Serial#,firmware
+        model = self.board_type
+        serial = self.board_serial.getcache()
+        return 'Acq card,%s,%s,1.0'%(model, serial)
+    def _cls(self):
+        """ Clear error buffer and status
+        """
+        self._error_state = False
+        self._errors_list = []
+    def _check_error(self):
+        if self._error_state:
+            raise ValueError, 'Acq Board currently in error state. clear it with _get_error.'
     def _get_error(self):
         if self._errors_list == []:
             self._error_state = False
-            return 'No more errors'
+            return '+0,"No error"'
         return self._errors_list.pop()
     def _set_timeout(self):
         # Workaround for some bug because of visaInstrument _set_timeout property
@@ -206,6 +217,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.run()
     def _async_detect(self):
         return instrument.wait_on_event(self._run_finished, check_state, max_time=.5)
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('op_mode', 'sampling_rate', 'clock_source',
+                'nb_Msample', 'chan_mode', 'chan_nb')
 
     def init(self,full = False):
         if full == True:
@@ -215,7 +229,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                     name = obj._getdev[:-1]
                     self._objdict[name] = obj
         # if full = true do one time
-        # get the board type and porgram state
+        # get the board type and program state
         self.board_serial.get()
         self.board_status.get()
         self.result_available.get()        
@@ -236,6 +250,17 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if self.fetch._rcv_val == None:
                 return None
             return np.fromstring(self.fetch._rcv_val, np.uint64)
+
+    def read_getdev(self, **kwarg):
+        # TODO may need to check if trigger is already in progress
+        self._async_trig()
+        while not self._async_detect():
+            pass
+        return self.fetch.get()
+    def read_getformat(self, **kwarg):
+        return self.fetch.getformat(**kwarg)
+    # TODO redirect read to fetch when doing async
+
         #device member
     def create_devs(self):
 
@@ -317,15 +342,18 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.devwrap('fetch', autoinit=False)
         self.fetch._event_flag = threading.Event()
         self.fetch._rcv_val = None
+        self.devwrap('read', autoinit=False)
         
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
         
     #class methode     
     def write(self, val):
+        self._check_error()
         val = '@' + val + '\n'
         self.s.send(val)
 
+    # only use read, ask before starting listen thread.
     def read(self):
         return self.s.recv(128)
 

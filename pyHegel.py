@@ -162,6 +162,7 @@ def _readall_async(devs, formats, i):
         _readall(devs, formats, i, async=2)
         return _readall(devs, formats, i, async=3)
     except KeyboardInterrupt:
+        print 'Rewinding async because of keyboard interrupt'
         _readall(devs, formats, i, async=-1)
         raise
 

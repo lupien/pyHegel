@@ -57,8 +57,12 @@ def _get_conf_header(format):
 def _write_dev(val, filename, format=format, first=False):
     append = format['append']
     bin = format['bin']
+    doheader = True
+    if bin:
+        doheader = False
     if append and not first:
         open_mode = 'a'
+        doheader = False
     else:
         open_mode = 'w'
     if bin:
@@ -67,7 +71,7 @@ def _write_dev(val, filename, format=format, first=False):
             filename = os.path.splitext(filename)[0]+bin
     f=open(filename, open_mode)
     header = _get_conf_header(format)
-    if header : # if either is not None or not ''
+    if header and doheader: # if either is not None or not ''
         for h in header:
             f.write('#'+h+'\n')
     if append:
@@ -963,7 +967,7 @@ class agilent_multi_34410A(visaInstrument):
                                  'volt_aperture_en', 'zero', 'autorange',
                                  'trig_src', 'trig_delay', 'trig_count',
                                  'sample_count', 'sample_src', 'sample_timer',
-                                 'trig_delayauto')
+                                 'trig_delayauto', 'line_freq')
     def set_long_avg(self, time, force=False):
         line_period = 1/self.line_freq.getcache()
         if time > 1.:
@@ -984,6 +988,8 @@ class agilent_multi_34410A(visaInstrument):
           'DIODe', 'FREQuency', 'PERiod', 'RESistance', 'FRESistance', 'TEMPerature', quotes=True)
         self.mode = scpiDevice('FUNC', str_type=ch, choices=ch)
         self.readval = scpiDevice(getstr='READ?',str_type=float) # similar to INItiate followed by FETCh.
+        # TODO make readval redirect to fetchval for async mode
+        # handle avg, stats when in multiple points mode.
         self.fetchval = scpiDevice(getstr='FETCh?',str_type=_decode_float64, autoinit=False, trig=True) #You can't ask for fetch after an aperture change. You need to read some data first.
         self.line_freq = scpiDevice(getstr='SYSTem:LFRequency?', str_type=float) # see also SYST:LFR:ACTual?
         self.volt_nplc = scpiDevice('VOLTage:NPLC', str_type=float, choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100]) # DC
@@ -1088,6 +1094,7 @@ class infiniiVision_3000(visaInstrument):
         self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', str_type=_decode_block_base, autoinit=False) # returns block of data(always bin with # header)
         self.snap_png._format['bin']='.png'
         self.inksaver = scpiDevice(':HARDcopy:INKSaver', str_type=bool) # ON, OFF 1 or 0
+        # TODO return scaled values, and select channels
         self.data = scpiDevice(getstr=':waveform:DATA?', str_type=_decode_uint8_bin, autoinit=False) # returns block of data (always header# for asci byte and word)
           # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
           #  type (Normal, peak, average, HRes), #points, #avg, xincr, xorg, xref, yincr, yorg, yref
@@ -1113,6 +1120,7 @@ class agilent_EXA(visaInstrument):
         self.average_count = scpiDevice(getstr=':average:count?',str_type=float)
         self.freq_start = scpiDevice(':freq:start', str_type=float, min=10e6, max=12.6e9)
         self.freq_stop = scpiDevice(':freq:stop', str_type=float, min=10e6, max=12.6e9)
+        # TODO handle multiple channels
         self.trace1 = scpiDevice(getstr=':trace? trace1', str_type=_decode_float64, multi=True, autoinit=False)
         self.fetch1 = scpiDevice(getstr=':fetch:san1?', autoinit=False)
         self.read1 = scpiDevice(getstr=':read:san1?', autoinit=False)
