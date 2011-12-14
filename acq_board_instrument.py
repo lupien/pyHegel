@@ -221,8 +221,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def _async_detect(self):
         return instrument.wait_on_event(self._run_finished, check_state=self, max_time=.5)
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('op_mode', 'sampling_rate', 'clock_source',
-                'nb_Msample', 'chan_mode', 'chan_nb')
+        if self.op_mode.getcache() == 'Hist':
+            return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
+                                     'chan_nb')
+        if self.op_mode.getcache() == 'Net':
+            return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
+                                     'lock_in_square','net_signal_freq')
 
     def init(self,full = False):
         if full == True:
