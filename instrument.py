@@ -1216,3 +1216,46 @@ class ScalingDevice(BaseDevice):
     def check(self, val):
         self._basedev.check((val - self._offset) / self._scale)
 
+
+class CopyDevice(BaseDevice):
+    """
+       This class provides a wrapper around a device.
+       On reading, it returns basedevs[0].get
+       On writing it will write to basedev[0], basdev[1] ...
+       setget option does nothing here.
+       basedevs is a list of dev
+    """
+    def __init__(self, basedevs , autoinit=None, doc='', **extrak):
+        self._basedevs = basedevs
+        for i, dev in enumerate(self._basedevs):
+            if isinstance(dev, BaseInstrument):
+                self._basedevs[i] = dev.alias
+        doc+= self.__doc__+doc+'basedevs=%s'%repr(basedevs)
+        if autoinit == None:
+            autoinit = basedevs[0]._autoinit
+        BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
+        self.instr = basedevs[0].instr
+        self.name = basedevs[0].name
+        self._format['header'] = self._current_config
+    def _current_config(self, dev_obj=None, options={}):
+        ret = ['Copy:: %r'%(self._basedevs)]
+        for dev in self._basedevs:
+            frmt = self.dev.getformat()
+            base = _get_conf_header_util(frmt['header'], dev_obj, options)
+            if base != None:
+                ret.extend(base)
+        return ret
+    def get(self):
+        val = self._basedevs[0].get()
+        self._cache = val
+        return val
+    def set(self, val):
+        for dev in self._basedevs:
+            dev.set(val)
+        # read basedev cache, in case the values is changed by setget mode.
+        self._cache = self._basedevs[0].getcache()
+    def check(self, val):
+        for dev in self._basedevs:
+            dev.check(val)
+
+
