@@ -221,6 +221,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.run()
     def _async_detect(self):
         return instrument.wait_on_event(self._run_finished, check_state=self, max_time=.5)
+    def wait_after_trig(self):
+        return instrument.wait_on_event(self._run_finished, check_state=self)
+    def run_and_wait(self):
+        self._async_trig()
+        self.wait_after_trig()
+
     def _current_config(self, dev_obj=None, options={}):
         if self.op_mode.getcache() == 'Hist':
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
