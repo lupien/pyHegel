@@ -48,7 +48,7 @@ class Listen_thread(threading.Thread):
         super(type(self), self).__init__()
         self.daemon = True
         self._stop = False
-        self.acq_instr = acq_instr
+        self.acq_instr = weakref.proxy(acq_instr)
     def run(self):
         select_list = [self.acq_instr.s]
         socket_timeout = 0.1
