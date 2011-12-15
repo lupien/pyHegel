@@ -40,7 +40,7 @@ def _writevec(file_obj, vals_list, pre_str=''):
 
 def _get_conf_header_util(header, obj, options):
     if callable(header):
-        header = header(obj, options)
+        header = header(obj.instr, obj, options)
     if header: # if either is not None or not ''
         if isinstance(header, basestring):
             header=[header]
@@ -205,6 +205,7 @@ class BaseDevice(object):
         if choices:
             doc+='-------------\n Possible value to set: %s'%repr(choices)
         self.__doc__ = doc+BaseDevice.__doc__
+        # obj is used by _get_conf_header
         self._format = dict(file=False, multi=multi, graph=[],
                             append=False, header=None, bin=False,
                             options={}, obj=self)
@@ -462,8 +463,10 @@ class BaseInstrument(object):
         # not specify anything for header in its format string than
         # we assign it.
         self.devwrap('header')
-        if hasattr(self, '_current_config'):
-            conf = self._current_config
+        # need the class function to prevent binding which blocks __del__
+        cls = type(self)
+        if hasattr(cls, '_current_config'):
+            conf = cls._current_config
         else:
             conf = None
         for devname, obj in self.devs_iter():
@@ -1198,7 +1201,6 @@ class ScalingDevice(BaseDevice):
         self.name = basedev.name
         self._format['multi'] = ['scale', 'raw']
         self._format['graph'] = [0]
-        self._format['header'] = self._current_config
     def _current_config(self, dev_obj=None, options={}):
         ret = ['Scaling:: fact=%r offset=%r'%(self._scale, self._offset)]
         frmt = self._basedev.getformat()
