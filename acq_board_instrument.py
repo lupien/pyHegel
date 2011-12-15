@@ -146,6 +146,7 @@ class Listen_thread(threading.Thread):
         return not self.is_alive()
 
 
+# TODO: Add CHECKING verification in init and instrument write/read.
 class Acq_Board_Instrument(instrument.visaInstrument):
     
     def __init__(self, ip_adress, port_nb):
