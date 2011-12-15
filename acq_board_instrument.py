@@ -11,6 +11,7 @@ import socket
 import select
 import threading
 import math
+import weakref
 import numpy as np
 
 # user made import
