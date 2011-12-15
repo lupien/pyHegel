@@ -233,6 +233,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             return self._conf_helper('op_mode', 'sampling_rate', 'clock_source','osc_nb_sample',
                                      'osc_hori_offset', 'osc_trigger_level', 'osc_slope', 'osc_trig_source',
                                      'chan_mode','chan_nb')
+        
+        if self.op_mode.getcache() == 'Spec':
+             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
+                                      'chan_mode','chan_nb','fft_length')
                                      
 
     def init(self,full = False):
@@ -276,6 +280,28 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return np.fromstring(self.fetch._rcv_val, np.ushort)
             else:
                 return np.fromstring(self.fetch._rcv_val, np.ubyte)
+        if mode == 'Spec':
+            # TODO prevent ch2 form overwrite ch1 in the file
+            if type(ch) != list:
+                ch = [ch]
+            if 1 in ch:            
+                s = 'DATA:SPEC:CH1?'
+                if filename != None:
+                    s += ' '+filename
+                self.write(s)
+                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                if self.fetch._rcv_val == None:
+                    return None
+                return np.fromstring(self.fetch._rcv_val, np.float64)
+            if 2 in ch:
+                s = 'DATA:SPEC:CH2?'
+                if filename != None:
+                    s += ' '+filename
+                self.write(s)
+                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                if self.fetch._rcv_val == None:
+                    return None
+                return np.fromstring(self.fetch._rcv_val, np.float64)
                 
 
     def readval_getdev(self, **kwarg):
@@ -469,7 +495,21 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.osc_slope.set(slope)
         self.osc_trig_source(trig_source)
         
-
+    def set_spectrum(self,nb_Msample, fft_length, sampling_rate, chan_mode, chan_nb, clock_source):
+        self.op_mode.set('Spec')
+        self.sampling_rate.set(sampling_rate)
+        self.test_mode.set(False)
+        self.clock_source.set(clock_source)
+        self.nb_Msample.set(nb_Msample)
+        self.chan_mode.set(chan_mode)
+        self.chan_nb.set(chan_nb)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        self.fft_length.set(fft_length)
+        
+        
     def run(self):
         # check if the configuration are ok
         
