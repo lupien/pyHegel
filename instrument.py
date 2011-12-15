@@ -16,6 +16,7 @@ import random
 import os
 import time
 import threading
+import weakref
 from PyQt4 import QtGui, QtCore
 
 import traces
@@ -435,16 +436,17 @@ class BaseInstrument(object):
         setattr(cls, name, wd)
     def devwrap(self, name, **extrak):
         setdev = getdev = check = getformat = None
+        cls = type(self)
         for s in dir(self):
            if s == name+'_setdev':
-              setdev = getattr(self, s)
+              setdev = getattr(cls, s)
            if s == name+'_getdev':
-              getdev = getattr(self, s)
+              getdev = getattr(cls, s)
            if s == name+'_check':
-              check = getattr(self, s)
+              check = getattr(cls, s)
            if s == name+'_getformat':
-              getformat = getattr(self, s)
-        wd = wrapDevice(setdev, getdev, check, getformat, **extrak)
+              getformat = getattr(cls, s)
+        wd = cls_wrapDevice(setdev, getdev, check, getformat, **extrak)
         setattr(self, name, wd)
     def devs_iter(self):
         for devname in dir(self):
@@ -465,7 +467,7 @@ class BaseInstrument(object):
         else:
             conf = None
         for devname, obj in self.devs_iter():
-            obj.instr = self
+            obj.instr = weakref.proxy(self)
             obj.name = devname
             if conf and not obj._format['header']:
                 obj._format['header'] = conf
