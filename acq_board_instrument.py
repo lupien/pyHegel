@@ -227,6 +227,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if self.op_mode.getcache() == 'Net':
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
                                      'lock_in_square','net_signal_freq')
+                                     
+        if self.op_mode.getcache() == 'Osc':
+            return self._conf_helper('op_mode', 'sampling_rate', 'clock_source','osc_nb_sample',
+                                     'osc_hori_offset', 'osc_trigger_level', 'osc_slope', 'osc_trig_source',
+                                     'chan_mode','chan_nb')
+                                     
 
     def init(self,full = False):
         if full == True:
@@ -257,6 +263,19 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if self.fetch._rcv_val == None:
                 return None
             return np.fromstring(self.fetch._rcv_val, np.uint64)
+        if mode == 'Osc':
+            s = 'DATA:OSC:DATA?'
+            if filename != None:
+                s += ' '+filename
+            self.write(s)
+            instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+            if self.fetch._rcv_val == None:
+                return None
+            if self.board_type == 'ADC14':
+                return np.fromstring(self.fetch._rcv_val, np.ushort)
+            else:
+                return np.fromstring(self.fetch._rcv_val, np.ubyte)
+                
 
     def readval_getdev(self, **kwarg):
         # TODO may need to check if trigger is already in progress
@@ -430,6 +449,25 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_create.set(False)
         self.net_signal_freq.set(signal_freq)
         self.lock_in_square.set(lock_in_square)
+        
+    def set_scope(self, nb_sample, sampling_rate, hori_offset, trigger_level, slope, trig_source,chan_mode, chan_nb, clock_source):
+        self.op_mode.set('Osc')
+        self.sampling_rate.set(sampling_rate)
+        self.test_mode.set(False)
+        self.clock_source.set(clock_source)
+        self.nb_Msample.set(32)
+        self.chan_mode.set(chan_mode)
+        self.chan_nb.set(chan_nb)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        self.osc_nb_sample.set(nb_sample)
+        self.osc_hori_offset.set(hori_offset)
+        self.osc_trigger_level.set(trigger_level)
+        self.osc_slope.set(slope)
+        self.osc_trig_source(trig_source)
+        
         
     def run(self):
         # check if the configuration are ok
