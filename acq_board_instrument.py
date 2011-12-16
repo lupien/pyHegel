@@ -66,6 +66,9 @@ class dummy_device(object):
         instrument.wait_on_event(self._event_flag, check_state=self.instr)
         return self._rcv_val
 
+# TODO: there is still a problem with acq.disconnect
+#        the listen thread is not terminated properly
+#        it crashes on the next connect (when object gets deleted)
 class Listen_thread(threading.Thread):
     def __init__(self, acq_instr):
         super(type(self), self).__init__()
