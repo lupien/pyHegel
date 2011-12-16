@@ -60,6 +60,8 @@ class dummy_device(object):
         self._getdev = getstr
     def getdev(self, quest_extra=''):
         self._event_flag.clear()
+        if quest_extra:
+            quest_extra=' '+quest_extra
         self.instr.write(self._getdev + quest_extra)
         instrument.wait_on_event(self._event_flag, check_state=self.instr)
         return self._rcv_val
@@ -419,16 +421,18 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self._nb_tau_helper(N)
             self._tau_vec_helper(i, vals)
             self.tau_vec._current_tau_vec.append(vals)
-    def tau_vec_getdev(self, force=False):
+    def tau_vec_getdev(self, force=False, i=None, append=None):
         if not force:
             return self.tau_vec._current_tau_vec
         # we read from device
-        N = self._tau_nb.getdev()
-        self.tau_vec = N
+        N = int(self._tau_nb.getdev())
+        self.tau_vec.nb_tau = N
         self.tau_vec._current_tau_vec = []
         for i in range(N):
-            val = self._tau_veci(repr(i))
-            self.tau_vec._current_tau_vec.append(val)
+            ind, val = self._tau_veci.getdev(repr(i)).split(' ')
+            if i != int(ind):
+                raise ValueError, 'read wrong index. asked for %i, got %s'%(i, ind)
+            self.tau_vec._current_tau_vec.append(int(val))
         return self.tau_vec._current_tau_vec
 
     def tau_vec_check(self, vals, i=None, append=False):
@@ -439,6 +443,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             N = len(vals)
             if N > self.max_nb_tau:
                 raise ValueError, 'Too many values in tau_vec.set, max of %i elements'%self.max_nb_tau
+            return
         except TypeError:
             pass
         if not np.isreal(vals):
@@ -548,7 +553,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.devwrap('readval', autoinit=False)
         self.devwrap('tau_vec', setget=True)
         self._tau_nb = dummy_device('CONFIG:NB_TAU?')
-        self._tau_veci = dummy_device('CONFIG:TAU? ')
+        self._tau_veci = dummy_device('CONFIG:TAU?')
 
         # This needs to be last to complete creation
         super(type(self),self).create_devs()

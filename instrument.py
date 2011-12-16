@@ -340,9 +340,9 @@ class cls_wrapDevice(BaseDevice):
             return self._getdev(self.instr, **kwarg)
         else:
             raise NotImplementedError, self.perror('This device does not handle getdev')
-    def check(self, val):
+    def check(self, val, **kwarg):
         if self._check != None:
-            self._check(self.instr, val)
+            self._check(self.instr, val, **kwarg)
         else:
             super(type(self), self).check(val)
     def getformat(self, **kwarg):
