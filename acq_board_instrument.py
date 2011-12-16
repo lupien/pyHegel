@@ -30,6 +30,15 @@ class acq_bool(object):
             raise ValueError, 'acq_bool should not be None'
         return repr(val)
 
+class acq_filename(object):
+    def __call__(self, input_str):
+        if input_str[0] != '<' or input_str[0] != '>':
+            print 'Filename is missing < >'
+            return input_str
+        return input_str[1:-1]
+    def _tostr(self, val):
+        return '<'+val+'>'
+
 class acq_device(instrument.scpiDevice):
     def __init__(self, *arg, **kwarg):
         super(type(self), self).__init__(*arg, **kwarg)
