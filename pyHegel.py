@@ -464,6 +464,18 @@ def trace(dev, interval=1, title=''):
     """
     record(dev, interval, npoints=1000, filename='trace.dat', title=title)
 
+def scope(dev, interval=.1, title=''):
+    t = traces.Trace()
+    t.setWindowTitle('Scope: '+title)
+    while True:
+        v=dev.get()
+        x=linspace(0, 1, len(v))
+        t.setPoints(x, v)
+        wait(interval)
+        _checkTracePause(t)
+        if t.abort_enabled:
+            break
+
 
 _get_filename_i = 0
 def _process_filename(filename):
