@@ -325,7 +325,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def create_devs(self):
 
         # choices string and number
-        op_mode_str = ['Acq', 'Corr', 'Cust', 'Hist', 'Net', 'Osc', 'Spec']
+        op_mode_str = ['Null', 'Acq', 'Corr', 'Cust', 'Hist', 'Net', 'Osc', 'Spec']
         clock_source_str = ['Internal', 'External', 'USB']
         chan_mode_str = ['Single','Dual']
         osc_slope_str = ['Rising','Falling']
