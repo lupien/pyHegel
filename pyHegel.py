@@ -469,7 +469,7 @@ def scope(dev, interval=.1, title=''):
     t.setWindowTitle('Scope: '+title)
     while True:
         v=dev.get()
-        x=linspace(0, 1, len(v))
+        x=np.linspace(0, 1, len(v))
         t.setPoints(x, v)
         wait(interval)
         _checkTracePause(t)

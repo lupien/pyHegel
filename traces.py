@@ -6,14 +6,13 @@
 
 import time
 
-from PyQt4 import QtCore, QtGui, uic
+from PyQt4 import QtCore, QtGui
 import numpy as np
-from matplotlib import pylab, pyplot, ticker, rcParams
+from matplotlib import pylab, rcParams
 
 # same as in fullmpcanvas.py
 # follows new_figure_manager
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.backends.backend_qt4 import FigureManagerQT
 from matplotlib.figure import Figure
 
@@ -99,6 +98,8 @@ class Trace(FigureManagerQT):
         self.ax = self.fig.add_subplot(111)
         self.xs = None
         self.ys = None
+        self.xmax = None
+        self.xmin = None
         self.legend_strs = None
         self.first_update = True
         self.twinmode = False
@@ -143,9 +144,15 @@ class Trace(FigureManagerQT):
     def abort_button_press(self, state):
         self.abort_enabled = state
     def rescale_button_press(self):
-        # TODO implement rescale correctly
-        self.ax2.relim()
-        self.ax2.autoscale(enable=None)
+        # TODO tell toolbar that a new set of scales exists
+        self.ax.relim()
+        self.ax.set_xlim(self.xmin, self.xmax, auto=True)
+        self.ax.set_autoscaley_on(True)
+        self.ax.autoscale(enable=None)
+        if self.twinmode:
+            self.ax2.set_autoscaley_on(True)
+            self.ax2.relim()
+            self.ax2.autoscale(enable=None)
         self.draw()
     def mykey_press(self, event):
         # TODO add a Rescale
@@ -174,6 +181,8 @@ class Trace(FigureManagerQT):
                  minx = np.min(minx)
         except:
             pass
+        self.xmax = maxx
+        self.xmin = minx
         self.ax.set_xlim(minx, maxx, auto=False)
         self.update()
     def set_xlabel(self, label):
@@ -209,6 +218,7 @@ class Trace(FigureManagerQT):
            if self.ys.shape[1] == 2:
                self.twinmode = True
                self.ax2 = self.ax.twinx()
+               self.ax2.set_xlim(self.xmin, self.xmax, auto=False)
            self.crvs = []
            #self.ax.clear()
         x = self.xs
@@ -375,8 +385,6 @@ sleeper = Sleeper()
 
 def sleep(sec):
     sleeper.start_sleep(sec/60.)
-    start = time.time()
-    end = start + sec
     try:
         while not sleeper.finished:
             QtGui.QApplication.instance().processEvents(
