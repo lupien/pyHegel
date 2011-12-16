@@ -30,6 +30,15 @@ class acq_bool(object):
             raise ValueError, 'acq_bool should not be None'
         return repr(val)
 
+class acq_filename(object):
+    def __call__(self, input_str):
+        if input_str[0] != '<' or input_str[0] != '>':
+            print 'Filename is missing < >'
+            return input_str
+        return input_str[1:-1]
+    def _tostr(self, val):
+        return '<'+val+'>'
+
 class acq_device(instrument.scpiDevice):
     def __init__(self, *arg, **kwarg):
         super(type(self), self).__init__(*arg, **kwarg)
@@ -43,6 +52,17 @@ class acq_device(instrument.scpiDevice):
         self.instr.write(self._getdev)
         instrument.wait_on_event(self._event_flag, check_state=self.instr)
         return self._fromstr(self._rcv_val)
+
+class dummy_device(object):
+    def __init__(self, getstr):
+        self._rcv_val = None
+        self._event_flag = threading.Event()
+        self._getdev = getstr
+    def getdev(self, quest_extra=''):
+        self._event_flag.clear()
+        self.instr.write(self._getdev + quest_extra)
+        instrument.wait_on_event(self._event_flag, check_state=self.instr)
+        return self._rcv_val
 
 class Listen_thread(threading.Thread):
     def __init__(self, acq_instr):
@@ -167,7 +187,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.min_usb_clock_freq = 200
         self.min_nb_Msample = 32
         self.max_nb_Msample = 4294967295
-        
+        self.max_nb_tau = 50
         
         # try connect to the server
         self.s.connect((self.host, self.port))
@@ -246,6 +266,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                                       'chan_mode','chan_nb','fft_length')
                                      
 
+    def dummy_devs_iter(self):
+        for devname in dir(self):
+           obj = getattr(self, devname)
+           if isinstance(obj, dummy_device):
+               yield devname, obj
+
     def init(self,full = False):
         if full == True:
             self._objdict = {}
@@ -253,11 +279,17 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 if isinstance(obj, acq_device):
                     name = obj._getdev[:-1]
                     self._objdict[name] = obj
+            for devname, obj in self.dummy_devs_iter():
+                name = obj._getdev[:-1]
+                obj.instr = weakref.proxy(self)
+                self._objdict[name] = obj
+
         # if full = true do one time
         # get the board type and program state
         self.board_serial.get()
         self.board_status.get()
-        self.result_available.get()        
+        self.result_available.get()
+        self.tau_vec([0])        
 
     def fetch_getformat(self, filename=None):
         self.fetch._format.update(file=True)
@@ -321,6 +353,66 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         return self.fetch.getformat(**kwarg)
     # TODO redirect read to fetch when doing async
 
+    def _tau_vec_helper(self, i, val):
+        self.write('CONFIG:TAU %r,%r'%(i, val))
+    def _nb_tau_helper(self, N):
+        self.write('CONFIG:NB_TAU %i'%N)
+        self.tau_vec.nb_tau = N
+    def tau_vec_setdev(self, vals, i=None, append=False):
+        # for the _cache to maintain coherency, this dev needs setget
+        # check has made sure the parameter make sense so we proceed
+      
+        try:
+            # vals is a vector
+            # don't care for i or append
+            N = len(vals)
+            self._nb_tau_helper(N)
+            for i, val in enumerate(vals):
+                self._tau_vec_helper(i, val)
+            self.tau_vec._current_tau_vec = list(vals)
+            return
+        except TypeError:
+            pass
+        if i != None:
+            self._tau_vec_helper(i, vals)
+            self.tau_vec._current_tau_vec[i] = vals
+        else: # append
+            i = N = self.tau_vec.nb_tau
+            N += 1
+            self._nb_tau_helper(N)
+            self._tau_vec_helper(i, vals)
+            self.tau_vec._current_tau_vec.append(vals)
+    def tau_vec_getdev(self, force=False):
+        if not force:
+            return self.tau_vec._current_tau_vec
+        # we read from device
+        N = self._tau_nb.getdev()
+        self.tau_vec = N
+        self.tau_vec._current_tau_vec = []
+        for i in range(N):
+            val = self._tau_veci(repr(i))
+            self.tau_vec._current_tau_vec.append(val)
+        return self.tau_vec._current_tau_vec
+
+    def tau_vec_check(self, vals, i=None, append=False):
+        # i is an index
+        try:
+            # vals is a vector
+            # don't care for i or append
+            N = len(vals)
+            if N > self.max_nb_tau:
+                raise ValueError, 'Too many values in tau_vec.set, max of %i elements'%self.max_nb_tau
+        except TypeError:
+            pass
+        if not np.isreal(vals):
+            raise ValueError, 'vals needs to be a number'
+        if i != None and not (0 <= i <= self.tau_vec.nb_tau):
+            raise ValueError, 'Index is out of range'
+        if append and self.tau_vec.nb_tau + 1 >= self.max_nb_tau:
+            raise ValueError, 'You can no longer append, reached max'
+        if i != None and append:
+            raise ValueError, 'Choose either i or append, not both'
+
         #device member
     def create_devs(self):
 
@@ -367,7 +459,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self.net_signal_freq = acq_device('CONFIG:NET_SIGNAL_FREQ', str_type=float,  min=0, max=50000000)
         
         self.lock_in_square = acq_device('CONFIG:LOCK_IN_SQUARE', str_type=acq_bool()) 
-        self.nb_tau = acq_device('CONFIG:NB_TAU', str_type=int,  min=0, max=50)
         self.autocorr_mode = acq_device('CONFIG:AUTOCORR_MODE', str_type=acq_bool())
         self.corr_mode = acq_device('CONFIG:CORR_MODE', str_type=acq_bool())
         self.autocorr_single_chan = acq_device('CONFIG:AUTOCORR_SINGLE_CHAN', str_type=acq_bool())
@@ -418,7 +509,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.fetch._event_flag = threading.Event()
         self.fetch._rcv_val = None
         self.devwrap('readval', autoinit=False)
-        
+        self.devwrap('tau_vec', setget=True)
+        self._tau_nb = dummy_device('CONFIG:NB_TAU?')
+        self._tau_veci = dummy_device('CONFIG:TAU? ')
+
         # This needs to be last to complete creation
         super(type(self),self).create_devs()
         
