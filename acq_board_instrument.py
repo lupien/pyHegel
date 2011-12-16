@@ -193,6 +193,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         
         # try connect to the server
         self.s.connect((self.host, self.port))
+        self._set_timeout = 5
 
         # status and flag
         self.board_type = None
@@ -226,10 +227,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self._error_state = False
             return '+0,"No error"'
         return self._errors_list.pop()
+    @property
     def _set_timeout(self):
-        # Workaround for some bug because of visaInstrument _set_timeout property
-        # TODO: find proper fix
-        pass
+        return self.s.gettimeout()
+    @_set_timeout.setter
+    def _set_timeout(self, seconds): # can be None
+        self.s.settimeout(seconds)
     def __del__(self):
         print 'deleting acq1'
         # TODO  find a proper way to shut down connection
