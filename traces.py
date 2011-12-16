@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 #
 # python-matplotlib-0.99.1.2-4.fc13.i686 QT backend is missing many
 # key codes compared to gtk so add missing ones needed for FigureManagerQT
@@ -110,13 +111,26 @@ class Trace(FigureManagerQT):
         # handle status better for twinx (pressing 1 or 2 selects axis)
         self.canvas.mpl_connect('key_press_event', self.mykey_press)
         ######### Add button to toolbar
+        # Pause
         self.pause_button = QtGui.QPushButton('Pause')
         self.pause_enabled = False
         self.pause_button.setCheckable(True)
         self.toolbar.addSeparator()
         self.toolbar.addWidget(self.pause_button)
-        self.pause_button.connect(self.pause_button, 
+        self.pause_button.connect(self.pause_button,
               QtCore.SIGNAL('toggled(bool)'), self.pause_button_press)
+        # abort
+        self.abort_button = QtGui.QPushButton('Abort')
+        self.abort_enabled = False
+        self.abort_button.setCheckable(True)
+        self.toolbar.addWidget(self.abort_button)
+        self.abort_button.connect(self.abort_button,
+              QtCore.SIGNAL('toggled(bool)'), self.abort_button_press)
+        # Rescale
+        self.rescale_button = QtGui.QPushButton('Rescale')
+        self.toolbar.addWidget(self.rescale_button)
+        self.rescale_button.connect(self.rescale_button,
+              QtCore.SIGNAL('clicked()'), self.rescale_button_press)
         #########
         _figlist.append(self)
         self.window.connect(self.window, QtCore.SIGNAL('destroyed()'),
@@ -126,6 +140,13 @@ class Trace(FigureManagerQT):
         _figlist.remove(self)
     def pause_button_press(self, state):
         self.pause_enabled = state
+    def abort_button_press(self, state):
+        self.abort_enabled = state
+    def rescale_button_press(self):
+        # TODO implement rescale correctly
+        self.ax2.relim()
+        self.ax2.autoscale(enable=None)
+        self.draw()
     def mykey_press(self, event):
         # TODO add a Rescale
         # based on FigureManagerBase.key_press

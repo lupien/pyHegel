@@ -333,6 +333,8 @@ class _Sweep(instrument.BaseInstrument):
                 if graph:
                     t.addPoint(iv, gsel([iv]+vals))
                     _checkTracePause(t)
+                    if t.abort_enabled:
+                        break
         except KeyboardInterrupt:
             print 'Interrupted sweep'
             pass
@@ -341,8 +343,10 @@ class _Sweep(instrument.BaseInstrument):
         if graph and close_after:
             t.window.close()
         if reset: # return to first value
-            dev.set(span[0]) # TODO replace with move
-            
+            if graph and t.abort_enabled:
+                pass
+            else:
+                dev.set(span[0]) # TODO replace with move
 
 sweep = _Sweep()
 
@@ -444,6 +448,8 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
             if npoints == None or i < npoints:
                 wait(interval)
             _checkTracePause(t)
+            if t.abort_enabled:
+                break
     except KeyboardInterrupt:
         # TODO proper file closing in case of error.
         #      on windows sometimes the file stays locked.
