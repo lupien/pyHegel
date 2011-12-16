@@ -252,6 +252,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if self.op_mode.getcache() == 'Hist':
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
                                      'chan_nb')
+                                     
+        if self.op_mode.getcache() == 'Corr':
+            return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
+                                     'autocorr_mode', 'corr_mode','autocorr_single_chan',
+                                     'chan_mode','chan_nb',)
+                           
         if self.op_mode.getcache() == 'Net':
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
                                      'lock_in_square','net_signal_freq')
@@ -341,6 +347,37 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 if self.fetch._rcv_val == None:
                     return None
                 return np.fromstring(self.fetch._rcv_val, np.float64)
+        if mode == 'Corr':
+            # TODO prevent ch2 form overwrite ch1 in the file
+            if type(ch) != list:
+                ch = [ch]
+            if self.corr_mode.getcache():
+                s = 'DATA:CORR:CORR_RESULT?'
+                if filename != None:
+                    s += ' '+filename
+                self.write(s)
+                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                if self.fetch._rcv_val == None:
+                    return None
+                return np.fromstring(self.fetch._rcv_val, np.float64)
+            if 1 in ch:
+                s = 'DATA:CORR:AUTOCORR_CH1_RESULT?'
+                if filename != None:
+                    s += ' '+filename
+                self.write(s)
+                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                if self.fetch._rcv_val == None:
+                    return None
+                return np.fromstring(self.fetch._rcv_val, np.float64)
+            if 2 in ch:
+                s = 'DATA:CORR:AUTOCORR_CH2_RESULT?'
+                if filename != None:
+                    s += ' '+filename
+                self.write(s)
+                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                if self.fetch._rcv_val == None:
+                    return None
+                return np.fromstring(self.fetch._rcv_val, np.float64)
                 
 
     def readval_getdev(self, **kwarg):
@@ -354,7 +391,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     # TODO redirect read to fetch when doing async
 
     def _tau_vec_helper(self, i, val):
-        self.write('CONFIG:TAU %r,%r'%(i, val))
+        self.write('CONFIG:TAU %r %r'%(i, val))
     def _nb_tau_helper(self, N):
         self.write('CONFIG:NB_TAU %i'%N)
         self.tau_vec.nb_tau = N
@@ -467,7 +504,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.cust_param2 = acq_device('CONFIG:CUST_PARAM2', str_type=float)
         self.cust_param3 = acq_device('CONFIG:CUST_PARAM3', str_type=float)
         self.cust_param4 = acq_device('CONFIG:CUST_PARAM4', str_type=float)
-        self.cust_user_lib = acq_device('CONFIG:CUST_USER_LIB', str_type=str)
+        self.cust_user_lib = acq_device('CONFIG:CUST_USER_LIB', str_type=acq_filename)
         self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?',str_type=int)
         self.board_status = acq_device(getstr='STATUS:STATE?',str_type=str)
         self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?',str_type=acq_bool())
@@ -549,8 +586,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         
     def disconnect(self):
         self.write('DISCONNECT')
-        
-        
+            
     def set_histogram(self, nb_Msample, sampling_rate, chan_nb, clock_source):
         self.op_mode.set('Hist')
         self.sampling_rate.set(sampling_rate)
@@ -563,6 +599,58 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_edge_en.set(False)
         self.trigger_await.set(False)
         self.trigger_create.set(False)
+    
+    def set_correlation(self, nb_Msample, sampling_rate, clock_source):
+        self.op_mode.set('Corr')
+        self.sampling_rate.set(sampling_rate)
+        self.test_mode.set(False)
+        self.clock_source.set(clock_source)
+        self.nb_Msample.set(nb_Msample)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        self.chan_mode.set('Dual')
+        self.chan_nb.set(1)
+        self.autocorr_mode.set(False)
+        self.corr_mode.set(True)
+    
+    def set_autocorrelation(self, nb_Msample, sampling_rate, autocorr_single_chan, autocorr_chan_nb, clock_source):
+        self.op_mode.set('Corr')
+        self.sampling_rate.set(sampling_rate)
+        self.test_mode.set(False)
+        self.clock_source.set(clock_source)
+        self.nb_Msample.set(nb_Msample)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        if autocorr_single_chan:
+            self.chan_mode.set('Single')
+        else:
+            self.chan_mode.set('Dual')
+        self.chan_nb.set(autocorr_chan_nb)
+        self.autocorr_mode.set(True)
+        self.corr_mode.set(False)
+        
+    def set_auto_and_corr(self, nb_Msample, sampling_rate, autocorr_single_chan, autocorr_chan_nb, clock_source):
+        self.op_mode.set('Corr')
+        self.sampling_rate.set(sampling_rate)
+        self.test_mode.set(False)
+        self.clock_source.set(clock_source)
+        self.nb_Msample.set(nb_Msample)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        if autocorr_single_chan:
+            self.chan_mode.set('Single')
+        else:
+            self.chan_mode.set('Dual')
+        self.chan_nb.set(autocorr_chan_nb)
+        self.autocorr_mode.set(True)
+        self.corr_mode.set(True)
+        
         
     def set_network_analyzer(self, nb_Msample, sampling_rate, signal_freq, lock_in_square, clock_source):
         self.op_mode.set('Net')
