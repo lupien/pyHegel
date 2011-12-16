@@ -465,6 +465,8 @@ def trace(dev, interval=1, title=''):
     record(dev, interval, npoints=1000, filename='trace.dat', title=title)
 
 def scope(dev, interval=.1, title=''):
+    # TODO make this works
+    #      find a way to set a proper x scale
     t = traces.Trace()
     t.setWindowTitle('Scope: '+title)
     while True:
