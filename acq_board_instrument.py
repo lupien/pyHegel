@@ -279,6 +279,11 @@ class Acq_Board_Instrument(instrument.visaInstrument):
              return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
                                       'chan_mode','chan_nb','fft_length')
                                      
+        if self.op_mode.getcache() == 'Cust':
+             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
+                                      'chan_mode','chan_nb','cust_param1','cust_param2','cust_param3',
+                                      'cust_param4') 
+                                     
 
     def dummy_devs_iter(self):
         for devname in dir(self):
@@ -386,6 +391,30 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 if self.fetch._rcv_val == None:
                     return None
                 return np.fromstring(self.fetch._rcv_val, np.float64)
+                
+        if mode == 'Cust':
+            # TODO prevent ch2 form overwrite ch1 in the file
+            if type(ch) != list:
+                ch = [ch]
+            if 1 in ch:
+                s = 'DATA:CUST:RESULT_DATA1?'
+                if filename != None:
+                    s += ' '+filename
+                self.write(s)
+                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                if self.fetch._rcv_val == None:
+                    return None
+                return np.fromstring(self.fetch._rcv_val, np.float64)
+            if 2 in ch:
+                s = 'DATA:CUST:RESULT_DATA2?'
+                if filename != None:
+                    s += ' '+filename
+                self.write(s)
+                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                if self.fetch._rcv_val == None:
+                    return None
+                return np.fromstring(self.fetch._rcv_val, np.float64)
+            
                 
 
     def readval_getdev(self, **kwarg):
@@ -515,7 +544,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.cust_param2 = acq_device('CONFIG:CUST_PARAM2', str_type=float)
         self.cust_param3 = acq_device('CONFIG:CUST_PARAM3', str_type=float)
         self.cust_param4 = acq_device('CONFIG:CUST_PARAM4', str_type=float)
-        self.cust_user_lib = acq_device('CONFIG:CUST_USER_LIB', str_type=acq_filename)
+        self.cust_user_lib = acq_device('CONFIG:CUST_USER_LIB', str_type=acq_filename())
         self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?',str_type=int)
         self.board_status = acq_device(getstr='STATUS:STATE?',str_type=str)
         self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?',str_type=acq_bool())
@@ -708,6 +737,23 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_await.set(False)
         self.trigger_create.set(False)
         self.fft_length.set(fft_length)
+        
+    def set_custom(self,nb_Msample, sampling_rate, chan_mode, chan_nb, clock_source,cust_param1,cust_param2,cust_param3,cust_param4,cust_user_lib):
+        self.op_mode.set('Cust')
+        self.test_mode.set(False)
+        self.clock_source.set(clock_source)
+        self.nb_Msample.set(nb_Msample)
+        self.chan_mode.set(chan_mode)
+        self.chan_nb.set(chan_nb)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        self.cust_param1.set(cust_param1)
+        self.cust_param2.set(cust_param2)
+        self.cust_param3.set(cust_param3)
+        self.cust_param4.set(cust_param4)
+        self.cust_user_lib.set(cust_user_lib)
         
         
     def run(self):
