@@ -257,6 +257,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.wait_after_trig()
 
     def _current_config(self, dev_obj=None, options={}):
+        if self.op_mode.getcache() == 'Acq':
+            return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
+                                     'chan_nb','chan_mode')
+                                     
         if self.op_mode.getcache() == 'Hist':
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
                                      'chan_nb')
@@ -317,6 +321,18 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.fetch._event_flag.clear()
         mode = self.op_mode.getcache()
         self.fetch._dump_file = None
+        if mode == 'Acq':
+            s = 'DATA:ACQ:DATA?'
+            if filename != None:
+                s += ' '+filename
+            self.write(s)
+            instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+            if self.fetch._rcv_val == None:
+                return None
+            if self.board_type == 'ADC14':
+                return np.fromstring(self.fetch._rcv_val, np.ushort)
+            else:
+                return np.fromstring(self.fetch._rcv_val, np.ubyte)
         if mode == 'Hist':
             s = 'DATA:HIST:DATA?'
             if filename != None:
@@ -626,6 +642,19 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         
     def disconnect(self):
         self.write('DISCONNECT')
+        
+    def set_simple_acq(self,nb_Msample, sampling_rate, chan_mode, chan_nb,clock_source):
+        self.op_mode.set('Acq')
+        self.sampling_rate.set(sampling_rate)
+        self.test_mode.set(False)
+        self.clock_source.set(clock_source)
+        self.nb_Msample.set(nb_Msample)
+        self.chan_mode.set(chan_mode)
+        self.chan_nb.set(chan_nb)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
             
     def set_histogram(self, nb_Msample, sampling_rate, chan_nb, clock_source):
         self.op_mode.set('Hist')
