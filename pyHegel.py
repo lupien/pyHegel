@@ -280,8 +280,9 @@ class _Sweep(instrument.BaseInstrument):
         devs = self.get_alldevs(out)
         fullpath = None
         if filename != None:
-            filename = _process_filename(filename)
-            fullpath=os.path.join(self.path.get(), filename)
+            fullpath = os.path.join(sweep.path.get(), filename)
+            fullpath = _process_filename(fullpath)
+            filename = os.path.basename(fullpath)
         if extra_conf == None:
             extra_conf = [sweep.out]
         elif not isinstance(extra_conf, list):
@@ -411,8 +412,9 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     t = traces.Trace(time_mode=True)
     fullpath = None
     if filename != None:
-        filename = _process_filename(filename)
-        fullpath=os.path.join(sweep.path.get(), filename)
+        fullpath = os.path.join(sweep.path.get(), filename)
+        fullpath = _process_filename(fullpath)
+        filename = os.path.basename(fullpath)
     if title == None:
         title = filename
     if title == None:
