@@ -12,6 +12,7 @@ import select
 import threading
 import math
 import weakref
+import matplotlib.pyplot as plt
 import numpy as np
 
 # user made import
@@ -542,8 +543,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self.osc_trigger_level = acq_device('CONFIG:OSC_TRIGGER_LEVEL', str_type=float,  min=-0.375, max=0.375)
         
         self.osc_slope = acq_device('CONFIG:OSC_SLOPE', str_type=str, choices=osc_slope_str) 
-        self.osc_nb_sample = acq_device('CONFIG:OSC_NB_SAMPLE', str_type=int,  min=1, max= ((8192*1024*1024)-1)) # max 8Go
-        self.osc_hori_offset = acq_device('CONFIG:OSC_HORI_OFFSET', str_type=int,  min=0, max= ((8192*1024*1024)-1)) # max 8Go
+        self.osc_nb_sample = acq_device('CONFIG:OSC_NB_SAMPLE', str_type=int,  min=1, max= ((16*1024*1024)-1)) # max 16MB
+        self.osc_hori_offset = acq_device('CONFIG:OSC_HORI_OFFSET', str_type=int,  min=-(8*1024*1024), max= ((8*1024*1024)-1)) # max 8MB
         self.osc_trig_source = acq_device('CONFIG:OSC_TRIG_SOURCE', str_type=int,  min=1, max=2)
         
         if self.board_type == 'ADC8':
@@ -642,6 +643,18 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         
     def disconnect(self):
         self.write('DISCONNECT')
+        
+    def scope_display(self):
+        plt.hold(False)
+        while True:
+            v = self.readval.get()
+            if self.chan_mode.getcache() == 'Dual':         
+                v.shape = (-1,2)
+                plt.plot(v)
+            else:
+                plt.plot(v)
+            
+        
         
     def set_simple_acq(self,nb_Msample, sampling_rate, chan_mode, chan_nb,clock_source):
         self.op_mode.set('Acq')
