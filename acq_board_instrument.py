@@ -195,6 +195,17 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.max_nb_Msample = 4294967295
         self.max_nb_tau = 50
         
+        self.min_acq_Msample_14bits = 16
+        self.max_acq_Msample_14bits = 4096
+        self.min_acq_Msample_8bits = 32
+        self.max_acq_Msample_8bits = 8192
+        self.min_net_Msample_8bits = 32
+        self.max_net_Msample_8bits = 128
+        self.max_net_Msample_14bits = 16
+        self.max_net_Msample_14bits = 64
+        self.max_Msample_8bits = 4294959104
+        self.max_Msample_14bits = 2147479552
+        
         # try connect to the server
         self.s.connect((self.host, self.port))
         self._set_timeout = 5
@@ -797,7 +808,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.cust_param4.set(cust_param4)
         self.cust_user_lib.set(cust_user_lib)
         
-        
     def run(self):
         # check if the configuration are ok
         
@@ -806,35 +816,83 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             raise ValueError, 'ERROR Board already Running'
         
         # check if nb_Msample fit the op_mode
-        if self.op_mode.getcache() == 'Hist' or self.op_mode.getcache() == 'Corr':
+        if self.op_mode.getcache() == 'Acq' and self.board_type == 'ADC14':
+            if self.nb_Msample.getcache() < self.min_acq_Msample_14bits:
+                 new_nb_Msample = self.min_acq_Msample_14bits
+                 self.nb_Msample.set(new_nb_Msample)
+                 raise ValueError, 'Warning nb_Msample must be superior or equal to 16 in Acq ADC14, value corrected to 16'
+            if self.nb_Msample.getcache() > self.max_acq_Msample_14bits:
+                 new_nb_Msample = self.max_acq_Msample_14bits
+                 self.nb_Msample.set(new_nb_Msample)
+                 raise ValueError, 'Warning nb_Msample must be inferior to 4096 in Acq ADC14, value corrected to 4096'
+        
+        
+        if self.op_mode.getcache() == 'Acq' and self.board_type == 'ADC8':
+            if self.nb_Msample.getcache() < self.min_acq_Msample_8bits:
+                 new_nb_Msample = self.min_acq_Msample_8bits
+                 self.nb_Msample.set(new_nb_Msample)
+                 raise ValueError, 'Warning nb_Msample must be superior or equal to 32 in Acq ADC8, value corrected to 32'
+            if self.nb_Msample.getcache() > self.max_acq_Msample_8bits:
+                 new_nb_Msample = self.max_acq_Msample_8bits
+                 self.nb_Msample.set(new_nb_Msample)
+                 raise ValueError, 'Warning nb_Msample must be inferior to 8192 in Acq ADC14, value corrected to 8192'
+        
+        
+        if self.op_mode.getcache() == 'Hist' and self.board_type == 'ADC14':
+            quotien = float(self.nb_Msample.getcache())/256
+            frac,entier = math.modf(quotien)
+            if frac != 0.0:
+                new_nb_Msample = int(math.ceil(quotien))*256
+                if new_nb_Msample > self.max_Msample_14bits:
+                    new_nb_Msample = self.max_Msample_14bits
+                    self.nb_Msample.set(new_nb_Msample)
+                    raise ValueError, 'Warning nb_Msample must be a multiple of 256 in Hist ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
+        
+        
+        if self.op_mode.getcache() == 'Corr' and self.board_type == 'ADC14':
+            quotien = float(self.nb_Msample.getcache())/4096
+            frac,entier = math.modf(quotien)
+            if frac != 0.0:
+                new_nb_Msample = int(math.ceil(quotien))*4096
+                if new_nb_Msample > self.max_Msample_14bits:
+                    new_nb_Msample = self.max_Msample_14bits
+                    self.nb_Msample.set(new_nb_Msample)
+                    raise ValueError, 'Warning nb_Msample must be a multiple of 4096 in Corr ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
+
+
+        if (self.op_mode.getcache() == 'Hist' or self.op_mode.getcache() == 'Corr') and self.board_type == 'ADC8':
+            quotien = float(self.nb_Msample.getcache())/8192
+            frac,entier = math.modf(quotien)
+            if frac != 0.0:
+                new_nb_Msample = int(math.ceil(quotien))*8192
+                if new_nb_Msample > self.max_nb_Msample_8bits:
+                    new_nb_Msample = self.max_nb_Msample
+                    self.nb_Msample.set(new_nb_Msample)
+                    raise ValueError, 'Warning nb_Msample must be a multiple of 8192 in Hist or Corr ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
+        
+        
+        if self.op_mode.getcache() == 'Net' and self.board_type == 'ADC14':
+            if self.nb_Msample.getcache() < self.min_net_Msample_14bits:
+                 new_nb_Msample = self.min_net_Msample_14bits
+                 self.nb_Msample.set(new_nb_Msample)
+                 raise ValueError, 'Warning nb_Msample must be superior or equal to 16 in net ADC14, value corrected to 16'
+            if self.nb_Msample.getcache() > self.max_net_Msample_14bits:
+                 new_nb_Msample = self.max_net_Msample_14bits
+                 self.nb_Msample.set(new_nb_Msample)
+                 raise ValueError, 'Warning nb_Msample must be inferior to 64 in net ADC14, value corrected to 128'
+         
+         
+        if self.op_mode.getcache() == 'Net' and self.board_type == 'ADC8':
+            if self.nb_Msample.getcache() < self.min_net_Msample_8bits:
+                 new_nb_Msample = self.min_net_Msample_8bits
+                 self.nb_Msample.set(new_nb_Msample)
+                 raise ValueError, 'Warning nb_Msample must be superior or equal to 32 in net ADC14, value corrected to 16'
+            if self.nb_Msample.getcache() > self.max_net_Msample_8bits:
+                 new_nb_Msample = self.max_net_Msample_8bits
+                 self.nb_Msample.set(new_nb_Msample)
+                 raise ValueError, 'Warning nb_Msample must be inferior to 128 in net ADC14, value corrected to 128'           
             
-            if self.board_type == 'ADC14' and self.op_mode.getcache() == 'Hist':
-                quotien = float(self.nb_Msample.getcache())/512
-                frac,entier = math.modf(quotien)
-            
-                if frac != 0.0:
-                    new_nb_Msample = int(math.ceil(quotien))*512
-                    if new_nb_Msample > (self.max_nb_Msample - 512):
-                        new_nb_Msample = self.max_nb_Msample - 512
-                        self.nb_Msample.set(new_nb_Msample)
-                    raise ValueError, 'Warning nb_Msample must be a multiple of 512 in Hist ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
-            else:
-                quotien = float(self.nb_Msample.getcache())/8192
-                frac,entier = math.modf(quotien)
-            
-                if frac != 0.0:
-                    new_nb_Msample = int(math.ceil(quotien))*8192
-                    if new_nb_Msample > (self.max_nb_Msample - 8192):
-                        new_nb_Msample = self.max_nb_Msample - 8192
-                        self.nb_Msample.set(new_nb_Msample)
-                    raise ValueError, 'Warning nb_Msample must be a multiple of 8192 in Corr and Hist ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
-                    
-        if self.op_mode.getcache() == 'Net':
-            if self.nb_Msample.getcache() > 64:
-                self.nb_Msample.set(64)
-                raise ValueError, 'Warning nb_Msample must be between 32 and 64 in Net mode, value corrected to nearest possible value : ' + str(self.nb_Msample.getcache())
-            
-            
+    
         #check if clock freq is a multiple of 5 Mhz when in USB clock mode
         if self.clock_source.getcache() == 'USB':
             if self.board_type == 'ADC8':
@@ -861,7 +919,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                     self.sampling_rate.set(new_sampling_rate)
                 raise ValueError, 'Warning sampling_rate not a multiple of 5, value corrected to nearest possible value : ' + str(new_sampling_rate)
                   
-        #if in Osc mode check if the sample to sand fit the horizontal offset
+        #if in Osc mode check if the sample to send fit the horizontal offset
         if self.op_mode.getcache() == 'Osc':
             if self.osc_hori_offset() > self.osc_nb_sample():
                 self.osc_hori_offset.set(self.osc_nb_sample.getcache())
