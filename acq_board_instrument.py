@@ -343,6 +343,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.fetch._event_flag.clear()
         mode = self.op_mode.getcache()
         self.fetch._dump_file = None
+        if not self.result_available.getcache():
+            raise ValueError, 'Error result not available\n' 
         if mode == 'Acq':
             s = 'DATA:ACQ:DATA?'
             if filename != None:
