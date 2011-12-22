@@ -85,19 +85,25 @@ class Listen_thread(threading.Thread):
         total_byte = 0
         acq = self.acq_instr
         while not self._stop:
-            try:
-                r, _, _ = select.select(select_list, [], [], socket_timeout)
-                if not bool(r):
-                    continue
-            except socket.error:
-                break
+            if bin_mode and len(old_stuff) > 0:
+                pass
+            else:
+                try:
+                    r, _, _ = select.select(select_list, [], [], socket_timeout)
+                    if not bool(r):
+                        continue
+                except socket.error:
+                    break
+            #print 'Listen Available:',
             if bin_mode:
                 if len(old_stuff) != 0:
-                    new_stuff = acq.s.recv(block_length-len(old_stuff))
-                    new_stuff = old_stuff+new_stuff
+                    next_readlen = block_length-len(old_stuff)
+                    new_stuff = old_stuff
                     old_stuff = ''
                 else:
-                    new_stuff = acq.s.recv(block_length)
+                    new_stuff = acq.s.recv(next_readlen)
+                    next_readlen = block_length
+                #print 'BIN',repr(new_stuff)
                 total_byte -= len(new_stuff)
                 if total_byte < 0:
                     old_stuff = new_stuff[total_byte:]
@@ -110,8 +116,12 @@ class Listen_thread(threading.Thread):
                 if total_byte <= 0:
                     bin_mode = False
                     acq.fetch._event_flag.set()
-                continue
-            new_stuff = acq.s.recv(128)
+                    new_stuff = ''
+                else:
+                    continue
+            else:
+                new_stuff = acq.s.recv(128)
+            #print repr(new_stuff)
             old_stuff += new_stuff
             trames = old_stuff.split('\n', 1)
             old_stuff = trames.pop()
@@ -158,7 +168,7 @@ class Listen_thread(threading.Thread):
                         acq.fetch._rcv_val = ''
                         bin_mode = True
                         block_length, total_byte = val.split(' ')
-                        block_length = int(block_length)
+                        next_readlen = block_length = int(block_length)
                         total_byte = int(total_byte)
                         break;
                 trames = old_stuff.split('\n', 1)
@@ -694,6 +704,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_create.set(False)
     
     def set_correlation(self, nb_Msample, sampling_rate, clock_source):
+        """
+        
+        """
         self.op_mode.set('Corr')
         self.sampling_rate.set(sampling_rate)
         self.test_mode.set(False)
