@@ -336,7 +336,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.result_available.get()
         self.tau_vec([0])        
 
-    def fetch_getformat(self, filename=None):
+    def fetch_getformat(self, filename=None, ch=[1]):
         self.fetch._format.update(file=True)
         return instrument.BaseDevice.getformat(self.fetch)
     def fetch_getdev(self, filename=None, ch=[1]):
@@ -402,7 +402,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             # TODO prevent ch2 form overwrite ch1 in the file
             if type(ch) != list:
                 ch = [ch]
-            if self.corr_mode.getcache():
+            if 0 in ch:
                 s = 'DATA:CORR:CORR_RESULT?'
                 if filename != None:
                     s += ' '+filename
@@ -460,7 +460,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self._async_trig()
         while not self._async_detect():
             pass
-        return self.fetch.get()
+        return self.fetch.get(**kwarg)
     def readval_getformat(self, **kwarg):
         return self.fetch.getformat(**kwarg)
     # TODO redirect read to fetch when doing async
@@ -735,6 +735,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self.chan_mode.set('Single')
         else:
             self.chan_mode.set('Dual')
+        self.autocorr_single_chan.set(autocorr_single_chan)     
         self.chan_nb.set(autocorr_chan_nb)
         self.autocorr_mode.set(True)
         self.corr_mode.set(False)
@@ -753,6 +754,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self.chan_mode.set('Single')
         else:
             self.chan_mode.set('Dual')
+        self.autocorr_single_chan.set(autocorr_single_chan)    
         self.chan_nb.set(autocorr_chan_nb)
         self.autocorr_mode.set(True)
         self.corr_mode.set(True)
