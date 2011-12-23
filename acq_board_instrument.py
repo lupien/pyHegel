@@ -211,7 +211,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.max_acq_Msample_8bits = 8192
         self.min_net_Msample_8bits = 32
         self.max_net_Msample_8bits = 128
-        self.max_net_Msample_14bits = 16
+        self.min_net_Msample_14bits = 16
         self.max_net_Msample_14bits = 64
         self.max_Msample_8bits = 4294959104
         self.max_Msample_14bits = 2147479552
@@ -752,10 +752,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_edge_en.set(False)
         self.trigger_await.set(False)
         self.trigger_create.set(False)
-        if autocorr_single_chan:
-            self.chan_mode.set('Single')
-        else:
-            self.chan_mode.set('Dual')
+        self.chan_mode.set('Dual')
         self.autocorr_single_chan.set(autocorr_single_chan)    
         self.chan_nb.set(autocorr_chan_nb)
         self.autocorr_mode.set(True)
