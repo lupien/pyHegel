@@ -294,7 +294,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                            
         if self.op_mode.getcache() == 'Net':
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
-                                     'lock_in_square','net_signal_freq')
+                                     'lock_in_square','net_signal_freq','nb_harm')
                                      
         if self.op_mode.getcache() == 'Osc':
             return self._conf_helper('op_mode', 'sampling_rate', 'clock_source','osc_nb_sample',
@@ -366,6 +366,27 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if self.fetch._rcv_val == None:
                 return None
             return np.fromstring(self.fetch._rcv_val, np.uint64)
+        if mode == 'Net':
+            if type(ch) != list:
+                ch = [ch]
+            if 1 in ch: 
+                s = 'DATA:NET:HARM_CH1?'
+                if filename != None:
+                    s += ' '+filename
+                self.write(s)
+                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                if self.fetch._rcv_val == None:
+                    return None
+                return np.fromstring(self.fetch._rcv_val, np.float64)
+            if 2 in ch:
+                s = 'DATA:NET:HARM_CH2?'
+                if filename != None:
+                    s += ' '+filename
+                self.write(s)
+                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                if self.fetch._rcv_val == None:
+                    return None
+                return np.fromstring(self.fetch._rcv_val, np.float64)    
         if mode == 'Osc':
             s = 'DATA:OSC:DATA?'
             if filename != None:
@@ -575,7 +596,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         elif self.board_type == 'ADC14':
             self.net_signal_freq = acq_device('CONFIG:NET_SIGNAL_FREQ', str_type=float,  min=0, max=50000000)
         
-        self.lock_in_square = acq_device('CONFIG:LOCK_IN_SQUARE', str_type=acq_bool()) 
+        self.lock_in_square = acq_device('CONFIG:LOCK_IN_SQUARE', str_type=acq_bool())
+        self.nb_harm = acq_device('CONFIG:NB_HARM',str_type=int, min=1, max=100)
         self.autocorr_mode = acq_device('CONFIG:AUTOCORR_MODE', str_type=acq_bool())
         self.corr_mode = acq_device('CONFIG:CORR_MODE', str_type=acq_bool())
         self.autocorr_single_chan = acq_device('CONFIG:AUTOCORR_SINGLE_CHAN', str_type=acq_bool())
@@ -759,7 +781,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.corr_mode.set(True)
         
         
-    def set_network_analyzer(self, nb_Msample, sampling_rate, signal_freq, lock_in_square, clock_source):
+    def set_network_analyzer(self, nb_Msample, sampling_rate, signal_freq, lock_in_square, nb_harm, clock_source):
         self.op_mode.set('Net')
         self.sampling_rate.set(sampling_rate)
         self.test_mode.set(False)
@@ -772,6 +794,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_create.set(False)
         self.net_signal_freq.set(signal_freq)
         self.lock_in_square.set(lock_in_square)
+        self.nb_harm.set(nb_harm)
         
     def set_scope(self, nb_sample, sampling_rate, hori_offset, trigger_level, slope, trig_source,chan_mode, chan_nb, clock_source):
         self.op_mode.set('Osc')
