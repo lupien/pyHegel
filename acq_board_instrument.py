@@ -902,8 +902,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             frac,entier = math.modf(quotien)
             if frac != 0.0:
                 new_nb_Msample = int(math.ceil(quotien))*8192
-                if new_nb_Msample > self.max_nb_Msample_8bits:
-                    new_nb_Msample = self.max_nb_Msample
+                if new_nb_Msample > self.max_Msample_8bits:
+                    new_nb_Msample = self.max_Msample_8bits
                     self.nb_Msample.set(new_nb_Msample)
                     raise ValueError, 'Warning nb_Msample must be a multiple of 8192 in Hist or Corr ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
         
