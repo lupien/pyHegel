@@ -484,10 +484,19 @@ def scope(dev, interval=.1, title=''):
 _get_filename_i = 0
 def _process_filename(filename):
     global _get_filename_i
-    timestamp = time.strftime('%Y%m%d-%H%M%S')
+    localtime = time.localtime()
+    datestamp = time.strftime('%Y%m%d', localtime)
+    timestamp = time.strftime('%H%M%S', localtime)
+    dtstamp = datestamp+'-'+timestamp
     changed = False
     if '%T' in filename:
-        filename = filename.replace('%T', timestamp)
+        filename = filename.replace('%T', dtstamp)
+        changed = True
+    if '%D' in filename:
+        filename = filename.replace('%D', datestamp)
+        changed = True
+    if '%t' in filename:
+        filename = filename.replace('%t', timestamp)
         changed = True
     if re.search(r'%[\d]*i', filename):
         # Note that there is a possible race condition here
