@@ -882,8 +882,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 new_nb_Msample = int(math.ceil(quotien))*256
                 if new_nb_Msample > self.max_Msample_14bits:
                     new_nb_Msample = self.max_Msample_14bits
-                    self.nb_Msample.set(new_nb_Msample)
-                    raise ValueError, 'Warning nb_Msample must be a multiple of 256 in Hist ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                self.nb_Msample.set(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be a multiple of 256 in Hist ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
         
         
         if self.op_mode.getcache() == 'Corr' and self.board_type == 'ADC14':
@@ -893,8 +893,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 new_nb_Msample = int(math.ceil(quotien))*4096
                 if new_nb_Msample > self.max_Msample_14bits:
                     new_nb_Msample = self.max_Msample_14bits
-                    self.nb_Msample.set(new_nb_Msample)
-                    raise ValueError, 'Warning nb_Msample must be a multiple of 4096 in Corr ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                self.nb_Msample.set(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be a multiple of 4096 in Corr ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
 
 
         if (self.op_mode.getcache() == 'Hist' or self.op_mode.getcache() == 'Corr') and self.board_type == 'ADC8':
@@ -904,8 +904,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 new_nb_Msample = int(math.ceil(quotien))*8192
                 if new_nb_Msample > self.max_Msample_8bits:
                     new_nb_Msample = self.max_Msample_8bits
-                    self.nb_Msample.set(new_nb_Msample)
-                    raise ValueError, 'Warning nb_Msample must be a multiple of 8192 in Hist or Corr ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                self.nb_Msample.set(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be a multiple of 8192 in Hist or Corr ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
         
         
         if self.op_mode.getcache() == 'Net' and self.board_type == 'ADC14':
