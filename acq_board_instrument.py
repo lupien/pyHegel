@@ -337,7 +337,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.tau_vec([0])        
 
     def fetch_getformat(self, filename=None, ch=[1]):
-        self.fetch._format.update(file=True)
+        self.fetch._format.update(file=False)
         return instrument.BaseDevice.getformat(self.fetch)
     def fetch_getdev(self, filename=None, ch=[1]):
         self.fetch._event_flag.clear()
