@@ -159,6 +159,8 @@ class Listen_thread(threading.Thread):
                             if obj == acq.board_status or obj == acq.result_available:
                                 obj._cache = obj._fromstr(val)
                             if obj == acq.result_available:
+                                # run is finished for any result_available status received
+                                # wether True or False
                                 acq._run_finished.set()
                 else: # trame[0]=='#'
                     trame = trame[1:]
