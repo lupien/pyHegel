@@ -55,6 +55,13 @@ def _get_conf_header(format):
     options = format['options']
     return _get_conf_header_util(header, obj, options)
 
+def _replace_ext(filename, newext=None):
+    if newext == None:
+        return filename
+    root, ext = os.path.splitext(filename)
+    return root+newext
+
+
 def _write_dev(val, filename, format=format, first=False):
     append = format['append']
     bin = format['bin']
@@ -69,7 +76,7 @@ def _write_dev(val, filename, format=format, first=False):
     if bin:
         open_mode += 'b'
         if bin != '.ext':
-            filename = os.path.splitext(filename)[0]+bin
+            filename = _replace_ext(filename, bin)
     f=open(filename, open_mode)
     header = _get_conf_header(format)
     if header and doheader: # if either is not None or not ''
@@ -89,7 +96,7 @@ def _write_dev(val, filename, format=format, first=False):
             else:
                 val.tofile(f)
         else:
-            np.savetxt(f, val, fmt='%.18g')
+            np.savetxt(f, val, fmt='%.18g', delimiter='\t')
     f.close()
 
 

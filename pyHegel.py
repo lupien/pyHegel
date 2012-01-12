@@ -199,8 +199,10 @@ def _checkTracePause(trace):
 #          header=['line1', 'line2']  Stuff to dump at head of new file
 #                                       it can also be a function that returns the proper list of strings
 #          bin=False/'.npy'/'.raw'/'.png' Dump data in binary form. npy is numpy format
-#                                      All of the changes the extension of the file except
-#                                      if you use 'ext', then the original extension is kept
+#              '.ext'/...              All of the change the extension of the file except
+#                                      if you use '.ext', then the original extension is kept
+#                                      All formats except numpy are straight dump
+#                                      No headers are saved in any bin formats
 #
 #   Also handle getasync
 

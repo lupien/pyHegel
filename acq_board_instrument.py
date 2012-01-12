@@ -11,6 +11,7 @@ import socket
 import select
 import threading
 import math
+import os
 import weakref
 import matplotlib.pyplot as plt
 import numpy as np
@@ -344,20 +345,50 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.tau_vec([0])        
 
     def fetch_getformat(self, filename=None, ch=[1]):
-        self.fetch._format.update(file=False)
+        fmt = self.fetch._format
+        fmt.update(file=False)
+        fmt.update(bin=False)
+        mode = self.op_mode.getcache()
+        if mode == 'Acq':
+            if self.nb_Msample.getcache() > 64:
+                fmt.update(file=True)
+            fmt.update(bin='.npy')
         return instrument.BaseDevice.getformat(self.fetch)
+
+    def _fetch_filename_helper(self, filename, extra=None, newext=None):
+        filestr=''
+        location = self.format_location()
+        tofilename = acq_filename()._tostr
+        if location == 'Local':
+            if filename == None:
+                raise ValueError, 'A filename is needed'
+            root, ext = os.path.splitext(filename)
+            if extra != None:
+                root = root + '_' + extra
+            if newext != None:
+                ext = newext
+            filename = root + ext
+            filestr = ' ' + tofilename(filename)
+        return filestr
     def fetch_getdev(self, filename=None, ch=[1]):
         self.fetch._event_flag.clear()
         mode = self.op_mode.getcache()
+        location = self.format_location()
+        # All saving by server or by dump_file is binary so change ext
+        if filename != None:
+            filename = instrument._replace_ext(filename, '.bin')
+        filestr= self._fetch_filename_helper(filename)
         self.fetch._dump_file = None
         if not self.result_available.getcache():
             raise ValueError, 'Error result not available\n' 
         if mode == 'Acq':
-            s = 'DATA:ACQ:DATA?'
-            if filename != None:
-                s += ' '+filename
+            if location == 'Remote' and filename != None:
+                self.fetch._dump_file = open(filename, 'wb')
+            s = 'DATA:ACQ:DATA?'+filestr
             self.write(s)
             instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+            if self.fetch._dump_file != None:
+                self.fetch._dump_file.close()
             if self.fetch._rcv_val == None:
                 return None
             if self.board_type == 'ADC14':
@@ -365,9 +396,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             else:
                 return np.fromstring(self.fetch._rcv_val, np.ubyte)
         if mode == 'Hist':
-            s = 'DATA:HIST:DATA?'
-            if filename != None:
-                s += ' '+filename
+            s = 'DATA:HIST:DATA?'+filestr
             self.write(s)
             instrument.wait_on_event(self.fetch._event_flag, check_state=self)
             if self.fetch._rcv_val == None:
@@ -377,27 +406,23 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if type(ch) != list:
                 ch = [ch]
             if 1 in ch: 
-                s = 'DATA:NET:HARM_CH1?'
-                if filename != None:
-                    s += ' '+filename
+                filestr = self._fetch_filename_helper(filename,'1')
+                s = 'DATA:NET:HARM_CH1?'+filestr
                 self.write(s)
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 return np.fromstring(self.fetch._rcv_val, np.float64)
             if 2 in ch:
-                s = 'DATA:NET:HARM_CH2?'
-                if filename != None:
-                    s += ' '+filename
+                filestr = self._fetch_filename_helper(filename,'2')
+                s = 'DATA:NET:HARM_CH2?'+filestr
                 self.write(s)
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 return np.fromstring(self.fetch._rcv_val, np.float64)    
         if mode == 'Osc':
-            s = 'DATA:OSC:DATA?'
-            if filename != None:
-                s += ' '+filename
+            s = 'DATA:OSC:DATA?'+filestr
             self.write(s)
             instrument.wait_on_event(self.fetch._event_flag, check_state=self)
             if self.fetch._rcv_val == None:
@@ -411,18 +436,16 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if type(ch) != list:
                 ch = [ch]
             if 1 in ch:            
-                s = 'DATA:SPEC:CH1?'
-                if filename != None:
-                    s += ' '+filename
+                filestr = self._fetch_filename_helper(filename,'1')
+                s = 'DATA:SPEC:CH1?'+filestr
                 self.write(s)
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 return np.fromstring(self.fetch._rcv_val, np.float64)
             if 2 in ch:
-                s = 'DATA:SPEC:CH2?'
-                if filename != None:
-                    s += ' '+filename
+                filestr = self._fetch_filename_helper(filename,'2')
+                s = 'DATA:SPEC:CH2?'+filestr
                 self.write(s)
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
@@ -433,27 +456,24 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if type(ch) != list:
                 ch = [ch]
             if 0 in ch:
-                s = 'DATA:CORR:CORR_RESULT?'
-                if filename != None:
-                    s += ' '+filename
+                filestr = self._fetch_filename_helper(filename,'corr')
+                s = 'DATA:CORR:CORR_RESULT?'+filestr
                 self.write(s)
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 return np.fromstring(self.fetch._rcv_val, np.float64)
             if 1 in ch:
-                s = 'DATA:CORR:AUTOCORR_CH1_RESULT?'
-                if filename != None:
-                    s += ' '+filename
+                filestr = self._fetch_filename_helper(filename,'auto1')
+                s = 'DATA:CORR:AUTOCORR_CH1_RESULT?'+filestr
                 self.write(s)
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 return np.fromstring(self.fetch._rcv_val, np.float64)
             if 2 in ch:
-                s = 'DATA:CORR:AUTOCORR_CH2_RESULT?'
-                if filename != None:
-                    s += ' '+filename
+                filestr = self._fetch_filename_helper(filename,'auto2')
+                s = 'DATA:CORR:AUTOCORR_CH2_RESULT?'+filestr
                 self.write(s)
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
@@ -465,18 +485,16 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if type(ch) != list:
                 ch = [ch]
             if 1 in ch:
-                s = 'DATA:CUST:RESULT_DATA1?'
-                if filename != None:
-                    s += ' '+filename
+                filestr = self._fetch_filename_helper(filename,'1')
+                s = 'DATA:CUST:RESULT_DATA1?'+filestr
                 self.write(s)
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 return np.fromstring(self.fetch._rcv_val, np.float64)
             if 2 in ch:
-                s = 'DATA:CUST:RESULT_DATA2?'
-                if filename != None:
-                    s += ' '+filename
+                filestr = self._fetch_filename_helper(filename,'2')
+                s = 'DATA:CUST:RESULT_DATA2?'+filestr
                 self.write(s)
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
