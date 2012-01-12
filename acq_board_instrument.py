@@ -690,10 +690,13 @@ class Acq_Board_Instrument(instrument.visaInstrument):
            
     def stop(self):
         self.write('STOP')
-        
+
     def disconnect(self):
         self.write('DISCONNECT')
-        
+
+    def shutdown_server(self):
+        self.write('SHUTDOWN')
+
     def scope_display(self):
         plt.hold(False)
         while True:
