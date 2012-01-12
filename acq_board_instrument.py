@@ -84,6 +84,7 @@ class Listen_thread(threading.Thread):
         block_length = 0
         total_byte = 0
         acq = self.acq_instr
+        rcv_ptr = 0
         while not self._stop:
             if bin_mode and len(old_stuff) > 0:
                 pass
@@ -112,8 +113,11 @@ class Listen_thread(threading.Thread):
                     acq.fetch._dump_file.write(new_stuff)
                     acq.fetch._rcv_val = None
                 else:
-                    acq.fetch._rcv_val += new_stuff
+                    acq.fetch._rcv_val[rcv_ptr:]=new_stuff
+                    rcv_ptr+=len(new_stuff)
                 if total_byte <= 0:
+                    if acq.fetch._dump_file == None:
+                        acq.fetch._rcv_val = bytes(acq.fetch._rcv_val)
                     bin_mode = False
                     acq.fetch._event_flag.set()
                     new_stuff = ''
@@ -165,11 +169,12 @@ class Listen_thread(threading.Thread):
                         acq.fetch._rcv_val = None
                         acq.fetch._event_flag.set()
                     else: # location == 'Remote'
-                        acq.fetch._rcv_val = ''
                         bin_mode = True
+                        rcv_ptr = 0
                         block_length, total_byte = val.split(' ')
                         next_readlen = block_length = int(block_length)
                         total_byte = int(total_byte)
+                        acq.fetch._rcv_val = bytearray(total_byte)
                         break;
                 trames = old_stuff.split('\n', 1)
                 old_stuff = trames.pop()
