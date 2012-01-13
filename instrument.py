@@ -918,16 +918,21 @@ class sr384_rf(visaInstrument):
         super(type(self),self).create_devs()
 
 class agilent_rf_33522A(visaInstrument):
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('ampl1', 'freq1', 'offset1', 'phase1', 'mode1', 'out_en1', 'pulse_width1',
+                                 'ampl2', 'freq2', 'offset2', 'phase2', 'mode2', 'out_en2', 'pulse_width2')
     def create_devs(self):
         # voltage unit depends on front panel/remote selection (sourc1:voltage:unit) vpp, vrms, dbm
         self.ampl1 = scpiDevice('SOUR1:VOLT', str_type=float, min=0.001, max=10)
         self.freq1 = scpiDevice('SOUR1:FREQ', str_type=float, min=1e-6, max=30e6)
+        self.pulse_width1 = scpiDevice('SOURce1:FUNCtion:PULSe:WIDTh', str_type=float, min=16e-9, max=1e6) # s
         self.offset1 = scpiDevice('SOUR1:VOLT:OFFS', str_type=float, min=-5, max=5)
         self.phase1 = scpiDevice('SOURce1:PHASe', str_type=float, min=-360, max=360) # in deg unless changed by unit:angle
         self.mode1 = scpiDevice('SOUR1:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
         self.out_en1 = scpiDevice('OUTPut1', str_type=bool) #OFF,0 or ON,1
         self.ampl2 = scpiDevice('SOUR2:VOLT', str_type=float, min=0.001, max=10)
         self.freq2 = scpiDevice('SOUR2:FREQ', str_type=float, min=1e-6, max=30e6)
+        self.pulse_width2 = scpiDevice('SOURce2:FUNCtion:PULSe:WIDTh', str_type=float, min=16e-9, max=1e6) # s
         self.phase2 = scpiDevice('SOURce2:PHASe', str_type=float, min=-360, max=360) # in deg unless changed by unit:angle
         self.offset2 = scpiDevice('SOUR2:VOLT:OFFS', str_type=float, min=-5, max=5)
         self.mode2 = scpiDevice('SOUR2:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
