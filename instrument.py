@@ -230,7 +230,11 @@ class BaseDevice(object):
         self._cache = val
     def get(self, **kwarg):
         if not CHECKING:
+            bin = kwarg.pop('bin', None)
             format = self.getformat(**kwarg)
+            if bin != None:
+                format['file'] = False
+                format['bin'] = bin
             if kwarg.get('filename', False) and not format['file']:
                 #we did not ask for a filename but got one.
                 #since getdev probably does not understand filename

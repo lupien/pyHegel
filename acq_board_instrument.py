@@ -350,9 +350,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         fmt.update(bin=False)
         mode = self.op_mode.getcache()
         if mode == 'Acq':
-            if self.nb_Msample.getcache() > 64:
-                fmt.update(file=True)
-            fmt.update(bin='.npy')
+            #if self.nb_Msample.getcache() > 64:
+            #    fmt.update(file=True)
+            #fmt.update(bin='.npy')
+            fmt.update(file=True)
         return instrument.BaseDevice.getformat(self.fetch)
 
     def _fetch_filename_helper(self, filename, extra=None, newext=None):
@@ -508,7 +509,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self._async_trig()
         while not self._async_detect():
             pass
-        return self.fetch.get(**kwarg)
+        return self.fetch.getdev(**kwarg)
     def readval_getformat(self, **kwarg):
         return self.fetch.getformat(**kwarg)
     # TODO redirect read to fetch when doing async
