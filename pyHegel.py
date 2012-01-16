@@ -114,6 +114,8 @@ def _dev_filename(root, dev_name, npts, append=False):
         maxn = 99999
     else:
         maxn = npts-1
+    if npts == 1:
+        maxn = 1
     root = os.path.abspath(root)
     root, ext = os.path.splitext(root)
     dev_name = dev_name.replace('.', '_')
@@ -258,24 +260,50 @@ class _Sweep(instrument.BaseInstrument):
         return self._conf_helper('before', 'after', 'beforewait')
     def __repr__(self):
         return '<sweep instrument>'
-    def __call__(self, dev, start, stop, npts, filename='%T.txt', rate=None,
+    def __call__(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
                   close_after=False, title=None, out=None, extra_conf=None,
                   async=False, reset=False):
         """
-            routine pour faire un sweep
-             dev est l'objet a varier
-            ....
+            Usage:
+                To define sweep either
+                  set start, stop and npts (then uses linspace internally)
+                  or just set start with a list of values
+                filename to use
+                    use %T: for date time string (20120115-145030)
+                        %t: for time string only
+                        %D: for date string
+                        %02i: for unique 2 digit increment (00, 01 ...)
+                              %03i for   3 digits
+                rate: unused
+                close_after: automatically closes the figure after the sweep when True
+                title: string used for window title
+                out: list of devices.  (This overrides sweep.out)
+                extra_conf: list of devices to dump configuration headers at head
+                            of data file. It isdone automatically for sweep device and
+                            the out devices. This allows to add other instruments.
+                async: When True, enables async mode (waiting on devices is done in
+                        parallel instead of consecutivelly.) This saves time.
+                reset: After the sweep is completed, the dev is returned to the
+                       first value in the sweep list.
         """
+        dolinspace = True
+        if isinstance(start, (list, np.ndarray)):
+            span = np.asarray(start)
+            start = min(span)
+            stop = max(span)
+            npts = len(span)
+            dolinspace = False
         try:
            dev.check(start)
            dev.check(stop)
         except ValueError:
-           print 'Wrong start or stop values. Aborting!'
+           print 'Wrong start or stop values (outside of valid range). Aborting!'
            return
         npts = int(npts)
-        if npts < 2:
-           raise ValueError, 'npts needs to be at least 2'
-        span = np.linspace(start, stop, npts)
+        if npts < 1:
+           raise ValueError, 'npts needs to be at least 1'
+        if dolinspace:
+            span = np.linspace(start, stop, npts)
         if instrument.CHECKING:
             # For checking only take first and last values
             span = span[[0,-1]]

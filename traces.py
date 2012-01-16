@@ -175,12 +175,9 @@ class Trace(FigureManagerQT):
                         a.zorder = 1 if i==n else 0
 
     def setLim(self, minx, maxx=None):
-        try:
-            if len(minx)>1:
-                 maxx = np.max(minx)
-                 minx = np.min(minx)
-        except:
-            pass
+        if isinstance(minx, (list, tuple, np.ndarray)):
+             maxx = np.max(minx)
+             minx = np.min(minx)
         self.xmax = maxx
         self.xmin = minx
         self.ax.set_xlim(minx, maxx, auto=False)
