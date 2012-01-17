@@ -646,6 +646,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.hist_m1 = acq_device(getstr = 'DATA:HIST:M1?', str_type = float, autoinit=False, trig=True)
         self.hist_m2 = acq_device(getstr = 'DATA:HIST:M2?', str_type = float, autoinit=False, trig=True)
         self.hist_m3 = acq_device(getstr = 'DATA:HIST:M3?', str_type = float, autoinit=False, trig=True)
+        self.hist_m4 = acq_device(getstr = 'DATA:HIST:M4?', str_type = float, autoinit=False, trig=True)
+        self.hist_m5 = acq_device(getstr = 'DATA:HIST:M5?', str_type = float, autoinit=False, trig=True)
         # TODO histogram raw data
         
         #TODO correlation result
