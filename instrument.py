@@ -202,7 +202,7 @@ class BaseDevice(object):
         self._lastget = None
         self._autoinit = autoinit
         self._setdev_p = None
-        self._getdev = None
+        self._getdev_p = None
         self._setget = setget
         self._trig = trig
         self._delay = delay
@@ -237,17 +237,17 @@ class BaseDevice(object):
                 format['bin'] = bin
             if kwarg.get('filename', False) and not format['file']:
                 #we did not ask for a filename but got one.
-                #since getdev probably does not understand filename
+                #since _getdev probably does not understand filename
                 #we handle it here
                 filename = kwarg.pop('filename')
-                ret = self.getdev(**kwarg)
+                ret = self._getdev(**kwarg)
                 _write_dev(ret, filename, format=format)
                 self._lastget = ret
                 ret = None
             else:
-                ret = self.getdev(**kwarg)
-        elif self._getdev == None:
-            raise NotImplementedError, self.perror('This device does not handle getdev')
+                ret = self._getdev(**kwarg)
+        elif self._getdev_p == None:
+            raise NotImplementedError, self.perror('This device does not handle _getdev')
         else:
             ret = self._cache
         self._cache = ret
@@ -278,8 +278,8 @@ class BaseDevice(object):
     # Implement these in a derived class
     def _setdev(self, val):
         raise NotImplementedError, self.perror('This device does not handle _setdev')
-    def getdev(self):
-        raise NotImplementedError, self.perror('This device does not handle getdev')
+    def _getdev(self):
+        raise NotImplementedError, self.perror('This device does not handle _getdev')
     def check(self, val):
         if self._setdev_p == None:
             raise NotImplementedError, self.perror('This device does not handle check')
@@ -309,7 +309,7 @@ class wrapDevice(BaseDevice):
         BaseDevice.__init__(self, **extrak)
         # the methods are unbounded methods.
         self._setdev_p = setdev
-        self._getdev = getdev
+        self._getdev_p = getdev
         self._check  = check
         self._getformat  = getformat
     def _setdev(self, val, **kwarg):
@@ -317,11 +317,11 @@ class wrapDevice(BaseDevice):
             self._setdev_p(val, **kwarg)
         else:
             raise NotImplementedError, self.perror('This device does not handle _setdev')
-    def getdev(self, **kwarg):
-        if self._getdev != None:
-            return self._getdev(**kwarg)
+    def _getdev(self, **kwarg):
+        if self._getdev_p != None:
+            return self._getdev_p(**kwarg)
         else:
-            raise NotImplementedError, self.perror('This device does not handle getdev')
+            raise NotImplementedError, self.perror('This device does not handle _getdev')
     def check(self, val, **kwarg):
         if self._check != None:
             self._check(val, **kwarg)
@@ -338,7 +338,7 @@ class cls_wrapDevice(BaseDevice):
         BaseDevice.__init__(self, **extrak)
         # the methods are unbounded methods.
         self._setdev_p = setdev
-        self._getdev = getdev
+        self._getdev_p = getdev
         self._check  = check
         self._getformat  = getformat
     def _setdev(self, val, **kwarg):
@@ -346,11 +346,11 @@ class cls_wrapDevice(BaseDevice):
             self._setdev_p(self.instr, val, **kwarg)
         else:
             raise NotImplementedError, self.perror('This device does not handle _setdev')
-    def getdev(self, **kwarg):
-        if self._getdev != None:
-            return self._getdev(self.instr, **kwarg)
+    def _getdev(self, **kwarg):
+        if self._getdev_p != None:
+            return self._getdev_p(self.instr, **kwarg)
         else:
-            raise NotImplementedError, self.perror('This device does not handle getdev')
+            raise NotImplementedError, self.perror('This device does not handle _getdev')
     def check(self, val, **kwarg):
         if self._check != None:
             self._check(self.instr, val, **kwarg)
@@ -568,7 +568,7 @@ class scpiDevice(BaseDevice):
         self._setdev_p = setstr
         if getstr == None and autoget:
             getstr = setstr+'?'
-        self._getdev = getstr
+        self._getdev_p = getstr
         self.type = str_type
     def _tostr(self, val):
         # This function converts from val to a str for the command
@@ -596,10 +596,10 @@ class scpiDevice(BaseDevice):
            raise NotImplementedError, self.perror('This device does not handle _setdev')
         val = self.tostr(val)
         self.instr.write(self._setdev_p+' '+val)
-    def getdev(self):
-        if self._getdev == None:
-           raise NotImplementedError, self.perror('This device does not handle getdev')
-        ret = self.instr.ask(self._getdev)
+    def _getdev(self):
+        if self._getdev_p == None:
+           raise NotImplementedError, self.perror('This device does not handle _getdev')
+        ret = self.instr.ask(self._getdev_p)
         return self._fromstr(ret)
 
 def _decode_block_header(s):

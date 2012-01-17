@@ -47,11 +47,11 @@ class acq_device(instrument.scpiDevice):
         self._event_flag = threading.Event()
         self._event_flag.set()
         self._rcv_val = None
-    def getdev(self):
-        if self._getdev == None:
-           raise NotImplementedError, self.perror('This device does not handle getdev')
+    def _getdev(self):
+        if self._getdev_p == None:
+           raise NotImplementedError, self.perror('This device does not handle _getdev')
         self._event_flag.clear()
-        self.instr.write(self._getdev)
+        self.instr.write(self._getdev_p)
         instrument.wait_on_event(self._event_flag, check_state=self.instr)
         return self._fromstr(self._rcv_val)
 
@@ -59,12 +59,12 @@ class dummy_device(object):
     def __init__(self, getstr):
         self._rcv_val = None
         self._event_flag = threading.Event()
-        self._getdev = getstr
-    def getdev(self, quest_extra=''):
+        self._getdev_p = getstr
+    def _getdev(self, quest_extra=''):
         self._event_flag.clear()
         if quest_extra:
             quest_extra=' '+quest_extra
-        self.instr.write(self._getdev + quest_extra)
+        self.instr.write(self._getdev_p + quest_extra)
         instrument.wait_on_event(self._event_flag, check_state=self.instr)
         return self._rcv_val
 
@@ -330,10 +330,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self._objdict = {}
             for devname, obj in self.devs_iter():
                 if isinstance(obj, acq_device):
-                    name = obj._getdev[:-1]
+                    name = obj._getdev_p[:-1]
                     self._objdict[name] = obj
             for devname, obj in self.dummy_devs_iter():
-                name = obj._getdev[:-1]
+                name = obj._getdev_p[:-1]
                 obj.instr = weakref.proxy(self)
                 self._objdict[name] = obj
 
@@ -509,7 +509,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self._async_trig()
         while not self._async_detect():
             pass
-        return self.fetch.getdev(**kwarg)
+        return self.fetch._getdev(**kwarg)
     def _readval_getformat(self, **kwarg):
         return self.fetch.getformat(**kwarg)
     # TODO redirect read to fetch when doing async
@@ -547,11 +547,11 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if not force:
             return self.tau_vec._current_tau_vec
         # we read from device
-        N = int(self._tau_nb.getdev())
+        N = int(self._tau_nb._getdev())
         self.tau_vec.nb_tau = N
         self.tau_vec._current_tau_vec = []
         for i in range(N):
-            ind, val = self._tau_veci.getdev(repr(i)).split(' ')
+            ind, val = self._tau_veci._getdev(repr(i)).split(' ')
             if i != int(ind):
                 raise ValueError, 'read wrong index. asked for %i, got %s'%(i, ind)
             self.tau_vec._current_tau_vec.append(int(val))
