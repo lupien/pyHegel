@@ -594,7 +594,7 @@ class scpiDevice(BaseDevice):
     def _setdev(self, val):
         if self._setdev_p == None:
            raise NotImplementedError, self.perror('This device does not handle _setdev')
-        val = self.tostr(val)
+        val = self._tostr(val)
         self.instr.write(self._setdev_p+' '+val)
     def _getdev(self):
         if self._getdev_p == None:
