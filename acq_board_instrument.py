@@ -27,7 +27,7 @@ class acq_bool(object):
             return True
         else:
             return None
-    def _tostr(self, val):
+    def tostr(self, val):
         if val == None:
             raise ValueError, 'acq_bool should not be None'
         return repr(val)
@@ -38,7 +38,7 @@ class acq_filename(object):
             print 'Filename is missing < >'
             return input_str
         return input_str[1:-1]
-    def _tostr(self, val):
+    def tostr(self, val):
         return '<'+val+'>'
 
 class acq_device(instrument.scpiDevice):
@@ -226,7 +226,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         
         # try connect to the server
         self.s.connect((self.host, self.port))
-        self._set_timeout = 5
+        self.set_timeout = 5
 
         # status and flag
         self.board_type = None
@@ -242,12 +242,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         # init the parent class
         instrument.BaseInstrument.__init__(self)
 
-    def _idn(self):
+    def idn(self):
         # Should be: Manufacturer,Model#,Serial#,firmware
         model = self.board_type
         serial = self.board_serial.getcache()
         return 'Acq card,%s,%s,1.0'%(model, serial)
-    def _cls(self):
+    def cls(self):
         """ Clear error buffer and status
         """
         self._error_state = False
@@ -255,16 +255,16 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def _check_error(self):
         if self._error_state:
             raise ValueError, 'Acq Board currently in error state. clear it with _get_error.'
-    def _get_error(self):
+    def get_error(self):
         if self._errors_list == []:
             self._error_state = False
             return '+0,"No error"'
         return self._errors_list.pop()
     @property
-    def _set_timeout(self):
+    def set_timeout(self):
         return self.s.gettimeout()
-    @_set_timeout.setter
-    def _set_timeout(self, seconds): # can be None
+    @set_timeout.setter
+    def set_timeout(self, seconds): # can be None
         self.s.settimeout(seconds)
     def __del__(self):
         print 'deleting acq1'
@@ -344,7 +344,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.result_available.get()
         self.tau_vec([0])        
 
-    def fetch_getformat(self, filename=None, ch=[1]):
+    def _fetch_getformat(self, filename=None, ch=[1]):
         fmt = self.fetch._format
         fmt.update(file=False)
         fmt.update(bin=False)
@@ -359,7 +359,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def _fetch_filename_helper(self, filename, extra=None, newext=None):
         filestr=''
         location = self.format_location()
-        tofilename = acq_filename()._tostr
+        tofilename = acq_filename().tostr
         if location == 'Local':
             if filename == None:
                 raise ValueError, 'A filename is needed'
@@ -371,7 +371,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             filename = root + ext
             filestr = ' ' + tofilename(filename)
         return filestr
-    def fetch_getdev(self, filename=None, ch=[1]):
+    def _fetch_getdev(self, filename=None, ch=[1]):
         self.fetch._event_flag.clear()
         mode = self.op_mode.getcache()
         location = self.format_location()
@@ -504,13 +504,13 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             
                 
 
-    def readval_getdev(self, **kwarg):
+    def _readval_getdev(self, **kwarg):
         # TODO may need to check if trigger is already in progress
         self._async_trig()
         while not self._async_detect():
             pass
         return self.fetch.getdev(**kwarg)
-    def readval_getformat(self, **kwarg):
+    def _readval_getformat(self, **kwarg):
         return self.fetch.getformat(**kwarg)
     # TODO redirect read to fetch when doing async
 
@@ -519,7 +519,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def _nb_tau_helper(self, N):
         self.write('CONFIG:NB_TAU %i'%N)
         self.tau_vec.nb_tau = N
-    def tau_vec_setdev(self, vals, i=None, append=False):
+    def _tau_vec_setdev(self, vals, i=None, append=False):
         # for the _cache to maintain coherency, this dev needs setget
         # check has made sure the parameter make sense so we proceed
       
@@ -543,7 +543,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self._nb_tau_helper(N)
             self._tau_vec_helper(i, vals)
             self.tau_vec._current_tau_vec.append(vals)
-    def tau_vec_getdev(self, force=False, i=None, append=None):
+    def _tau_vec_getdev(self, force=False, i=None, append=None):
         if not force:
             return self.tau_vec._current_tau_vec
         # we read from device
@@ -557,7 +557,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self.tau_vec._current_tau_vec.append(int(val))
         return self.tau_vec._current_tau_vec
 
-    def tau_vec_check(self, vals, i=None, append=False):
+    def _tau_vec_check(self, vals, i=None, append=False):
         # i is an index
         try:
             # vals is a vector
@@ -578,7 +578,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             raise ValueError, 'Choose either i or append, not both'
 
         #device member
-    def create_devs(self):
+    def _create_devs(self):
 
         # choices string and number
         op_mode_str = ['Null', 'Acq', 'Corr', 'Cust', 'Hist', 'Net', 'Osc', 'Spec']
@@ -670,16 +670,16 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.net_att = acq_device(getstr = 'DATA:NET:ATT?',str_type = float, autoinit=False, trig=True)
         self.net_phase_diff = acq_device(getstr = 'DATA:NET:PHASE_DIFF?',str_type = float, autoinit=False, trig=True)
 
-        self.devwrap('fetch', autoinit=False)
+        self._devwrap('fetch', autoinit=False)
         self.fetch._event_flag = threading.Event()
         self.fetch._rcv_val = None
-        self.devwrap('readval', autoinit=False)
-        self.devwrap('tau_vec', setget=True)
+        self._devwrap('readval', autoinit=False)
+        self._devwrap('tau_vec', setget=True)
         self._tau_nb = dummy_device('CONFIG:NB_TAU?')
         self._tau_veci = dummy_device('CONFIG:TAU?')
 
         # This needs to be last to complete creation
-        super(type(self),self).create_devs()
+        super(type(self),self)._create_devs()
         
     #class methode     
     def write(self, val):

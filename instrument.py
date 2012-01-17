@@ -191,7 +191,7 @@ class BaseDevice(object):
     def __init__(self, autoinit=True, doc='', setget=False,
                   min=None, max=None, choices=None, multi=False,
                   trig=False, delay=False):
-        # instr and name updated by instrument's create_devs
+        # instr and name updated by instrument's _create_devs
         # doc is inserted before the above doc
         # setget makes us get the value after setting in
         #  this is usefull for instruments that could change the value
@@ -201,7 +201,7 @@ class BaseDevice(object):
         self._cache = None
         self._lastget = None
         self._autoinit = autoinit
-        self._setdev = None
+        self._setdev_p = None
         self._getdev = None
         self._setget = setget
         self._trig = trig
@@ -221,12 +221,12 @@ class BaseDevice(object):
     def set(self, val, **kwarg):
         self.check(val, **kwarg)
         if not CHECKING:
-            self.setdev(val, **kwarg)
+            self._setdev(val, **kwarg)
             if self._setget:
                 val = self.get(**kwarg)
-        elif self._setdev == None:
-            raise NotImplementedError, self.perror('This device does not handle setdev')
-        # only change cache after succesfull setdev
+        elif self._setdev_p == None:
+            raise NotImplementedError, self.perror('This device does not handle _setdev')
+        # only change cache after succesfull _setdev
         self._cache = val
     def get(self, **kwarg):
         if not CHECKING:
@@ -276,12 +276,12 @@ class BaseDevice(object):
         dic.update(name=self.name, instr=self.instr, gname=self.instr.find_global_name())
         return ('{gname}.{name}: '+error_str).format(**dic)
     # Implement these in a derived class
-    def setdev(self, val):
-        raise NotImplementedError, self.perror('This device does not handle setdev')
+    def _setdev(self, val):
+        raise NotImplementedError, self.perror('This device does not handle _setdev')
     def getdev(self):
         raise NotImplementedError, self.perror('This device does not handle getdev')
     def check(self, val):
-        if self._setdev == None:
+        if self._setdev_p == None:
             raise NotImplementedError, self.perror('This device does not handle check')
         mintest = maxtest = choicetest = True
         if self.min != None:
@@ -308,15 +308,15 @@ class wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
         BaseDevice.__init__(self, **extrak)
         # the methods are unbounded methods.
-        self._setdev = setdev
+        self._setdev_p = setdev
         self._getdev = getdev
         self._check  = check
         self._getformat  = getformat
-    def setdev(self, val, **kwarg):
-        if self._setdev != None:
-            self._setdev(val, **kwarg)
+    def _setdev(self, val, **kwarg):
+        if self._setdev_p != None:
+            self._setdev_p(val, **kwarg)
         else:
-            raise NotImplementedError, self.perror('This device does not handle setdev')
+            raise NotImplementedError, self.perror('This device does not handle _setdev')
     def getdev(self, **kwarg):
         if self._getdev != None:
             return self._getdev(**kwarg)
@@ -337,15 +337,15 @@ class cls_wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
         BaseDevice.__init__(self, **extrak)
         # the methods are unbounded methods.
-        self._setdev = setdev
+        self._setdev_p = setdev
         self._getdev = getdev
         self._check  = check
         self._getformat  = getformat
-    def setdev(self, val, **kwarg):
-        if self._setdev != None:
-            self._setdev(self.instr, val, **kwarg)
+    def _setdev(self, val, **kwarg):
+        if self._setdev_p != None:
+            self._setdev_p(self.instr, val, **kwarg)
         else:
-            raise NotImplementedError, self.perror('This device does not handle setdev')
+            raise NotImplementedError, self.perror('This device does not handle _setdev')
     def getdev(self, **kwarg):
         if self._getdev != None:
             return self._getdev(self.instr, **kwarg)
@@ -363,23 +363,23 @@ class cls_wrapDevice(BaseDevice):
             return super(type(self), self).getformat(self.instr, **kwarg)
 
 # Using this metaclass, the class method
-# add_class_devs will be executed at class creation.
+# _add_class_devs will be executed at class creation.
 # Hence added devices will be part of the class and will
 # allow the inst.dev=2 syntax 
 #   (Since for the device __set__ to work requires the
 #    object to be part of the class, not the instance)
 class MetaClassInit(type):
     def __init__(cls, name, bases, dct):
-        cls.add_class_devs()
+        cls._add_class_devs()
         type.__init__(cls, name, bases, dct)
-#TODO: maybe override classmethod, automatically call add_class_devs for all devices...
+#TODO: maybe override classmethod, automatically call _add_class_devs for all devices...
 
 class BaseInstrument(object):
     __metaclass__ = MetaClassInit
     alias = None
     def __init__(self):
         self.header_val = None
-        self.create_devs()
+        self._create_devs()
         self._async_list = []
         self._async_level = -1
         self.async_delay = 0.
@@ -431,32 +431,32 @@ class BaseInstrument(object):
         except IndexError:
             return "name_not_found"
     @classmethod
-    def cls_devwrap(cls, name):
+    def _cls_devwrap(cls, name):
         # Only use this if the class will be using only one instance
         # Otherwise multiple instances will collide (reuse same wrapper)
         setdev = getdev = check = getformat = None
         for s in dir(cls):
-           if s == name+'_setdev':
+           if s == '_'+name+'_setdev':
               setdev = getattr(cls, s)
-           if s == name+'_getdev':
+           if s == '_'+name+'_getdev':
               getdev = getattr(cls, s)
-           if s == name+'_check':
+           if s == '_'+name+'_check':
               check = getattr(cls, s)
-           if s == name+'_getformat':
+           if s == '_'+name+'_getformat':
               check = getattr(cls, s)
         wd = cls_wrapDevice(setdev, getdev, check, getformat)
         setattr(cls, name, wd)
-    def devwrap(self, name, **extrak):
+    def _devwrap(self, name, **extrak):
         setdev = getdev = check = getformat = None
         cls = type(self)
         for s in dir(self):
-           if s == name+'_setdev':
+           if s == '_'+name+'_setdev':
               setdev = getattr(cls, s)
-           if s == name+'_getdev':
+           if s == '_'+name+'_getdev':
               getdev = getattr(cls, s)
-           if s == name+'_check':
+           if s == '_'+name+'_check':
               check = getattr(cls, s)
-           if s == name+'_getformat':
+           if s == '_'+name+'_getformat':
               getformat = getattr(cls, s)
         wd = cls_wrapDevice(setdev, getdev, check, getformat, **extrak)
         setattr(self, name, wd)
@@ -465,7 +465,7 @@ class BaseInstrument(object):
            obj = getattr(self, devname)
            if devname != 'alias' and isinstance(obj, BaseDevice):
                yield devname, obj
-    def create_devs(self):
+    def _create_devs(self):
         # devices need to be created here (not at class level)
         # because we want each instrument instance to use its own
         # device instance (otherwise they would share the instance data)
@@ -473,7 +473,7 @@ class BaseInstrument(object):
         # if instrument had a _current_config function and the device does
         # not specify anything for header in its format string than
         # we assign it.
-        self.devwrap('header')
+        self._devwrap('header')
         # need the class function to prevent binding which blocks __del__
         cls = type(self)
         if hasattr(cls, '_current_config'):
@@ -533,15 +533,15 @@ class BaseInstrument(object):
     def perror(self, error_str='', **dic):
         dic.update(instr=self, gname=self.find_global_name())
         return ('{gname}: '+error_str).format(**dic)
-    def header_getdev(self):
+    def _header_getdev(self):
         if self.header_val == None:
             return self.find_global_name()
         else:
             return self.header_val
-    def header_setdev(self, val):
+    def _header_setdev(self, val):
         self.header_val = val
     @classmethod
-    def add_class_devs(cls):
+    def _add_class_devs(cls):
         pass
     def trigger():
         pass
@@ -550,7 +550,7 @@ class MemoryDevice(BaseDevice):
     def __init__(self, initval=None, **extrak):
         BaseDevice.__init__(self, **extrak)
         self._cache = initval
-        self._setdev = True # needed to enable BaseDevice Check
+        self._setdev_p = True # needed to enable BaseDevice Check
     def get(self):
         return self._cache
     def set(self, val):
@@ -565,7 +565,7 @@ class scpiDevice(BaseDevice):
         if setstr == None and getstr == None:
            raise ValueError, 'At least one of setstr or getstr needs to be specified'
         BaseDevice.__init__(self, doc=doc, **extrak)
-        self._setdev = setstr
+        self._setdev_p = setstr
         if getstr == None and autoget:
             getstr = setstr+'?'
         self._getdev = getstr
@@ -580,7 +580,7 @@ class scpiDevice(BaseDevice):
             return repr(val)
         if t == None or (type(t) == type and issubclass(t, basestring)):
             return val
-        return t._tostr(val)
+        return t.tostr(val)
     def _fromstr(self, valstr):
         # This function converts from the query result to a value
         t = self.type
@@ -591,11 +591,11 @@ class scpiDevice(BaseDevice):
         if t == None or (type(t) == type and issubclass(t, basestring)):
             return valstr
         return t(valstr)
-    def setdev(self, val):
-        if self._setdev == None:
-           raise NotImplementedError, self.perror('This device does not handle setdev')
-        val = self._tostr(val)
-        self.instr.write(self._setdev+' '+val)
+    def _setdev(self, val):
+        if self._setdev_p == None:
+           raise NotImplementedError, self.perror('This device does not handle _setdev')
+        val = self.tostr(val)
+        self.instr.write(self._setdev_p+' '+val)
     def getdev(self):
         if self._getdev == None:
            raise NotImplementedError, self.perror('This device does not handle getdev')
@@ -703,7 +703,7 @@ class ChoiceStrings(object):
                 raise ValueError, 'The value --%s-- is not quoted properly'%input_str
             return self.normalizelong(input_str[1:-1])
         return self.normalizelong(input_str)
-    def _tostr(self, input_choice):
+    def tostr(self, input_choice):
         # this is called by dev._tostr to convert a choice to the format needed by instrument
         if self.quotes:
             return '"%s"'%input_choice
@@ -793,17 +793,17 @@ class visaInstrument(BaseInstrument):
         self.visa.write(val)
     def ask(self, question):
         return self.visa.ask(question)
-    def _idn(self):
+    def idn(self):
         return self.ask('*idn?')
     def _clear(self):
         self.visa.clear()
     @property
-    def _set_timeout(self):
+    def set_timeout(self):
         return self.visa.timeout
-    @_set_timeout.setter
-    def _set_timeout(self, seconds):
+    @set_timeout.setter
+    def set_timeout(self, seconds):
         self.visa.timeout = seconds
-    def _get_error(self):
+    def get_error(self):
         return self.ask('SYSTem:ERRor?')
     def _info(self):
         gn, cn, p = BaseInstrument._info(self)
@@ -830,7 +830,7 @@ class yokogawa_gs200(visaInstrument):
         self.write('*cls')
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('function', 'range', 'level')
-    def create_devs(self):
+    def _create_devs(self):
         #self.level_2 = wrapDevice(self.levelsetdev, self.levelgetdev, self.levelcheck)
         self.function = scpiDevice(':source:function', choices=ChoiceStrings('VOLT', 'CURRent')) # use 'voltage' or 'current'
         # voltage or current means to add V or A in the string (possibly with multiplier)
@@ -838,19 +838,19 @@ class yokogawa_gs200(visaInstrument):
         #self.level = scpiDevice(':source:level') # can be a voltage, current, MAX, MIN
         self.voltlim = scpiDevice(':source:protection:voltage', str_type=float, setget=True) #voltage, MIN or MAX
         self.currentlim = scpiDevice(':source:protection:current', str_type=float, setget=True) #current, MIN or MAX
-        self.devwrap('level', setget=True)
+        self._devwrap('level', setget=True)
         self.alias = self.level
         # This needs to be last to complete creation
-        super(type(self),self).create_devs()
-    def level_check(self, val):
+        super(type(self),self)._create_devs()
+    def _level_check(self, val):
         rnge = 1.2*self.range.getcache()
         if self.function.getcache()=='CURR' and rnge>.2:
             rnge = .2
         if abs(val) > rnge:
            raise ValueError, self.perror('level is invalid')
-    def level_getdev(self):
+    def _level_getdev(self):
         return float(self.ask(':source:level?'))
-    def level_setdev(self, val):
+    def _level_setdev(self, val):
         # used %.6e instead of repr
         # repr sometimes sends 0.010999999999999999
         # which the yokogawa understands as 0.010 instead of 0.011
@@ -865,12 +865,12 @@ class sr830_lia(visaInstrument):
     def _check_snapsel(self,sel):
         if not (2 <= len(sel) <= 6):
             raise ValueError, 'snap sel needs at least 2 and no more thant 6 elements'
-    def snap_getdev(self, sel=[1,2]):
+    def _snap_getdev(self, sel=[1,2]):
         # sel must be a list
         self._check_snapsel(sel)
         sel = map(str, sel)
         return _decode_float64(self.ask('snap? '+string.join(sel,sep=',')))
-    def snap_getformat(self, sel=[1,2], filename=None):
+    def _snap_getformat(self, sel=[1,2], filename=None):
         self._check_snapsel(sel)
         headers = [ self._snap_type[i] for i in sel]
         d = self.snap._format
@@ -878,7 +878,7 @@ class sr830_lia(visaInstrument):
         return BaseDevice.getformat(self.snap, sel=sel)
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant')
-    def create_devs(self):
+    def _create_devs(self):
         self.freq = scpiDevice('freq', str_type=float)
         self.sens = scpiDevice('sens', str_type=int)
         self.oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float)
@@ -891,10 +891,10 @@ class sr830_lia(visaInstrument):
         self.r = scpiDevice(getstr='outp? 3', str_type=float)
         self.theta = scpiDevice(getstr='outp? 4', str_type=float)
         self.xy = scpiDevice(getstr='snap? 1,2')
-        self.devwrap('snap')
+        self._devwrap('snap')
         self.alias = self.snap
         # This needs to be last to complete creation
-        super(type(self),self).create_devs()
+        super(type(self),self)._create_devs()
 
 class sr384_rf(visaInstrument):
     # This instruments needs to be on local state or to pass through local state
@@ -903,7 +903,7 @@ class sr384_rf(visaInstrument):
     def init(self, full=False):
         # This clears the error state
         self.write('*cls')
-    def create_devs(self):
+    def _create_devs(self):
         self.freq = scpiDevice('freq',str_type=float)
         self.offset_low = scpiDevice('ofsl',str_type=float) #volts
         self.amp_lf_dbm = scpiDevice('ampl',str_type=float)
@@ -915,13 +915,13 @@ class sr384_rf(visaInstrument):
         self.phase = scpiDevice('phas',str_type=float, min=-360, max=360) # deg, only change by 360
         self.mod_en = scpiDevice('modl', str_type=bool) # 0 is off, 1 is on
         # This needs to be last to complete creation
-        super(type(self),self).create_devs()
+        super(type(self),self)._create_devs()
 
 class agilent_rf_33522A(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('ampl1', 'freq1', 'offset1', 'phase1', 'mode1', 'out_en1', 'pulse_width1',
                                  'ampl2', 'freq2', 'offset2', 'phase2', 'mode2', 'out_en2', 'pulse_width2')
-    def create_devs(self):
+    def _create_devs(self):
         # voltage unit depends on front panel/remote selection (sourc1:voltage:unit) vpp, vrms, dbm
         self.ampl1 = scpiDevice('SOUR1:VOLT', str_type=float, min=0.001, max=10)
         self.freq1 = scpiDevice('SOUR1:FREQ', str_type=float, min=1e-6, max=30e6)
@@ -939,7 +939,7 @@ class agilent_rf_33522A(visaInstrument):
         self.out_en2 = scpiDevice('OUTPut2', str_type=bool) #OFF,0 or ON,1
         self.alias = self.freq1
         # This needs to be last to complete creation
-        super(type(self),self).create_devs()
+        super(type(self),self)._create_devs()
     def phase_sync(self):
         self.write('PHASe:SYNChronize')
 
@@ -1001,7 +1001,7 @@ class agilent_multi_34410A(visaInstrument):
                width = line_period*round(width/line_period)
         self.aperture.set(width)
         self.sample_count.set(count)
-    def create_devs(self):
+    def _create_devs(self):
         # This needs to be last to complete creation
         # fetch and read return sample_count*trig_count data values (comma sep)
         ch = ChoiceStrings(
@@ -1044,7 +1044,7 @@ class agilent_multi_34410A(visaInstrument):
         self.sample_timer = scpiDevice('SAMPle:TIMer', str_type=float) # seconds
         self.trig_delayauto = scpiDevice('TRIGger:DELay:AUTO', str_type=bool)
         self.alias = self.readval
-        super(type(self),self).create_devs()
+        super(type(self),self)._create_devs()
         # For INITiate: need to wait for completion of triggered measurement before calling it again
         # for trigger: *trg and visa.trigger seem to do the same. Can only be called after INItiate and 
         #   during measurement.
@@ -1092,7 +1092,7 @@ class agilent_multi_34410A(visaInstrument):
 
 
 class lakeshore_322(visaInstrument):
-    def create_devs(self):
+    def _create_devs(self):
         self.crdg = scpiDevice(getstr='CRDG?', str_type=float)
         self.thermocouple = scpiDevice(getstr='TEMP?', str_type=float)
         self.ta = scpiDevice(getstr='KRDG? A', str_type=float) #in Kelvin
@@ -1107,10 +1107,10 @@ class lakeshore_322(visaInstrument):
         self.sp = scpiDevice(setstr='SETP 1,', getstr='SETP? 1', str_type=float)
         self.alias = self.tb
         # This needs to be last to complete creation
-        super(type(self),self).create_devs()
+        super(type(self),self)._create_devs()
 
 class infiniiVision_3000(visaInstrument):
-    def create_devs(self):
+    def _create_devs(self):
         # Note vincent's hegel, uses set to define filename where block data is saved.
         self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', str_type=_decode_block_base, autoinit=False) # returns block of data(always bin with # header)
         self.snap_png._format['bin']='.png'
@@ -1126,7 +1126,7 @@ class infiniiVision_3000(visaInstrument):
         self.preamble = scpiDevice(getstr=':waveform:PREamble?')
         self.source = scpiDevice(':WAVeform:SOURce') # CHAN1, CHAN2, CHAN3, CHAN4
         # This needs to be last to complete creation
-        super(type(self),self).create_devs()
+        super(type(self),self)._create_devs()
 
 class agilent_EXA(visaInstrument):
     def init(self, full=False):
@@ -1134,7 +1134,7 @@ class agilent_EXA(visaInstrument):
         self.write(':format:border swap')
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('bandwidth', 'freq_start', 'freq_stop','average_count')
-    def create_devs(self):
+    def _create_devs(self):
         self.bandwidth = scpiDevice(':bandwidth',str_type=float)
         self.mark1x = scpiDevice(':calc:mark1:x',str_type=float)
         self.mark1y = scpiDevice(getstr=':calc:mark1:y?',str_type=float)
@@ -1146,13 +1146,13 @@ class agilent_EXA(visaInstrument):
         self.fetch1 = scpiDevice(getstr=':fetch:san1?', autoinit=False)
         self.read1 = scpiDevice(getstr=':read:san1?', autoinit=False)
         # This needs to be last to complete creation
-        super(type(self),self).create_devs()
+        super(type(self),self)._create_devs()
 
 class agilent_PNAL(visaInstrument):
     def init(self, full=False):
         self.write(':format REAL,64')
         self.write(':format:border swap')
-    def create_devs(self):
+    def _create_devs(self):
         self.bandwith = scpiDevice(':sense1:bandwidth',str_type=float)
         self.average_count = scpiDevice(getstr=':sense:average:count?',str_type=int)
         self.freq_start = scpiDevice(':sense:freq:start', str_type=float, min=10e6, max=40e9)
@@ -1166,34 +1166,34 @@ class agilent_PNAL(visaInstrument):
         self.select_w = scpiDevice(getstr=':syst:meas1:window?')
         self.select_t = scpiDevice(getstr=':syst:meas1:trace?')
         # This needs to be last to complete creation
-        super(type(self),self).create_devs()
+        super(type(self),self)._create_devs()
 
 class dummy(BaseInstrument):
     def init(self, full=False):
         self.incr_val = 0
         self.wait = .1
-    def incr_getdev(self):
+    def _incr_getdev(self):
         ret = self.incr_val
         self.incr_val += 1
         traces.wait(self.wait)
         return ret
-    def incr_setdev(self, val):
+    def _incr_setdev(self, val):
         self.incr_val = val
-    #incr3 = wrapDevice(incr_setdev, incr_getdev)
-    #incr2 = wrapDevice(getdev=incr_getdev)
-    def rand_getdev(self):
+    #incr3 = wrapDevice(_incr_setdev, _incr_getdev)
+    #incr2 = wrapDevice(getdev=_incr_getdev)
+    def _rand_getdev(self):
         traces.wait(self.wait)
         return random.normalvariate(0,1.)
-    def create_devs(self):
+    def _create_devs(self):
         self.volt = MemoryDevice(0., doc='This is a memory voltage, a float')
         self.current = MemoryDevice(1., doc='This is a memory current, a float')
         self.other = MemoryDevice(autoinit=False, doc='This takes a boolean')
         #self.freq = scpiDevice('freq', str_type=float)
-        self.devwrap('rand', doc='This returns a random value. There is not set.', delay=True)
-        self.devwrap('incr')
+        self._devwrap('rand', doc='This returns a random value. There is not set.', delay=True)
+        self._devwrap('incr')
         self.alias = self.current
         # This needs to be last to complete creation
-        super(type(self),self).create_devs()
+        super(type(self),self)._create_devs()
 
 class ScalingDevice(BaseDevice):
     """

@@ -40,14 +40,14 @@ def reset_pyHegel():
 instrument._globaldict = globals()
 
 class _Clock(instrument.BaseInstrument):
-    def time_getdev(self):
+    def _time_getdev(self):
         """ Get UTC time since epoch in seconds """
         return time.time()
-    def create_devs(self):
-        self.devwrap('time')
+    def _create_devs(self):
+        self._devwrap('time')
         self.alias = self.time
         # This needs to be last to complete creation
-        super(type(self),self).create_devs()
+        super(type(self),self)._create_devs()
 clock = _Clock()
 
 writevec = instrument._writevec
@@ -55,7 +55,7 @@ writevec = instrument._writevec
 def _getheaderhelper(dev):
     return dev.instr.header.get()+'.'+dev.name
 
-def getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
+def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     hdrs = []
     graphsel = []
     count = 0
@@ -319,7 +319,7 @@ class _Sweep(instrument.BaseInstrument):
             extra_conf = [extra_conf, sweep.out]
         else:
             extra_conf.append(sweep.out)
-        hdrs, graphsel, formats = getheaders(dev, devs, fullpath, npts, extra_conf=extra_conf)
+        hdrs, graphsel, formats = _getheaders(dev, devs, fullpath, npts, extra_conf=extra_conf)
         graph = self.graph.get()
         if graph:
             t = traces.Trace()
@@ -451,7 +451,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
         title = str(_record_trace_num)
     _record_trace_num += 1
     t.setWindowTitle('Record: '+title)
-    hdrs, graphsel, formats = getheaders(getdevs=devs, root=fullpath, npts=npoints, extra_conf=extra_conf)
+    hdrs, graphsel, formats = _getheaders(getdevs=devs, root=fullpath, npts=npoints, extra_conf=extra_conf)
     if graphsel == []:
         # nothing selected to graph so pick first dev
         # It probably will be the loop index i
@@ -710,7 +710,7 @@ def load(names=None, newnames=None):
         i = instr(*param)
         exec 'global '+newname+';'+newname+'=i'
 
-class Hegel_Task(threading.Thread):
+class _Hegel_Task(threading.Thread):
     def __init__(self, func, args=(), kwargs={}, count=None,
            interval=None, **extra):
         # func can be a function or a callable class instance.
@@ -742,18 +742,18 @@ class Hegel_Task(threading.Thread):
         self.stopit = True
 
 def task(*arg, **kwarg):
-    Hegel_Task(*arg, **kwarg)
+    _Hegel_Task(*arg, **kwarg)
 
 def top():
     # All threads count: threading.active_count()
     for t in threading.enumerate():
-        if isinstance(t, Hegel_Task):
+        if isinstance(t, _Hegel_Task):
             print '%5i %s'%(t.ident, t)
 
 def kill(n):
     # stop thread with number given by top
     for t in threading.enumerate():
-        if isinstance(t, Hegel_Task) and t.ident==n:
+        if isinstance(t, _Hegel_Task) and t.ident==n:
             print 'Stopping task and waiting'
             t.stop()
             t.join()
