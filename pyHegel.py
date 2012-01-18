@@ -575,6 +575,18 @@ def getasync(devs, filename=None, **kwarg):
         ret.append(dev.getasync(async=3, **kwarg))
     return ret
 
+def make_dir(directory, setsweep=True):
+    """
+        Creates a directory if it does now already exists
+        and changes sweep.path to point there unless
+        setsweep is False
+    """
+    dirname = _process_filename(directory)
+    if not os.path.exists(dirname):
+        os.makedirs(dirname)
+    if setsweep:
+        sweep.path.set(dirname)
+
 
 def iprint(instrument, force=False):
     """
