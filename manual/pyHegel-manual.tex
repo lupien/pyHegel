@@ -1,0 +1,266 @@
+\documentclass[letterpaper,12pt]{article}
+
+\usepackage{url}
+\usepackage{hyperref}
+
+\usepackage{fancyvrb}
+\DefineShortVerb{\|}
+\DefineVerbatimEnvironment{code}{Verbatim}{}
+%\DefineVerbatimEnvironment{code}{BVerbatim}{}
+
+\title{pyHegel user manual}
+\author{Christian Lupien}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+This manual describes pyHegel. This program is used to communicate with
+various laboratory instruments using protocols such as GPIB or VISA. It 
+allows for the automation of data acquisition.
+
+The program is written in python and relies on using a python console to enter
+the various commands. Python is a powerfull interpreted language, so pyHegel
+can easily be extended by writting python code interactivelly, define functions
+or calling python scripts.
+
+There are 2 python series. The 2.x and 3.x series. pyHegel is currently written
+for the 2.7 version. For a introduction to python, see the tutorial at 
+\url{http://docs.python.org/tutorial/}
+and the documentation at
+\url{http://docs.python.org/}.
+
+To extend the capabilities of python, many modules can be used. for pyHegel
+we use the pyVisa module to interface to instruments using visa device drivers.
+Visa libraries should already be installed. They come from National Instruments
+or Agilent. They allow interfacing to instruments using a GPIB bus, a USB cable
+or LAN, depending on the instrument capabilities.
+
+Other interesting modules, and those that would be usefull to know better in 
+order to better use pyHegel are: numpy, scipy, matplotlib and iPython. 
+The numpy and scipy packages are used for numerical calculations. For
+documentation see \url{http://docs.scipy.org/doc/} and for tutorials see
+\url{http://www.scipy.org/Tentative_NumPy_Tutorial} and
+\url{http://docs.scipy.org/doc/scipy/reference/tutorial/}. 
+Numpy provides multi-dimensional array structures and fast calculations on them.
+It works in a similar way as matlab, IDL, yorick, Mathematica or other
+command line data analysis programs. The scipy module uses numpy to provide
+many usefull algorithm, like filtering, probality densites, fitting ...
+The matplotlib module allows plotting of data with a syntax similar to 
+matlab (called pyplot) but also posseses an object interface.
+For documentation see \url{http://matplotlib.sourceforge.net/}
+and for a tutorial see \url{http://matplotlib.sourceforge.net/users/pyplot_tutorial.html}.
+
+Finally the iPython module is the recommanded interface to use. The python 
+console is quite basic. The iPython package as improved the basic console to
+provide much better interactive environment. It has powerfull command line
+editing capabilities (command recall, tab expansion, macros, automation,
+automatic saving or in/out values ...).
+For documentation see \url{http://ipython.org/documentation.html}.
+Note that the ipython console can import the codes from the numpy and matplotlib.pylab
+modules and gives you direct access to those functions.
+
+
+
+\section{Installation}
+In order for pyHegel to run, you first need to have python installed
+with all the necessary modules. On linux that sould already be the case. On
+windows, the easiest way to achieve this is to install the pythonxy
+package. It contains all that is needed and more, like python editing enviroments
+such as spyder, a lot of the documentations, the Qt libraries to make portable
+graphical user interfaces. Just download the latest version from 
+\url{http://code.google.com/p/pythonxy/} or take the one on 
+the local network. Then install it. Make sure to install it for all users
+and customize the install to include the pyVisa module.
+
+Once pyhton is installed you need to obtain the latest version of pyHegel.
+Currently the version of pyHegel are being maintained in a git repository.
+Git is a distributed version control system. Therefore you should download
+and install Git from \url{http://git-scm.com/} or again from the local network.
+
+Then you use git to install the latest version. First you clone one of the
+remote repository locally. You can do that with Git-GUI. Select clone and then
+use \url{git://bender.physique.usherbrooke.ca/~lupien/pyHegel} and place the 
+result somewhere locallay (recommended location is
+ |C:\Codes\pyHegel|). This should download the latest version. If you later
+want a newer want, get back into Git-GUI, reopen the correct local directory,
+then in remote/fetch and select the proper location.
+If you followed above it should be called origin. Otherwise it might be
+lupien-git or something similar. Entries with ssh in the name will not work
+since the require a password (they are used when submitting modified code).
+
+You now have the latest version of the core. To run it, now start an ipython console.
+You do that by running the python(x,y) program. It is a graphical interface that
+allows you to start many of the tools within pythonxy. Using it you start one
+of the consoles. Then at the command prompt within the console, you 
+need to change directory to the location of the code and then execute it.
+You do this has follows
+\begin{code}
+cd C:/Codes/pyHegel
+run -i pyHegel
+\end{code}
+
+You can now start to use pyHegel. You probably will want to load an instrument
+and start comminicating with it.
+\section{Basic structure}
+pyHegel is based on the legacy Hegel program which was written in C++ by Bertrand Reulet and has a similar syntax.
+However, since it is executed from a python console, you also have access to all
+the python code you want.
+
+The code comes with the main pyHegel.py file which contains the main commands.
+The |instrument| module contains all the basic instrument classes and the
+specific classes for various laboratory equipment (multimeters, sources, ...).
+the |traces| module handles plotting, and |local_config| provides a list of
+preconfigured instruments to load. Finally the |acq_board_instrument| module
+handles the control of the fast acquisiation cards.
+
+Every instrument is represented by an object, which is created from a class definition
+that describe that instrument model
+by instantiating it (in python parlance), here using the proper
+VISA or GPIB address of the particular instrument. In python, the various 
+components of an object are accessed by adding a dot (.) to the object and
+putting the attribute name, for example |obj.freq| accesses the attribute |freq| (which can be another object, or a value) of the object |obj|.
+
+Whithin the ipython console, the various attribute availble can be listed with
+the tab completion. Just add the dot and press tab and a list of possibilites
+will be printed. Usually, attributes starting with an underscore (|_|), are
+reserved for internal used. In addition, to get information about any object
+in ipython (including pyHegel instruments and devices) just precede or follow
+the object with a question mark (?). For example
+\begin{code}
+sweep?
+?sweep
+\end{code}
+both give the online documentation of sweep.
+If you double the question mark (??) you obtain the python source code for
+the object.
+
+In ipyhton, when you call a function that returns a value on the console without
+assignin it to a variable, the result is displayed, and saved in a buffer.
+Like in mathematica, you can refer to the last result using the underscore (|_|).
+Earlier results are referred as |_n| where any is the number of the entry.
+Assignement are done with the equal sign |newvar=function()|.
+
+
+Within an instrument multiple devices are present. These represent various
+things that the instrument can do. For a generator, they could represent the
+frequency and the amplitude. In genreral a device will allow to be changed with
+a |set| command and to be read with a |get| command, however, some devices might
+only do one of those. Every device also has a cache, accessed with |getcache|
+that is the last value used in either get/set. Reading the cache skips
+the communication with the device and is therefore faster and has no side effects.
+
+Both |set| and |get| can accept optional arguments, depending on the device.
+For example it could be the trace number, or a filename. In all those cases,
+it is a python keyword argument and it has a default value. There are no 
+other positional arguments. For exemple |scope.trace.get(m=1)| could be
+a valid call.
+
+Every device that can be |set| also has a |check| function that verifies
+if the parameters are valid. It is automatically called on all set.
+
+The functions available for a device can be called directly. To get the frequency from a generator might be done like this: |gen.freq.get()|
+The parenthesis are needed because get is a python function.
+Every device also has a few shortcuts. Calling the device itself is the
+same has obtaining the cache. So the following are the same
+\begin{code}
+gen.freq.getcache()
+gen.freq()
+\end{code}
+Additionally, calling a device with a value is the same as set so
+\begin{code}
+gen.freq.set(5e7)
+gen.freq(5e7)
+\end{code}
+are the same.
+
+Besides devices, instruments can also have commandes that are called directly.
+For example the acquisistion cards has |set_histogram| function that is used
+to turn on the histogram mode of the card. |set_histogram| is not a device and
+you cannot perform |set| or |get| on it.
+
+\section{Commands}
+All the following are python functions and therefore require parentesis.
+However, when entering commands on the ipython console interactivelly, the
+parentesis around the arguments can be skipped and ipython will add them 
+automatically. This will not work when no argument are present, then you
+need to add them yourself or use the ipython trick of preceding the function
+name by a slash (|/|). These shortcut will not work for script files,
+unless the script is designated and ipython script by having the extension
+.ipy. Regular python code/script files have extension .py.
+
+\begin{code}
+load
+find_all_instruments()
+iprint(device)
+ilist()
+dlist()
+
+set
+get
+getasync
+move
+copy
+sleep(time)
+wait
+
+spy
+record
+trace
+
+scope
+check
+checkmode
+batch
+also execfile, run or run -i
+Execute system command
+os.system or !
+pass : to skip
+comments in python are #
+
+make_dir
+
+task
+top
+kill
+
+var???
+
+reset_pyHegel()
+collect_garbage()
+
+clock
+sweep
+\end{code}
+The sweep device have an additional syntax available you can assign to them:
+\begin{code}
+set(sweep.path,'Somewhere/on/disk')
+sweep.path('Somewhere/on/disk')
+sweep.path='Somewhere/on/disk'
+\end{code}
+All do the same thing.
+
+
+Can alias an instrument or device by assigning it to another variable
+|newname=instrument1|, |newname = instrument1.device1|
+
+You can forget about a loaded instrument by deleting the the python object:
+|del instrument1|. However, if the object was assigned to other variables (including the ipython numbered results) the object will not get deleted. Deletion
+in python only occures when the last reference to the object disappeared.
+This might be delayed by the garbage collector and not be possible because
+of circular references (there should not be circular refenrences in instruments
+and devices however). Left over devices are usually not a big problem since they
+don't consume much memory and closing a device does not usually communicate
+with it.
+
+Of course all numpy and matplotlib functions should already be loaded so 
+you can use:
+plot
+random
+arange
+linspace
+hist
+etc...
+
+\end{document}
+
