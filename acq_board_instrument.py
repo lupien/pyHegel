@@ -578,11 +578,14 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             raise ValueError, 'Choose either i or append, not both'
 
     def _hist_ms_getformat(self, filename=None, m=[1,2,3,4,5]):
-        if not isinstance(m, (list, tuple, np.ndarray)):
+        if not isinstance(m, (list, tuple, set, np.ndarray)):
             m=[m]
+        m=sorted(set(m)) # removes duplicates, and sort
+        if min(m)<1 or max(m)>5:
+            raise ValueError, 'Selector out of range, should be 1-5'
         fmt = self.hist_ms._format
         headers = [ 'm%i'%i for i in m]
-        fmt.update(multi=headers, graph=range(len(m)))
+        fmt.update(multi=headers, graph=range(len(headers)))
         return instrument.BaseDevice.getformat(self.hist_ms, m=m)
     def _hist_ms_getdev(self, m=[1,2,3,4,5]):
         if not isinstance(m, (list, tuple, np.ndarray)):
@@ -671,7 +674,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.hist_m3 = acq_device(getstr = 'DATA:HIST:M3?', str_type = float, autoinit=False, trig=True)
         self.hist_m4 = acq_device(getstr = 'DATA:HIST:M4?', str_type = float, autoinit=False, trig=True)
         self.hist_m5 = acq_device(getstr = 'DATA:HIST:M5?', str_type = float, autoinit=False, trig=True)
-        self._devwrap('hist_ms', autoinit=False, trig=True)
+        docstr="""
+           hist_ms has optionnal parameter m=[1,2,3,4,5]
+           It specifies which of the moment to obtain and returns
+           a list of the selected ones. By default, all are selected.
+        """
+        self._devwrap('hist_ms', autoinit=False, trig=True, doc=docstr)
         # TODO histogram raw data
         
         #TODO correlation result
