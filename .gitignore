@@ -1,2 +1,8 @@
 *~
 *.pyc
+
+# eliminate latex output
+*.out
+*.log
+*.dvi
+*.aux
