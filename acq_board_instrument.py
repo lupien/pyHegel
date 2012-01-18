@@ -577,6 +577,29 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if i != None and append:
             raise ValueError, 'Choose either i or append, not both'
 
+    def _hist_ms_getformat(self, filename=None, m=[1,2,3,4,5]):
+        if not isinstance(m, (list, tuple, np.ndarray)):
+            m=[m]
+        fmt = self.hist_ms._format
+        headers = [ 'm%i'%i for i in m]
+        fmt.update(multi=headers, graph=range(len(m)))
+        return instrument.BaseDevice.getformat(self.hist_ms, m=m)
+    def _hist_ms_getdev(self, m=[1,2,3,4,5]):
+        if not isinstance(m, (list, tuple, np.ndarray)):
+            m=[m]
+        ret = []
+        if 1 in m:
+            ret.append(self.hist_m1.get())
+        if 2 in m:
+            ret.append(self.hist_m2.get())
+        if 3 in m:
+            ret.append(self.hist_m3.get())
+        if 4 in m:
+            ret.append(self.hist_m4.get())
+        if 5 in m:
+            ret.append(self.hist_m5.get())
+        return ret
+
         #device member
     def _create_devs(self):
 
@@ -648,6 +671,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.hist_m3 = acq_device(getstr = 'DATA:HIST:M3?', str_type = float, autoinit=False, trig=True)
         self.hist_m4 = acq_device(getstr = 'DATA:HIST:M4?', str_type = float, autoinit=False, trig=True)
         self.hist_m5 = acq_device(getstr = 'DATA:HIST:M5?', str_type = float, autoinit=False, trig=True)
+        self._devwrap('hist_ms', autoinit=False, trig=True)
         # TODO histogram raw data
         
         #TODO correlation result
