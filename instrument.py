@@ -293,9 +293,9 @@ class BaseDevice(object):
         state = mintest and maxtest and choicetest
         if state == False:
            if not mintest:
-               err='invalid MIN'
+               err='below MIN=%r'%self.min
            if not maxtest:
-               err='invalid MAX'
+               err='above MAX=%r'%self.max
            if not choicetest:
                err='invalid value(%s): use one of %s'%(val, repr(self.choices))
            raise ValueError, self.perror('Failed check: '+err)
