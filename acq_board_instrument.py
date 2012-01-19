@@ -890,6 +890,19 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_await.set(False)
         self.trigger_create.set(False)
         self.fft_length.set(fft_length)
+
+    def get_spectrum_f(self):
+        """
+           returns a vector of frequency data to match the amplitudes
+           returned in spectrum modes.
+           Requires a proper sampling rate to be set.
+        """
+        rate = self.sampling_rate.getcache()*1e6
+        N = self.fft_length.getcache()
+        period = 1./rate * N
+        df = 1./period
+        freq = df*np.arange(N/2+1)
+        return freq
         
     def set_custom(self,nb_Msample, sampling_rate, chan_mode, chan_nb, clock_source,cust_param1,cust_param2,cust_param3,cust_param4,cust_user_lib):
         self.op_mode.set('Cust')
