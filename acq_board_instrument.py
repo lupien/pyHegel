@@ -443,6 +443,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 ret = np.fromstring(self.fetch._rcv_val, np.ushort)
             else:
                 ret = np.fromstring(self.fetch._rcv_val, np.ubyte)
+            if self.chan_mode.getcache() == 'Dual':
+                ret.shape=(-1,2)
+                ret = ret.T
             if unit == 'V':
                 return self.convert_bin2v(ret)
             else:
@@ -790,18 +793,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def shutdown_server(self):
         self.write('SHUTDOWN')
 
-    def scope_display(self):
-        plt.hold(False)
-        while True:
-            v = self.readval.get()
-            if self.chan_mode.getcache() == 'Dual':         
-                v.shape = (-1,2)
-                plt.plot(v)
-            else:
-                plt.plot(v)
-            
-        
-        
+
     def set_simple_acq(self,nb_Msample, sampling_rate, chan_mode, chan_nb,clock_source):
         self.op_mode.set('Acq')
         self.sampling_rate.set(sampling_rate)

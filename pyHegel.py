@@ -496,15 +496,24 @@ def trace(dev, interval=1, title=''):
     """
     record(dev, interval, npoints=1000, filename='trace.dat', title=title)
 
-def scope(dev, interval=.1, title=''):
-    # TODO make this works
-    #      find a way to set a proper x scale
+def scope(dev, interval=.1, title='', **kwarg):
+    """
+       For xscale it uses instr.get_xscale
+       interval is in s
+       title is for the window title
+       kwarg is the list of optional parameters to pass to dev
+       example:
+           scope(acq1.readval, unit='V') # with acq1 in scope mode
+    """
     t = traces.Trace()
     t.setWindowTitle('Scope: '+title)
+    xscale = dev.instr.get_xscale()
+    t.setLim(xscale)
     while True:
-        v=dev.get()
-        x=np.linspace(0, 1, len(v))
-        t.setPoints(x, v)
+        v=dev.get(**kwarg)
+        if v.ndim == 1:
+            v.shape=(1,-1)
+        t.setPoints(xscale, v)
         wait(interval)
         _checkTracePause(t)
         if t.abort_enabled:

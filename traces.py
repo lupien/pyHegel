@@ -202,7 +202,7 @@ class Trace(FigureManagerQT):
             # convert from sec since epoch to matplotlib date format
             x = x/(24.*3600)+pylab.epoch2num(0)
         self.xs = np.array(x)
-        self.ys = np.array(y)
+        self.ys = np.array(y.T)
         self.update()
     def setlegend(self, str_lst):
         self.legend_strs = str_lst
