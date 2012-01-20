@@ -342,9 +342,16 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.board_serial.get()
         self.board_status.get()
         self.result_available.get()
-        self.tau_vec([0])        
+        self.tau_vec([0])
 
-    def _fetch_getformat(self, filename=None, ch=[1]):
+    def convert_bin2v(self, bin):
+        if self.board_type == 'ADC14':
+            v = (2.**13-bin)*0.750/2.**14
+        else: # ADC8
+            v = (bin-2.**7)*0.700/2.**8
+        return v
+
+    def _fetch_getformat(self, filename=None, ch=[1], unit='default'):
         fmt = self.fetch._format
         fmt.update(file=False)
         fmt.update(bin=False)
@@ -371,7 +378,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             filename = root + ext
             filestr = ' ' + tofilename(filename)
         return filestr
-    def _fetch_getdev(self, filename=None, ch=[1]):
+    def _fetch_getdev(self, filename=None, ch=[1], unit='default'):
         self.fetch._event_flag.clear()
         mode = self.op_mode.getcache()
         location = self.format_location()
@@ -402,7 +409,11 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             instrument.wait_on_event(self.fetch._event_flag, check_state=self)
             if self.fetch._rcv_val == None:
                 return None
-            return np.fromstring(self.fetch._rcv_val, np.uint64)
+            ret = np.fromstring(self.fetch._rcv_val, np.uint64)
+            if unit == 'rate':
+                return ret*1./self.nb_Msample.getcache()*self.sampling_rate.getcache()
+            else:
+                return ret
         if mode == 'Net':
             if type(ch) != list:
                 ch = [ch]
@@ -429,13 +440,18 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if self.fetch._rcv_val == None:
                 return None
             if self.board_type == 'ADC14':
-                return np.fromstring(self.fetch._rcv_val, np.ushort)
+                ret = np.fromstring(self.fetch._rcv_val, np.ushort)
             else:
-                return np.fromstring(self.fetch._rcv_val, np.ubyte)
+                ret = np.fromstring(self.fetch._rcv_val, np.ubyte)
+            if unit == 'V':
+                return self.convert_bin2v(ret)
+            else:
+                return ret
         if mode == 'Spec':
             # TODO prevent ch2 form overwrite ch1 in the file
             if type(ch) != list:
                 ch = [ch]
+            ret = []
             if 1 in ch:            
                 filestr = self._fetch_filename_helper(filename,'1')
                 s = 'DATA:SPEC:CH1?'+filestr
@@ -443,7 +459,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
-                return np.fromstring(self.fetch._rcv_val, np.float64)
+                ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
             if 2 in ch:
                 filestr = self._fetch_filename_helper(filename,'2')
                 s = 'DATA:SPEC:CH2?'+filestr
@@ -451,7 +467,27 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
-                return np.fromstring(self.fetch._rcv_val, np.float64)
+                ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
+            ret = np.asarray(ret)
+            if ret.shape[0]==1:
+                ret=ret[0]
+            V = ret
+            xscale = self.get_xscale()
+            bin_width = xscale[1]-xscale[0]
+            if unit == 'V2':
+                return V*V
+            elif unit == 'V/sHz':
+                return V/np.sqrt(bin_width)
+            elif unit == 'W':
+                return V*V/50.
+            elif unit == 'W/Hz':
+                return V*V/50./bin_width
+            elif unit == 'dBm':
+                return 10*np.log10(V*V/50./1e-3)
+            elif unit == 'dBm/Hz':
+                return 10*np.log10(V*V/50./1e-3/bin_width)
+            else:
+                return V
         if mode == 'Corr':
             # TODO prevent ch2 form overwrite ch1 in the file
             if type(ch) != list:
@@ -501,8 +537,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 if self.fetch._rcv_val == None:
                     return None
                 return np.fromstring(self.fetch._rcv_val, np.float64)
-            
-                
+
+
 
     def _readval_getdev(self, **kwarg):
         # TODO may need to check if trigger is already in progress
@@ -893,19 +929,34 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_create.set(False)
         self.fft_length.set(fft_length)
 
-    def get_spectrum_f(self):
+    def get_xscale(self):
         """
-           returns a vector of frequency data to match the amplitudes
-           returned in spectrum modes.
+           returns a vector of for use use as xscale
+           It can be the frequency data to match the amplitudes
+            returned in spectrum modes.
+           or the x scales for histograms in volts, etc...
            Requires a proper sampling rate to be set.
         """
+        mode = self.op_mode.getcache()
         rate = self.sampling_rate.getcache()*1e6
-        N = self.fft_length.getcache()
-        period = 1./rate * N
-        df = 1./period
-        freq = df*np.arange(N/2+1)
-        return freq
-        
+        if mode == 'Spec':
+            N = self.fft_length.getcache()
+            period = 1./rate * N
+            df = 1./period
+            freq = df*np.arange(N/2+1)
+            return freq
+        elif mode == 'Osc':
+            N = self.osc_nb_sample.getcache()
+            return 1./rate*np.arange(N)
+        elif mode == 'Hist':
+            if self.board_type == 'ADC14':
+                N = 2**14
+            else: # ADC8
+                N = 2**8
+            return self.convert_bin2v(np.arange(N))
+        elif mode == 'Corr':
+            return self.tau_vec.getcahe()*1./rate
+
     def set_custom(self,nb_Msample, sampling_rate, chan_mode, chan_nb, clock_source,cust_param1,cust_param2,cust_param3,cust_param4,cust_user_lib):
         self.op_mode.set('Cust')
         self.test_mode.set(False)
