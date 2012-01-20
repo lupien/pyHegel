@@ -622,7 +622,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self.sampling_rate = acq_device('CONFIG:SAMPLING_RATE', str_type=float,  min=self.min_sampling_adc8, max=self.max_sampling_adc8)
         elif self.board_type == 'ADC14':
             self.sampling_rate = acq_device('CONFIG:SAMPLING_RATE', str_type=float,  min=self.min_sampling_adc14, max=self.max_sampling_adc14)
-        
+
+        self.decimation = acq_device('CONFIG:DECIMATION', str_type=int, min=1, max=1024)
+        self.acq_verbose = acq_device('CONFIG:ACQ_VERBOSE', str_type=acq_bool())
         self.test_mode = acq_device('CONFIG:TEST_MODE', str_type=acq_bool())
         self.clock_source = acq_device('CONFIG:CLOCK_SOURCE', str_type=str, choices=clock_source_str)
         self.nb_Msample = acq_device('CONFIG:NB_MSAMPLE', str_type=int,  min=self.min_nb_Msample, max=self.max_nb_Msample)
