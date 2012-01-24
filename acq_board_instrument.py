@@ -411,7 +411,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return None
             ret = np.fromstring(self.fetch._rcv_val, np.uint64)
             if unit == 'rate':
-                return ret*1./self.nb_Msample.getcache()*self.sampling_rate.getcache()
+                return ret*1./self.nb_Msample.getcache()* \
+                        self.sampling_rate.getcache()*self.decimation.getcache()
             else:
                 return ret
         if mode == 'Net':
@@ -807,9 +808,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_await.set(False)
         self.trigger_create.set(False)
             
-    def set_histogram(self, nb_Msample, sampling_rate, chan_nb, clock_source):
+    def set_histogram(self, nb_Msample, sampling_rate, chan_nb, clock_source, decimation=1):
         self.op_mode.set('Hist')
         self.sampling_rate.set(sampling_rate)
+        self.decimation.set(decimation)
         self.test_mode.set(False)
         self.clock_source.set(clock_source)
         self.nb_Msample.set(nb_Msample)
@@ -1005,6 +1007,14 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                     new_nb_Msample = self.max_Msample_14bits
                 self.nb_Msample.set(new_nb_Msample)
                 raise ValueError, 'Warning nb_Msample must be a multiple of 256 in Hist ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
+            decimation = self.decimation.getcache()
+            if decimation != 1 and decimation % 2 ==1:
+                raise ValueError, 'Decimation can only be 1 or a multiple of 2 for Hist ADC14'
+
+        if self.op_mode.getcache() == 'Hist' and self.board_type == 'ADC8':
+            decimation = self.decimation.getcache()
+            if decimation != 1 and decimation != 2 and decimation % 4 != 0:
+                raise ValueError, 'Decimation can only be 1, 2 or a multiple of 4 for Hist ADC8'
         
         
         if self.op_mode.getcache() == 'Corr' and self.board_type == 'ADC14':
