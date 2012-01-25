@@ -955,7 +955,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 N = 2**8
             return self.convert_bin2v(np.arange(N))
         elif mode == 'Corr':
-            return self.tau_vec.getcahe()*1./rate
+            return np.array(self.tau_vec.getcache())*1./rate
 
     def set_custom(self,nb_Msample, sampling_rate, chan_mode, chan_nb, clock_source,cust_param1,cust_param2,cust_param3,cust_param4,cust_user_lib):
         self.op_mode.set('Cust')
