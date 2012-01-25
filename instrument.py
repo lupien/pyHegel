@@ -14,6 +14,7 @@ import string
 import functools
 import random
 import os
+import subprocess
 import time
 import threading
 import weakref
@@ -651,6 +652,7 @@ def _decode_block_auto(s, t=np.float64):
 
 _decode_float64 = functools.partial(_decode_block_auto, t=np.float64)
 _decode_float32 = functools.partial(_decode_block_auto, t=np.float32)
+_decode_uint32 = functools.partial(_decode_block_auto, t=np.uint32)
 _decode_uint8_bin = functools.partial(_decode_block, t=np.uint8)
 _decode_uint16_bin = functools.partial(_decode_block, t=np.uint16)
 
@@ -1278,4 +1280,12 @@ class CopyDevice(BaseDevice):
         for dev in self._basedevs:
             dev.check(val)
 
-
+class ExecuteDevice(BaseDevice):
+    """
+        execute some external code and use the returned string has the data
+    """
+    def __init__(self, basedev, command, multi=None):
+        self._basedevs = basedev
+        self._command = command
+    def getdev(self):
+        return subprocess.check_output(self.command)

@@ -15,6 +15,7 @@ import os
 import weakref
 import matplotlib.pyplot as plt
 import numpy as np
+import sys
 
 # user made import
 import instrument
@@ -157,8 +158,12 @@ class Listen_thread(threading.Thread):
                             obj._rcv_val = val
                             obj._event_flag.set()
                             # update _cache for STATUS result
-                            if obj == acq.board_status or obj == acq.result_available:
+                            if obj == acq.board_status or obj == acq.result_available or \
+                                      obj == acq.partial_status:
                                 obj._cache = obj._fromstr(val)
+                            if obj == acq.partial_status:
+                                partial_L, partial_v = obj._cache
+                                sys.stdout.write('\rPartial %3i/%-3i     '%(partial_v,partial_L))
                             if obj == acq.result_available:
                                 # run is finished for any result_available status received
                                 # wether True or False
@@ -703,6 +708,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.cust_user_lib = acq_device('CONFIG:CUST_USER_LIB', str_type=acq_filename())
         self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?',str_type=int)
         self.board_status = acq_device(getstr='STATUS:STATE?',str_type=str)
+        self.partial_status = acq_device(getstr='STATUS:PARTIAL?',str_type=instrument._decode_uint32)
         self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?',str_type=acq_bool())
         
         self.format_location = acq_device('CONFIG:FORMAT:LOCATION', str_type=str, choices=format_location_str)
