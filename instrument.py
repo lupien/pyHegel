@@ -25,6 +25,14 @@ import traces
 _globaldict = dict() # This is set in pynoise.py
 CHECKING = False
 
+class ProxyMethod(object):
+    def __init__(self, bound_method):
+        #self.class_of_method = bound_method.im_class
+        self.instance = weakref.proxy(bound_method.im_self)
+        self.func_name = bound_method.func_name
+    def __call__(self, *arg, **kwarg):
+        return getattr(self.instance, self.func_name)(*arg, **kwarg)
+
 def find_all_instruments():
     return visa.get_instruments_list()
 
@@ -41,7 +49,7 @@ def _writevec(file_obj, vals_list, pre_str=''):
 
 def _get_conf_header_util(header, obj, options):
     if callable(header):
-        header = header(obj.instr, obj, options)
+        header = header(obj, options)
     if header: # if either is not None or not ''
         if isinstance(header, basestring):
             header=[header]
@@ -475,10 +483,9 @@ class BaseInstrument(object):
         # not specify anything for header in its format string than
         # we assign it.
         self._devwrap('header')
-        # need the class function to prevent binding which blocks __del__
-        cls = type(self)
-        if hasattr(cls, '_current_config'):
-            conf = cls._current_config
+        # need the ProxyMethod to prevent binding which blocks __del__
+        if hasattr(self, '_current_config'):
+            conf = ProxyMethod(self._current_config)
         else:
             conf = None
         for devname, obj in self.devs_iter():
@@ -1258,7 +1265,7 @@ class CopyDevice(BaseDevice):
         BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
         self.instr = basedevs[0].instr
         self.name = basedevs[0].name
-        self._format['header'] = self._current_config
+        self._format['header'] = CopyDevice._current_config
     def _current_config(self, dev_obj=None, options={}):
         ret = ['Copy:: %r'%(self._basedevs)]
         for dev in self._basedevs:
