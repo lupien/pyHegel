@@ -405,9 +405,16 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if self.fetch._rcv_val == None:
                 return None
             if self.board_type == 'ADC14':
-                return np.fromstring(self.fetch._rcv_val, np.ushort)
+                ret = np.fromstring(self.fetch._rcv_val, np.ushort)
             else:
-                return np.fromstring(self.fetch._rcv_val, np.ubyte)
+                ret = np.fromstring(self.fetch._rcv_val, np.ubyte)
+            if self.chan_mode.getcache() == 'Dual':
+                ret.shape=(-1,2)
+                ret = ret.T
+            if unit == 'V':
+                return self.convert_bin2v(ret)
+            else:
+                return ret
         if mode == 'Hist':
             self.fetch._event_flag.clear()
             s = 'DATA:HIST:DATA?'+filestr
