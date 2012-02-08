@@ -430,9 +430,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return ret
         if mode == 'Net':
             if ch == None:
-                ch = 1
+                ch = 2
             if type(ch) != list:
                 ch = [ch]
+            ret = []
             if 1 in ch: 
                 self.fetch._event_flag.clear()
                 filestr = self._fetch_filename_helper(filename,'1')
@@ -441,7 +442,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
-                return np.fromstring(self.fetch._rcv_val, np.float64)
+                ret.append(np.fromstring(self.fetch._rcv_val, np.complex128))
             if 2 in ch:
                 self.fetch._event_flag.clear()
                 filestr = self._fetch_filename_helper(filename,'2')
@@ -450,7 +451,11 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
-                return np.fromstring(self.fetch._rcv_val, np.float64)    
+                ret.append(np.fromstring(self.fetch._rcv_val, np.complex128))
+            ret = np.asarray(ret)
+            if ret.shape[0]==1:
+                ret=ret[0]
+            return ret
         if mode == 'Osc':
             self.fetch._event_flag.clear()
             s = 'DATA:OSC:DATA?'+filestr
