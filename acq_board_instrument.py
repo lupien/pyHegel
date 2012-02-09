@@ -349,12 +349,22 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.result_available.get()
         self.tau_vec([0])
 
-    def convert_bin2v(self, bin):
+    def convert_bin2v(self, bin, off=True, auto_inv=True):
         if self.board_type == 'ADC14':
-            v = (2.**13-bin)*0.750/2.**14
-        else: # ADC8
-            v = (bin-2.**7)*0.700/2.**8
-        return v
+            vrange = 0.750
+            resolution = 2.**14
+            offset = 2.**13
+            sign = -1.
+        else: # 8bit
+            vrange = 0.700
+            resolution = 2.**14
+            offset = 2.**13
+            sign = +1.
+        if off == False:
+            offset = 0.
+        if auto_inv == False:
+            sign = 1.
+        return (bin - offset)*sign*vrange/resolution
 
     def _fetch_getformat(self, filename=None, ch=[1], unit='default'):
         fmt = self.fetch._format
@@ -383,7 +393,85 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             filename = root + ext
             filestr = ' ' + tofilename(filename)
         return filestr
+
+
     def _fetch_getdev(self, filename=None, ch=None, unit='default'):
+        """
+           fetch is used to obtain possibly large data sets.
+           It should only be called after performing an acquisition (run),
+           otherwise the data is unavailable, and it will hang (press CTRL-C to abort).
+           Changing acq mode (with one of the set commands) also looses the data and
+           requires a run.
+
+           Possible optional parameters are
+            -filename  used for dumping the data directly to a file
+                       In local mode, the saving will be done by data acquisition server
+                        (so filename location should be accessible by it)
+                       In remote mode, the saving is done by python but only
+                       for Acq mode (in a streaming way, to avoid memory problems).
+                       Otherwise it is discarded.
+                       For multiple channels, the filename is modified to include
+                       and identifier for the channel.
+                       The extension is always changed to .bin
+            -unit      to change the output format
+            -ch        to select which channel to read (can be a list)
+
+           Behavior according to modes:
+               Acq:  ch as no effect here
+                     By default the data is return as unsigned integers
+                      (char for 8bit, short for 14bit).
+                     It can be in volts for unit='V'
+                     When in 'Single' mode, it is a 1D vector of the selected
+                     channel.
+                     When in 'Dual' mode, it is a 2D vector (2,N)
+                      where [0,:] is ch1 and [1,:] is ch2
+               Osc:  Same as for Acq
+
+               Hist: by default returns a vector of uint64 of size
+                     256 (8bit) or 16384 (14bit). These bins contain the count
+                     of events in that binary code from the ADC.
+                     When unit='rate', the return vector is the count rate
+                     in count/s as floats.
+
+               For all the following, ch can select which channels to return
+               To select one channel: ch=1 or ch=[1]
+                 Then the return values form a 1D vector
+               To select multiple channels: ch=[1,2]
+                 Then the return values form a 2D vector, where
+                 the first dimension is the channel number sorted
+                 (so ch=[1,2] or ch=[2,1] should return the exact same vector)
+               Note asking for a channel that was not measured will probably fail.
+
+               Net: by default, returns the various harmonics of ch=2,
+                    as a complex number in V (peak).
+                    unit='amplitude' returns abs(result)
+                    unit='angle' returns angle(result, deg=True)
+                    unit='real' returns result.real
+                    unit='imag' returns result.imag
+               Spec: by default, returns amplitudes in Volts of
+                        ch=[1,2] in Dual or of the selected channel in Single
+                    unit='V2' returns the V^2
+                    unit='V/sHz' returns V/sqrt(bin BW), BW=bandwidth
+                    unit='W' returns the power in W assuming R0=50 Ohms
+                    unit='W/Hz' returns power/(bin BW)
+                    unit='dBm' returns W converted to dBm
+                    unit='dBm/Hz' returns W/Hz converted to dBm
+               Corr: by default, returns the bit^2 of the correlation.
+                    unit='V2' returns it in V^2
+                      The selectable channels are:
+                          ch=0 for cross-correlation between ch1 and ch2,
+                          ch=1 for auto-correlation of ch1
+                          ch=2 for auto-correlation of ch2
+                      by default for set_correlation it is ch=0
+                                 for set_autocorrelation not in single_chan mode
+                                  is ch=[1,2] otherwise it is the selected channel
+                                 for set_auto_and_corr not in single_chan mode it is
+                                     ch=[0,1,2] otherwise it is
+                                     either ch=[0,1] or ch=[0,2] depending
+                                     on selected channel
+               Custom: returns whatever the custom code should return
+                       which depends on loaded custom dll
+        """
         mode = self.op_mode.getcache()
         location = self.format_location()
         # All saving by server or by dump_file is binary so change ext
@@ -393,6 +481,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.fetch._dump_file = None
         if not self.result_available.getcache():
             raise ValueError, 'Error result not available\n' 
+
         if mode == 'Acq':
             self.fetch._event_flag.clear()
             if location == 'Remote' and filename != None:
@@ -415,6 +504,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return self.convert_bin2v(ret)
             else:
                 return ret
+
         if mode == 'Hist':
             self.fetch._event_flag.clear()
             s = 'DATA:HIST:DATA?'+filestr
@@ -428,6 +518,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                         self.sampling_rate.getcache()*self.decimation.getcache()
             else:
                 return ret
+
         if mode == 'Net':
             if ch == None:
                 ch = 2
@@ -455,7 +546,17 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             ret = np.asarray(ret)
             if ret.shape[0]==1:
                 ret=ret[0]
-            return ret
+            if unit == 'amplitude':
+                return np.abs(ret)
+            if unit == 'angle':
+                return np.angle(ret, deg=True)
+            if unit == 'real':
+                return ret.real
+            if unit == 'imag':
+                return ret.imag
+            else:
+                return ret
+
         if mode == 'Osc':
             self.fetch._event_flag.clear()
             s = 'DATA:OSC:DATA?'+filestr
@@ -474,10 +575,14 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return self.convert_bin2v(ret)
             else:
                 return ret
+
         if mode == 'Spec':
             # TODO prevent ch2 form overwrite ch1 in the file
             if ch == None:
-                ch = 1
+                if self.chan_mode.getcache() == 'Dual':
+                    ch = [1,2]
+                else:
+                    ch = self.chan_nb.getcache()
             if type(ch) != list:
                 ch = [ch]
             ret = []
@@ -519,10 +624,18 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return 10*np.log10(V*V/50./1e-3/bin_width)
             else:
                 return V
+
         if mode == 'Corr':
             # TODO prevent ch2 form overwrite ch1 in the file
             if ch == None:
-                ch = [0, 1, 2]
+                ch = []
+                if self.corr_mode.getcache():
+                    ch.append(0)
+                if self.autocorr_mode.getcache():
+                    if self.autocorr_single_chan.getcache():
+                        ch.append(self.chan_nb.getcache())
+                    else:
+                        ch.extend([1,2])
             if type(ch) != list:
                 ch = [ch]
             ret = []
@@ -556,7 +669,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             ret = np.asarray(ret)
             if ret.shape[0]==1:
                 ret=ret[0]
-            return ret
+            if unit == 'V2':
+                return self.convert(self.convert_bin2v(ret, off=False),off=False)
+            else:
+                return ret
 
         if mode == 'Cust':
             # TODO prevent ch2 form overwrite ch1 in the file
@@ -564,6 +680,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 ch = 1
             if type(ch) != list:
                 ch = [ch]
+            ret = []
             if 1 in ch:
                 self.fetch._event_flag.clear()
                 filestr = self._fetch_filename_helper(filename,'1')
@@ -572,7 +689,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
-                return np.fromstring(self.fetch._rcv_val, np.float64)
+                ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
             if 2 in ch:
                 self.fetch._event_flag.clear()
                 filestr = self._fetch_filename_helper(filename,'2')
@@ -581,8 +698,11 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
-                return np.fromstring(self.fetch._rcv_val, np.float64)
-
+                ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
+            ret = np.asarray(ret)
+            if ret.shape[0]==1:
+                ret=ret[0]
+            return ret
 
 
     def _readval_getdev(self, **kwarg):

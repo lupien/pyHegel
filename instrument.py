@@ -187,7 +187,8 @@ def wait_on_event(task_or_event, check_state = None, max_time=None):
 class BaseDevice(object):
     """
         ----------------
-        All devices provide get, set, check method
+        All devices provide a get method. 
+        Some device also implement set, check methods.
         Both get and set use a cache variable which is accessible
         with getcache, setcache methods
         The gets have no parameters.
@@ -315,6 +316,12 @@ class BaseDevice(object):
 
 class wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
+        # auto insert documentation if setdev or getdev has one.
+        if not extrak.has_key('doc'):
+            if setdev != None and setdev.__doc__:
+                extrak['doc'] = setdev.__doc__
+            elif getdev != None and getdev.__doc__:
+                extrak['doc'] = getdev.__doc__
         BaseDevice.__init__(self, **extrak)
         # the methods are unbounded methods.
         self._setdev_p = setdev
@@ -344,6 +351,12 @@ class wrapDevice(BaseDevice):
 
 class cls_wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
+        # auto insert documentation if setdev or getdev has one.
+        if not extrak.has_key('doc'):
+            if setdev != None and setdev.__doc__:
+                extrak['doc'] = setdev.__doc__
+            elif getdev != None and getdev.__doc__:
+                extrak['doc'] = getdev.__doc__
         BaseDevice.__init__(self, **extrak)
         # the methods are unbounded methods.
         self._setdev_p = setdev
