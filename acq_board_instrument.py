@@ -210,27 +210,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
 
         # clock initialization
         self._clock_src_init_done = False
-
-        # maximum value
-        self.max_sampling_adc8 = 3000
-        self.min_sampling_adc8 = 1000
-        self.max_sampling_adc14 = 400
-        self.min_sampling_adc14 = 20
-        self.min_usb_clock_freq = 200
-        self.min_nb_Msample = 32
-        self.max_nb_Msample = 4294967295
-        self.max_nb_tau = 50
-        
-        self.min_acq_Msample_14bits = 16
-        self.max_acq_Msample_14bits = 4096
-        self.min_acq_Msample_8bits = 32
-        self.max_acq_Msample_8bits = 8192
-        self.min_net_Msample_8bits = 32
-        self.max_net_Msample_8bits = 128
-        self.min_net_Msample_14bits = 16
-        self.max_net_Msample_14bits = 64
-        self.max_Msample_8bits = 4294959104
-        self.max_Msample_14bits = 2147479552
         
         # try connect to the server
         self.s.connect((self.host, self.port))
@@ -241,6 +220,31 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.Get_Board_Type()
         if not self.board_type in ['ADC8', 'ADC14']:
             raise ValueError, 'Invalid board_type'
+
+        # maximum value
+        if self.board_type == 'ADC8':
+            self._max_sampling = 3000
+            self._min_sampling = 1000
+            self._min_nb_Msample = 32
+            self._max_nb_Msample = 4294967295
+            self._max_Msample = 4294959104
+            self._min_acq_Msample = 32
+            self._max_acq_Msample = 8192
+            self._min_net_Msample = 32
+            self._max_net_Msample = 128
+        else: # ADC14
+            self._max_sampling = 400
+            self._min_sampling = 20
+            self._max_Msample = 2147479552
+            self._min_acq_Msample = 16
+            self._max_acq_Msample = 4096
+            self._min_net_Msample = 16
+            self._max_net_Msample = 64
+        self._min_usb_clock_freq = 200
+        self._min_nb_Msample_all = 32
+        self._max_nb_Msample_all = 4294967295
+        self._max_nb_tau = 50
+
         self.visa_addr = self.board_type
         self._run_finished = threading.Event() # starts in clear state
 
@@ -360,8 +364,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             sign = -1.
         else: # 8bit
             vrange = 0.700
-            resolution = 2.**14
-            offset = 2.**13
+            resolution = 2.**8
+            offset = 2.**7
             sign = +1.
         if off == False:
             offset = 0.
@@ -768,8 +772,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             # vals is a vector
             # don't care for i or append
             N = len(vals)
-            if N > self.max_nb_tau:
-                raise ValueError, 'Too many values in tau_vec.set, max of %i elements'%self.max_nb_tau
+            if N > self._max_nb_tau:
+                raise ValueError, 'Too many values in tau_vec.set, max of %i elements'%self._max_nb_tau
             return
         except TypeError:
             pass
@@ -777,7 +781,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             raise ValueError, 'vals needs to be a number'
         if i != None and not (0 <= i <= self.tau_vec.nb_tau):
             raise ValueError, 'Index is out of range'
-        if append and self.tau_vec.nb_tau + 1 >= self.max_nb_tau:
+        if append and self.tau_vec.nb_tau + 1 >= self._max_nb_tau:
             raise ValueError, 'You can no longer append, reached max'
         if i != None and append:
             raise ValueError, 'Choose either i or append, not both'
@@ -822,17 +826,14 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         #device init
         # Configuration
         self.op_mode = acq_device('CONFIG:OP_MODE', str_type=str, choices=op_mode_str)
-        
-        if self.board_type == 'ADC8':
-            self.sampling_rate = acq_device('CONFIG:SAMPLING_RATE', str_type=float,  min=self.min_sampling_adc8, max=self.max_sampling_adc8)
-        elif self.board_type == 'ADC14':
-            self.sampling_rate = acq_device('CONFIG:SAMPLING_RATE', str_type=float,  min=self.min_sampling_adc14, max=self.max_sampling_adc14)
+
+        self.sampling_rate = acq_device('CONFIG:SAMPLING_RATE', str_type=float,  min=self._min_sampling, max=self._max_sampling)
 
         self.decimation = acq_device('CONFIG:DECIMATION', str_type=int, min=1, max=1024)
         self.acq_verbose = acq_device('CONFIG:ACQ_VERBOSE', str_type=acq_bool())
         self.test_mode = acq_device('CONFIG:TEST_MODE', str_type=acq_bool())
         self.clock_source = acq_device('CONFIG:CLOCK_SOURCE', str_type=str, choices=clock_source_str)
-        self.nb_Msample = acq_device('CONFIG:NB_MSAMPLE', str_type=int,  min=self.min_nb_Msample, max=self.max_nb_Msample)
+        self.nb_Msample = acq_device('CONFIG:NB_MSAMPLE', str_type=int,  min=self._min_nb_Msample_all, max=self._max_nb_Msample_all)
         self.chan_mode = acq_device('CONFIG:CHAN_MODE', str_type=str, choices=chan_mode_str)
         self.chan_nb = acq_device('CONFIG:CHAN_NB', str_type=int,  min=1, max=2)
         self.trigger_invert = acq_device('CONFIG:TRIGGER_INVERT', str_type=acq_bool())
@@ -990,9 +991,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
 
 
     def set_clock_source_helper(self, sampling_rate=None, clock_source=None):
+        clock_max = self._max_sampling
         if self.board_type == 'ADC8':
             clock_int = 2000
-            clock_max = self.max_sampling_adc8
             usb_en = True
         else:
             clock_int = 400
@@ -1028,10 +1029,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         """
         self.op_mode.set('Acq')
         if nb_Msample=='min':
-            if self.board_type == 'ADC8':
-                nb_Msample = self.min_acq_Msample_8bits
-            else:
-                nb_Msample = self.min_acq_Msample_14bits
+            nb_Msample = self._min_acq_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source_helper(sampling_rate, clock_source)
         self.test_mode.set(False)
@@ -1184,35 +1182,23 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if not self._clock_src_init_done:
             raise ValueError, 'Clock unitialized, you need to set it at least once, see set_clock_source_helper'
         # check if nb_Msample fit the op_mode
-        if self.op_mode.getcache() == 'Acq' and self.board_type == 'ADC14':
-            if self.nb_Msample.getcache() < self.min_acq_Msample_14bits:
-                 new_nb_Msample = self.min_acq_Msample_14bits
+        if self.op_mode.getcache() == 'Acq':
+            if self.nb_Msample.getcache() < self._min_acq_Msample:
+                 new_nb_Msample = self._min_acq_Msample
                  self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be superior or equal to 16 in Acq ADC14, value corrected to 16'
-            if self.nb_Msample.getcache() > self.max_acq_Msample_14bits:
-                 new_nb_Msample = self.max_acq_Msample_14bits
+                 raise ValueError, 'Warning nb_Msample must be superior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
+            if self.nb_Msample.getcache() > self._max_acq_Msample:
+                 new_nb_Msample = self._max_acq_Msample
                  self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be inferior to 4096 in Acq ADC14, value corrected to 4096'
-        
-        
-        if self.op_mode.getcache() == 'Acq' and self.board_type == 'ADC8':
-            if self.nb_Msample.getcache() < self.min_acq_Msample_8bits:
-                 new_nb_Msample = self.min_acq_Msample_8bits
-                 self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be superior or equal to 32 in Acq ADC8, value corrected to 32'
-            if self.nb_Msample.getcache() > self.max_acq_Msample_8bits:
-                 new_nb_Msample = self.max_acq_Msample_8bits
-                 self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be inferior to 8192 in Acq ADC14, value corrected to 8192'
-        
+                 raise ValueError, 'Warning nb_Msample must be inferior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
         
         if self.op_mode.getcache() == 'Hist' and self.board_type == 'ADC14':
             quotien = float(self.nb_Msample.getcache())/256
             frac,entier = math.modf(quotien)
             if frac != 0.0:
                 new_nb_Msample = int(math.ceil(quotien))*256
-                if new_nb_Msample > self.max_Msample_14bits:
-                    new_nb_Msample = self.max_Msample_14bits
+                if new_nb_Msample > self._max_Msample:
+                    new_nb_Msample = self._max_Msample
                 self.nb_Msample.set(new_nb_Msample)
                 raise ValueError, 'Warning nb_Msample must be a multiple of 256 in Hist ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
             decimation = self.decimation.getcache()
@@ -1230,8 +1216,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             frac,entier = math.modf(quotien)
             if frac != 0.0:
                 new_nb_Msample = int(math.ceil(quotien))*4096
-                if new_nb_Msample > self.max_Msample_14bits:
-                    new_nb_Msample = self.max_Msample_14bits
+                if new_nb_Msample > self._max_Msample:
+                    new_nb_Msample = self._max_Msample
                 self.nb_Msample.set(new_nb_Msample)
                 raise ValueError, 'Warning nb_Msample must be a multiple of 4096 in Corr ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
 
@@ -1241,33 +1227,21 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             frac,entier = math.modf(quotien)
             if frac != 0.0:
                 new_nb_Msample = int(math.ceil(quotien))*8192
-                if new_nb_Msample > self.max_Msample_8bits:
-                    new_nb_Msample = self.max_Msample_8bits
+                if new_nb_Msample > self._max_Msample:
+                    new_nb_Msample = self._max_Msample
                 self.nb_Msample.set(new_nb_Msample)
                 raise ValueError, 'Warning nb_Msample must be a multiple of 8192 in Hist or Corr ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
         
         
-        if self.op_mode.getcache() == 'Net' and self.board_type == 'ADC14':
-            if self.nb_Msample.getcache() < self.min_net_Msample_14bits:
-                 new_nb_Msample = self.min_net_Msample_14bits
+        if self.op_mode.getcache() == 'Net':
+            if self.nb_Msample.getcache() < self._min_net_Msample:
+                 new_nb_Msample = self._min_net_Msample
                  self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be superior or equal to 16 in net ADC14, value corrected to 16'
-            if self.nb_Msample.getcache() > self.max_net_Msample_14bits:
-                 new_nb_Msample = self.max_net_Msample_14bits
+                 raise ValueError, 'Warning nb_Msample must be superior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
+            if self.nb_Msample.getcache() > self._max_net_Msample:
+                 new_nb_Msample = self._max_net_Msample
                  self.nb_Msample.set(new_nb_Msample)
                  raise ValueError, 'Warning nb_Msample must be inferior to 64 in net ADC14, value corrected to 128'
-         
-         
-        if self.op_mode.getcache() == 'Net' and self.board_type == 'ADC8':
-            if self.nb_Msample.getcache() < self.min_net_Msample_8bits:
-                 new_nb_Msample = self.min_net_Msample_8bits
-                 self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be superior or equal to 32 in net ADC14, value corrected to 16'
-            if self.nb_Msample.getcache() > self.max_net_Msample_8bits:
-                 new_nb_Msample = self.max_net_Msample_8bits
-                 self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be inferior to 128 in net ADC14, value corrected to 128'           
-            
     
         #check if clock freq is a multiple of 5 Mhz when in USB clock mode
         if self.clock_source.getcache() == 'USB':
@@ -1283,15 +1257,15 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if frac != 0.0:
                 if self.board_type == 'ADC8':
                     new_sampling_rate =  2* math.ceil(quotien) * 5
-                    if new_sampling_rate > self.max_sampling_adc8:
-                        new_sampling_rate = self.max_sampling_adc8
+                    if new_sampling_rate > self._max_sampling:
+                        new_sampling_rate = self._max_sampling
                     self.sampling_rate.set(new_sampling_rate)
                 else:
                     new_sampling_rate = math.ceil(quotien) * 5
-                    if new_sampling_rate > self.max_sampling_adc14:
-                        new_sampling_rate = self.max_sampling_adc14
-                    elif new_sampling_rate < self.min_usb_clock_freq:
-                        new_sampling_rate = self.min_usb_clock_freq
+                    if new_sampling_rate > self._max_sampling:
+                        new_sampling_rate = self._max_sampling
+                    elif new_sampling_rate < self._min_usb_clock_freq:
+                        new_sampling_rate = self._min_usb_clock_freq
                     self.sampling_rate.set(new_sampling_rate)
                 raise ValueError, 'Warning sampling_rate not a multiple of 5, value corrected to nearest possible value : ' + str(new_sampling_rate)
                   
