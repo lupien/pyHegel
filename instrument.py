@@ -925,6 +925,10 @@ class sr384_rf(visaInstrument):
     def init(self, full=False):
         # This clears the error state
         self.write('*cls')
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('freq', 'en_lf', 'amp_lf_dbm', 'offset_low',
+                                 'en_rf', 'amp_rf_dbm', 'en_hf', 'amp_hf_dbm',
+                                 'phase', 'mod_en')
     def _create_devs(self):
         self.freq = scpiDevice('freq',str_type=float)
         self.offset_low = scpiDevice('ofsl',str_type=float) #volts
@@ -1114,6 +1118,8 @@ class agilent_multi_34410A(visaInstrument):
 
 
 class lakeshore_322(visaInstrument):
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('sp')
     def _create_devs(self):
         self.crdg = scpiDevice(getstr='CRDG?', str_type=float)
         self.thermocouple = scpiDevice(getstr='TEMP?', str_type=float)
@@ -1132,6 +1138,8 @@ class lakeshore_322(visaInstrument):
         super(type(self),self)._create_devs()
 
 class infiniiVision_3000(visaInstrument):
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('source', 'mode', 'preamble')
     def _create_devs(self):
         # Note vincent's hegel, uses set to define filename where block data is saved.
         self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', str_type=_decode_block_base, autoinit=False) # returns block of data(always bin with # header)
@@ -1174,6 +1182,8 @@ class agilent_PNAL(visaInstrument):
     def init(self, full=False):
         self.write(':format REAL,64')
         self.write(':format:border swap')
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('bandwidth', 'freq_start', 'freq_stop','average_count')
     def _create_devs(self):
         self.bandwith = scpiDevice(':sense1:bandwidth',str_type=float)
         self.average_count = scpiDevice(getstr=':sense:average:count?',str_type=int)
@@ -1194,6 +1204,8 @@ class dummy(BaseInstrument):
     def init(self, full=False):
         self.incr_val = 0
         self.wait = .1
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('volt', 'current', 'other')
     def _incr_getdev(self):
         ret = self.incr_val
         self.incr_val += 1
