@@ -207,7 +207,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.host = ip_adress
         self.port = port_nb
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        
+
+        # clock initialization
+        self._clock_src_init_done = False
+
         # maximum value
         self.max_sampling_adc8 = 3000
         self.min_sampling_adc8 = 1000
@@ -414,6 +417,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                        and identifier for the channel.
                        The extension is always changed to .bin
             -unit      to change the output format
+                       unknown units are treated as 'default'
             -ch        to select which channel to read (can be a list)
 
            Behavior according to modes:
@@ -956,135 +960,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def shutdown_server(self):
         self.write('SHUTDOWN')
 
-
-    def set_simple_acq(self,nb_Msample, sampling_rate, chan_mode, chan_nb,clock_source):
-        self.op_mode.set('Acq')
-        self.sampling_rate.set(sampling_rate)
-        self.test_mode.set(False)
-        self.clock_source.set(clock_source)
-        self.nb_Msample.set(nb_Msample)
-        self.chan_mode.set(chan_mode)
-        self.chan_nb.set(chan_nb)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
-            
-    def set_histogram(self, nb_Msample, sampling_rate, chan_nb, clock_source, decimation=1):
-        self.op_mode.set('Hist')
-        self.sampling_rate.set(sampling_rate)
-        self.decimation.set(decimation)
-        self.test_mode.set(False)
-        self.clock_source.set(clock_source)
-        self.nb_Msample.set(nb_Msample)
-        self.chan_mode.set('Single')
-        self.chan_nb.set(chan_nb)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
-    
-    def set_correlation(self, nb_Msample, sampling_rate, clock_source):
-        """
-        
-        """
-        self.op_mode.set('Corr')
-        self.sampling_rate.set(sampling_rate)
-        self.test_mode.set(False)
-        self.clock_source.set(clock_source)
-        self.nb_Msample.set(nb_Msample)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
-        self.chan_mode.set('Dual')
-        self.chan_nb.set(1)
-        self.autocorr_mode.set(False)
-        self.corr_mode.set(True)
-    
-    def set_autocorrelation(self, nb_Msample, sampling_rate, autocorr_single_chan, autocorr_chan_nb, clock_source):
-        self.op_mode.set('Corr')
-        self.sampling_rate.set(sampling_rate)
-        self.test_mode.set(False)
-        self.clock_source.set(clock_source)
-        self.nb_Msample.set(nb_Msample)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
-        if autocorr_single_chan:
-            self.chan_mode.set('Single')
-        else:
-            self.chan_mode.set('Dual')
-        self.autocorr_single_chan.set(autocorr_single_chan)     
-        self.chan_nb.set(autocorr_chan_nb)
-        self.autocorr_mode.set(True)
-        self.corr_mode.set(False)
-        
-    def set_auto_and_corr(self, nb_Msample, sampling_rate, autocorr_single_chan, autocorr_chan_nb, clock_source):
-        self.op_mode.set('Corr')
-        self.sampling_rate.set(sampling_rate)
-        self.test_mode.set(False)
-        self.clock_source.set(clock_source)
-        self.nb_Msample.set(nb_Msample)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
-        self.chan_mode.set('Dual')
-        self.autocorr_single_chan.set(autocorr_single_chan)    
-        self.chan_nb.set(autocorr_chan_nb)
-        self.autocorr_mode.set(True)
-        self.corr_mode.set(True)
-        
-        
-    def set_network_analyzer(self, nb_Msample, sampling_rate, signal_freq, lock_in_square, nb_harm, clock_source):
-        self.op_mode.set('Net')
-        self.sampling_rate.set(sampling_rate)
-        self.test_mode.set(False)
-        self.clock_source.set(clock_source)
-        self.nb_Msample.set(nb_Msample)
-        self.chan_mode.set('Dual')
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
-        self.net_signal_freq.set(signal_freq)
-        self.lock_in_square.set(lock_in_square)
-        self.nb_harm.set(nb_harm)
-        
-    def set_scope(self, nb_sample, sampling_rate, hori_offset, trigger_level, slope, trig_source,chan_mode, chan_nb, clock_source):
-        self.op_mode.set('Osc')
-        self.sampling_rate.set(sampling_rate)
-        self.test_mode.set(False)
-        self.clock_source.set(clock_source)
-        self.nb_Msample.set(32)
-        self.chan_mode.set(chan_mode)
-        self.chan_nb.set(chan_nb)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
-        self.osc_nb_sample.set(nb_sample)
-        self.osc_hori_offset.set(hori_offset)
-        self.osc_trigger_level.set(trigger_level)
-        self.osc_slope.set(slope)
-        self.osc_trig_source(trig_source)
-        
-    def set_spectrum(self,nb_Msample, fft_length, sampling_rate, chan_mode, chan_nb, clock_source):
-        self.op_mode.set('Spec')
-        self.sampling_rate.set(sampling_rate)
-        self.test_mode.set(False)
-        self.clock_source.set(clock_source)
-        self.nb_Msample.set(nb_Msample)
-        self.chan_mode.set(chan_mode)
-        self.chan_nb.set(chan_nb)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
-        self.fft_length.set(fft_length)
-
     def get_xscale(self):
         """
            returns a vector of for use use as xscale
@@ -1113,10 +988,179 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         elif mode == 'Corr':
             return np.array(self.tau_vec.getcache())*1./rate
 
-    def set_custom(self,nb_Msample, sampling_rate, chan_mode, chan_nb, clock_source,cust_param1,cust_param2,cust_param3,cust_param4,cust_user_lib):
-        self.op_mode.set('Cust')
-        self.test_mode.set(False)
+
+    def set_clock_source_helper(self, sampling_rate=None, clock_source=None):
+        if self.board_type == 'ADC8':
+            clock_int = 2000
+            clock_max = self.max_sampling_adc8
+            usb_en = True
+        else:
+            clock_int = 400
+            usb_en = False
+        if clock_source==None and self._clock_src_init_done:
+            clock_source = self.clock_source.getcache()
+        if clock_source == 'Internal':
+            if sampling_rate != None and sampling_rate != clock_int:
+                raise ValueError, 'Sampling rate needs to be %f for internal or leave it unspecified'
+            self.sampling_rate.set(clock_int)
+        elif clock_source == 'External':
+            if sampling_rate == None:
+                raise ValueError, 'Sampling rate needs to be specified for external'
+            self.sampling_rate.set(sampling_rate)
+        elif clock_source == 'USB':
+            if not usb_en:
+                raise ValueError, 'USB clock mode not allowed with this card'
+            if sampling_rate == None:
+                sampling_rate = clock_max
+                print 'Using the max sampling rate of', clock_max
+            self.sampling_rate.set(sampling_rate)
+        else:
+            return
         self.clock_source.set(clock_source)
+        self._clock_src_init_done = True
+
+    def set_simple_acq(self,nb_Msample='min', chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
+        """
+        Activates the simple acquisition mode which simply captures nb_Msample samples.
+        Set sampling_rate anc clock_source, or reuse the previous ones by default (see set_clock_source_helper)
+        chan_mode can be 'Dual' or 'Single' (default). In dual nb_Msample represents the total of both channels.
+        When in single mode, set chan_nb to select which channel either 1 or 2.
+        """
+        self.op_mode.set('Acq')
+        if nb_Msample=='min':
+            if self.board_type == 'ADC8':
+                nb_Msample = self.min_acq_Msample_8bits
+            else:
+                nb_Msample = self.min_acq_Msample_14bits
+            print 'Using ', nb_Msample, 'nb_Msample'
+        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.test_mode.set(False)
+        self.nb_Msample.set(nb_Msample)
+        self.chan_mode.set(chan_mode)
+        self.chan_nb.set(chan_nb)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+            
+    def set_histogram(self, nb_Msample='min', chan_nb=1, sampling_rate=None, clock_source=None, decimation=1):
+        self.op_mode.set('Hist')
+        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.decimation.set(decimation)
+        self.test_mode.set(False)
+        self.nb_Msample.set(nb_Msample)
+        self.chan_mode.set('Single')
+        self.chan_nb.set(chan_nb)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+    
+    def set_correlation(self, nb_Msample='min', sampling_rate=None, clock_source=None):
+        """
+        
+        """
+        self.op_mode.set('Corr')
+        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.test_mode.set(False)
+        self.nb_Msample.set(nb_Msample)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        self.chan_mode.set('Dual')
+        self.chan_nb.set(1)
+        self.autocorr_mode.set(False)
+        self.corr_mode.set(True)
+    
+    def set_autocorrelation(self, nb_Msample='min', autocorr_single_chan=True,
+                            autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
+        self.op_mode.set('Corr')
+        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.test_mode.set(False)
+        self.nb_Msample.set(nb_Msample)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        if autocorr_single_chan:
+            self.chan_mode.set('Single')
+        else:
+            self.chan_mode.set('Dual')
+        self.autocorr_single_chan.set(autocorr_single_chan)     
+        self.chan_nb.set(autocorr_chan_nb)
+        self.autocorr_mode.set(True)
+        self.corr_mode.set(False)
+        
+    def set_auto_and_corr(self, nb_Msample='min', autocorr_single_chan=False,
+                          autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
+        self.op_mode.set('Corr')
+        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.test_mode.set(False)
+        self.nb_Msample.set(nb_Msample)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        self.chan_mode.set('Dual')
+        self.autocorr_single_chan.set(autocorr_single_chan)    
+        self.chan_nb.set(autocorr_chan_nb)
+        self.autocorr_mode.set(True)
+        self.corr_mode.set(True)
+        
+        
+    def set_network_analyzer(self, signal_freq, nb_Msample='min', nb_harm=1,
+                             lock_in_square=False, sampling_rate=None, clock_source=None):
+        self.op_mode.set('Net')
+        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.test_mode.set(False)
+        self.nb_Msample.set(nb_Msample)
+        self.chan_mode.set('Dual')
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        self.net_signal_freq.set(signal_freq)
+        self.lock_in_square.set(lock_in_square)
+        self.nb_harm.set(nb_harm)
+        
+    def set_scope(self, nb_sample=1024, hori_offset=0, trigger_level=0., slope='Rising',
+                  trig_source=1,chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
+        self.op_mode.set('Osc')
+        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.test_mode.set(False)
+        self.nb_Msample.set(32)
+        self.chan_mode.set(chan_mode)
+        self.chan_nb.set(chan_nb)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        self.osc_nb_sample.set(nb_sample)
+        self.osc_hori_offset.set(hori_offset)
+        self.osc_trigger_level.set(trigger_level)
+        self.osc_slope.set(slope)
+        self.osc_trig_source(trig_source)
+        
+    def set_spectrum(self,nb_Msample='min', fft_length=1024, chan_mode='Single',
+                     chan_nb=1, sampling_rate=None, clock_source=None):
+        self.op_mode.set('Spec')
+        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.test_mode.set(False)
+        self.nb_Msample.set(nb_Msample)
+        self.chan_mode.set(chan_mode)
+        self.chan_nb.set(chan_nb)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+        self.fft_length.set(fft_length)
+
+    def set_custom(self, cust_user_lib, cust_param1, cust_param2, cust_param3, cust_param4,
+                   nb_Msample='min',  chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
+        self.op_mode.set('Cust')
+        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.chan_mode.set(chan_mode)
         self.chan_nb.set(chan_nb)
@@ -1136,7 +1180,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         #check if board is Idle
         if self.board_status.getcache() == 'Running':
             raise ValueError, 'ERROR Board already Running'
-        
+
+        if not self._clock_src_init_done:
+            raise ValueError, 'Clock unitialized, you need to set it at least once, see set_clock_source_helper'
         # check if nb_Msample fit the op_mode
         if self.op_mode.getcache() == 'Acq' and self.board_type == 'ADC14':
             if self.nb_Msample.getcache() < self.min_acq_Msample_14bits:
