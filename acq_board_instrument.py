@@ -1210,7 +1210,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                     either 1(default) or 2
         decimation: only analyze one of every decimation point
                     can be 1, 2, 4, n*4  for 8bit
-                    can be 1, 2, n*2  for 8bit
+                    can be 1, 2, n*2  for 14bit
                      for n any integer >= 1
         """
         self.op_mode.set('Hist')
