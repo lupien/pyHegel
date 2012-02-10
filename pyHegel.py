@@ -554,12 +554,18 @@ def _process_filename(filename):
 def get(dev, filename=None, **extrap):
     """
        Get a value from device
-       if filename is given and contains a %i (or %04i)
-       then it will replace the %i with and integer that
-       increments to prevent collision.
-       If the strings contains %T, it will be replaced by a timestamp
+       When giving it a filename, data will be saved to it
+       and the strings uses the following format
+                    use %T: for date time string (20120115-145030)
+                        %t: for time string only
+                        %D: for date string
+                        %02i: for unique 2 digit increment (00, 01 ...)
+                              %03i for   3 digits
+       The path for saving is sweep.path if it is defined otherwise it saves
+       in the current directory.
     """
     if filename != None:
+        filename = os.path.join(sweep.path.get(), filename)
         filename = _process_filename(filename)
         extrap.update(filename=filename)
     try:
