@@ -1167,6 +1167,13 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.clock_source.set(clock_source)
         self._clock_src_init_done = True
 
+    def _set_mode_defaults(self):
+        self.test_mode.set(False)
+        self.trigger_invert.set(False)
+        self.trigger_edge_en.set(False)
+        self.trigger_await.set(False)
+        self.trigger_create.set(False)
+
     def set_simple_acq(self,nb_Msample='min', chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         """
         Activates the simple acquisition mode which simply captures nb_Msample
@@ -1182,14 +1189,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             nb_Msample = self._min_acq_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
-        self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.chan_mode.set(chan_mode)
         self.chan_nb.set(chan_nb)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
+        self._set_mode_defaults()
             
     def set_histogram(self, nb_Msample='min', chan_nb=1, sampling_rate=None, clock_source=None, decimation=1):
         """
@@ -1217,14 +1220,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
         self.decimation.set(decimation)
-        self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.chan_mode.set('Single')
         self.chan_nb.set(chan_nb)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
+        self._set_mode_defaults()
     
     def set_correlation(self, nb_Msample='min', sampling_rate=None, clock_source=None):
         """
@@ -1245,12 +1244,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
-        self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
+        self._set_mode_defaults()
         self.chan_mode.set('Dual')
         self.chan_nb.set(1)
         self.autocorr_mode.set(False)
@@ -1280,12 +1275,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
-        self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
+        self._set_mode_defaults()
         if autocorr_single_chan:
             self.chan_mode.set('Single')
         else:
@@ -1320,12 +1311,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
-        self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
+        self._set_mode_defaults()
         self.chan_mode.set('Dual')
         self.autocorr_single_chan.set(autocorr_single_chan)    
         self.chan_nb.set(autocorr_chan_nb)
@@ -1367,13 +1354,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             nb_Msample = self._min_net_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
-        self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.chan_mode.set('Dual')
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
+        self._set_mode_defaults()
         self.net_signal_freq.set(signal_freq)
         self.lock_in_square.set(lock_in_square)
         self.nb_harm.set(nb_harm)
@@ -1401,14 +1384,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         """
         self.op_mode.set('Osc')
         self.set_clock_source(sampling_rate, clock_source)
-        self.test_mode.set(False)
         self.nb_Msample.set(32)
         self.chan_mode.set(chan_mode)
         self.chan_nb.set(chan_nb)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
+        self._set_mode_defaults()
         self.osc_nb_sample.set(nb_sample)
         self.osc_hori_offset.set(hori_offset)
         self.osc_trigger_level.set(trigger_level)
@@ -1438,14 +1417,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             nb_Msample = self._min_acq_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
-        self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.chan_mode.set(chan_mode)
         self.chan_nb.set(chan_nb)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
+        self._set_mode_defaults()
         self.fft_length.set(fft_length)
 
     def set_custom(self, cust_user_lib, cust_param1, cust_param2, cust_param3, cust_param4,
@@ -1473,14 +1448,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             nb_Msample = self._min_acq_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
-        self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.chan_mode.set(chan_mode)
         self.chan_nb.set(chan_nb)
-        self.trigger_invert.set(False)
-        self.trigger_edge_en.set(False)
-        self.trigger_await.set(False)
-        self.trigger_create.set(False)
+        self._set_mode_defaults()
         self.cust_param1.set(cust_param1)
         self.cust_param2.set(cust_param2)
         self.cust_param3.set(cust_param3)
