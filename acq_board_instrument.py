@@ -197,6 +197,50 @@ class Listen_thread(threading.Thread):
 
 # TODO: Add CHECKING verification in init and instrument write/read.
 class Acq_Board_Instrument(instrument.visaInstrument):
+    """
+    This instrument controls the fast acquisition cards (Ulraview 8 and 14bit)
+    To use, first make sure the data acquisition server is started
+      Ctrl_Carte_Acquisition.exe
+    Then this instrument can be loaded. This instrument requires an ip address
+    (can be a dns name) and a port number since the communication with
+    the server is through a network connection. If running pyHegel on the
+    same machine, this can be localhost (127.0.0.1), port 50000
+
+    Once loaded, an acquisition mode needs to be selected. See the methods
+        set_histogram
+        set_scope
+        set_simple_acq
+        set_spectrum
+        set_network_analyzer
+        set_correlation, set_autocorrelation, set_auto_and_corr
+        set_custom
+    You can set the clock_source/sampling_rate with any of them or you can
+    use set_clock_source. It needs to be done at least once.
+    The set_ command while set a bunch of devices on this instrument automatically.
+    This can also be done manually but is not recommanded (unless you know what
+    you are doing).
+
+    Then you can start an acquisition using either run or run_and_wait
+    And finally you can obtain the data.
+    See the individual modes for the data available.
+    Most of them return data through fetch, see fetch for all the options.
+    Instead of fetch you can use readval which is the same as
+    run_and_wait followed by a fetch.
+
+    In case of trouble, you might need to read the error values.
+    see get_error for data. When all the error message are read, the error state
+    is cleared.
+
+    If you want to reload this instrument, you first need to delete it (example:
+    del acq1) otherwise loading will fail since server only accepts one
+    connection at a time.
+
+    To obtain a proper x scale for graphs, use get_xdata
+
+    Other methods available: stop, disconnect, shutdown_server, convert_bin2v
+                             idn, cls, wait_after_trig, wait_after_trig
+    and attribute: board_type
+    """
     
     def __init__(self, ip_adress, port_nb):
         self._listen_thread = None
@@ -234,6 +278,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self._max_acq_Msample = 8192
             self._min_net_Msample = 32
             self._max_net_Msample = 128
+            self._clock_internal_freq = 2000
+            self._volt_range = 0.700
+            self._bit_resolution = 2**8
         else: # ADC14
             self._max_sampling = 400
             self._min_sampling = 20
@@ -244,9 +291,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self._max_acq_Msample = 4096
             self._min_net_Msample = 16
             self._max_net_Msample = 64
-        self._min_usb_clock_freq = 200
+            self._clock_internal_freq = 400
+            self._volt_range = 0.750
+            self._bit_resolution = 2**14
+        self._min_usb_clock_freq = 200 # TODO check this, I think it should be 137.5 MHz
         self._min_nb_Msample_all = 32
-        self._max_nb_Msample_all = 4294967295
+        self._max_nb_Msample_all = 4294967295 # TODO clean up min max nb_Msample
         self._max_nb_tau = 50
 
         self.visa_addr = self.board_type
@@ -259,6 +309,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         instrument.BaseInstrument.__init__(self)
 
     def idn(self):
+        """
+        Return a identification string similar to *idn of scpi instruments.
+        """
         # Should be: Manufacturer,Model#,Serial#,firmware
         model = self.board_type
         serial = self.board_serial.getcache()
@@ -272,12 +325,20 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if self._error_state:
             raise ValueError, 'Acq Board currently in error state. clear it with _get_error.'
     def get_error(self):
+        """
+        The errors are on a stack. This pops and shows the last one.
+        Execute this multiple times to clear the error state (or use cls).
+        When no errors are present, this returns: +0,"No error"
+        """
         if self._errors_list == []:
             self._error_state = False
             return '+0,"No error"'
         return self._errors_list.pop()
     @property
     def set_timeout(self):
+        """
+        Change the socket timeout.
+        """
         return self.s.gettimeout()
     @set_timeout.setter
     def set_timeout(self, seconds): # can be None
@@ -292,13 +353,20 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.s.close()
 
     def _async_trig(self):
-        self._run_finished.clear()
+        #self._run_finished.clear() # now in run itself
         self.run()
     def _async_detect(self):
         return instrument.wait_on_event(self._run_finished, check_state=self, max_time=.5)
     def wait_after_trig(self):
+        """
+        waits until the run is finished
+        """
         return instrument.wait_on_event(self._run_finished, check_state=self)
     def run_and_wait(self):
+        """
+        This performs a run and waits for it to finish.
+        See run for more details.
+        """
         self._async_trig()
         self.wait_after_trig()
 
@@ -361,15 +429,20 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.tau_vec([0])
 
     def convert_bin2v(self, bin, off=True, auto_inv=True):
+        """
+        Converts bin/bit values to a voltage
+        off: when true (default), removes the zero offset
+             which is needed for raw values.
+        auto_inv: when true (default) corrects for the inversion
+                  the 14bit cards does on data. This is needed for
+                  raw values.
+        """
+        vrange = self._volt_range
+        resolution = self._bit_resolution
+        offset = resolution/2.
         if self.board_type == 'ADC14':
-            vrange = 0.750
-            resolution = 2.**14
-            offset = 2.**13
             sign = -1.
         else: # 8bit
-            vrange = 0.700
-            resolution = 2.**8
-            offset = 2.**7
             sign = +1.
         if off == False:
             offset = 0.
@@ -421,6 +494,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                        In remote mode, the saving is done by python but only
                        for Acq mode (in a streaming way, to avoid memory problems).
                        Otherwise it is discarded.
+                       local/remote is selected by format_location device
                        For multiple channels, the filename is modified to include
                        and identifier for the channel.
                        The extension is always changed to .bin
@@ -483,6 +557,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                                      on selected channel
                Custom: returns whatever the custom code should return
                        which depends on loaded custom dll
+
+            The actual transfer of data is controlled by the devices
+             format_location
+             format_type
+             format_block_length
+            Their default are usually ok.
         """
         mode = self.op_mode.getcache()
         location = self.format_location()
@@ -718,6 +798,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
 
 
     def _readval_getdev(self, **kwarg):
+        """
+        Readval performs the same thing as run_and_wait() followed by fetch.
+        For the arguments, see fetch.
+        Use this for sweep with async off, or with get to automatically
+        start the acquisition before fetching the data.
+        """
         # TODO may need to check if trigger is already in progress
         self._async_trig()
         while not self._async_detect():
@@ -733,6 +819,16 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.write('CONFIG:NB_TAU %i'%N)
         self.tau_vec.nb_tau = N
     def _tau_vec_setdev(self, vals, i=None, append=False):
+        """
+        This device is used to change the list of tau.
+        There is a max of 50.
+        You can give it a list of values, which then replaces the previous list.
+        You can change an element i by
+         set(acq1.tau_vec, 5, i=3)
+        which changes the 4th element to be 5
+        You can also append a single value to the list with the optional
+        argument: append=True
+        """
         # for the _cache to maintain coherency, this dev needs setget
         # check has made sure the parameter make sense so we proceed
       
@@ -801,6 +897,11 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         fmt.update(multi=headers, graph=range(len(headers)))
         return instrument.BaseDevice.getformat(self.hist_ms, m=m)
     def _hist_ms_getdev(self, m=[1,2,3,4,5]):
+        """
+           hist_ms has optionnal parameter m=[1,2,3,4,5]
+           It specifies which of the moment to obtain and returns
+           a list of the selected ones. By default, all are selected.
+        """
         if not isinstance(m, (list, tuple, np.ndarray)):
             m=[m]
         ret = []
@@ -818,7 +919,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
 
         #device member
     def _create_devs(self):
-
         # choices string and number
         op_mode_str = ['Null', 'Acq', 'Corr', 'Cust', 'Hist', 'Net', 'Osc', 'Spec']
         clock_source_str = ['Internal', 'External', 'USB']
@@ -833,8 +933,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
 
         self.sampling_rate = acq_device('CONFIG:SAMPLING_RATE', str_type=float,  min=self._min_sampling, max=self._max_sampling)
 
-        self.decimation = acq_device('CONFIG:DECIMATION', str_type=int, min=1, max=1024)
-        self.acq_verbose = acq_device('CONFIG:ACQ_VERBOSE', str_type=acq_bool())
+        self.decimation = acq_device('CONFIG:DECIMATION', str_type=int, min=1, max=1024, doc='Skip over points for analysis. It is not used for all modes.')
+        self.acq_verbose = acq_device('CONFIG:ACQ_VERBOSE', str_type=acq_bool(), doc='Increase verbosity of server when True')
         self.test_mode = acq_device('CONFIG:TEST_MODE', str_type=acq_bool())
         self.clock_source = acq_device('CONFIG:CLOCK_SOURCE', str_type=str, choices=clock_source_str)
         self.nb_Msample = acq_device('CONFIG:NB_MSAMPLE', str_type=int,  min=self._min_nb_Msample_all, max=self._max_nb_Msample_all)
@@ -845,10 +945,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_await = acq_device('CONFIG:TRIGGER_AWAIT', str_type=acq_bool())
         self.trigger_create = acq_device('CONFIG:TRIGGER_CREATE', str_type=acq_bool())
         
-        if self.board_type == 'ADC8':
-            self.osc_trigger_level = acq_device('CONFIG:OSC_TRIGGER_LEVEL', str_type=float,  min=-0.35, max=0.35)
-        elif self.board_type == 'ADC14':
-            self.osc_trigger_level = acq_device('CONFIG:OSC_TRIGGER_LEVEL', str_type=float,  min=-0.375, max=0.375)
+        volt_range = self._volt_range/2
+        self.osc_trigger_level = acq_device('CONFIG:OSC_TRIGGER_LEVEL', str_type=float,
+                                            min=-volt_range, max=volt_range)
         
         self.osc_slope = acq_device('CONFIG:OSC_SLOPE', str_type=str, choices=osc_slope_str) 
         self.osc_nb_sample = acq_device('CONFIG:OSC_NB_SAMPLE', str_type=int,  min=1, max= ((16*1024*1024)-1)) # max 16MB
@@ -865,20 +964,20 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.autocorr_mode = acq_device('CONFIG:AUTOCORR_MODE', str_type=acq_bool())
         self.corr_mode = acq_device('CONFIG:CORR_MODE', str_type=acq_bool())
         self.autocorr_single_chan = acq_device('CONFIG:AUTOCORR_SINGLE_CHAN', str_type=acq_bool())
-        self.fft_length = acq_device('CONFIG:FFT_LENGTH', str_type=int)
+        self.fft_length = acq_device('CONFIG:FFT_LENGTH', str_type=int, min=64, max=2**20)
         self.cust_param1 = acq_device('CONFIG:CUST_PARAM1', str_type=float)
         self.cust_param2 = acq_device('CONFIG:CUST_PARAM2', str_type=float)
         self.cust_param3 = acq_device('CONFIG:CUST_PARAM3', str_type=float)
         self.cust_param4 = acq_device('CONFIG:CUST_PARAM4', str_type=float)
         self.cust_user_lib = acq_device('CONFIG:CUST_USER_LIB', str_type=acq_filename())
-        self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?',str_type=int)
-        self.board_status = acq_device(getstr='STATUS:STATE?',str_type=str)
+        self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?',str_type=int, doc='The serial number of the aquisition card.')
+        self.board_status = acq_device(getstr='STATUS:STATE?',str_type=str, doc='The current status of the acquisition card. Can be Idle, Running, Transferring')
         self.partial_status = acq_device(getstr='STATUS:PARTIAL?',str_type=instrument._decode_uint32)
-        self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?',str_type=acq_bool())
+        self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?',str_type=acq_bool(), doc='Is True when results are available from the card (after run completes)')
         
-        self.format_location = acq_device('CONFIG:FORMAT:LOCATION', str_type=str, choices=format_location_str)
-        self.format_type = acq_device('CONFIG:FORMAT:TYPE',str_type=str, choices=format_type_str)
-        self.format_block_length = acq_device('CONFIG:FORMAT:BLOCK_LENGTH',str_type = int, min=1, max=4294967296)
+        self.format_location = acq_device('CONFIG:FORMAT:LOCATION', str_type=str, choices=format_location_str, doc='Select between sending the data through the network socket (Remote), or letting the server save it (Local)')
+        self.format_type = acq_device('CONFIG:FORMAT:TYPE',str_type=str, choices=format_type_str, doc='Select saving format when in Local. Only implemented one is Default')
+        self.format_block_length = acq_device('CONFIG:FORMAT:BLOCK_LENGTH',str_type = int, min=1, max=4294967296, doc='Size of blocks used in Remote transmission')
 
         # Results
         #histogram result
@@ -887,12 +986,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.hist_m3 = acq_device(getstr = 'DATA:HIST:M3?', str_type = float, autoinit=False, trig=True)
         self.hist_m4 = acq_device(getstr = 'DATA:HIST:M4?', str_type = float, autoinit=False, trig=True)
         self.hist_m5 = acq_device(getstr = 'DATA:HIST:M5?', str_type = float, autoinit=False, trig=True)
-        docstr="""
-           hist_ms has optionnal parameter m=[1,2,3,4,5]
-           It specifies which of the moment to obtain and returns
-           a list of the selected ones. By default, all are selected.
-        """
-        self._devwrap('hist_ms', autoinit=False, trig=True, doc=docstr)
+        self._devwrap('hist_ms', autoinit=False, trig=True)
         # TODO histogram raw data
         
         #TODO correlation result
@@ -957,17 +1051,30 @@ class Acq_Board_Instrument(instrument.visaInstrument):
            
            
     def stop(self):
+        """
+        Ask the server to stop acquiring data
+        """
         self.write('STOP')
 
     def disconnect(self):
+        """
+        Tell server that we are disconnecting.
+        This allows someone else to disconnect.
+
+        deleting the instrument should also disconnect.
+          del acq1
+        """
         self.write('DISCONNECT')
 
     def shutdown_server(self):
+        """
+        This ask the server to shutdown. The server program should end.
+        """
         self.write('SHUTDOWN')
 
     def get_xscale(self):
         """
-           returns a vector of for use use as xscale
+           returns a vector of values for use use as xscale
            It can be the frequency data to match the amplitudes
             returned in spectrum modes.
            or the x scales for histograms in volts, etc...
@@ -993,35 +1100,64 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         elif mode == 'Corr':
             return np.array(self.tau_vec.getcache())*1./rate
 
+    def _check_clock(self, sampling_rate, clock_source, checkNone=False):
+        if checkNone:
+            if sampling_rate == None:
+                raise ValueError, 'sampling_rate or clock_source are missing (None)'
+        if clock_source == 'Internal':
+            if sampling_rate != None and sampling_rate != self._clock_internal_freq:
+                raise ValueError, 'Sampling rate needs to be %f for internal or leave it unspecified in set_ mode fucntions'%self._clock_internal_freq
+        elif clock_source == 'External':
+            if sampling_rate == None:
+                raise ValueError, 'Sampling rate needs to be specified for external'
+        elif clock_source == 'USB':
+            #check if clock freq is a multiple of 5 Mhz when in USB clock mode
+            # TODO check that this is what should be done
+            #      I think the resolution is better at lower frequency
+            #       10 for clock 2200-4400 (Useless for ADC8)
+            #       5 for clock 1100-2200 (2200-4400 ADC8 sample rate, steps of 10)
+            #       2.5 for clock 550-1100 (1100-2200 ADC8 sample, steps of 10)
+            #       1.25 for clock 275-550 (550-1100 ADC8 sample, steps of 2.5)
+            #                               275-550 ADC14 sample, steps of 1.25
+            #       0.625 for clock 137.5-275 (137.5-275 ADC14 sample, steps of 0.625)
+            if sampling_rate != None:
+                if self.board_type == 'ADC8': #8bit makes sampling rate double of clock frequency
+                    factor = 2
+                else:
+                    factor = 1
+                clock_step = 5.
+                clock_freq = sampling_rate/factor
+                if clock_freq < self._min_usb_clock_freq:
+                    raise ValueError, 'sampling_rate too low for USB clock, minimum is %f'%(self._min_usb_clock_freq*factor)
+                quotien = clock_freq/clock_step
+                frac,entier = math.modf(quotien)
+                if frac != 0:
+                    raise ValueError, 'Warning sampling_rate not a multiple of %f, which is needed for USB clock'%(clock_step*factor)
+        else:
+            raise ValueError, 'Invalid clock_source'
 
-    def set_clock_source_helper(self, sampling_rate=None, clock_source=None):
+    def set_clock_source(self, sampling_rate=None, clock_source=None):
         """
         Use this at least once per loaded instrument to set
         both the clock_source ('Internal', 'External', 'USB')
         and the sampling rate.
         The sampling rate is needed for 'External' and optional otherwise
          (the maximum one is used)
+
+        Note that for external with an 8bit card, the sampling_rate should be
+        twice(x2) the clock source frequency.
         """
+        if sampling_rate==None and clock_source==None:
+            return
         clock_max = self._max_sampling
-        if self.board_type == 'ADC8':
-            clock_int = 2000
-            usb_en = True
-        else:
-            clock_int = 400
-            usb_en = False
         if clock_source==None and self._clock_src_init_done:
             clock_source = self.clock_source.getcache()
+        self._check_clock(sampling_rate, clock_source)
         if clock_source == 'Internal':
-            if sampling_rate != None and sampling_rate != clock_int:
-                raise ValueError, 'Sampling rate needs to be %f for internal or leave it unspecified'
-            self.sampling_rate.set(clock_int)
+            self.sampling_rate.set(self._clock_internal_freq)
         elif clock_source == 'External':
-            if sampling_rate == None:
-                raise ValueError, 'Sampling rate needs to be specified for external'
             self.sampling_rate.set(sampling_rate)
         elif clock_source == 'USB':
-            if not usb_en:
-                raise ValueError, 'USB clock mode not allowed with this card'
             if sampling_rate == None:
                 sampling_rate = clock_max
                 print 'Using the max sampling rate of', clock_max
@@ -1036,7 +1172,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         Activates the simple acquisition mode which simply captures nb_Msample
         samples.
         Set sampling_rate anc clock_source, or reuse the previous ones by
-        default (see set_clock_source_helper).
+        default (see set_clock_source).
         chan_mode can be 'Dual' or 'Single' (default). In dual nb_Msample
         represents the total of both channels.
         When in single mode, set chan_nb to select which channel either 1 or 2.
@@ -1045,7 +1181,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if nb_Msample=='min':
             nb_Msample = self._min_acq_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
-        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.set_clock_source(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.chan_mode.set(chan_mode)
@@ -1056,11 +1192,30 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.trigger_create.set(False)
             
     def set_histogram(self, nb_Msample='min', chan_nb=1, sampling_rate=None, clock_source=None, decimation=1):
+        """
+        Activates the histogram mode.
+
+        Get the data either from
+          hist_m1, hist_m2, hist_m3, hist_m4, hist_m5
+        which return the moments of the last acquisition
+          hist_ms (any combination of the above)
+        or fetch (readval) to capture the full histogram.
+
+        Set sampling_rate anc clock_source, or reuse the previous ones by
+        default (see set_clock_source).
+        nb_MSample: set the number of samples used for histogram (uses min by default)
+        chan_nb:    select the channel to acquire for the histogram,
+                    either 1(default) or 2
+        decimation: only analyze one of every decimation point
+                    can be 1, 2, 4, n*4  for 8bit
+                    can be 1, 2, n*2  for 8bit
+                     for n any integer >= 1
+        """
         self.op_mode.set('Hist')
         if nb_Msample=='min':
             nb_Msample = self._min_hist_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
-        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.set_clock_source(sampling_rate, clock_source)
         self.decimation.set(decimation)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
@@ -1073,13 +1228,23 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     
     def set_correlation(self, nb_Msample='min', sampling_rate=None, clock_source=None):
         """
-        
+        Activates the cross correlation mode. This reads both ch1 and ch2
+        and calculates the cross correlation.
+          correl = sum[(xi-xavg)(yj-yavg)], for x=ch1, y=ch2
+          j=i+tau
+        See tau_vec to set a vector of time displacement between x and y.
+        Get data with fetch(readval)
+
+        Set sampling_rate anc clock_source, or reuse the previous ones by
+        default (see set_clock_source).
+        nb_MSample: set the number of samples used for histogram (uses min by default)
+                    This number includes both channels.
         """
         self.op_mode.set('Corr')
         if nb_Msample=='min':
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
-        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.set_clock_source(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.trigger_invert.set(False)
@@ -1093,11 +1258,28 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     
     def set_autocorrelation(self, nb_Msample='min', autocorr_single_chan=True,
                             autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
+        """
+        Activates the auto-correlation mode.
+          auto_correl = sum[(xi-xavg)(xj-xavg)], for x=ch1 or ch2
+          j=i+tau
+        See tau_vec to set a vector of time displacement between x and y.
+        Get data with fetch(readval)
+
+        Set sampling_rate anc clock_source, or reuse the previous ones by
+        default (see set_clock_source).
+        nb_MSample: set the number of samples used for histogram (uses min by default)
+                    This number includes both channels, if both are read.
+        autocorr_single_chan: When True, only one channel is read and analyzed
+                              otherwise both are read and analyzed.
+
+        autocorr_chan_nb: channel number to read and analyze when in single
+                          mode. Either 1 (default) or 2.
+        """
         self.op_mode.set('Corr')
         if nb_Msample=='min':
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
-        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.set_clock_source(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.trigger_invert.set(False)
@@ -1115,11 +1297,29 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         
     def set_auto_and_corr(self, nb_Msample='min', autocorr_single_chan=False,
                           autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
+        """
+        Activates the cross-auto-correlation mode.
+        It will calculate both the cross-correlation and
+        the auto-correlation. Both channel are always read.
+        The cross correlation is always analyzed.
+        At least one auto-correlation is analyzed but tau=0 for all of them.
+        Get data with fetch(readval)
+
+        See tau_vec to set a vector of time displacement between x and y.
+        Set sampling_rate anc clock_source, or reuse the previous ones by
+        default (see set_clock_source).
+        nb_MSample: set the number of samples used for histogram (uses min by default)
+                    This number includes both channels.
+        autocorr_single_chan: When True, only one channel is analyzed for
+                              autocorrelation otherwise both are analyzed.
+        autocorr_chan_nb: channel number to analyze when in single
+                          mode. Either 1 (default) or 2.
+        """
         self.op_mode.set('Corr')
         if nb_Msample=='min':
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
-        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.set_clock_source(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.trigger_invert.set(False)
@@ -1135,11 +1335,37 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         
     def set_network_analyzer(self, signal_freq, nb_Msample='min', nb_harm=1,
                              lock_in_square=False, sampling_rate=None, clock_source=None):
+        """
+        Activates the network analyzer mode.
+        It performs like a lock-in amplifier.
+        Both channels are used.
+         ch1 is used as the reference signal.
+         ch2 is used as the measured signal.
+        WARNING: before running, make sure the net_signal_freq is set properly
+          (close to the value of the reference signal), otherwise the analysis
+          will fail.
+
+        Get the data from one of (for the first harmonic only)
+            net_ch1_ampl, net_ch1_phase, net_ch1_real, net_ch1_imag
+            net_ch2_ampl, net_ch2_phase, net_ch2_real, net_ch2_imag
+            net_ch1_freq or net_ch2_freq (both are the same)
+            net_phase_diff, net_att
+        or get data for all harmonics using fetch (readval)
+
+        Set sampling_rate and clock_source, or reuse the previous ones by
+        default (see set_clock_source).
+        signal_freq: initial value for net_signal_freq
+        nb_MSample: set the number of samples used for histogram (uses min by default)
+                    This number includes both channels.
+        nb_harm:  the number of harmonics to analyze, defaults to 1.
+        lock_in_square: when True, squares the signal before doing the lock-in
+                        analysis.
+        """
         self.op_mode.set('Net')
         if nb_Msample=='min':
             nb_Msample = self._min_net_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
-        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.set_clock_source(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.chan_mode.set('Dual')
@@ -1153,8 +1379,27 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         
     def set_scope(self, nb_sample=1024, hori_offset=0, trigger_level=0., slope='Rising',
                   trig_source=1,chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
+        """
+        Activates the oscilloscope mode.
+        Get nb_sample (1024 by default).
+        WARNING: if the acquisition card can't find a trigger, it will hang.
+
+        hori_offset:  delay in time_steps (integer) between trigger and data.
+        trigger_level: Voltage used for trigger (default=0.0).
+        slope: the trigger slope. Either 'Rising' (default) or 'Falling'.
+        trig_source: The channel used for finding a trigger. Either 1 (default)
+                     or 2.
+        chan_mode: Either 'Single' (default) or 'Dual'.
+                   In dual, both channels are read.
+        chanb_nb: Channel to read when in 'Single' mode. Either 1 (default) or 2.
+
+        Get data from fetch (readval). Can also use the scope command.
+
+        Set sampling_rate and clock_source, or reuse the previous ones by
+        default (see set_clock_source).
+        """
         self.op_mode.set('Osc')
-        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.set_clock_source(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(32)
         self.chan_mode.set(chan_mode)
@@ -1171,11 +1416,27 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         
     def set_spectrum(self,nb_Msample='min', fft_length=1024, chan_mode='Single',
                      chan_nb=1, sampling_rate=None, clock_source=None):
+        """
+        Activates the spectrum analyzer mode (FFT).
+
+        nb_MSample: set the number of samples used for histogram (uses min by default)
+                    This number includes both channels, if both are read.
+        fft_length: The number of points used for calculating the FFT.
+                    Needs to be a power of 2. defaults to 1024
+        chan_mode: Either 'Single' (default) or 'Dual'.
+                   In dual, both channels are read.
+        chanb_nb: Channel to read when in 'Single' mode. Either 1 (default) or 2.
+
+        Get data from fetch (readval) or from custom_result1-4
+
+        Set sampling_rate and clock_source, or reuse the previous ones by
+        default (see set_clock_source).
+        """
         self.op_mode.set('Spec')
         if nb_Msample=='min':
             nb_Msample = self._min_acq_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
-        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.set_clock_source(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.chan_mode.set(chan_mode)
@@ -1188,11 +1449,29 @@ class Acq_Board_Instrument(instrument.visaInstrument):
 
     def set_custom(self, cust_user_lib, cust_param1, cust_param2, cust_param3, cust_param4,
                    nb_Msample='min',  chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
+        """
+        Activates the custom mode.
+
+        cust_user_lib: the dll file to load into the acquisition server program
+        cust_param1-4: the parameters passed to the custom code. All are floats.
+        nb_MSample: set the number of samples used for histogram (uses min by default)
+                    This number includes both channels, if both are read.
+        fft_length: The number of points used for calculating the FFT.
+                    Needs to be a power of 2. defaults to 1024
+        chan_mode: Either 'Single' (default) or 'Dual'.
+                   In dual, both channels are read.
+        chanb_nb: Channel to read when in 'Single' mode. Either 1 (default) or 2.
+
+        Get data from fetch (readval).
+
+        Set sampling_rate and clock_source, or reuse the previous ones by
+        default (see set_clock_source).
+        """
         self.op_mode.set('Cust')
         if nb_Msample=='min':
             nb_Msample = self._min_acq_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
-        self.set_clock_source_helper(sampling_rate, clock_source)
+        self.set_clock_source(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
         self.chan_mode.set(chan_mode)
@@ -1208,14 +1487,22 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.cust_user_lib.set(cust_user_lib)
         
     def run(self):
+        """
+        This function checks the validity of the current configuration.
+        If valid, it starts the acquisition/analysis.
+        """
         # check if the configuration are ok
         
         #check if board is Idle
         if self.board_status.getcache() == 'Running':
             raise ValueError, 'ERROR Board already Running'
 
+        #check clock settings are valid
         if not self._clock_src_init_done:
-            raise ValueError, 'Clock unitialized, you need to set it at least once, see set_clock_source_helper'
+            raise ValueError, 'Clock unitialized, you need to set it at least once, see set_clock_source'
+        self._check_clock(self.sampling_rate.getcache(),
+                                self.clock_source.getcache(), checkNone=True)
+
         # check if nb_Msample fit the op_mode
         if self.op_mode.getcache() == 'Acq':
             if self.nb_Msample.getcache() < self._min_acq_Msample:
@@ -1226,7 +1513,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                  new_nb_Msample = self._max_acq_Msample
                  self.nb_Msample.set(new_nb_Msample)
                  raise ValueError, 'Warning nb_Msample must be inferior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
-        
+
+        # TODO clean up use of 256, 4096 ...
         if self.op_mode.getcache() == 'Hist' and self.board_type == 'ADC14':
             quotien = float(self.nb_Msample.getcache())/256
             frac,entier = math.modf(quotien)
@@ -1276,62 +1564,26 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if self.nb_Msample.getcache() > self._max_net_Msample:
                  new_nb_Msample = self._max_net_Msample
                  self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be inferior to 64 in net ADC14, value corrected to 128'
+                 raise ValueError, 'Warning nb_Msample must be inferior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
     
-        #check if clock freq is a multiple of 5 Mhz when in USB clock mode
-        if self.clock_source.getcache() == 'USB':
-            if self.board_type == 'ADC8':
-                clock_freq = self.sampling_rate.getcache()/2
-            else:
-                clock_freq = self.sampling_rate.getcache()
-                
-            quotien = clock_freq/5.0
-            
-            frac,entier = math.modf(quotien)
-            
-            if frac != 0.0:
-                if self.board_type == 'ADC8':
-                    new_sampling_rate =  2* math.ceil(quotien) * 5
-                    if new_sampling_rate > self._max_sampling:
-                        new_sampling_rate = self._max_sampling
-                    self.sampling_rate.set(new_sampling_rate)
-                else:
-                    new_sampling_rate = math.ceil(quotien) * 5
-                    if new_sampling_rate > self._max_sampling:
-                        new_sampling_rate = self._max_sampling
-                    elif new_sampling_rate < self._min_usb_clock_freq:
-                        new_sampling_rate = self._min_usb_clock_freq
-                    self.sampling_rate.set(new_sampling_rate)
-                raise ValueError, 'Warning sampling_rate not a multiple of 5, value corrected to nearest possible value : ' + str(new_sampling_rate)
-                  
         #if in Osc mode check if the sample to send fit the horizontal offset
         if self.op_mode.getcache() == 'Osc':
-            if self.osc_hori_offset() > self.osc_nb_sample():
-                self.osc_hori_offset.set(self.osc_nb_sample.getcache())
+            nb_sample = self.osc_nb_sample.getcache()
+            if self.osc_hori_offset() > nb_sample:
+                self.osc_hori_offset.set(nb_sample)
+                raise ValueError, 'Warning osc_hori_offset larger than nb_Sample. corrected to nearest possible value : ' + str(nb_sample)
         
         # check if the fft length is a power of 2 and if the nb_Msample fit too
-        """
         if self.op_mode.getcache() == 'Spec':
-            
-            pwr2 = math.log(float(self.fft_length.getcache()),2)
-            
+            pwr2 = math.log(self.fft_length.getcache(), 2)
             frac,entier = math.modf(pwr2)
-            
             if frac != 0:
                 new_fft_length = 2**math.ceil(pwr2)
                 self.fft_length.set(new_fft_length)
                 raise ValueError, 'Warning fft_length not a power of 2, value corrected to nearest possible value : ' + str(new_fft_length)
-            else:
-                new_fft_length = self.fft_length
-            
-           quotien =  self.nb_Msample.getcache() / new_fft_length
-           frac,entier = math.modf(quotien)
-           
-           if frac != 0
-               new_nb_Msamples = math.ceil(quotien) * new_fft_length
-        """
-                
+
         self.write('STATUS:CONFIG_OK True')
+        self._run_finished.clear()
         self.write('RUN')
         
         
