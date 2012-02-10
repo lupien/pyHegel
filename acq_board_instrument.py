@@ -228,6 +228,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self._min_nb_Msample = 32
             self._max_nb_Msample = 4294967295
             self._max_Msample = 4294959104
+            self._min_hist_Msample = 8192
+            self._min_corr_Msample = 8192
             self._min_acq_Msample = 32
             self._max_acq_Msample = 8192
             self._min_net_Msample = 32
@@ -236,6 +238,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self._max_sampling = 400
             self._min_sampling = 20
             self._max_Msample = 2147479552
+            self._min_hist_Msample = 4096
+            self._min_corr_Msample = 4096
             self._min_acq_Msample = 16
             self._max_acq_Msample = 4096
             self._min_net_Msample = 16
@@ -678,7 +682,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if ret.shape[0]==1:
                 ret=ret[0]
             if unit == 'V2':
-                return self.convert(self.convert_bin2v(ret, off=False),off=False)
+                return self.convert_bin2v(self.convert_bin2v(ret, off=False),off=False)
             else:
                 return ret
 
@@ -991,6 +995,13 @@ class Acq_Board_Instrument(instrument.visaInstrument):
 
 
     def set_clock_source_helper(self, sampling_rate=None, clock_source=None):
+        """
+        Use this at least once per loaded instrument to set
+        both the clock_source ('Internal', 'External', 'USB')
+        and the sampling rate.
+        The sampling rate is needed for 'External' and optional otherwise
+         (the maximum one is used)
+        """
         clock_max = self._max_sampling
         if self.board_type == 'ADC8':
             clock_int = 2000
@@ -1022,9 +1033,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
 
     def set_simple_acq(self,nb_Msample='min', chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         """
-        Activates the simple acquisition mode which simply captures nb_Msample samples.
-        Set sampling_rate anc clock_source, or reuse the previous ones by default (see set_clock_source_helper)
-        chan_mode can be 'Dual' or 'Single' (default). In dual nb_Msample represents the total of both channels.
+        Activates the simple acquisition mode which simply captures nb_Msample
+        samples.
+        Set sampling_rate anc clock_source, or reuse the previous ones by
+        default (see set_clock_source_helper).
+        chan_mode can be 'Dual' or 'Single' (default). In dual nb_Msample
+        represents the total of both channels.
         When in single mode, set chan_nb to select which channel either 1 or 2.
         """
         self.op_mode.set('Acq')
@@ -1043,6 +1057,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             
     def set_histogram(self, nb_Msample='min', chan_nb=1, sampling_rate=None, clock_source=None, decimation=1):
         self.op_mode.set('Hist')
+        if nb_Msample=='min':
+            nb_Msample = self._min_hist_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source_helper(sampling_rate, clock_source)
         self.decimation.set(decimation)
         self.test_mode.set(False)
@@ -1059,6 +1076,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         
         """
         self.op_mode.set('Corr')
+        if nb_Msample=='min':
+            nb_Msample = self._min_corr_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source_helper(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
@@ -1074,6 +1094,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def set_autocorrelation(self, nb_Msample='min', autocorr_single_chan=True,
                             autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
         self.op_mode.set('Corr')
+        if nb_Msample=='min':
+            nb_Msample = self._min_corr_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source_helper(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
@@ -1093,6 +1116,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def set_auto_and_corr(self, nb_Msample='min', autocorr_single_chan=False,
                           autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
         self.op_mode.set('Corr')
+        if nb_Msample=='min':
+            nb_Msample = self._min_corr_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source_helper(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
@@ -1110,6 +1136,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def set_network_analyzer(self, signal_freq, nb_Msample='min', nb_harm=1,
                              lock_in_square=False, sampling_rate=None, clock_source=None):
         self.op_mode.set('Net')
+        if nb_Msample=='min':
+            nb_Msample = self._min_net_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source_helper(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
@@ -1143,6 +1172,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def set_spectrum(self,nb_Msample='min', fft_length=1024, chan_mode='Single',
                      chan_nb=1, sampling_rate=None, clock_source=None):
         self.op_mode.set('Spec')
+        if nb_Msample=='min':
+            nb_Msample = self._min_acq_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source_helper(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
@@ -1157,6 +1189,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def set_custom(self, cust_user_lib, cust_param1, cust_param2, cust_param3, cust_param4,
                    nb_Msample='min',  chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         self.op_mode.set('Cust')
+        if nb_Msample=='min':
+            nb_Msample = self._min_acq_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source_helper(sampling_rate, clock_source)
         self.test_mode.set(False)
         self.nb_Msample.set(nb_Msample)
