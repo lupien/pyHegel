@@ -924,6 +924,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         clock_source_str = ['Internal', 'External', 'USB']
         chan_mode_str = ['Single','Dual']
         osc_slope_str = ['Rising','Falling']
+        osc_trigmode_str = ['Normal','Auto']
         format_location_str = ['Local','Remote']
         format_type_str = ['Default','ASCII','NPZ']
         
@@ -953,6 +954,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.osc_nb_sample = acq_device('CONFIG:OSC_NB_SAMPLE', str_type=int,  min=1, max= ((16*1024*1024)-1)) # max 16MB
         self.osc_hori_offset = acq_device('CONFIG:OSC_HORI_OFFSET', str_type=int,  min=-(8*1024*1024), max= ((8*1024*1024)-1)) # max 8MB
         self.osc_trig_source = acq_device('CONFIG:OSC_TRIG_SOURCE', str_type=int,  min=1, max=2)
+        self.osc_trig_mode = acq_device('CONFIG:OSC_TRIG_MODE', str_type=str, choices=osc_trigmode_str)
         
         if self.board_type == 'ADC8':
             self.net_signal_freq = acq_device('CONFIG:NET_SIGNAL_FREQ', str_type=float,  min=0, max=375000000)
@@ -1092,10 +1094,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             N = self.osc_nb_sample.getcache()
             return 1./rate*np.arange(N)
         elif mode == 'Hist':
-            if self.board_type == 'ADC14':
-                N = 2**14
-            else: # ADC8
-                N = 2**8
+            N = self._bit_resolution
             return self.convert_bin2v(np.arange(N))
         elif mode == 'Corr':
             return np.array(self.tau_vec.getcache())*1./rate
@@ -1362,7 +1361,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.nb_harm.set(nb_harm)
         
     def set_scope(self, nb_sample=1024, hori_offset=0, trigger_level=0., slope='Rising',
-                  trig_source=1,chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
+                  trig_source=1, trig_mode='Auto', chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         """
         Activates the oscilloscope mode.
         Get nb_sample (1024 by default).
@@ -1373,6 +1372,11 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         slope: the trigger slope. Either 'Rising' (default) or 'Falling'.
         trig_source: The channel used for finding a trigger. Either 1 (default)
                      or 2.
+        trig_mode: Either 'Auto'  (default) or 'Normal'
+                   In 'Normal' the cards might wait forever for a trigger.
+                   To stop it see stop methode.
+                   In 'Auto' if a trigger is not seen the first section of data is
+                   returned.
         chan_mode: Either 'Single' (default) or 'Dual'.
                    In dual, both channels are read.
         chanb_nb: Channel to read when in 'Single' mode. Either 1 (default) or 2.
@@ -1393,6 +1397,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.osc_trigger_level.set(trigger_level)
         self.osc_slope.set(slope)
         self.osc_trig_source(trig_source)
+        self.osc_trig_mode(trig_mode)
         
     def set_spectrum(self,nb_Msample='min', fft_length=1024, chan_mode='Single',
                      chan_nb=1, sampling_rate=None, clock_source=None):
