@@ -450,16 +450,37 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             sign = 1.
         return (bin - offset)*sign*vrange/resolution
 
+    def _fetch_get_ch_corr(self, ch=None):
+        if ch == None:
+            ch = []
+            if self.corr_mode.getcache():
+                ch.append(0)
+            if self.autocorr_mode.getcache():
+                if self.autocorr_single_chan.getcache():
+                    ch.append(self.chan_nb.getcache())
+                else:
+                    ch.extend([1,2])
+        if type(ch) != list:
+            ch = [ch]
+        return ch
     def _fetch_getformat(self, filename=None, **kwarg):
         fmt = self.fetch._format
         fmt.update(file=False)
         fmt.update(bin=False)
+        fmt.update(multi=False, graphs=[])
         mode = self.op_mode.getcache()
         if mode == 'Acq':
             #if self.nb_Msample.getcache() > 64:
             #    fmt.update(file=True)
             #fmt.update(bin='.npy')
             fmt.update(file=True)
+        if mode == 'Corr':
+            ch = kwarg.get('ch')
+            ch = self._fetch_get_ch_corr(ch)
+            nbtau = len(self.tau_vec.getcache())
+            headers = ['ch%i-%i'%(c,i)  for c in ch  for i in range(nbtau)]
+            graphs = [(i*nbtau) for i in range(len(ch))]
+            fmt.update(multi=headers, graph=graphs)
         return instrument.BaseDevice.getformat(self.fetch, **kwarg)
 
     def _fetch_filename_helper(self, filename, extra=None, newext=None):
@@ -717,17 +738,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return V
 
         if mode == 'Corr':
-            if ch == None:
-                ch = []
-                if self.corr_mode.getcache():
-                    ch.append(0)
-                if self.autocorr_mode.getcache():
-                    if self.autocorr_single_chan.getcache():
-                        ch.append(self.chan_nb.getcache())
-                    else:
-                        ch.extend([1,2])
-            if type(ch) != list:
-                ch = [ch]
+            ch = self._fetch_get_ch_corr(ch) # always returns a list
             ret = []
             if 0 in ch:
                 self.fetch._event_flag.clear()

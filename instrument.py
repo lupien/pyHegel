@@ -42,9 +42,20 @@ def _repr_or_string(val):
     else:
         return repr(val)
 
+
+def _writevec_flatten_list(vals_list):
+    ret = []
+    for val in vals_list:
+        if isinstance(val, np.ndarray):
+            ret.extend(list(val.flatten()))
+        else:
+            ret.append(val)
+    return ret
+
 def _writevec(file_obj, vals_list, pre_str=''):
-     strs_list = map(_repr_or_string, vals_list)
-     file_obj.write(pre_str+string.join(strs_list,'\t')+'\n')
+    vals_list = _writevec_flatten_list(vals_list)
+    strs_list = map(_repr_or_string, vals_list)
+    file_obj.write(pre_str+string.join(strs_list,'\t')+'\n')
 
 
 def _get_conf_header_util(header, obj, options):

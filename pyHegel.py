@@ -155,6 +155,7 @@ def _readall(devs, formats, i, async=None):
                 instrument._write_dev(val, filename, format=fmt, first= i==0)
         else:
             ret.append(val)
+    ret = instrument._writevec_flatten_list(ret)
     return ret
 
 def _readall_async(devs, formats, i):
