@@ -511,7 +511,11 @@ class BaseInstrument(object):
     def _conf_helper(self, *devnames):
         ret = []
         for devname in devnames:
-            val = _repr_or_string(getattr(self, devname).getcache())
+            if isinstance(devname, dict):
+                val = repr(devname)
+                devname = 'options'
+            else:
+                val = _repr_or_string(getattr(self, devname).getcache())
             ret.append('%s=%s'%(devname, val))
         return ret
     def read(self):

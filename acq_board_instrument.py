@@ -373,34 +373,34 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
         if self.op_mode.getcache() == 'Acq':
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
-                                     'chan_nb','chan_mode')
+                                     'chan_nb','chan_mode', options)
                                      
         if self.op_mode.getcache() == 'Hist':
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
-                                     'chan_nb')
+                                     'chan_nb', 'decimation', options)
                                      
         if self.op_mode.getcache() == 'Corr':
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
                                      'autocorr_mode', 'corr_mode','autocorr_single_chan',
-                                     'chan_mode','chan_nb',)
+                                     'chan_mode','chan_nb', 'tau_vec', options)
                            
         if self.op_mode.getcache() == 'Net':
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
-                                     'lock_in_square','net_signal_freq','nb_harm')
+                                     'lock_in_square','net_signal_freq','nb_harm', options)
                                      
         if self.op_mode.getcache() == 'Osc':
             return self._conf_helper('op_mode', 'sampling_rate', 'clock_source','osc_nb_sample',
                                      'osc_hori_offset', 'osc_trigger_level', 'osc_slope', 'osc_trig_source',
-                                     'chan_mode','chan_nb')
+                                     'osc_trig_mode', 'chan_mode','chan_nb', options)
         
         if self.op_mode.getcache() == 'Spec':
              return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
-                                      'chan_mode','chan_nb','fft_length')
+                                      'chan_mode','chan_nb','fft_length', options)
                                      
         if self.op_mode.getcache() == 'Cust':
              return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
                                       'chan_mode','chan_nb','cust_param1','cust_param2','cust_param3',
-                                      'cust_param4') 
+                                      'cust_param4', options)
                                      
 
     def dummy_devs_iter(self):
@@ -450,7 +450,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             sign = 1.
         return (bin - offset)*sign*vrange/resolution
 
-    def _fetch_getformat(self, filename=None, ch=[1], unit='default'):
+    def _fetch_getformat(self, filename=None, **kwarg):
         fmt = self.fetch._format
         fmt.update(file=False)
         fmt.update(bin=False)
@@ -460,7 +460,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             #    fmt.update(file=True)
             #fmt.update(bin='.npy')
             fmt.update(file=True)
-        return instrument.BaseDevice.getformat(self.fetch)
+        return instrument.BaseDevice.getformat(self.fetch, **kwarg)
 
     def _fetch_filename_helper(self, filename, extra=None, newext=None):
         filestr=''
@@ -669,7 +669,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return ret
 
         if mode == 'Spec':
-            # TODO prevent ch2 form overwrite ch1 in the file
             if ch == None:
                 if self.chan_mode.getcache() == 'Dual':
                     ch = [1,2]
@@ -718,7 +717,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return V
 
         if mode == 'Corr':
-            # TODO prevent ch2 form overwrite ch1 in the file
             if ch == None:
                 ch = []
                 if self.corr_mode.getcache():
@@ -767,7 +765,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return ret
 
         if mode == 'Cust':
-            # TODO prevent ch2 form overwrite ch1 in the file
             if ch == None:
                 ch = 1
             if type(ch) != list:
@@ -989,10 +986,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.hist_m4 = acq_device(getstr = 'DATA:HIST:M4?', str_type = float, autoinit=False, trig=True)
         self.hist_m5 = acq_device(getstr = 'DATA:HIST:M5?', str_type = float, autoinit=False, trig=True)
         self._devwrap('hist_ms', autoinit=False, trig=True)
-        # TODO histogram raw data
-        
-        #TODO correlation result
-        #TODO 
         
         # network analyzer result
         self.custom_result1 = acq_device(getstr = 'DATA:CUST:RESULT1?',str_type = float, autoinit=False, trig=True)
