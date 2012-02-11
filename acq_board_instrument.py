@@ -576,6 +576,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                                      ch=[0,1,2] otherwise it is
                                      either ch=[0,1] or ch=[0,2] depending
                                      on selected channel
+                     For sweep/record the data will be merged into main data and
+                     only first tau will be traced
                Custom: returns whatever the custom code should return
                        which depends on loaded custom dll
 
