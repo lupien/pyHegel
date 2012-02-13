@@ -88,6 +88,40 @@ def close_last_trace():
 def time2date(x):
     return x/(24.*3600)+pylab.epoch2num(0)
 
+def get_timezone_shift(x=None):
+    """
+    returns the timezone shift of x in seconds (UTC - local)
+    x should be the time in s since the unix epoch
+     (as returned by time.time())
+    """
+    dt = time.localtime(x)
+    if dt.tm_isdst:
+        tz = time.altzone
+    else:
+        tz = time.timezone
+    return tz
+
+def time_stripdate(x, first=None):
+    """
+    takes either first if given or the first element of x
+    and returns x minus that first value date (time=0:0:0)
+    x, first and return are in seconds.
+    x and first are since epoch (time.time())
+    """
+    if first == None:
+        try:
+            first = x[0]
+        except TypeError:
+            first = x
+    dt = list(time.localtime(first))
+    dt[3]=0 # tm_hour
+    dt[4]=0 # tm_min
+    dt[5]=0 # tm_sec
+    offset = time.mktime(dt)
+    return x-offset
+    
+    
+
 class Trace(FigureManagerQT):
     def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False):
         self.fig = Figure(figsize=(width,height),dpi=dpi)
