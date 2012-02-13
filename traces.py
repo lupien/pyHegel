@@ -85,7 +85,8 @@ def get_last_trace():
 def close_last_trace():
     get_last_trace().window.close()
 
-#TODO: add rescale button, abort button.
+def time2date(x):
+    return x/(24.*3600)+pylab.epoch2num(0)
 
 class Trace(FigureManagerQT):
     def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False):
@@ -189,7 +190,7 @@ class Trace(FigureManagerQT):
     def addPoint(self, x, ys):
         if self.time_mode:
             # convert from sec since epoch to matplotlib date format
-            x = x/(24.*3600)+pylab.epoch2num(0)
+            x = time2date(x)
         if self.xs == None:
            self.xs = np.array([x])
         else:  self.xs = np.append(self.xs, x)
@@ -200,7 +201,7 @@ class Trace(FigureManagerQT):
     def setPoints(self, x, y):
         if self.time_mode:
             # convert from sec since epoch to matplotlib date format
-            x = x/(24.*3600)+pylab.epoch2num(0)
+            x = time2date(x)
         self.xs = np.array(x)
         self.ys = np.array(y.T)
         self.update()
@@ -276,7 +277,7 @@ def plot_time(x, *extrap, **extrak):
         xticksize: changes x axis thick size (defaults to 9)
     """
     # uses the timezone set by pylab.rcParams['timezone']
-    x = x/(24.*3600)+pylab.epoch2num(0)
+    x = time2date(x)
     xrotation = extrak.pop('xrotation', 10)
     xticksize = extrak.pop('xticksize', 9)
     ret = pylab.plot_date(x, *extrap, **extrak)
