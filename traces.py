@@ -139,6 +139,7 @@ class Trace(FigureManagerQT):
         self.first_update = True
         self.twinmode = False
         self.time_mode = time_mode
+        # could also use self.fig.autofmt_xdate()
         if time_mode:
             lbls = self.ax.get_xticklabels()
             for l in lbls:
@@ -254,6 +255,7 @@ class Trace(FigureManagerQT):
            self.crvs = []
            #self.ax.clear()
         x = self.xs
+        lbls = []
         for i,y in enumerate(self.ys.T):
            if self.twinmode and i == 1:
                ax = self.ax2
@@ -268,6 +270,7 @@ class Trace(FigureManagerQT):
                  lbl = self.legend_strs[i]
               except TypeError:
                  lbl = 'data '+str(i)
+              lbls.append(lbl)
               if self.time_mode:
                   plt = ax.plot_date(x, y, style, label=lbl)[0]
               else:
@@ -276,9 +279,14 @@ class Trace(FigureManagerQT):
            else:
               self.crvs[i].set_data(x, y)
         if self.first_update:
-            self.ax.legend(loc='upper left')
             if self.twinmode:
-                self.ax2.legend(loc='upper right')
+                lines1 = self.ax.lines
+                lines2 = self.ax2.lines
+                self.ax.set_ylabel(lbls[0],color=lines1[0].get_color())
+                self.ax2.set_ylabel(lbls[1],color=lines2[0].get_color())
+                #self.ax2.legend(loc='upper right')
+            else:
+                self.ax.legend(loc='upper left').draggable()
         self.ax.relim()
         self.ax.autoscale(enable=None)
         if self.twinmode:
