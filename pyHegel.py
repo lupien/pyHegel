@@ -76,6 +76,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         if isinstance(dev, tuple):
             kwarg = dev[1]
             dev = dev[0]
+        dev.force_get()
         hdr = _getheaderhelper(dev)
         f = dev.getformat(**kwarg).copy()
         f['basename'] = _dev_filename(root, hdr, npts, append=f['append'])
@@ -99,6 +100,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
             graphsel.append(count)
             count += 1
     for x in extra_conf:
+        x.force_get()
         hdr = _getheaderhelper(x)
         f = x.getformat(**kwarg).copy()
         f['base_conf'] = instrument._get_conf_header(f)
@@ -566,6 +568,7 @@ def get(dev, filename=None, **extrap):
        in the current directory.
     """
     if filename != None:
+        dev.force_get()
         filename = os.path.join(sweep.path.get(), filename)
         filename = _process_filename(filename)
         extrap.update(filename=filename)
@@ -576,8 +579,7 @@ def get(dev, filename=None, **extrap):
 
 def getasync(devs, filename=None, **kwarg):
     if filename != None:
-        filename = _process_filename(filename)
-        kwarg.update(filename=filename)
+        raise ValueError, 'getasync does not currently handle the filename option'
     if not isinstance(devs, list):
         devs = [devs]
     for dev in devs:

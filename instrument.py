@@ -324,6 +324,12 @@ class BaseDevice(object):
     def getformat(self, filename=None, **kwarg): # we need to absorb any filename argument
         self._format['options'] = kwarg
         return self._format
+    def force_get(self):
+        """
+        Force a reread of the instrument attached to this device.
+        This should be called before saving headers.
+        """
+        self.instr.force_get()
 
 class wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
@@ -417,6 +423,7 @@ class BaseInstrument(object):
         self._async_level = -1
         self.async_delay = 0.
         self._async_task = None
+        self._last_force = time.time()
         if not CHECKING:
             self.init(full=True)
     def _async_detect(self):
@@ -433,7 +440,7 @@ class BaseInstrument(object):
             if self._async_level > 1:
                 self._async_task.cancel()
             self._async_level = -1
-            raise ValueError, 'Async in the wrong order'
+            raise ValueError, 'Async in the wrong order. Reseting order. Try again..'
         if async == 0:  # setup async task
             if self._async_level == -1: # first time through
                 self._async_list = []
@@ -550,15 +557,28 @@ class BaseInstrument(object):
         if self.alias == None:
             raise TypeError, self.perror('This instrument does not have an alias for call')
         return self.alias()
+    def force_get(self):
+        """
+           Rereads all devices that have autoinit=True
+           This should be called when a user might have manualy changed some
+           settings on an instrument.
+           It is limited to once per 2 second.
+        """
+        if time.time()-self._last_force < 2:
+            # less than 2s since last force, skip it
+            return
+        for s, obj in self.devs_iter():
+            if obj._autoinit:
+                obj.get()
+        self._last_force = time.time()
     def iprint(self, force=False):
+        if force:
+            self.force_get()
         ret = ''
         for s, obj in self.devs_iter():
             if self.alias == obj:
                 ret += 'alias = '
-            if force and obj._autoinit:
-                val = obj.get()
-            else:
-                val = obj.getcache()
+            val = obj.getcache()
             ret += s+" = "+repr(val)+"\n"
         return ret
     def _info(self):
@@ -1049,7 +1069,7 @@ class agilent_multi_34410A(visaInstrument):
           'CURRent:AC', 'VOLTage:AC', 'CAPacitance', 'CONTinuity', 'CURRent', 'VOLTage',
           'DIODe', 'FREQuency', 'PERiod', 'RESistance', 'FRESistance', 'TEMPerature', quotes=True)
         self.mode = scpiDevice('FUNC', str_type=ch, choices=ch)
-        self.readval = scpiDevice(getstr='READ?',str_type=float) # similar to INItiate followed by FETCh.
+        self.readval = scpiDevice(getstr='READ?',str_type=float, autoinit=False) # similar to INItiate followed by FETCh.
         # TODO make readval redirect to fetchval for async mode
         # handle avg, stats when in multiple points mode.
         self.fetchval = scpiDevice(getstr='FETCh?',str_type=_decode_float64, autoinit=False, trig=True) #You can't ask for fetch after an aperture change. You need to read some data first.

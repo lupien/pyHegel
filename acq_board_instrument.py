@@ -1043,7 +1043,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def ask(self, quest):
         self.write(quest)
         return self.read()
-        
+
+    def force_get(self):
+        # Since user cannot change change values except without using this program
+        # the cache are always up to date and this is not needed.
+        pass
+
     def Get_Board_Type(self):
        res = self.ask('CONFIG:BOARD_TYPE?')
        if res[0] != '@' or res[-1] != '\n':
