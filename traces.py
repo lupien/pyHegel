@@ -16,6 +16,13 @@ from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt4 import FigureManagerQT
 from matplotlib.figure import Figure
 
+# see from mpl_toolkits.axes_grid1 import host_subplot
+# matplotlib/Examples/axes_grid/demo_parasite_axes2.py
+#from mpl_toolkits.axes_grid1 import host_subplot
+from mpl_toolkits.axes_grid1.parasite_axes import host_subplot_class_factory
+import mpl_toolkits.axisartist as AA
+host_subplot_class = host_subplot_class_factory(AA.Axes)
+
 _figlist = []
 
 # set the timezone for proper display of date/time axis
@@ -130,18 +137,20 @@ class Trace(FigureManagerQT):
         self.MainWidget = self.window
         self.setWindowTitle('Trace...')
         self.isclosed = False
-        self.ax = self.fig.add_subplot(111)
+        ax = host_subplot_class(self.fig, 111)
+        self.fig.add_subplot(ax)
+        self.axs = [ax]
         self.xs = None
         self.ys = None
         self.xmax = None
         self.xmin = None
         self.legend_strs = None
         self.first_update = True
-        self.twinmode = False
         self.time_mode = time_mode
         # could also use self.fig.autofmt_xdate()
+        ax = self.axs[0]
         if time_mode:
-            lbls = self.ax.get_xticklabels()
+            lbls = ax.get_xticklabels()
             for l in lbls:
                 l.update(dict(rotation=10, size=9))
         self.update()
@@ -181,14 +190,12 @@ class Trace(FigureManagerQT):
         self.abort_enabled = state
     def rescale_button_press(self):
         # TODO tell toolbar that a new set of scales exists
-        self.ax.relim()
-        self.ax.set_xlim(self.xmin, self.xmax, auto=True)
-        self.ax.set_autoscaley_on(True)
-        self.ax.autoscale(enable=None)
-        if self.twinmode:
-            self.ax2.set_autoscaley_on(True)
-            self.ax2.relim()
-            self.ax2.autoscale(enable=None)
+        for i,ax in enumerate(self.axs):
+            ax.relim()
+            if i==0:
+                ax.set_xlim(self.xmin, self.xmax, auto=True)
+            ax.set_autoscaley_on(True)
+            ax.autoscale(enable=None)
         self.draw()
     def mykey_press(self, event):
         # TODO add a Rescale
@@ -216,10 +223,10 @@ class Trace(FigureManagerQT):
              minx = np.min(minx)
         self.xmax = maxx
         self.xmin = minx
-        self.ax.set_xlim(minx, maxx, auto=False)
+        self.axs[0].set_xlim(minx, maxx, auto=False)
         self.update()
     def set_xlabel(self, label):
-        self.ax.set_xlabel(label)
+        self.axs[0].set_xlabel(label)
     def setWindowTitle(self, title):
         self.set_window_title(title)
     def addPoint(self, x, ys):
@@ -248,50 +255,47 @@ class Trace(FigureManagerQT):
            self.draw()
            return
         if self.first_update:
-           if self.ys.shape[1] == 2:
-               self.twinmode = True
-               self.ax2 = self.ax.twinx()
-               self.ax2.set_xlim(self.xmin, self.xmax, auto=False)
-           self.crvs = []
-           #self.ax.clear()
+            ndim = self.ys.shape[1]
+            right = .95-(ndim-1)*.1
+            if right < .5:
+                right = .5
+            #offset = (.95-right)/(ndim-1)
+            offset = 50
+            self.fig.subplots_adjust(right=right)
+            host = self.axs[0]
+            # cycle over all extra axes
+            for i in range(ndim-1):
+                ax = host.twinx()
+                new_fixed_axis = ax.get_grid_helper().new_fixed_axis
+                ax.axis['right'] = new_fixed_axis(loc='right', axes=ax, offset=(offset*i,0))
+                ax.axis['right'].toggle(all=True)
+                self.axs.append(ax)
+                # add them to figure so selecting axes (press 1, 2, a) works properly
+                self.fig.add_axes(ax)
+                ax.set_xlim(self.xmin, self.xmax, auto=False)
+            self.crvs = []
+            #self.ax.clear()
         x = self.xs
-        lbls = []
-        for i,y in enumerate(self.ys.T):
-           if self.twinmode and i == 1:
-               ax = self.ax2
-               #style = '.-r'
-               style = '.-'
-               ax._get_lines.color_cycle.next()
-           else:
-               ax = self.ax
-               style = '.-'
+        for i,(y,ax) in enumerate(zip(self.ys.T, self.axs)):
+           style = '.-'
            if self.first_update:
               try:
                  lbl = self.legend_strs[i]
               except TypeError:
                  lbl = 'data '+str(i)
-              lbls.append(lbl)
               if self.time_mode:
                   plt = ax.plot_date(x, y, style, label=lbl)[0]
               else:
                   plt = ax.plot(x, y, style, label=lbl)[0]
+              line_color = ax.lines[0].get_color()
+              ax.set_ylabel(lbl, color=line_color)
               self.crvs.append(plt)
            else:
               self.crvs[i].set_data(x, y)
-        if self.first_update:
-            if self.twinmode:
-                lines1 = self.ax.lines
-                lines2 = self.ax2.lines
-                self.ax.set_ylabel(lbls[0],color=lines1[0].get_color())
-                self.ax2.set_ylabel(lbls[1],color=lines2[0].get_color())
-                #self.ax2.legend(loc='upper right')
-            else:
-                self.ax.legend(loc='upper left').draggable()
-        self.ax.relim()
-        self.ax.autoscale(enable=None)
-        if self.twinmode:
-            self.ax2.relim()
-            self.ax2.autoscale(enable=None)
+        self.axs[0].legend(loc='upper left', bbox_to_anchor=(0, 1.10)).draggable()
+        for ax in self.axs:
+            ax.relim()
+            ax.autoscale(enable=None)
         self.first_update = False
         self.draw()
     def draw(self):
