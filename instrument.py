@@ -719,7 +719,7 @@ class ChoiceStrings(object):
        irrespective of capitalization.
        The elements need to have the following format:
           ABCdef
-       where: ABC is known has the short name and
+       where: ABC is known as the short name and
               abcdef is known has the long name.
        When using in or searching with index method
              both long and short names are looked for
@@ -732,7 +732,7 @@ class ChoiceStrings(object):
         if extrap != {}:
             raise TypeError, 'ChoiceStrings only has quotes=False as keyword argument'
         self.values = values
-        self.short = [v.rstrip(string.ascii_lowercase).lower() for v in values]
+        self.short = [v.translate(None, string.ascii_lowercase).lower() for v in values]
         self.long = [v.lower() for v in values]
         # for short having '', use the long name instead
         # this happens for a string all in lower cap.
