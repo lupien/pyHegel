@@ -934,24 +934,45 @@ class sr830_lia(visaInstrument):
         d.update(multi=headers, graph=range(len(sel)))
         return BaseDevice.getformat(self.snap, sel=sel)
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant')
+        return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant',
+                                 'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf')
     def _create_devs(self):
-        self.freq = scpiDevice('freq', str_type=float, setget=True)
-        self.sens = scpiDevice('sens', str_type=int)
+        self.freq = scpiDevice('freq', str_type=float, setget=True, min=0.001, max=102e3)
+        self.sens = scpiDevice('sens', str_type=int, min=0, max=26) #0: 2 nV/fA, 1:5, 2:10, 3:20 ... (1,2,5) ... 26: 1 V/uA
         self.oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float, setget=True)
         self.srclvl = scpiDevice('slvl', str_type=float, min=0.004, max=5., setget=True)
-        self.harm = scpiDevice('harm', str_type=int)
-        self.phase = scpiDevice('phas', str_type=float, setget=True)
-        self.timeconstant = scpiDevice('oflt', str_type=int)
+        self.harm = scpiDevice('harm', str_type=int, min=1, max=19999)
+        self.phase = scpiDevice('phas', str_type=float, min=-360., max=729.90, setget=True)
+        self.timeconstant = scpiDevice('oflt', str_type=int, min=0, max=19) # 0: 10 us, 1: 30, 2: 100 ... (1, 3) ... 19: 30 ks
         self.x = scpiDevice(getstr='outp? 1', str_type=float, delay=True)
         self.y = scpiDevice(getstr='outp? 2', str_type=float, delay=True)
         self.r = scpiDevice(getstr='outp? 3', str_type=float, delay=True)
         self.theta = scpiDevice(getstr='outp? 4', str_type=float, delay=True)
-        self.xy = scpiDevice(getstr='snap? 1,2', delay=True)
+        self.input_conf = scpiDevice('isrc', str_type=int, min=0, max=3, doc='0: A\n1: A-B\n2: I(1MOhm)\n3: I(100 MOhm)\n')
+        self.grounded_conf = scpiDevice('ignd', str_type=bool)
+        self.dc_coupled_conf = scpiDevice('icpl', str_type=bool)
+        self.linefilter_conf = scpiDevice('ilin', str_type=int, min=0, max=3, doc='0: No filters\n1: line notch\n2: 2xline notch:\n3: both line, 2xline notch\n')
+        # status: b0=Input/Reserver ovld, b1=Filter ovld, b2=output ovld, b3=unlock,
+        # b4=range change (accross 200 HZ, hysteresis), b5=indirect time constant change
+        # b6=triggered, b7=unused
+        self.status_byte = scpiDevice(getstr='LIAS?', str_type=int)
         self._devwrap('snap', delay=True)
         self.alias = self.snap
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+    def get_error(self):
+        """
+         returns a byte of bit flags
+          bit 0 (1):   unused
+          bit 1 (2):   Backup error
+          bit 2 (4):   RAM error
+          bit 3 (8):   Unused
+          bit 4 (16):  Rom error
+          bit 5 (32):  GPIB error
+          bit 6 (64):  DSP error
+          bit 7 (128): Math Error
+        """
+        return int(self.ask('ERRS?'))
 
 class sr384_rf(visaInstrument):
     # This instruments needs to be on local state or to pass through local state
@@ -965,11 +986,11 @@ class sr384_rf(visaInstrument):
                                  'en_rf', 'amp_rf_dbm', 'en_hf', 'amp_hf_dbm',
                                  'phase', 'mod_en')
     def _create_devs(self):
-        self.freq = scpiDevice('freq',str_type=float)
-        self.offset_low = scpiDevice('ofsl',str_type=float) #volts
-        self.amp_lf_dbm = scpiDevice('ampl',str_type=float)
-        self.amp_rf_dbm = scpiDevice('ampr',str_type=float)
-        self.amp_hf_dbm = scpiDevice('amph',str_type=float) # doubler
+        self.freq = scpiDevice('freq',str_type=float, min=1e-6, max=8.1e9)
+        self.offset_low = scpiDevice('ofsl',str_type=float, min=-1.5, max=+1.5) #volts
+        self.amp_lf_dbm = scpiDevice('ampl',str_type=float, min=-47, max=14.96) # all channel output power calibrated to +13 dBm only, manual says 15.5 for low but intruments stops at 14.96
+        self.amp_rf_dbm = scpiDevice('ampr',str_type=float, min=-110, max=16.53)
+        self.amp_hf_dbm = scpiDevice('amph',str_type=float, min=-10, max=16.53) # doubler
         self.en_lf = scpiDevice('enbl', str_type=bool) # 0 is off, 1 is on, read value depends on freq
         self.en_rf = scpiDevice('enbr', str_type=bool) # 0 is off, 1 is on, read value depends on freq
         self.en_hf = scpiDevice('enbh', str_type=bool) # 0 is off, 1 is on, read value depends on freq
@@ -977,6 +998,60 @@ class sr384_rf(visaInstrument):
         self.mod_en = scpiDevice('modl', str_type=bool) # 0 is off, 1 is on
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+    def get_error(self):
+        """
+         Pops last error
+          ## Execution Errors
+          0: No error
+         10: Illegal value
+         11: Illegal Mode
+         12: Not allowed
+         13: Recall Failed
+         14: No clock option
+         15: No RF doubler option
+         16: No IQ option
+         17: Failed self test
+          ## Query Errors
+         30: Lost data
+         32: No listener
+          ## Device dependent errors
+         40: Failed ROM check
+         42: Failed EEPROM check
+         43: Failed FPGA check
+         44: Failed SRAM check
+         45: Failed GPIB check
+         46: Failed LF DDS check
+         47: Failed RF DDS check
+         48: Failed 20 MHz PLL
+         49: Failed 100 MHz PLL
+         50: Failed 19 MHz PLL
+         51: Failed 1 GHz PLL
+         52: Failed 4 GHz PLL
+         53: Failed DAC
+          ## Parsing errors
+        110: Illegal command
+        111: Undefined command
+        112: Illegal query
+        113: Illegal set
+        114: Null parameter
+        115: Extra parameters
+        116: Missing parameters
+        117: Parameter overflow
+        118: Invalid floating point number
+        120: Invalid Integer
+        121: Integer overflow
+        122: Invalid Hexadecimal
+        126: Syntax error
+        127: Illegal units
+        128: Missing units
+          ## Communication errors
+        170: Communication error
+        171: Over run
+          ## Other errors
+        254: Too many errors
+        """
+        return int(self.ask('LERR?'))
+
 
 class agilent_rf_33522A(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
