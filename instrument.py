@@ -1231,7 +1231,7 @@ class lakeshore_322(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('sp')
     def _create_devs(self):
-        self.crdg = scpiDevice(getstr='CRDG?', str_type=float)
+        self.crdg = scpiDevice(getstr='CRDG? A', str_type=float)
         self.thermocouple = scpiDevice(getstr='TEMP?', str_type=float)
         self.ta = scpiDevice(getstr='KRDG? A', str_type=float) #in Kelvin
         self.tb = scpiDevice(getstr='KRDG? B', str_type=float) #in Kelvin
