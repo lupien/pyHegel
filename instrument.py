@@ -934,7 +934,8 @@ class sr830_lia(visaInstrument):
         d.update(multi=headers, graph=range(len(sel)))
         return BaseDevice.getformat(self.snap, sel=sel)
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant',
+        return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
+                                 'sync_filter', 'reserve_mode',
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf')
     def _create_devs(self):
         self.freq = scpiDevice('freq', str_type=float, setget=True, min=0.001, max=102e3)
@@ -944,6 +945,8 @@ class sr830_lia(visaInstrument):
         self.harm = scpiDevice('harm', str_type=int, min=1, max=19999)
         self.phase = scpiDevice('phas', str_type=float, min=-360., max=729.90, setget=True)
         self.timeconstant = scpiDevice('oflt', str_type=int, min=0, max=19) # 0: 10 us, 1: 30, 2: 100 ... (1, 3) ... 19: 30 ks
+        self.filter_slope = scpiDevice('ofsl', str_type=int, min=0, max=3, doc='0: 6 dB/oct\n1: 12\n2: 18\n3: 24\n')
+        self.sync_filter = scpiDevice('sync', str_type=bool)
         self.x = scpiDevice(getstr='outp? 1', str_type=float, delay=True)
         self.y = scpiDevice(getstr='outp? 2', str_type=float, delay=True)
         self.r = scpiDevice(getstr='outp? 3', str_type=float, delay=True)
@@ -951,6 +954,7 @@ class sr830_lia(visaInstrument):
         self.input_conf = scpiDevice('isrc', str_type=int, min=0, max=3, doc='0: A\n1: A-B\n2: I(1MOhm)\n3: I(100 MOhm)\n')
         self.grounded_conf = scpiDevice('ignd', str_type=bool)
         self.dc_coupled_conf = scpiDevice('icpl', str_type=bool)
+        self.reserve_mode = scpiDevice('rmod', str_type=int, min=0, max=2, doc='0: High reserve\n1: Normal\n2: Low noise\n')
         self.linefilter_conf = scpiDevice('ilin', str_type=int, min=0, max=3, doc='0: No filters\n1: line notch\n2: 2xline notch:\n3: both line, 2xline notch\n')
         # status: b0=Input/Reserver ovld, b1=Filter ovld, b2=output ovld, b3=unlock,
         # b4=range change (accross 200 HZ, hysteresis), b5=indirect time constant change
