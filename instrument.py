@@ -403,6 +403,13 @@ class cls_wrapDevice(BaseDevice):
         else:
             return super(type(self), self).getformat(self.instr, **kwarg)
 
+def _find_global_name(obj):
+    dic = _globaldict
+    try:
+        return [k for k,v in dic.iteritems() if v is obj and k[0]!='_'][0]
+    except IndexError:
+        return "name_not_found"
+
 # Using this metaclass, the class method
 # _add_class_devs will be executed at class creation.
 # Hence added devices will be part of the class and will
@@ -467,11 +474,7 @@ class BaseInstrument(object):
         elif async == 3: # get values
             return obj.getcache()
     def find_global_name(self):
-        dic = _globaldict
-        try:
-            return [k for k,v in dic.iteritems() if v is self and k[0]!='_'][0]
-        except IndexError:
-            return "name_not_found"
+        return _find_global_name(self)
     @classmethod
     def _cls_devwrap(cls, name):
         # Only use this if the class will be using only one instance
@@ -1345,7 +1348,31 @@ class dummy(BaseInstrument):
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
-class ScalingDevice(BaseDevice):
+
+class LogicalDevice(BaseDevice):
+    """
+       Base device for logical devices.
+       Need to define instr attribute for getasync and get_xscale (scope)
+       Need to overwrite force_get method, _current_config
+       And may be change getformat
+    """
+    def _getclassname(self):
+        return self.__class__.__name__
+    def getfullname(self):
+        gn, cn, p = self._info()
+        return gn
+    def __repr__(self):
+        gn, cn, p = self._info()
+        return '<device "%s" (class "%s" at 0x%08x)>'%(gn, cn, p)
+    def find_global_name(self):
+        return _find_global_name(self)
+    def _info(self):
+        return self.find_global_name(), self._getclassname(), id(self)
+    def perror(self, error_str='', **dic):
+        dic.update(name=self.getfullname())
+        return ('{name}: '+error_str).format(**dic)
+
+class ScalingDevice(LogicalDevice):
     """
        This class provides a wrapper around a device.
        On reading, it returns basedev.get()*scale_factor + offset
@@ -1364,11 +1391,9 @@ class ScalingDevice(BaseDevice):
             autoinit = basedev._autoinit
         BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
         self.instr = basedev.instr
-        self.name = basedev.name
+        self.name = 'ScaleDev' # this should not be used
         self._format['multi'] = ['scale', 'raw']
         self._format['graph'] = [0]
-    def getfullname(self):
-        return 'ScalingDevice.'+self.name
     def _current_config(self, dev_obj=None, options={}):
         ret = ['Scaling:: fact=%r offset=%r'%(self._scale, self._offset)]
         frmt = self._basedev.getformat()
@@ -1389,7 +1414,7 @@ class ScalingDevice(BaseDevice):
         self._basedev.check((val - self._offset) / self._scale)
 
 
-class CopyDevice(BaseDevice):
+class CopyDevice(LogicalDevice):
     """
        This class provides a wrapper around a device.
        On reading, it returns basedevs[0].get
@@ -1407,7 +1432,7 @@ class CopyDevice(BaseDevice):
             autoinit = basedevs[0]._autoinit
         BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
         self.instr = basedevs[0].instr
-        self.name = basedevs[0].name
+        self.name = 'CopyDev' # this should not be used
         self._format['header'] = CopyDevice._current_config
     def _current_config(self, dev_obj=None, options={}):
         ret = ['Copy:: %r'%(self._basedevs)]
@@ -1430,7 +1455,7 @@ class CopyDevice(BaseDevice):
         for dev in self._basedevs:
             dev.check(val)
 
-class ExecuteDevice(BaseDevice):
+class ExecuteDevice(LogicalDevice):
     """
         execute some external code and use the returned string has the data
     """
