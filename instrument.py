@@ -324,6 +324,8 @@ class BaseDevice(object):
     def getformat(self, filename=None, **kwarg): # we need to absorb any filename argument
         self._format['options'] = kwarg
         return self._format
+    def getfullname(self):
+        return self.instr.header()+'.'+self.name
     def force_get(self):
         """
         Force a reread of the instrument attached to this device.
@@ -1365,6 +1367,8 @@ class ScalingDevice(BaseDevice):
         self.name = basedev.name
         self._format['multi'] = ['scale', 'raw']
         self._format['graph'] = [0]
+    def getfullname(self):
+        return 'ScalingDevice.'+self.name
     def _current_config(self, dev_obj=None, options={}):
         ret = ['Scaling:: fact=%r offset=%r'%(self._scale, self._offset)]
         frmt = self._basedev.getformat()

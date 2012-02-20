@@ -52,9 +52,6 @@ clock = _Clock()
 
 writevec = instrument._writevec
 
-def _getheaderhelper(dev):
-    return dev.instr.header.get()+'.'+dev.name
-
 def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     hdrs = []
     graphsel = []
@@ -65,7 +62,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     elif extra_conf == None:
         extra_conf = []
     if setdev != None:
-        hdrs.append(_getheaderhelper(setdev))
+        hdrs.append(setdev.getfullname())
         count += 1
         extra_conf.append(setdev)
 
@@ -77,7 +74,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
             kwarg = dev[1]
             dev = dev[0]
         dev.force_get()
-        hdr = _getheaderhelper(dev)
+        hdr = dev.getfullname()
         f = dev.getformat(**kwarg).copy()
         f['basename'] = _dev_filename(root, hdr, npts, append=f['append'])
         f['base_conf'] = instrument._get_conf_header(f)
@@ -101,7 +98,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
             count += 1
     for x in extra_conf:
         x.force_get()
-        hdr = _getheaderhelper(x)
+        hdr = x.getfullname()
         f = x.getformat(**kwarg).copy()
         f['base_conf'] = instrument._get_conf_header(f)
         f['base_hdr_name'] = hdr
