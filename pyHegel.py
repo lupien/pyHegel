@@ -19,6 +19,39 @@ import traces
 import instrument
 import local_config
 
+def help_pyHegel():
+    """
+    Available commands:
+        set
+        get
+        getasync
+        move
+        copy
+        spy
+        record
+        trace
+        scope
+        _process_filename
+        make_dir
+        iprint
+        ilist
+        dlist
+        find_all_instruments
+        checkmode
+        check
+        batch
+        sleep (gui)
+        wait
+        load
+        task
+        top
+        kill
+    Available instruments:
+        sweep
+        clock
+    """
+    print help_pyHegel.__doc__
+
 def reset_pyHegel():
     """
        Resets pyHegel
