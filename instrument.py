@@ -552,7 +552,8 @@ class BaseInstrument(object):
         pass
     # This allows instr.get() ... to be redirected to instr.alias.get()
     def __getattr__(self, name):
-        if name in ['get', 'set', 'check', 'getcache', 'setcache', 'instr', 'name', 'getformat', 'getasync']:
+        if name in ['get', 'set', 'check', 'getcache', 'setcache', 'instr',
+                    'name', 'getformat', 'getasync', 'getfullname']:
             if self.alias == None:
                 raise AttributeError, self.perror('This instrument does not have an alias for {nm}', nm=name)
             return getattr(self.alias, name)
@@ -1144,7 +1145,7 @@ class agilent_multi_34410A(visaInstrument):
            width = time
            if not force:
                width = line_period*round(width/line_period)
-        self.aperture.set(width)
+        self.volt_aperture.set(width)
         self.sample_count.set(count)
     def _create_devs(self):
         # This needs to be last to complete creation
