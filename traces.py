@@ -150,9 +150,8 @@ class Trace(FigureManagerQT):
         # could also use self.fig.autofmt_xdate()
         ax = self.axs[0]
         if time_mode:
-            lbls = ax.get_xticklabels()
-            for l in lbls:
-                l.update(dict(rotation=10, size=9))
+            ax.axis['bottom'].major_ticklabels.set_size(9)
+            ax.axis['bottom'].major_ticklabels.set_rotation(10)
         self.update()
         # handle status better for twinx (pressing 1 or 2 selects axis)
         self.canvas.mpl_connect('key_press_event', self.mykey_press)
@@ -329,6 +328,7 @@ def plot_time(x, *extrap, **extrak):
     ret = pylab.plot_date(x, *extrap, **extrak)
     ax = ret[0].axes
     # Rotate axes ticks
+    # could also use self.fig.autofmt_xdate()
     lbls = ax.get_xticklabels()
     for l in lbls:
         l.update(dict(rotation=xrotation, size=xticksize))
