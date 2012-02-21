@@ -107,7 +107,8 @@ def _write_dev(val, filename, format=format, first=False):
     else:
         # we assume val is array like, except for bin where it can also be a string
         #  remember that float64 has 53 bits (~16 digits) of precision
-        # for v of shape (100,2) this will output 2 columns and 100 lines
+        # for v of shape (2,100) this will output 2 columns and 100 lines
+        #  because of .T
         if bin == '.npy':
             np.save(f, val)
         elif bin:
@@ -116,7 +117,7 @@ def _write_dev(val, filename, format=format, first=False):
             else:
                 val.tofile(f)
         else:
-            np.savetxt(f, val, fmt='%.18g', delimiter='\t')
+            np.savetxt(f, val.T, fmt='%.18g', delimiter='\t')
     f.close()
 
 
