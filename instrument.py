@@ -1351,6 +1351,11 @@ class dummy(BaseInstrument):
         super(type(self),self)._create_devs()
 
 
+def _asDevice(dev):
+    if isinstance(dev, BaseInstrument):
+        dev = dev.alias
+    return dev
+
 class LogicalDevice(BaseDevice):
     """
        Base device for logical devices.
@@ -1387,8 +1392,7 @@ class ScalingDevice(LogicalDevice):
        setget option does nothing here.
     """
     def __init__(self, basedev, scale_factor, offset=0., doc='', autoinit=None, **extrak):
-        if isinstance(basedev, BaseInstrument):
-            basedev = basedev.alias
+        basedev = _asDevice(basedev) # deal with instr.alias
         self._basedev = basedev
         self._scale = float(scale_factor)
         self._offset = offset
@@ -1402,7 +1406,7 @@ class ScalingDevice(LogicalDevice):
         self._format['multi'] = ['scale', 'raw']
         self._format['graph'] = [0]
     def _current_config(self, dev_obj=None, options={}):
-        ret = ['Scaling:: fact=%r offset=%r'%(self._scale, self._offset)]
+        ret = ['Scaling:: fact=%r offset=%r basedev=%s'%(self._scale, self._offset, self._basedev.getfullname())]
         frmt = self._basedev.getformat()
         base = _get_conf_header_util(frmt['header'], dev_obj, options)
         if base != None:
@@ -1428,10 +1432,7 @@ class LimitDevice(LogicalDevice):
     def __init__(self, basedev, min=None, max=None, doc='', autoinit=None, **extrak):
         if min==None or max==None:
             raise ValueError, 'min and max need to be specified for LimitDevice'
-        if isinstance(basedev, BaseInstrument):
-            basedev = basedev.alias
         self._basedev = basedev
-        self._min = float(min)
         doc+= self.__doc__+doc+'basedev=%s\nmin,max=%g,%g (initial)'%(
                repr(basedev), min, max)
         if autoinit == None:
@@ -1439,6 +1440,8 @@ class LimitDevice(LogicalDevice):
         BaseDevice.__init__(self, autoinit=autoinit, min=min, max=max, doc=doc, **extrak)
         self.instr = basedev.instr
         self.name = 'LimitDev' # this should not be used
+        self._setdev_p = True # needed to enable BaseDevice Check, set (Checking mode)
+        self._getdev_p = self._basedev._getdev_p # needed to enable Checking mode of BaseDevice get
     def set_limits(self, min=None, max=None):
         """
            change the limits
@@ -1458,15 +1461,15 @@ class LimitDevice(LogicalDevice):
         if max != None:
             self.max = max
     def _current_config(self, dev_obj=None, options={}):
-        ret = ['Limiting:: min=%r max=%r'%(self.min, self.max)]
+        ret = ['Limiting:: min=%r max=%r basedev=%s'%(self.min, self.max, self._basedev.getfullname())]
         frmt = self._basedev.getformat()
         base = _get_conf_header_util(frmt['header'], dev_obj, options)
         if base != None:
             ret.extend(base)
         return ret
-    def get(self):
+    def _getdev(self):
         return self._basedev.get()
-    def set(self, val):
+    def _setdev(self, val):
         self._basedev.set(val)
         # read basedev cache, in case the values is changed by setget mode.
         self._cache = self._basedev.getcache()
@@ -1486,8 +1489,8 @@ class CopyDevice(LogicalDevice):
     def __init__(self, basedevs , autoinit=None, doc='', **extrak):
         self._basedevs = basedevs
         for i, dev in enumerate(self._basedevs):
-            if isinstance(dev, BaseInstrument):
-                self._basedevs[i] = dev.alias
+            dev = _asDevice(dev) # deal with instr.alias
+            self._basedevs[i] = dev
         doc+= self.__doc__+doc+'basedevs=%s'%repr(basedevs)
         if autoinit == None:
             autoinit = basedevs[0]._autoinit
@@ -1498,6 +1501,7 @@ class CopyDevice(LogicalDevice):
     def _current_config(self, dev_obj=None, options={}):
         ret = ['Copy:: %r'%(self._basedevs)]
         for dev in self._basedevs:
+            ret.append('::'+dev.getfullname())
             frmt = dev.getformat()
             base = _get_conf_header_util(frmt['header'], dev_obj, options)
             if base != None:
