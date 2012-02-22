@@ -295,7 +295,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self._volt_range = 0.750
             self._bit_resolution = 2**14
         self._min_usb_clock_freq = 200 # TODO check this, I think it should be 137.5 MHz
-        self._min_nb_Msample_all = 32
         self._max_nb_Msample_all = 4294967295 # TODO clean up min max nb_Msample
         self._max_nb_tau = 50
 
@@ -948,7 +947,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.acq_verbose = acq_device('CONFIG:ACQ_VERBOSE', str_type=acq_bool(), doc='Increase verbosity of server when True')
         self.test_mode = acq_device('CONFIG:TEST_MODE', str_type=acq_bool())
         self.clock_source = acq_device('CONFIG:CLOCK_SOURCE', str_type=str, choices=clock_source_str)
-        self.nb_Msample = acq_device('CONFIG:NB_MSAMPLE', str_type=int,  min=self._min_nb_Msample_all, max=self._max_nb_Msample_all)
+        self.nb_Msample = acq_device('CONFIG:NB_MSAMPLE', str_type=int,  min=self._min_acq_Msample, max=self._max_nb_Msample_all)
         self.chan_mode = acq_device('CONFIG:CHAN_MODE', str_type=str, choices=chan_mode_str)
         self.chan_nb = acq_device('CONFIG:CHAN_NB', str_type=int,  min=1, max=2)
         self.trigger_invert = acq_device('CONFIG:TRIGGER_INVERT', str_type=acq_bool())
@@ -1573,9 +1572,3 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.write('STATUS:CONFIG_OK True')
         self._run_finished.clear()
         self.write('RUN')
-        
-        
-            
-
-           
-           
