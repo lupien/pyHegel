@@ -1355,6 +1355,8 @@ class LogicalDevice(BaseDevice):
     """
        Base device for logical devices.
        Need to define instr attribute for getasync and get_xscale (scope)
+        also _basedev for default implementation of force_get
+             (can be None)
        Need to overwrite force_get method, _current_config
        And may be change getformat
     """
@@ -1373,6 +1375,9 @@ class LogicalDevice(BaseDevice):
     def perror(self, error_str='', **dic):
         dic.update(name=self.getfullname())
         return ('{name}: '+error_str).format(**dic)
+    def force_get(self):
+        if self._basedev != None:
+            self._basedev.force_get()
 
 class ScalingDevice(LogicalDevice):
     """
@@ -1415,6 +1420,60 @@ class ScalingDevice(LogicalDevice):
     def check(self, val):
         self._basedev.check((val - self._offset) / self._scale)
 
+class LimitDevice(LogicalDevice):
+    """
+    This class provides a wrapper around a device that limits the
+    value to a user selectable limits.
+    """
+    def __init__(self, basedev, min=None, max=None, doc='', autoinit=None, **extrak):
+        if min==None or max==None:
+            raise ValueError, 'min and max need to be specified for LimitDevice'
+        if isinstance(basedev, BaseInstrument):
+            basedev = basedev.alias
+        self._basedev = basedev
+        self._min = float(min)
+        doc+= self.__doc__+doc+'basedev=%s\nmin,max=%g,%g (initial)'%(
+               repr(basedev), min, max)
+        if autoinit == None:
+            autoinit = basedev._autoinit
+        BaseDevice.__init__(self, autoinit=autoinit, min=min, max=max, doc=doc, **extrak)
+        self.instr = basedev.instr
+        self.name = 'LimitDev' # this should not be used
+    def set_limits(self, min=None, max=None):
+        """
+           change the limits
+           can be called as
+           set_limits(0,1) # min=0, max=1
+           set_limits(max=2) # min unchanged, max=2
+           set_limits(-1) # max unchanged, min=-1
+           set_limits(min=-1) # same as above
+           set_limits([-4,3]) # min=-4, max=3
+        """
+        if min != None and len(min)==2 and max==None:
+            self.min = min[0]
+            self.max = min[1]
+            return
+        if min != None:
+            self.min = min
+        if max != None:
+            self.max = max
+    def _current_config(self, dev_obj=None, options={}):
+        ret = ['Limiting:: min=%r max=%r'%(self.min, self.max)]
+        frmt = self._basedev.getformat()
+        base = _get_conf_header_util(frmt['header'], dev_obj, options)
+        if base != None:
+            ret.extend(base)
+        return ret
+    def get(self):
+        return self._basedev.get()
+    def set(self, val):
+        self._basedev.set(val)
+        # read basedev cache, in case the values is changed by setget mode.
+        self._cache = self._basedev.getcache()
+    def check(self, val):
+        self._basedev.check(val)
+        super(type(self), self).check(val)
+
 
 class CopyDevice(LogicalDevice):
     """
@@ -1456,6 +1515,9 @@ class CopyDevice(LogicalDevice):
     def check(self, val):
         for dev in self._basedevs:
             dev.check(val)
+    def force_get(self):
+        for dev in self._basedevs:
+            dev.force_get()
 
 class ExecuteDevice(LogicalDevice):
     """
