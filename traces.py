@@ -149,9 +149,12 @@ class Trace(FigureManagerQT):
         self.time_mode = time_mode
         # could also use self.fig.autofmt_xdate()
         ax = self.axs[0]
+        tlabels = ax.axis['bottom'].major_ticklabels
         if time_mode:
-            ax.axis['bottom'].major_ticklabels.set_size(9)
-            ax.axis['bottom'].major_ticklabels.set_rotation(10)
+            tlabels.set_size(9)
+            tlabels.set_rotation(10)
+            tlabels.set_rotation_mode('default')
+            tlabels.set_verticalalignment('top')
         self.update()
         # handle status better for twinx (pressing 1 or 2 selects axis)
         self.canvas.mpl_connect('key_press_event', self.mykey_press)
