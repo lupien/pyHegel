@@ -277,9 +277,12 @@ class _Sweep(instrument.BaseInstrument):
       parameters.
       For example you could have (acq1.readval, dict(ch=1, unit='V'))
       or another way (acq1.readval, {'ch':1, 'unit':'V'})
-      A additional parameter is:
+      Additional parameter are:
           graph:  it allows the selection of which column of multi-column
                   data to graph. It should be a list of column index.
+          bin:    To overwrite filesave format/extension can be
+                  any extension like '.bin' or false to save as text.
+                  with '.npy', it is saved in npy format
     """)
     path = instrument.MemoryDevice('')
     graph = instrument.MemoryDevice(True)

@@ -252,13 +252,10 @@ class BaseDevice(object):
         self._cache = val
     def get(self, **kwarg):
         if not CHECKING:
-            bin = kwarg.pop('bin', None)
             keep = kwarg.pop('keep', False)
-            graph = kwarg.pop('graph', None)
             format = self.getformat(**kwarg)
-            if bin != None:
-                format['file'] = False
-                format['bin'] = bin
+            kwarg.pop('graph', None) #now remove graph from parameters (was needed by getformat)
+            kwarg.pop('bin', None) #same for bin
             if kwarg.get('filename', False) and not format['file']:
                 #we did not ask for a filename but got one.
                 #since _getdev probably does not understand filename
@@ -326,13 +323,19 @@ class BaseDevice(object):
            raise ValueError, self.perror('Failed check: '+err)
         #return state
     def getformat(self, filename=None, **kwarg): # we need to absorb any filename argument
+        # first handle options we don't want saved it 'options'
+        graph = kwarg.pop('graph', None)
         self._format['options'] = kwarg
+        #now handle the other overides
+        bin = kwarg.pop('bin', None)
         # we need to return a copy so changes to dict here and above does not
         # affect the devices dict permanently
         format = self._format.copy()
-        graph = kwarg.pop('graph', None)
         if graph != None:
             format['graph'] = graph
+        if bin != None:
+            format['file'] = False
+            format['bin'] = bin
         return format
     def getfullname(self):
         return self.instr.header()+'.'+self.name
