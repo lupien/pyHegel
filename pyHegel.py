@@ -108,7 +108,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
             dev = dev[0]
         dev.force_get()
         hdr = dev.getfullname()
-        f = dev.getformat(**kwarg).copy()
+        f = dev.getformat(**kwarg)
         f['basename'] = _dev_filename(root, hdr, npts, append=f['append'])
         f['base_conf'] = instrument._get_conf_header(f)
         f['base_hdr_name'] = hdr
@@ -132,7 +132,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     for x in extra_conf:
         x.force_get()
         hdr = x.getfullname()
-        f = x.getformat(**kwarg).copy()
+        f = x.getformat(**kwarg)
         f['base_conf'] = instrument._get_conf_header(f)
         f['base_hdr_name'] = hdr
         formats.append(f)
@@ -268,7 +268,19 @@ class _Sweep(instrument.BaseInstrument):
     before = instrument.MemoryDevice()
     beforewait = instrument.MemoryDevice(0.02) # provide a default wait so figures are updated
     after = instrument.MemoryDevice()
-    out = instrument.MemoryDevice()
+    out = instrument.MemoryDevice(doc="""
+      This is the list of device to read (get) for each iteration.
+      It can be a single device (or an instrument of it has an alias)
+      It can be a list of devices like [dev1, dev2, dev3]
+      If optional parameters are needed for the device it can be enterred as
+      a tuple (dev, devparam) where devparam is a dictionnary of optionnal
+      parameters.
+      For example you could have (acq1.readval, dict(ch=1, unit='V'))
+      or another way (acq1.readval, {'ch':1, 'unit':'V'})
+      A additional parameter is:
+          graph:  it allows the selection of which column of multi-column
+                  data to graph. It should be a list of column index.
+    """)
     path = instrument.MemoryDevice('')
     graph = instrument.MemoryDevice(True)
     def execbefore(self):

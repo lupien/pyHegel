@@ -254,6 +254,7 @@ class BaseDevice(object):
         if not CHECKING:
             bin = kwarg.pop('bin', None)
             keep = kwarg.pop('keep', False)
+            graph = kwarg.pop('graph', None)
             format = self.getformat(**kwarg)
             if bin != None:
                 format['file'] = False
@@ -326,7 +327,13 @@ class BaseDevice(object):
         #return state
     def getformat(self, filename=None, **kwarg): # we need to absorb any filename argument
         self._format['options'] = kwarg
-        return self._format
+        # we need to return a copy so changes to dict here and above does not
+        # affect the devices dict permanently
+        format = self._format.copy()
+        graph = kwarg.pop('graph', None)
+        if graph != None:
+            format['graph'] = graph
+        return format
     def getfullname(self):
         return self.instr.header()+'.'+self.name
     def force_get(self):
@@ -1414,17 +1421,21 @@ class ScalingDevice(LogicalDevice):
         if base != None:
             ret.extend(base)
         return ret
-    def get(self):
+    def conv_fromdev(self, raw):
+        return raw * self._scale + self._offset
+    def conv_todev(self, val):
+        return (val - self._offset) / self._scale
+    def _getdev(self):
         raw = self._basedev.get()
-        val = raw * self._scale + self._offset
-        self._cache = val, raw
+        val = self.conv_fromdev(raw)
         return val, raw
-    def set(self, val):
-        self._basedev.set((val - self._offset) / self._scale)
+    def _setdev(self, val):
+        self._basedev.set(self.conv_todev(val))
         # read basedev cache, in case the values is changed by setget mode.
-        self._cache = self._basedev.getcache() * self._scale + self._offset
+        self._cache = self.conv_fromdev(self._basedev.getcache())
     def check(self, val):
-        self._basedev.check((val - self._offset) / self._scale)
+        raw = self.conv_todev(val)
+        self._basedev.check(raw)
 
 class LimitDevice(LogicalDevice):
     """
