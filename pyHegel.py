@@ -584,7 +584,7 @@ def _process_filename(filename):
 
 
 ### get overides get the mathplotlib
-def get(dev, filename=None, **extrap):
+def get(dev, filename=None, keep=False, **extrap):
     """
        Get a value from device
        When giving it a filename, data will be saved to it
@@ -596,12 +596,16 @@ def get(dev, filename=None, **extrap):
                               %03i for   3 digits
        The path for saving is sweep.path if it is defined otherwise it saves
        in the current directory.
+       keep is used to also return the values when saving to a filename
+        by default, None is returned in that case.
+       extrap are all other keyword arguments and depende on the device.
     """
     if filename != None:
         dev.force_get()
         filename = os.path.join(sweep.path.get(), filename)
         filename = _process_filename(filename)
         extrap.update(filename=filename)
+        extrap.update(keep=keep)
     try:
         return dev.get(**extrap)
     except KeyboardInterrupt:

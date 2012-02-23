@@ -253,6 +253,7 @@ class BaseDevice(object):
     def get(self, **kwarg):
         if not CHECKING:
             bin = kwarg.pop('bin', None)
+            keep = kwarg.pop('keep', False)
             format = self.getformat(**kwarg)
             if bin != None:
                 format['file'] = False
@@ -265,7 +266,8 @@ class BaseDevice(object):
                 ret = self._getdev(**kwarg)
                 _write_dev(ret, filename, format=format)
                 self._lastget = ret
-                ret = None
+                if not keep:
+                    ret = None
             else:
                 ret = self._getdev(**kwarg)
         elif self._getdev_p == None:
