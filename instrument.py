@@ -1322,6 +1322,7 @@ class agilent_PNAL(visaInstrument):
         self.average_count = scpiDevice(getstr=':sense:average:count?',str_type=int)
         self.freq_start = scpiDevice(':sense:freq:start', str_type=float, min=10e6, max=40e9)
         self.freq_stop = scpiDevice(':sense:freq:stop', str_type=float, min=10e6, max=40e9)
+        self.freq_cw= scpiDevice(':sense:freq:cw', str_type=float, min=10e6, max=40e9)
         self.x1 = scpiDevice(getstr=':sense1:X?')
         self.curx1 = scpiDevice(getstr=':calc1:X?', autoinit=False)
         self.cur_data = scpiDevice(getstr=':calc1:data? fdata', autoinit=False)
