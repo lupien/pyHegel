@@ -1318,19 +1318,19 @@ class agilent_PNAL(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('bandwidth', 'freq_start', 'freq_stop','average_count')
     def _create_devs(self):
-        self.bandwith = scpiDevice(':sense1:bandwidth',str_type=float)
+        self.bandwidth = scpiDevice(':sense1:bandwidth',str_type=float)
         self.average_count = scpiDevice(getstr=':sense:average:count?',str_type=int)
         self.freq_start = scpiDevice(':sense:freq:start', str_type=float, min=10e6, max=40e9)
         self.freq_stop = scpiDevice(':sense:freq:stop', str_type=float, min=10e6, max=40e9)
         self.freq_cw= scpiDevice(':sense:freq:cw', str_type=float, min=10e6, max=40e9)
-        self.x1 = scpiDevice(getstr=':sense1:X?')
+        self.x1 = scpiDevice(getstr=':sense1:X?', autoinit=False)
         self.curx1 = scpiDevice(getstr=':calc1:X?', autoinit=False)
         self.cur_data = scpiDevice(getstr=':calc1:data? fdata', autoinit=False)
         self.cur_cplxdata = scpiDevice(getstr=':calc1:data? sdata', autoinit=False)
-        self.select_m = scpiDevice(':calc1:par:mnum')
-        self.select_i = scpiDevice(':calc1:par:sel')
-        self.select_w = scpiDevice(getstr=':syst:meas1:window?')
-        self.select_t = scpiDevice(getstr=':syst:meas1:trace?')
+        self.select_m = scpiDevice(':calc1:par:mnum', autoinit=False)
+        self.select_i = scpiDevice(':calc1:par:sel', autoinit=False)
+        self.select_w = scpiDevice(getstr=':syst:meas1:window?', autoinit=False)
+        self.select_t = scpiDevice(getstr=':syst:meas1:trace?', autoinit=False)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
