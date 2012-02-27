@@ -1524,11 +1524,9 @@ class CopyDevice(LogicalDevice):
             if base != None:
                 ret.extend(base)
         return ret
-    def get(self):
-        val = self._basedevs[0].get()
-        self._cache = val
-        return val
-    def set(self, val):
+    def _getdev(self):
+        return self._basedevs[0].get()
+    def _setdev(self, val):
         for dev in self._basedevs:
             dev.set(val)
         # read basedev cache, in case the values is changed by setget mode.
