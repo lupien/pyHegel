@@ -19,6 +19,7 @@ import time
 import threading
 import weakref
 from PyQt4 import QtGui, QtCore
+from scipy.optimize import brentq as brentq_rootsolver
 
 import traces
 
@@ -1402,7 +1403,6 @@ class ScalingDevice(LogicalDevice):
        This class provides a wrapper around a device.
        On reading, it returns basedev.get()*scale_factor + offset
        On writing it will write basedev.set((val - offset)/scale_factor)
-       setget option does nothing here.
     """
     def __init__(self, basedev, scale_factor, offset=0., doc='', autoinit=None, **extrak):
         basedev = _asDevice(basedev) # deal with instr.alias
@@ -1440,6 +1440,62 @@ class ScalingDevice(LogicalDevice):
     def check(self, val):
         raw = self.conv_todev(val)
         self._basedev.check(raw)
+
+class FunctionDevice(LogicalDevice):
+    """
+       This class provides a wrapper around a device.
+       On reading, it returns from_raw(basedev.get())
+       On writing it will write basedev.set(toraw)
+       from_raw is a function
+       to_raw is either a function (the inverse of from_raw).
+        or it is the interval of possible raw values
+        that is used for the function inversion (scipy.optimize.brent)
+    """
+    def __init__(self, basedev, from_raw, to_raw=[-1e12, 1e12], doc='', autoinit=None, **extrak):
+        basedev = _asDevice(basedev) # deal with instr.alias
+        self._basedev = basedev
+        self.from_raw = from_raw
+        if isinstance(to_raw, list):
+            self._to_raw = to_raw
+        else: # assume it is a function
+            self.to_raw = to_raw
+        doc+= self.__doc__+doc+'basedev=%s\n'%(repr(basedev))
+        if autoinit == None:
+            autoinit = basedev._autoinit
+        BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
+        self.instr = basedev.instr
+        self.name = 'FuncDev' # this should not be used
+        self._format['multi'] = ['conv', 'raw']
+        self._format['graph'] = [0]
+    def _current_config(self, dev_obj=None, options={}):
+        ret = ['Func Convert:: basedev=%s'%(self._basedev.getfullname())]
+        frmt = self._basedev.getformat()
+        base = _get_conf_header_util(frmt['header'], dev_obj, options)
+        if base != None:
+            ret.extend(base)
+        return ret
+    def to_raw(self, val):
+        # only handle scalar val not arrays
+        func = lambda x: self.from_raw(x)-val
+        a,b = self._to_raw
+        # extend limits to make sure the limits are invertable
+        diff = b-a
+        a -= diff/1e6
+        b += diff/1e6
+        x = brentq_rootsolver(func, a, b)
+        return x
+    def _getdev(self):
+        raw = self._basedev.get()
+        val = self.from_raw(raw)
+        return val, raw
+    def _setdev(self, val):
+        self._basedev.set(self.to_raw(val))
+        # read basedev cache, in case the values is changed by setget mode.
+        self._cache = self.from_raw(self._basedev.getcache())
+    def check(self, val):
+        raw = self.to_raw(val)
+        self._basedev.check(raw)
+
 
 class LimitDevice(LogicalDevice):
     """
