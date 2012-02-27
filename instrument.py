@@ -1596,10 +1596,34 @@ class CopyDevice(LogicalDevice):
 
 class ExecuteDevice(LogicalDevice):
     """
+        Performs the get then
         execute some external code and use the returned string has the data
+        Only handle get
+
+        The command can contain %F, which is replaced by the current filename.
     """
-    def __init__(self, basedev, command, multi=None):
-        self._basedevs = basedev
+    def __init__(self, basedev, command, multi=None, doc='', autoinit=None, **extrak):
         self._command = command
-    def getdev(self):
-        return subprocess.check_output(self.command)
+        basedev = _asDevice(basedev) # deal with instr.alias
+        self._basedev = basedev
+        doc+= self.__doc__+doc+'basedev=%s, command="%s"\n'%(repr(basedev), command)
+        if autoinit == None:
+            autoinit = basedev._autoinit
+        BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
+        self.instr = basedev.instr
+        self.name = 'ExecDev' # this should not be used
+        self._multi = multi
+        if multi != None:
+            self._format['multi'] = multi
+            self._format['graph'] = [0]
+    def _getdev(self):
+        ret = self._basedev.get()
+        # ret should be empty. Test it?
+        # TODO handle %F
+        command = self._command
+        if self._multi == None:
+            os.system(command)
+        else:
+            ret = subprocess.check_output(command)
+            ret = np.fromstring(ret, sep=' ')
+        return ret
