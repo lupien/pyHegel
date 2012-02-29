@@ -491,7 +491,7 @@ class BaseInstrument(object):
             delay = kwarg.pop('delay', False)
             if delay:
                 if self._async_delay_check and self.async_delay == 0.:
-                    print self.perror('You should give a value for async_delay')
+                    print self.perror('***** WARNING You should give a value for async_delay *****')
                 self._async_delay_check = False
                 self._async_task.change_delay(self.async_delay)
             trig = kwarg.pop('trig', False)
