@@ -600,6 +600,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self.fetch._event_flag.clear()
             if location == 'Remote' and filename != None:
                 self.fetch._dump_file = open(filename, 'wb')
+                self.fetch._last_filename = filename
             s = 'DATA:ACQ:DATA?'+filestr
             self.write(s)
             instrument.wait_on_event(self.fetch._event_flag, check_state=self)
@@ -817,7 +818,10 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self._async_trig()
         while not self._async_detect():
             pass
-        return self.fetch._getdev(**kwarg)
+        self.readval._last_filename = self.fetch._last_filename
+        ret = self.fetch._getdev(**kwarg)
+        self.readval._last_filename = self.fetch._last_filename
+        return ret
     def _readval_getformat(self, **kwarg):
         return self.fetch.getformat(**kwarg)
     # TODO redirect read to fetch when doing async
@@ -1018,7 +1022,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.net_att = acq_device(getstr = 'DATA:NET:ATT?',str_type = float, autoinit=False, trig=True)
         self.net_phase_diff = acq_device(getstr = 'DATA:NET:PHASE_DIFF?',str_type = float, autoinit=False, trig=True)
 
-        self._devwrap('fetch', autoinit=False)
+        self._devwrap('fetch', autoinit=False, trig=True)
         self.fetch._event_flag = threading.Event()
         self.fetch._rcv_val = None
         self._devwrap('readval', autoinit=False)

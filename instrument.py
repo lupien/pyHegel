@@ -1403,11 +1403,14 @@ class LogicalDevice(BaseDevice):
         self._basedev = basedev
         self._basedevs = basedevs
         doc = self.__doc__+doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev, basedevs)
-        if autoinit == None and basedev:
-            extrak['autoinit'] = basedev._autoinit
+        if basedev:
+            if autoinit == None:
+                extrak['autoinit'] = basedev._autoinit
+            extrak['trig'] = basedev._trig
+            extrak['delay'] = basedev._delay
         super(LogicalDevice, self).__init__(doc=doc, **extrak)
         if self._basedev:
-            self.instr = self._basedev.instr
+            self.instr = basedev.instr
         fmt = self._format
         if not fmt['header'] and hasattr(self, '_current_config'):
             conf = ProxyMethod(self._current_config)
