@@ -156,6 +156,7 @@ class asyncThread(threading.Thread):
         self._async_trig = trig
         self._async_detect = detect
         self._operations = operations
+        self.results = []
     def change_delay(self, new_delay):
         self._async_delay = new_delay
     def change_trig(self, new_trig):
@@ -184,7 +185,7 @@ class asyncThread(threading.Thread):
         if self._stop:
             return
         for func, kwarg in self._operations:
-            func(**kwarg)
+            self.results.append(func(**kwarg))
     def cancel(self):
         self._stop = True
     def wait(self, timeout=None):
@@ -219,7 +220,7 @@ class BaseDevice(object):
     """
     def __init__(self, autoinit=True, doc='', setget=False,
                   min=None, max=None, choices=None, multi=False,
-                  trig=False, delay=False):
+                  trig=False, delay=False, redir_async=None):
         # instr and name updated by instrument's _create_devs
         # doc is inserted before the above doc
         # setget makes us get the value after setting in
@@ -235,6 +236,7 @@ class BaseDevice(object):
         self._setget = setget
         self._trig = trig
         self._delay = delay
+        self._redir_async = redir_async
         self._last_filename = None
         self.min = min
         self.max = max
@@ -287,9 +289,16 @@ class BaseDevice(object):
         if self._cache==None and self._autoinit:
            return self.get()
         return self._cache
+    def _do_redir_async(self):
+        obj = self
+        # go through all redirections
+        while obj._redir_async:
+            obj = obj._redir_async
+        return obj
     def getasync(self, async, **kwarg):
-        return self.instr._get_async(async, self,
-                           trig=self._trig, delay=self._delay, **kwarg)
+        obj = self._do_redir_async()
+        return obj.instr._get_async(async, obj,
+                           trig=obj._trig, delay=obj._delay, **kwarg)
     def setcache(self, val):
         self._cache = val
     def __call__(self, val=None):
@@ -452,6 +461,7 @@ class BaseInstrument(object):
         self._create_devs()
         self._async_list = []
         self._async_level = -1
+        self._async_counter = 0
         self.async_delay = 0.
         self._async_task = None
         self._last_force = time.time()
@@ -493,8 +503,12 @@ class BaseInstrument(object):
             if self._async_level == 1: # First time through (no need to wait for sunsequent calls)
                 wait_on_event(self._async_task)
                 self._async_level = -1
+            self._async_counter = 0
         elif async == 3: # get values
-            return obj.getcache()
+            #return obj.getcache()
+            ret = self._async_task.results[self._async_counter]
+            self._async_counter += 1
+            return ret
     def find_global_name(self):
         return _find_global_name(self)
     @classmethod
@@ -942,6 +956,12 @@ class yokogawa_gs200(visaInstrument):
         self.write(':source:level %.6e'%val)
 
 class sr830_lia(visaInstrument):
+    """
+    When using async mode, don't forget to set the async_delay
+    to some usefull values.
+     might do sr1.async_delay = 1
+    when using 24dB/oct, 100ms filter.
+    """
     _snap_type = {1:'x', 2:'y', 3:'R', 4:'theta', 5:'Aux_in1', 6:'Aux_in2',
                   7:'Aux_in3', 8:'Aux_in4', 9:'Ref_Freq', 10:'Ch1', 11:'Ch2'}
     def init(self, full=False):
@@ -1176,10 +1196,9 @@ class agilent_multi_34410A(visaInstrument):
           'CURRent:AC', 'VOLTage:AC', 'CAPacitance', 'CONTinuity', 'CURRent', 'VOLTage',
           'DIODe', 'FREQuency', 'PERiod', 'RESistance', 'FRESistance', 'TEMPerature', quotes=True)
         self.mode = scpiDevice('FUNC', str_type=ch, choices=ch)
-        self.readval = scpiDevice(getstr='READ?',str_type=float, autoinit=False) # similar to INItiate followed by FETCh.
-        # TODO make readval redirect to fetchval for async mode
         # handle avg, stats when in multiple points mode.
-        self.fetchval = scpiDevice(getstr='FETCh?',str_type=_decode_float64, autoinit=False, trig=True) #You can't ask for fetch after an aperture change. You need to read some data first.
+        self.fetch = scpiDevice(getstr='FETCh?',str_type=_decode_float64, autoinit=False, trig=True) #You can't ask for fetch after an aperture change. You need to read some data first.
+        self.readval = scpiDevice(getstr='READ?',str_type=float, autoinit=False, redir_async=self.fetch) # similar to INItiate followed by FETCh.
         self.line_freq = scpiDevice(getstr='SYSTem:LFRequency?', str_type=float) # see also SYST:LFR:ACTual?
         self.volt_nplc = scpiDevice('VOLTage:NPLC', str_type=float, choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100]) # DC
         self.volt_aperture = scpiDevice('VOLTage:APERture', str_type=float) # DC, in seconds (max~1s), also MIN, MAX, DEF
@@ -1400,14 +1419,15 @@ class LogicalDevice(BaseDevice):
                 dev = _asDevice(dev) # deal with instr.alias
                 basedevs[i] = dev
             basedev = basedevs[0]
-        self._basedev = basedev
+        self._basedev_internal = basedev
         self._basedevs = basedevs
         doc = self.__doc__+doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev, basedevs)
         if basedev:
             if autoinit == None:
                 extrak['autoinit'] = basedev._autoinit
-            extrak['trig'] = basedev._trig
-            extrak['delay'] = basedev._delay
+            #extrak['trig'] = basedev._trig
+            #extrak['delay'] = basedev._delay
+            extrak['redir_async'] = basedev
         super(LogicalDevice, self).__init__(doc=doc, **extrak)
         if self._basedev:
             self.instr = basedev.instr
@@ -1416,6 +1436,17 @@ class LogicalDevice(BaseDevice):
             conf = ProxyMethod(self._current_config)
             fmt['header'] = conf
         self.name = self.__class__.__name__ # this should not be used
+    @property
+    def _basedev(self):
+        # whe in async mode, _basdev needs to point to possibly redirected device
+        basedev = self._basedev_internal
+        basedev_redir = self._do_redir_async()
+        alive = False
+        if basedev and basedev_redir.instr._async_task:
+            alive  = basedev_redir.instr._async_task.is_alive()
+        if alive:
+            return basedev_redir
+        return self._basedev_internal
     def _getclassname(self):
         return self.__class__.__name__
     def getfullname(self):
@@ -1434,6 +1465,16 @@ class LogicalDevice(BaseDevice):
     def force_get(self):
         if self._basedev != None:
             self._basedev.force_get()
+    def get(self, *arg, **kwarg):
+        ret = super(LogicalDevice, self).get(*arg, **kwarg)
+        if self._basedev != None and self._basedev._last_filename:
+            self._last_filename = self._basedev._last_filename
+        return ret
+    def getasync(self, async, **kwarg):
+        # same as basename except we keep obj.get as self.get
+        obj = self._do_redir_async()
+        return obj.instr._get_async(async, self,
+                           trig=obj._trig, delay=obj._delay, **kwarg)
     def _current_config_addbase(self, head, options={}):
         devs = self._basedevs
         if not devs:

@@ -1025,7 +1025,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self._devwrap('fetch', autoinit=False, trig=True)
         self.fetch._event_flag = threading.Event()
         self.fetch._rcv_val = None
-        self._devwrap('readval', autoinit=False)
+        self._devwrap('readval', autoinit=False, redir_async=self.fetch)
         self._devwrap('tau_vec', setget=True)
         self._tau_nb = dummy_device('CONFIG:NB_TAU?')
         self._tau_veci = dummy_device('CONFIG:TAU?')
