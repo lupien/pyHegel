@@ -86,6 +86,7 @@ def _replace_ext(filename, newext=None):
 def _write_dev(val, filename, format=format, first=False):
     append = format['append']
     bin = format['bin']
+    dev = format['obj']
     doheader = True
     if bin:
         doheader = False
@@ -99,6 +100,7 @@ def _write_dev(val, filename, format=format, first=False):
         if bin != '.ext':
             filename = _replace_ext(filename, bin)
     f=open(filename, open_mode)
+    dev._last_filename = filename
     header = _get_conf_header(format)
     if header and doheader: # if either is not None or not ''
         for h in header:
@@ -118,6 +120,10 @@ def _write_dev(val, filename, format=format, first=False):
             else:
                 val.tofile(f)
         else:
+            # force array so single values and lists also work
+            val = np.asarray(val)
+            if val.ndim == 0:
+                val.shape = (1,)
             np.savetxt(f, val.T, fmt='%.18g', delimiter='\t')
     f.close()
 
@@ -229,6 +235,7 @@ class BaseDevice(object):
         self._setget = setget
         self._trig = trig
         self._delay = delay
+        self._last_filename = None
         self.min = min
         self.max = max
         self.choices = choices
@@ -253,6 +260,7 @@ class BaseDevice(object):
         self._cache = val
     def get(self, **kwarg):
         if not CHECKING:
+            self._last_filename = None
             keep = kwarg.pop('keep', False)
             format = self.getformat(**kwarg)
             kwarg.pop('graph', None) #now remove graph from parameters (was needed by getformat)
@@ -1609,25 +1617,31 @@ class ExecuteDevice(LogicalDevice):
         if multi != None:
             self._format['multi'] = multi
             self._format['graph'] = [0]
+    def getformat(self, **kwarg):
         basefmt = self._basedev.getformat()
-        self._format['file'] = basefmt['file']
+        self._format['file'] = True
         self._format['bin'] = basefmt['bin']
+        return super(type(self), self).getformat(**kwarg)
     def _current_config(self, dev_obj=None, options={}):
         head = ['Execute:: command="%s" basedev=%s'%(self._command, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
     def _getdev(self, filename=None):
-        ret = self._basedev.get()
-        # ret should be empty. Test it?
+        kwarg={}
+        if filename != None:
+            kwarg['filename'] = filename
+        ret = self._basedev.get(**kwarg)
         command = self._command
-        root, ext = os.path.splitext(filename)
-        directory, basename = os.path.split(filename)
-        basenoext = os.path.splitext(basename)[0]
-        command = command.format(filename=filename, root=root, ext=ext,
+        filename = self._basedev._last_filename
+        if filename != None:
+            root, ext = os.path.splitext(filename)
+            directory, basename = os.path.split(filename)
+            basenoext = os.path.splitext(basename)[0]
+            command = command.format(filename=filename, root=root, ext=ext,
                                  directory=directory, basename=basename,
                                  basenoext=basenoext)
         if self._multi == None:
             os.system(command)
         else:
-            ret = subprocess.check_output(command)
+            ret = subprocess.check_output(command, shell=True)
             ret = np.fromstring(ret, sep=' ')
         return ret
