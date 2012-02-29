@@ -1458,7 +1458,7 @@ class LogicalDevice(BaseDevice):
        Need to overwrite force_get method, _current_config
        And may be change getformat
     """
-    def __init__(self, basedev=None, basedevs=None, doc='', autoinit=None, **extrak):
+    def __init__(self, basedev=None, basedevs=None, doc='', setget=None, autoinit=None, **extrak):
         # use either basedev (single one) or basedevs, multiple devices
         #   in the latter _basedev = _basedevs[0]
         # can also leave both blank
@@ -1477,6 +1477,8 @@ class LogicalDevice(BaseDevice):
         if basedev:
             if autoinit == None:
                 extrak['autoinit'] = basedev._autoinit
+            if setget == None:
+                extrak['setget'] = basedev._setget
             #extrak['trig'] = basedev._trig
             #extrak['delay'] = basedev._delay
             extrak['redir_async'] = basedev
@@ -1614,8 +1616,6 @@ class FunctionDevice(LogicalDevice):
         return val, raw
     def _setdev(self, val):
         self._basedev.set(self.to_raw(val))
-        # read basedev cache, in case the values is changed by setget mode.
-        self._cache = self.from_raw(self._basedev.getcache())
     def check(self, val):
         raw = self.to_raw(val)
         self._basedev.check(raw)
@@ -1658,8 +1658,6 @@ class LimitDevice(LogicalDevice):
         return self._basedev.get()
     def _setdev(self, val):
         self._basedev.set(val)
-        # read basedev cache, in case the values is changed by setget mode.
-        self._cache = self._basedev.getcache()
     def check(self, val):
         self._basedev.check(val)
         super(type(self), self).check(val)
@@ -1683,8 +1681,6 @@ class CopyDevice(LogicalDevice):
     def _setdev(self, val):
         for dev in self._basedevs:
             dev.set(val)
-        # read basedev cache, in case the values is changed by setget mode.
-        self._cache = self._basedevs[0].getcache()
     def check(self, val):
         for dev in self._basedevs:
             dev.check(val)
