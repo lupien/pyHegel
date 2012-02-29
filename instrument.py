@@ -968,6 +968,8 @@ class sr830_lia(visaInstrument):
     """
     _snap_type = {1:'x', 2:'y', 3:'R', 4:'theta', 5:'Aux_in1', 6:'Aux_in2',
                   7:'Aux_in3', 8:'Aux_in4', 9:'Ref_Freq', 10:'Ch1', 11:'Ch2'}
+    _filter_slope_v = np.arange(4)+1
+    _timeconstant_v = (np.logspace(-6,3,10)[:,None]*np.array([10.,30])).flatten() #s
     def init(self, full=False):
         # This empties the instrument buffers
         self._clear()
@@ -1029,6 +1031,52 @@ class sr830_lia(visaInstrument):
           bit 7 (128): Math Error
         """
         return int(self.ask('ERRS?'))
+    def find_fraction(self, n_time_constant, n_filter=None, time_constant=None, sec=False):
+        """
+        Calculates the fraction of a step function that is obtained after
+        n_time_constant*time_constant time when using n_filter
+        By default time_constant and n_filter are the current ones
+        When sec is Truem the input time is in sec, not in time_constants
+        """
+        if n_filter == None:
+            n_filter = self.filter_slope.getcache()
+            n_filter = self._filter_slope_v[n_filter]
+        if time_constant == None:
+            time_constant = self.timeconstant.getcache()
+            time_constant = self._timeconstant_v[time_constant]
+        if sec:
+            n_time_constant /= time_constant
+        t = n_time_constant
+        et = np.exp(-t)
+        if n_filter == 1:
+            return 1.-et
+        elif n_filter == 2:
+            return 1.-et*(1.+t)
+        elif n_filter == 3:
+            return 1.-et*(1.+t+0.5*t**2)
+        elif n_filter == 4:
+            return 1.-et*(1.+t+0.5*t**2+t**3/6.)
+        else:
+            raise ValueError, 'Invalid n_filter: 1 <= n_filter <= 4'
+    def find_n_time(self, frac=.99, n_filter=None, time_constant=None, sec=False):
+        """
+        Does the inverse of find_fraction.
+        Here, given a fraction, we find the number of time_constants needed to wait.
+        When sec is true, it returs the time in sec not in number of time_constants.
+        """
+        if n_filter == None:
+            n_filter = self.filter_slope.getcache()
+            n_filter = self._filter_slope_v[n_filter]
+        if time_constant == None:
+            time_constant = self.timeconstant.getcache()
+            time_constant = self._timeconstant_v[time_constant]
+        func = lambda x: self.find_fraction(x, n_filter, time_constant)-frac
+        n_time = brentq_rootsolver(func, 0, 100)
+        if sec:
+            return n_time*time_constant
+        else:
+            return n_time
+
 
 class sr384_rf(visaInstrument):
     # This instruments needs to be on local state or to pass through local state
