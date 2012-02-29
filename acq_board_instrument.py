@@ -44,7 +44,7 @@ class acq_filename(object):
 
 class acq_device(instrument.scpiDevice):
     def __init__(self, *arg, **kwarg):
-        super(type(self), self).__init__(*arg, **kwarg)
+        super(acq_device, self).__init__(*arg, **kwarg)
         self._event_flag = threading.Event()
         self._event_flag.set()
         self._rcv_val = None
@@ -74,7 +74,7 @@ class dummy_device(object):
 #        it crashes on the next connect (when object gets deleted)
 class Listen_thread(threading.Thread):
     def __init__(self, acq_instr):
-        super(type(self), self).__init__()
+        super(Listen_thread, self).__init__()
         self.daemon = True
         self._stop = False
         self.acq_instr = weakref.proxy(acq_instr)

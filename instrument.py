@@ -143,7 +143,7 @@ def _write_dev(val, filename, format=format, first=False):
 
 class asyncThread(threading.Thread):
     def __init__(self, operations, detect=None, delay=0., trig=None):
-        super(type(self), self).__init__()
+        super(asyncThread, self).__init__()
         self.daemon = True
         self._stop = False
         self._async_delay = delay
@@ -375,12 +375,12 @@ class wrapDevice(BaseDevice):
         if self._check != None:
             self._check(val, **kwarg)
         else:
-            super(type(self), self).check(val)
+            super(wrapDevice, self).check(val)
     def getformat(self, **kwarg):
         if self._getformat != None:
             return self._getformat(**kwarg)
         else:
-            return super(type(self), self).getformat(**kwarg)
+            return super(wrapDevice, self).getformat(**kwarg)
 
 class cls_wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
@@ -410,12 +410,12 @@ class cls_wrapDevice(BaseDevice):
         if self._check != None:
             self._check(self.instr, val, **kwarg)
         else:
-            super(type(self), self).check(val)
+            super(cls_wrapDevice, self).check(val)
     def getformat(self, **kwarg):
         if self._getformat != None:
             return self._getformat(self.instr, **kwarg)
         else:
-            return super(type(self), self).getformat(self.instr, **kwarg)
+            return super(cls_wrapDevice, self).getformat(self.instr, **kwarg)
 
 def _find_global_name(obj):
     dic = _globaldict
@@ -1379,6 +1379,32 @@ class LogicalDevice(BaseDevice):
        Need to overwrite force_get method, _current_config
        And may be change getformat
     """
+    def __init__(self, basedev=None, basedevs=None, doc='', autoinit=None, **extrak):
+        # use either basedev (single one) or basedevs, multiple devices
+        #   in the latter _basedev = _basedevs[0]
+        # can also leave both blank
+        # autoinit defaults to the one from _basedev
+        # self.instr set to self._basedev.inst if available
+        if basedev != None:
+            basedev = _asDevice(basedev) # deal with instr.alias
+        if basedevs != None:
+            for i, dev in enumerate(basedevs):
+                dev = _asDevice(dev) # deal with instr.alias
+                basedevs[i] = dev
+            basedev = basedevs[0]
+        self._basedev = basedev
+        self._basedevs = basedevs
+        doc = self.__doc__+doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev, basedevs)
+        if autoinit == None and basedev:
+            extrak['autoinit'] = basedev._autoinit
+        super(LogicalDevice, self).__init__(doc=doc, **extrak)
+        if self._basedev:
+            self.instr = self._basedev.instr
+        fmt = self._format
+        if not fmt['header'] and hasattr(self, '_current_config'):
+            conf = ProxyMethod(self._current_config)
+            fmt['header'] = conf
+        self.name = self.__class__.__name__ # this should not be used
     def _getclassname(self):
         return self.__class__.__name__
     def getfullname(self):
@@ -1397,6 +1423,21 @@ class LogicalDevice(BaseDevice):
     def force_get(self):
         if self._basedev != None:
             self._basedev.force_get()
+    def _current_config_addbase(self, head, options={}):
+        devs = self._basedevs
+        if not devs:
+            if self._basedev:
+                devs = [self._basedev]
+            else:
+                devs = []
+        for dev in devs:
+            head.append('::'+dev.getfullname())
+            frmt = dev.getformat()
+            base = _get_conf_header_util(frmt['header'], dev, options)
+            if base != None:
+                head.extend(base)
+        return head
+
 
 class ScalingDevice(LogicalDevice):
     """
@@ -1404,27 +1445,16 @@ class ScalingDevice(LogicalDevice):
        On reading, it returns basedev.get()*scale_factor + offset
        On writing it will write basedev.set((val - offset)/scale_factor)
     """
-    def __init__(self, basedev, scale_factor, offset=0., doc='', autoinit=None, **extrak):
-        basedev = _asDevice(basedev) # deal with instr.alias
-        self._basedev = basedev
+    def __init__(self, basedev, scale_factor, offset=0., doc='', **extrak):
         self._scale = float(scale_factor)
         self._offset = offset
-        doc+= self.__doc__+doc+'basedev=%s\nscale_factor=%g (initial)\noffset=%g'%(
-               repr(basedev), scale_factor, offset)
-        if autoinit == None:
-            autoinit = basedev._autoinit
-        BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
-        self.instr = basedev.instr
-        self.name = 'ScaleDev' # this should not be used
+        doc+= 'scale_factor=%g (initial)\noffset=%g'%(scale_factor, offset)
+        super(type(self), self).__init__(basedev=basedev, doc=doc, **extrak)
         self._format['multi'] = ['scale', 'raw']
         self._format['graph'] = [0]
     def _current_config(self, dev_obj=None, options={}):
-        ret = ['Scaling:: fact=%r offset=%r basedev=%s'%(self._scale, self._offset, self._basedev.getfullname())]
-        frmt = self._basedev.getformat()
-        base = _get_conf_header_util(frmt['header'], dev_obj, options)
-        if base != None:
-            ret.extend(base)
-        return ret
+        head = ['Scaling:: fact=%r offset=%r basedev=%s'%(self._scale, self._offset, self._basedev.getfullname())]
+        return self._current_config_addbase(head, options=options)
     def conv_fromdev(self, raw):
         return raw * self._scale + self._offset
     def conv_todev(self, val):
@@ -1451,29 +1481,19 @@ class FunctionDevice(LogicalDevice):
         or it is the interval of possible raw values
         that is used for the function inversion (scipy.optimize.brent)
     """
-    def __init__(self, basedev, from_raw, to_raw=[-1e12, 1e12], doc='', autoinit=None, **extrak):
-        basedev = _asDevice(basedev) # deal with instr.alias
-        self._basedev = basedev
+    def __init__(self, basedev, from_raw, to_raw=[-1e12, 1e12], doc='', **extrak):
         self.from_raw = from_raw
         if isinstance(to_raw, list):
             self._to_raw = to_raw
         else: # assume it is a function
             self.to_raw = to_raw
-        doc+= self.__doc__+doc+'basedev=%s\n'%(repr(basedev))
-        if autoinit == None:
-            autoinit = basedev._autoinit
-        BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
-        self.instr = basedev.instr
-        self.name = 'FuncDev' # this should not be used
+        super(type(self), self).__init__(basedev=basedev, doc=doc, **extrak)
         self._format['multi'] = ['conv', 'raw']
         self._format['graph'] = [0]
+        self._format['header'] = self._current_config
     def _current_config(self, dev_obj=None, options={}):
-        ret = ['Func Convert:: basedev=%s'%(self._basedev.getfullname())]
-        frmt = self._basedev.getformat()
-        base = _get_conf_header_util(frmt['header'], dev_obj, options)
-        if base != None:
-            ret.extend(base)
-        return ret
+        head = ['Func Convert:: basedev=%s'%(self._basedev.getfullname())]
+        return self._current_config_addbase(head, options=options)
     def to_raw(self, val):
         # only handle scalar val not arrays
         func = lambda x: self.from_raw(x)-val
@@ -1502,17 +1522,11 @@ class LimitDevice(LogicalDevice):
     This class provides a wrapper around a device that limits the
     value to a user selectable limits.
     """
-    def __init__(self, basedev, min=None, max=None, doc='', autoinit=None, **extrak):
+    def __init__(self, basedev, min=None, max=None, doc='', **extrak):
         if min==None or max==None:
             raise ValueError, 'min and max need to be specified for LimitDevice'
-        self._basedev = basedev
-        doc+= self.__doc__+doc+'basedev=%s\nmin,max=%g,%g (initial)'%(
-               repr(basedev), min, max)
-        if autoinit == None:
-            autoinit = basedev._autoinit
-        BaseDevice.__init__(self, autoinit=autoinit, min=min, max=max, doc=doc, **extrak)
-        self.instr = basedev.instr
-        self.name = 'LimitDev' # this should not be used
+        doc+= 'min,max=%g,%g (initial)'%(min, max)
+        super(type(self), self).__init__(basedev=basedev, min=min, max=max, doc=doc, **extrak)
         self._setdev_p = True # needed to enable BaseDevice Check, set (Checking mode)
         self._getdev_p = self._basedev._getdev_p # needed to enable Checking mode of BaseDevice get
     def set_limits(self, min=None, max=None):
@@ -1534,12 +1548,8 @@ class LimitDevice(LogicalDevice):
         if max != None:
             self.max = max
     def _current_config(self, dev_obj=None, options={}):
-        ret = ['Limiting:: min=%r max=%r basedev=%s'%(self.min, self.max, self._basedev.getfullname())]
-        frmt = self._basedev.getformat()
-        base = _get_conf_header_util(frmt['header'], dev_obj, options)
-        if base != None:
-            ret.extend(base)
-        return ret
+        head = ['Limiting:: min=%r max=%r basedev=%s'%(self.min, self.max, self._basedev.getfullname())]
+        return self._current_config_addbase(head, options=options)
     def _getdev(self):
         return self._basedev.get()
     def _setdev(self, val):
@@ -1559,27 +1569,11 @@ class CopyDevice(LogicalDevice):
        setget option does nothing here.
        basedevs is a list of dev
     """
-    def __init__(self, basedevs , autoinit=None, doc='', **extrak):
-        self._basedevs = basedevs
-        for i, dev in enumerate(self._basedevs):
-            dev = _asDevice(dev) # deal with instr.alias
-            self._basedevs[i] = dev
-        doc+= self.__doc__+doc+'basedevs=%s'%repr(basedevs)
-        if autoinit == None:
-            autoinit = basedevs[0]._autoinit
-        BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
-        self.instr = basedevs[0].instr
-        self.name = 'CopyDev' # this should not be used
-        self._format['header'] = CopyDevice._current_config
+    def __init__(self, basedevs , doc='', **extrak):
+        super(type(self), self).__init__(basedevs=basedevs, doc=doc, **extrak)
     def _current_config(self, dev_obj=None, options={}):
-        ret = ['Copy:: %r'%(self._basedevs)]
-        for dev in self._basedevs:
-            ret.append('::'+dev.getfullname())
-            frmt = dev.getformat()
-            base = _get_conf_header_util(frmt['header'], dev_obj, options)
-            if base != None:
-                ret.extend(base)
-        return ret
+        head = ['Copy:: %r'%(self._basedevs)]
+        return self._current_config_addbase(head, options=options)
     def _getdev(self):
         return self._basedevs[0].get()
     def _setdev(self, val):
@@ -1600,27 +1594,37 @@ class ExecuteDevice(LogicalDevice):
         execute some external code and use the returned string has the data
         Only handle get
 
-        The command can contain %F, which is replaced by the current filename.
+        The command can contain {filename}, which is replaced by the current filename.
+        also available are {root} and {ext} where ext is the extension, including
+        the separator (.)
+        {directory} {basename} where directory is the path to the filename and
+        basename is just the filename
+        {basenoext} is basename without the extension
     """
-    def __init__(self, basedev, command, multi=None, doc='', autoinit=None, **extrak):
+    def __init__(self, basedev, command, multi=None, doc='', **extrak):
         self._command = command
-        basedev = _asDevice(basedev) # deal with instr.alias
-        self._basedev = basedev
-        doc+= self.__doc__+doc+'basedev=%s, command="%s"\n'%(repr(basedev), command)
-        if autoinit == None:
-            autoinit = basedev._autoinit
-        BaseDevice.__init__(self, autoinit=autoinit, doc=doc, **extrak)
-        self.instr = basedev.instr
-        self.name = 'ExecDev' # this should not be used
+        doc+= 'command="%s"\n'%(command)
+        super(type(self), self).__init__(basedev=basedev, doc=doc, **extrak)
         self._multi = multi
         if multi != None:
             self._format['multi'] = multi
             self._format['graph'] = [0]
-    def _getdev(self):
+        basefmt = self._basedev.getformat()
+        self._format['file'] = basefmt['file']
+        self._format['bin'] = basefmt['bin']
+    def _current_config(self, dev_obj=None, options={}):
+        head = ['Execute:: command="%s" basedev=%s'%(self._command, self._basedev.getfullname())]
+        return self._current_config_addbase(head, options=options)
+    def _getdev(self, filename=None):
         ret = self._basedev.get()
         # ret should be empty. Test it?
-        # TODO handle %F
         command = self._command
+        root, ext = os.path.splitext(filename)
+        directory, basename = os.path.split(filename)
+        basenoext = os.path.splitext(basename)[0]
+        command = command.format(filename=filename, root=root, ext=ext,
+                                 directory=directory, basename=basename,
+                                 basenoext=basenoext)
         if self._multi == None:
             os.system(command)
         else:

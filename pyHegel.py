@@ -230,9 +230,11 @@ def _checkTracePause(trace):
 #                                     for headers and graphing
 #          graph=[1,2]                When using multi, this selects the values to graph
 #          graph=True/False           When file is True, This says to graph the return value or not
+#                                       TODO implement this
 #          append=True                Dump the data on a line in the file
 #          header=['line1', 'line2']  Stuff to dump at head of new file
 #                                       it can also be a function that returns the proper list of strings
+#                                       the functions defaults to instr._current_config if available
 #          bin=False/'.npy'/'.raw'/'.png' Dump data in binary form. npy is numpy format
 #              '.ext'/...              All of the change the extension of the file except
 #                                      if you use '.ext', then the original extension is kept
@@ -793,7 +795,7 @@ class _Hegel_Task(threading.Thread):
     def __init__(self, func, args=(), kwargs={}, count=None,
            interval=None, **extra):
         # func can be a function or a callable class instance.
-        super(type(self), self).__init__(**extra)
+        super(_Hegel_Task, self).__init__(**extra)
         self.args = args
         self.kwargs = kwargs
         self.count = count
