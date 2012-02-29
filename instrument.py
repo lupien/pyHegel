@@ -463,6 +463,7 @@ class BaseInstrument(object):
         self._async_level = -1
         self._async_counter = 0
         self.async_delay = 0.
+        self._async_delay_check = True
         self._async_task = None
         self._last_force = time.time()
         if not CHECKING:
@@ -489,6 +490,9 @@ class BaseInstrument(object):
                 self._async_level = 0
             delay = kwarg.pop('delay', False)
             if delay:
+                if self._async_delay_check and self.async_delay == 0.:
+                    print self.perror('You should give a value for async_delay')
+                self._async_delay_check = False
                 self._async_task.change_delay(self.async_delay)
             trig = kwarg.pop('trig', False)
             if trig:
