@@ -1437,6 +1437,9 @@ class agilent_PNAL(visaInstrument):
         self.select_i = scpiDevice(':calc1:par:sel', autoinit=False)
         self.select_w = scpiDevice(getstr=':syst:meas1:window?', autoinit=False)
         self.select_t = scpiDevice(getstr=':syst:meas1:trace?', autoinit=False)
+        # for max min power, ask source:power? max and source:power? min
+        self.power_dbm_port1 = scpiDevice(':SOURce1:POWer1?', str_type=float, autoinit=False)
+        self.power_dbm_port2 = scpiDevice(':SOURce1:POWer1?', str_type=float, autoinit=False)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
