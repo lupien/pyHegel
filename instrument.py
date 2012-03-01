@@ -820,6 +820,44 @@ class ChoiceStrings(object):
     def __repr__(self):
         return repr(self.values)
 
+class ChoiceIndex(object):
+    """
+    Initialize the class with a list of values or a dictionnary
+    The instrument uses the index of a list or the key of the dictionnary
+    """
+    def __init__(self, list_or_dict, offset=0):
+        self._list_or_dict = list_or_dict
+        if isinstance(list_or_dict, list):
+            self.keys = range(offset,offset+len(list_or_dict)) # instrument values
+            self.values = list_or_dict           # pyHegel values
+            self.dict = dict(zip(self.keys, self.values))
+        else: # list_or_dict is dict
+            self.dict = list_or_dict
+            self.keys = list_or_dict.keys()
+            self.values = list_or_dict.values()
+        try:
+            self.values_arr = np.array(self.values)
+        except:
+            self.values_arr = None
+    def index(self, val):
+        try:
+            return self.values.index(val)
+        except ValueError:
+            if self.values_arr != None:
+                pass # TODO implement finding value approximately for floats
+    def __call__(self, input_str):
+        # this is called by dev._fromstr to convert a string to the needed format
+        val = int(input_str)
+        return self.dict[val]
+    def tostr(self, input_choice):
+        # this is called by dev._tostr to convert a choice to the format needed by instrument
+        i = self.index(input_choice)
+        return self.keys[i]
+    def __contains__(self, x):
+        return x in self.values
+    def __repr__(self):
+        return repr(self.values)
+
 class visaInstrument(BaseInstrument):
     """
         Open visa instrument with a visa address.
