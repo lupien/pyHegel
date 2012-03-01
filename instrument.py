@@ -965,6 +965,12 @@ class sr830_lia(visaInstrument):
     to some usefull values.
      might do sr1.async_delay = 1
     when using 24dB/oct, 100ms filter.
+
+    You can use find_n_time and find_fraction to set the time.
+    For example: set sr1,sr1.find_n_time(.99,sec=True)
+
+    To read more than one channel at a time use snap
+    Otherwise you can use x, y, t, theta and snap
     """
     _snap_type = {1:'x', 2:'y', 3:'R', 4:'theta', 5:'Aux_in1', 6:'Aux_in2',
                   7:'Aux_in3', 8:'Aux_in4', 9:'Ref_Freq', 10:'Ch1', 11:'Ch2'}
@@ -1052,12 +1058,18 @@ class sr830_lia(visaInstrument):
             return 1.-et
         elif n_filter == 2:
             return 1.-et*(1.+t)
-        elif n_filter == 3:
-            return 1.-et*(1.+t+0.5*t**2)
-        elif n_filter == 4:
-            return 1.-et*(1.+t+0.5*t**2+t**3/6.)
+#        elif n_filter == 3:
+#            return 1.-et*(1.+t+0.5*t**2)
+#        elif n_filter == 4:
+#            return 1.-et*(1.+t+0.5*t**2+t**3/6.)
         else:
-            raise ValueError, 'Invalid n_filter: 1 <= n_filter <= 4'
+            # general formula: 1-exp(-t)*( 1+t +t**/2 + ... t**(n-1)/(n-1)!) )
+            m = 1.
+            tt = 1.
+            for i in range(1, n_filter):
+                tt *= t/i
+                m += tt
+            return 1.-et*m
     def find_n_time(self, frac=.99, n_filter=None, time_constant=None, sec=False):
         """
         Does the inverse of find_fraction.
