@@ -660,13 +660,17 @@ class MemoryDevice(BaseDevice):
 
 class scpiDevice(BaseDevice):
     def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None,
-                  doc='', **extrak):
+                 choices=None, doc='', **extrak):
         """
            str_type can be float, int, None
+           If choices is a subclass of ChoiceBase, then str_Type will be
+           set to that object if unset.
         """
         if setstr == None and getstr == None:
-           raise ValueError, 'At least one of setstr or getstr needs to be specified'
-        BaseDevice.__init__(self, doc=doc, **extrak)
+            raise ValueError, 'At least one of setstr or getstr needs to be specified'
+        if isinstance(choices, ChoiceBase) and str_type == None:
+            str_type = choices
+        BaseDevice.__init__(self, doc=doc, choices=choices, **extrak)
         self._setdev_p = setstr
         if getstr == None and autoget:
             getstr = setstr+'?'
@@ -763,7 +767,10 @@ def _decode_float64_avg(s):
 def _decode_float64_std(s):
     return _decode_block_auto(s, t=np.float64).std(ddof=1)
 
-class ChoiceStrings(object):
+class ChoiceBase(object):
+    pass
+
+class ChoiceStrings(ChoiceBase):
     """
        Initialize the class with a list of strings
         s=ChoiceStrings('Aa', 'Bb', ..)
@@ -780,6 +787,7 @@ class ChoiceStrings(object):
        Long and short name can be the same.
     """
     def __init__(self, *values, **extrap):
+        # use **extrap because we can't have keyword arguments after *arg
         self.quotes = extrap.pop('quotes', False)
         if extrap != {}:
             raise TypeError, 'ChoiceStrings only has quotes=False as keyword argument'
@@ -820,43 +828,71 @@ class ChoiceStrings(object):
     def __repr__(self):
         return repr(self.values)
 
-class ChoiceIndex(object):
+class ChoiceIndex(ChoiceBase):
     """
     Initialize the class with a list of values or a dictionnary
     The instrument uses the index of a list or the key of the dictionnary
+    option normalize when true rounds up the float values for better
+    comparison. Use it with a list created from a calculation.
     """
-    def __init__(self, list_or_dict, offset=0):
+    def __init__(self, list_or_dict, offset=0, normalize=False):
+        self._normalize = normalize
         self._list_or_dict = list_or_dict
+        if isinstance(list_or_dict, np.ndarray):
+            list_or_dict = list(list_or_dict)
         if isinstance(list_or_dict, list):
+            if self._normalize:
+                list_or_dict = [self.normalize_N(v) for v in list_or_dict]
             self.keys = range(offset,offset+len(list_or_dict)) # instrument values
             self.values = list_or_dict           # pyHegel values
             self.dict = dict(zip(self.keys, self.values))
         else: # list_or_dict is dict
+            if self._normalize:
+                list_or_dict = {k:self.normalize_N(v) for k,v in list_or_dict.iteritems()}
             self.dict = list_or_dict
             self.keys = list_or_dict.keys()
             self.values = list_or_dict.values()
-        try:
-            self.values_arr = np.array(self.values)
-        except:
-            self.values_arr = None
+    @staticmethod
+    def normalize_N(v):
+        """
+           This transforms 9.9999999999999991e-06 into 1e-05
+           so can compare the result of a calcualtion with the theoretical one
+           v can only by a single value
+        """
+        if abs(v) < 1e-25:
+            return 0.
+        return float('%.13e'%v)
     def index(self, val):
-        try:
-            return self.values.index(val)
-        except ValueError:
-            if self.values_arr != None:
-                pass # TODO implement finding value approximately for floats
+        if self._normalize:
+            val = self.normalize_N(val)
+        return self.values.index(val)
+    def __getitem__(self, key):
+        # negative indices will not work
+        return self.dict[key]
     def __call__(self, input_str):
         # this is called by dev._fromstr to convert a string to the needed format
         val = int(input_str)
-        return self.dict[val]
+        return self[val]
     def tostr(self, input_choice):
         # this is called by dev._tostr to convert a choice to the format needed by instrument
         i = self.index(input_choice)
-        return self.keys[i]
+        return str(self.keys[i])
     def __contains__(self, x):
+        if self._normalize:
+            x = self.normalize_N(x)
         return x in self.values
     def __repr__(self):
         return repr(self.values)
+
+def make_choice_list(list_values, start_exponent, end_exponent):
+    """
+    given list_values=[1,3]
+          start_exponent =-6
+          stop_expoenent = -3
+    produces [1e-6, 3e-6, 1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3]
+    """
+    powers = np.logspace(start_exponent, end_exponent, end_exponent-start_exponent+1)
+    return (powers[:,None] * np.array(list_values)).flatten()
 
 class visaInstrument(BaseInstrument):
     """
@@ -1019,7 +1055,6 @@ class sr830_lia(visaInstrument):
     _snap_type = {1:'x', 2:'y', 3:'R', 4:'theta', 5:'Aux_in1', 6:'Aux_in2',
                   7:'Aux_in3', 8:'Aux_in4', 9:'Ref_Freq', 10:'Ch1', 11:'Ch2'}
     _filter_slope_v = np.arange(4)+1
-    _timeconstant_v = (np.logspace(-6,3,10)[:,None]*np.array([10.,30])).flatten() #s
     def init(self, full=False):
         # This empties the instrument buffers
         self._clear()
@@ -1043,12 +1078,14 @@ class sr830_lia(visaInstrument):
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf')
     def _create_devs(self):
         self.freq = scpiDevice('freq', str_type=float, setget=True, min=0.001, max=102e3)
-        self.sens = scpiDevice('sens', str_type=int, min=0, max=26) #0: 2 nV/fA, 1:5, 2:10, 3:20 ... (1,2,5) ... 26: 1 V/uA
+        sens = ChoiceIndex(make_choice_list([2,5,10], -9, -1), normalize=True)
+        self.sens = scpiDevice('sens', choices=sens, doc='Set the sensitivity in V (for currents it is in uA)')
         self.oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float, setget=True)
         self.srclvl = scpiDevice('slvl', str_type=float, min=0.004, max=5., setget=True)
         self.harm = scpiDevice('harm', str_type=int, min=1, max=19999)
         self.phase = scpiDevice('phas', str_type=float, min=-360., max=729.90, setget=True)
-        self.timeconstant = scpiDevice('oflt', str_type=int, min=0, max=19) # 0: 10 us, 1: 30, 2: 100 ... (1, 3) ... 19: 30 ks
+        timeconstants = ChoiceIndex(make_choice_list([10, 30], -6, 3), normalize=True)
+        self.timeconstant = scpiDevice('oflt', choices=timeconstants)
         self.filter_slope = scpiDevice('ofsl', str_type=int, min=0, max=3, doc='0: 6 dB/oct\n1: 12\n2: 18\n3: 24\n')
         self.sync_filter = scpiDevice('sync', str_type=bool)
         self.x = scpiDevice(getstr='outp? 1', str_type=float, delay=True)
@@ -1093,7 +1130,6 @@ class sr830_lia(visaInstrument):
             n_filter = self._filter_slope_v[n_filter]
         if time_constant == None:
             time_constant = self.timeconstant.getcache()
-            time_constant = self._timeconstant_v[time_constant]
         if sec:
             n_time_constant /= time_constant
         t = n_time_constant
@@ -1125,7 +1161,6 @@ class sr830_lia(visaInstrument):
             n_filter = self._filter_slope_v[n_filter]
         if time_constant == None:
             time_constant = self.timeconstant.getcache()
-            time_constant = self._timeconstant_v[time_constant]
         func = lambda x: self.find_fraction(x, n_filter, time_constant)-frac
         n_time = brentq_rootsolver(func, 0, 100)
         if sec:
@@ -1302,7 +1337,7 @@ class agilent_multi_34410A(visaInstrument):
         ch = ChoiceStrings(
           'CURRent:AC', 'VOLTage:AC', 'CAPacitance', 'CONTinuity', 'CURRent', 'VOLTage',
           'DIODe', 'FREQuency', 'PERiod', 'RESistance', 'FRESistance', 'TEMPerature', quotes=True)
-        self.mode = scpiDevice('FUNC', str_type=ch, choices=ch)
+        self.mode = scpiDevice('FUNC', choices=ch)
         # _decode_float64_avg is needed because count points are returned
         # fetch? and read? return sample_count*trig_count data values (comma sep)
         self.fetch = scpiDevice(getstr='FETCh?',str_type=_decode_float64_avg, autoinit=False, trig=True) #You can't ask for fetch after an aperture change. You need to read some data first.
@@ -1329,7 +1364,7 @@ class agilent_multi_34410A(visaInstrument):
         self.null_en = scpiDevice('VOLTage:NULL', str_type=bool)
         self.null_val = scpiDevice('VOLTage:NULL:VALue', str_type=float)
         ch = ChoiceStrings('NULL', 'DB', 'DBM', 'AVERage', 'LIMit')
-        self.math_func = scpiDevice('CALCulate:FUNCtion', str_type=ch, choices=ch)
+        self.math_func = scpiDevice('CALCulate:FUNCtion', choices=ch)
         self.math_state = scpiDevice('CALCulate:STATe', str_type=bool)
         self.math_avg = scpiDevice(getstr='CALCulate:AVERage:AVERage?', str_type=float, trig=True)
         self.math_count = scpiDevice(getstr='CALCulate:AVERage:COUNt?', str_type=float)
@@ -1338,12 +1373,12 @@ class agilent_multi_34410A(visaInstrument):
         self.math_ptp = scpiDevice(getstr='CALCulate:AVERage:PTPeak?', str_type=float)
         self.math_sdev = scpiDevice(getstr='CALCulate:AVERage:SDEViation?', str_type=float)
         ch = ChoiceStrings('IMMediate', 'BUS', 'EXTernal')
-        self.trig_src = scpiDevice('TRIGger:SOURce', str_type=ch, choices=ch)
+        self.trig_src = scpiDevice('TRIGger:SOURce', choices=ch)
         self.trig_delay = scpiDevice('TRIGger:DELay', str_type=float) # seconds
         self.trig_count = scpiDevice('TRIGger:COUNt', str_type=float)
         self.sample_count = scpiDevice('SAMPle:COUNt', str_type=int)
         ch = ChoiceStrings('IMMediate', 'TIMer')
-        self.sample_src = scpiDevice('SAMPle:SOURce', str_type=ch, choices=ch)
+        self.sample_src = scpiDevice('SAMPle:SOURce', choices=ch)
         self.sample_timer = scpiDevice('SAMPle:TIMer', str_type=float) # seconds
         self.trig_delayauto = scpiDevice('TRIGger:DELay:AUTO', str_type=bool)
         self.alias = self.readval
