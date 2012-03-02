@@ -324,6 +324,8 @@ class _Sweep(instrument.BaseInstrument):
                         %D: for date string
                         %02i: for unique 2 digit increment (00, 01 ...)
                               %03i for   3 digits
+                     Also available are {datetime}, {date}, {time}
+                                        {start}, {stop}, {npts}
                 rate: unused
                 close_after: automatically closes the figure after the sweep when True
                 title: string used for window title
@@ -361,7 +363,7 @@ class _Sweep(instrument.BaseInstrument):
         fullpath = None
         if filename != None:
             fullpath = os.path.join(sweep.path.get(), filename)
-            fullpath = _process_filename(fullpath)
+            fullpath = _process_filename(fullpath, start=start, stop=stop, npts=npts)
             filename = os.path.basename(fullpath)
         if extra_conf == None:
             extra_conf = [sweep.out]
@@ -571,12 +573,32 @@ def scope(dev, interval=.1, title='', **kwarg):
 
 
 _get_filename_i = 0
-def _process_filename(filename):
+def _process_filename(filename, **kwarg):
+    """
+    Returns a filename with the following replacements:
+        %T:   Date-time like 20120301-173000 (march 1st, 2012 at 17:30:00)
+        %D:   Just the date part like 20120310
+        %t:   Just the time part like 173000
+        %i, %01i %02i ...:
+              Is replaced by the an integer. The integer is automatically
+              incremented in order to prevent collision with existing names.
+              When using the 0n version, n digit are used, with left padding
+              of 0: so %02i produces: 00, 01, 02, 03 ... 09, 10, 11 .. 99, 100
+                   and %03i would produce 000, 001 ....
+    There are also name replacements. All keyword arguments can be used for
+    replacement using the string.format syntax.
+    Variables always present:
+        {datetime}: same as %T
+        {date}:     same as %D
+        {time}:     same as %t
+    """
     global _get_filename_i
     localtime = time.localtime()
     datestamp = time.strftime('%Y%m%d', localtime)
     timestamp = time.strftime('%H%M%S', localtime)
     dtstamp = datestamp+'-'+timestamp
+    kwarg.update(datetime=dtstamp, date=datestamp, time=timestamp)
+    filename = filename.format(**kwarg)
     changed = False
     if '%T' in filename:
         filename = filename.replace('%T', dtstamp)
