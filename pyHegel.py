@@ -30,6 +30,7 @@ def help_pyHegel():
         spy
         record
         trace
+        snap
         scope
         _process_filename
         make_dir
@@ -250,7 +251,11 @@ def _itemgetter(*args):
         return lambda x: [ig(x)]
     return ig
 
-def _write_conf(f, formats):
+def _write_conf(f, formats, extra_base=None, **kwarg):
+    if extra_base != None:
+        extra = dict(base_hdr_name=extra_base, base_conf=[repr(kwarg)])
+        formats = formats[:] # make a copy
+        formats.append(extra)
     for fmt in formats:
         conf = fmt['base_conf']
         hdr = fmt['base_hdr_name']
@@ -391,7 +396,7 @@ class _Sweep(instrument.BaseInstrument):
         if filename != None:
             # Make it unbuffered, windows does not handle line buffer correctly
             f = open(fullpath, 'w', 0)
-            _write_conf(f, formats)
+            _write_conf(f, formats, extra_base='sweep_options', async=async, reset=reset)
             writevec(f, hdrs+['time'], pre_str='#')
         else:
             f = None
@@ -477,6 +482,78 @@ def spy(devs, interval=1):
         print 'Interrupting spy'
         pass
 
+class _Snap(object):
+    def __init__(self):
+        self.filename = None
+        self.out = None
+        self.async = False
+        self.cycle = 0
+        self.formats = None
+    def __call__(self, out=None, filename=None, async=None, append=True):
+        """
+        This command dumps a bunch of values to a file.
+        The first call initializes a filename, list of devices
+        Subsequent call can have no parameters and the previously selected
+        devices will be appended to the filename.
+        Changing the device list, will append a new header and change the following calls.
+        The filename uses the sweep.path directory.
+        Async unset (None) will use the last one async mode (which starts at False)
+        With append=True and opening an already existing file, the data is appended
+        otherwise the file is truncated
+        """
+        new_out = False
+        new_file = False
+        if async == None:
+            async = self.async
+        else:
+            self.async = async
+        new_file_mode = 'w'
+        if append:
+            new_file_mode = 'a'
+        if out == None:
+            out = self.out
+        elif out != self.out:
+            new_out = True
+            self.out = out
+        if out == None:
+            raise ValueError, 'Snap. No devices set for out'
+        if filename != None:
+            filename = os.path.join(sweep.path.get(), filename)
+            filename = _process_filename(filename)
+        if filename == None:
+            filename = self.filename
+        elif filename != self.filename:
+            self.filename = filename
+            new_file = True
+            new_out = True
+            self.cycle = 0
+        if filename == None:
+            raise ValueError, 'Snap. No filename selected'
+        if new_file:
+            f = open(filename, new_file_mode, 0)
+        else:
+            f = open(filename, 'a', 0)
+        if new_out:
+            hdrs, graphsel, formats = _getheaders(getdevs=out, root=filename)
+            self.formats = formats
+            _write_conf(f, formats, extra_base='snap_options', async=async)
+            writevec(f, ['time']+hdrs, pre_str='#')
+        else:
+            formats = self.formats
+        tme = clock.get()
+        i = self.cycle
+        if async:
+            vals = _readall_async(out, formats, i)
+        else:
+            vals = _readall(out, formats, i)
+        self.cycle += 1
+        writevec(f, [tme]+vals)
+        f.close()
+
+snap = _Snap()
+
+
+
 _record_trace_num = 0
 def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_conf=None, async=False):
     """
@@ -513,7 +590,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     if filename != None:
         # Make it unbuffered, windows does not handle line buffer correctly
         f = open(fullpath, 'w', 0)
-        _write_conf(f, formats)
+        _write_conf(f, formats, extra_base='record options', async=async, interval=interval)
         writevec(f, ['time']+hdrs, pre_str='#')
     else:
         f = None
