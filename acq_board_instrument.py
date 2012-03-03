@@ -824,7 +824,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         return ret
     def _readval_getformat(self, **kwarg):
         return self.fetch.getformat(**kwarg)
-    # TODO redirect read to fetch when doing async
 
     def _tau_vec_helper(self, i, val):
         self.write('CONFIG:TAU %r %r'%(i, val))
