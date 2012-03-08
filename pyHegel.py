@@ -317,11 +317,12 @@ class _Sweep(instrument.BaseInstrument):
         return '<sweep instrument>'
     def __call__(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
                   close_after=False, title=None, out=None, extra_conf=None,
-                  async=False, reset=False):
+                  async=False, reset=False, logspace=False):
         """
             Usage:
                 To define sweep either
-                  set start, stop and npts (then uses linspace internally)
+                  set start, stop and npts (then uses linspace internally
+                                                       or logspace)
                   or just set start with a list of values
                 filename to use
                     use %T: for date time string (20120115-145030)
@@ -342,6 +343,10 @@ class _Sweep(instrument.BaseInstrument):
                         parallel instead of consecutivelly.) This saves time.
                 reset: After the sweep is completed, the dev is returned to the
                        first value in the sweep list.
+                logspace: When true, the npts between start and stop are separated
+                           exponentially (so it for a nice linear spacing on a log scale)
+                          It uses np.logspace internally but start and stop stay the
+                          complete values contrary to np.logspace that uses the exponents.
         """
         dolinspace = True
         if isinstance(start, (list, np.ndarray)):
@@ -360,7 +365,10 @@ class _Sweep(instrument.BaseInstrument):
         if npts < 1:
            raise ValueError, 'npts needs to be at least 1'
         if dolinspace:
-            span = np.linspace(start, stop, npts)
+            if logspace:
+                span = np.logspace(np.log10(start), np.log10(stop), npts)
+            else:
+                span = np.linspace(start, stop, npts)
         if instrument.CHECKING:
             # For checking only take first and last values
             span = span[[0,-1]]
@@ -393,6 +401,8 @@ class _Sweep(instrument.BaseInstrument):
                 gsel = _itemgetter(*graphsel)
             t.setlegend(gsel(hdrs))
             t.set_xlabel(hdrs[0])
+            if logspace:
+                t.set_xlogscale()
         if filename != None:
             # Make it unbuffered, windows does not handle line buffer correctly
             f = open(fullpath, 'w', 0)

@@ -219,6 +219,10 @@ class Trace(FigureManagerQT):
                     else:
                         a.zorder = 1 if i==n else 0
 
+    def set_xlogscale(self, enable=True):
+        s = {True:'log', False:'linear'}
+        self.axs[0].set_xscale(s[enable])
+
     def setLim(self, minx, maxx=None):
         if isinstance(minx, (list, tuple, np.ndarray)):
              maxx = np.max(minx)
