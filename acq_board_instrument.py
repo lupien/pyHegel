@@ -322,7 +322,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self._errors_list = []
     def _check_error(self):
         if self._error_state:
-            raise ValueError, 'Acq Board currently in error state. clear it with _get_error.'
+            raise ValueError, 'Acq Board currently in error state. clear it with get_error.'
     def get_error(self):
         """
         The errors are on a stack. This pops and shows the last one.
