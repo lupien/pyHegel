@@ -996,7 +996,43 @@ class visaInstrument(BaseInstrument):
         #  Another option would be to use the *TRG 488.2 command
         self.visa.trigger()
 
-
+class visaInstrumentAsync(visaInstrument):
+    def init(self, full=False):
+        # This clears the error state, and status/event flags?
+        self.write('*cls')
+        if full:
+            self.write('*ese 1;*sre 32') # OPC flag
+            vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+                               vpp43.VI_QUEUE)
+    def _get_esr(self):
+        return int(self.ask('*esr?'))
+    def _async_detect(self):
+        ev_type = context = None
+        try:  # for 500 ms
+            ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 500)
+        except visa.VisaIOError, e:
+            if e.error_code != vpp43.VI_ERROR_TMO:
+                raise
+        if context != None:
+            # only reset event flag. We know the bit that is set already (OPC)
+            self._get_esr()
+            # only reset SRQ flag. We know the bit that is set already
+            self.read_status_byte()
+            vpp43.close(context)
+            return True
+        return False
+    def _async_trig(self):
+        if self._get_esr() & 0x01:
+            print 'Unread event byte!'
+        while self.read_status_byte() & 0x40:
+            print 'Unread status byte!'
+        try:
+            while True:
+                foo = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 0)
+                print 'Unread event queue!'
+        except:
+            pass
+        self.write('INITiate;*OPC') # this assume trig_src is immediate
 
 class yokogawa_gs200(visaInstrument):
     # TODO: implement multipliers, units. The multiplier
@@ -1275,43 +1311,7 @@ class agilent_rf_33522A(visaInstrument):
         self.write('PHASe:SYNChronize')
 
 #TODO: handle multiconf stuff VOLT, CURR nlpc ...
-class agilent_multi_34410A(visaInstrument):
-    def init(self, full=False):
-        # This clears the error state, and status/event flags?
-        self.write('*cls')
-        if full:
-            self.write('*ese 1;*sre 32') # OPC flag
-            vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
-                               vpp43.VI_QUEUE)
-    def _get_esr(self):
-        return int(self.ask('*esr?'))
-    def _async_detect(self):
-        ev_type = context = None
-        try:  # for 500 ms
-            ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 500)
-        except visa.VisaIOError, e:
-            if e.error_code != vpp43.VI_ERROR_TMO:
-                raise
-        if context != None:
-            # only reset event flag. We know the bit that is set already (OPC)
-            self._get_esr()
-            # only reset SRQ flag. We know the bit that is set already
-            self.read_status_byte()
-            vpp43.close(context)
-            return True
-        return False
-    def _async_trig(self):
-        if self._get_esr() & 0x01:
-            print 'Unread event byte!'
-        while self.read_status_byte() & 0x40:
-            print 'Unread status byte!'
-        try:
-            while True:
-                foo = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 0)
-                print 'Unread event queue!'
-        except:
-            pass
-        self.write('INITiate;*OPC') # this assume trig_src is immediate
+class agilent_multi_34410A(visaInstrumentAsync):
     def math_clear(self):
         self.write('CALCulate:AVERage:CLEar')
     def _current_config(self, dev_obj=None, options={}):
