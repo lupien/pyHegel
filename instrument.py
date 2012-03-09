@@ -878,6 +878,21 @@ class ChoiceStrings(ChoiceBase):
         return input_choice  # no need to change. Already a proper string.
     def __repr__(self):
         return repr(self.values)
+    def __getitem__(self, index):
+        # index can be a single value: return it
+        # or it can be a slice or a list, return a new object with only the selected elements
+        #   the list can be numbers or strings (which finds number with index)
+        if not isinstance(index, (slice, list)):
+            return self.values[index]
+        if isinstance(index, slice):
+            return ChoiceStrings(*self.values[index], quotes=self.quotes)
+        # we have a list
+        values = []
+        for i in index:
+            if isinstance(i, basestring):
+                i = self.index(i)
+            values.append(self.values[i])
+        return ChoiceStrings(*values, quotes=self.quotes)
 
 class ChoiceIndex(ChoiceBase):
     """
@@ -1366,8 +1381,9 @@ class agilent_multi_34410A(visaInstrumentAsync):
     def math_clear(self):
         self.write('CALCulate:AVERage:CLEar')
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('mode', 'volt_nplc', 'volt_aperture',
-                                 'volt_aperture_en', 'zero', 'autorange',
+        # handle different modes properly
+        return self._conf_helper('mode', 'nplc', 'aperture',
+                                 'aperture_en', 'zero', 'autorange',
                                  'trig_src', 'trig_delay', 'trig_count',
                                  'sample_count', 'sample_src', 'sample_timer',
                                  'trig_delayauto', 'line_freq')
@@ -1381,7 +1397,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
            width = time
            if not force:
                width = line_period*round(width/line_period)
-        self.volt_aperture.set(width)
+        self.aperture.set(width)
         self.sample_count.set(count)
     def _create_devs(self):
         # This needs to be last to complete creation
@@ -1402,21 +1418,63 @@ class agilent_multi_34410A(visaInstrumentAsync):
              (fetch_all needs to have more than one value)
         """)
         self.line_freq = scpiDevice(getstr='SYSTem:LFRequency?', str_type=float) # see also SYST:LFR:ACTual?
-        self.volt_nplc = scpiDevice('VOLTage:NPLC', str_type=float, choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100]) # DC
-        self.volt_aperture = scpiDevice('VOLTage:APERture', str_type=float) # DC, in seconds (max~1s), also MIN, MAX, DEF
-        self.volt_aperture_en = scpiDevice('VOLTage:APERture:ENabled', str_type=bool)
-        self.current_aperture = scpiDevice('CURRent:APERture', str_type=float) # DC, in seconds
-        self.res_aperture = scpiDevice('RESistance:APERture', str_type=float)
-        self.four_res_aperture = scpiDevice('FRESistance:APERture', str_type=float)
-        self.aperture = scpiDevice('{mode}:APERture', str_type=float, min = 0, max = 1.1,
+        ch_aper = ch[['volt', 'curr', 'res', 'fres', 'temp', 'freq', 'period']]
+        ch_aper_nplc = ch[['volt', 'curr', 'res', 'fres', 'temp']]
+        aper_max = float(self.ask('volt:aper? max'))
+        aper_min = float(self.ask('volt:aper? min'))
+        # TODO handle freq, period where valid values are .001, .010, .1, 1 (between .001 and 1 can use setget)
+        self.aperture = scpiDevice('{mode}:APERture', str_type=float, min = aper_min, max = aper_max, setget=True,
                                    options=dict(mode=self.mode),
-                                   options_lim=dict(mode=ChoiceStrings('VOLTage', 'CURRent', 'RESistance', 'FRESistance')))
+                                   options_lim=dict(mode=ch_aper) )
+        self.aperture_en = scpiDevice('{mode}:APERture:ENabled', str_type=bool,
+                                   options=dict(mode=self.mode),
+                                   options_lim=dict(mode=ch_aper_nplc) )
+        self.nplc = scpiDevice('{mode}:NPLC', str_type=float,
+                                   choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100],
+                                   options=dict(mode=self.mode),
+                                   options_lim=dict(mode=ch_aper_nplc) )
+        ch_band = ch[['curr:ac', 'volt:ac']]
+        self.bandwidth = scpiDevice('{mode}:BANDwidth', str_type=int,
+                                   choices=[3, 20, 200],
+                                   options=dict(mode=self.mode),
+                                   options_lim=dict(mode=ch_band) ) # in Hz
+        ch_freqperi = ch[['freq', 'per']]
+        self.fp_band = scpiDevice('{mode}:RANGe:LOWer', str_type=int,
+                                   choices=[3, 20, 200],
+                                   options=dict(mode=self.mode),
+                                   options_lim=dict(mode=ch_freqperi) ) # in Hz
+        self.fp_volt_autorange = scpiDevice('{mode}:VOLTage:RANGe:AUTO', str_type=bool,
+                                   options=dict(mode=self.mode),
+                                   options_lim=dict(mode=ch_freqperi) ) # Also use ONCE (immediate autorange, then off)
+        self.fp_volt_range = scpiDevice('{mode}:VOLTage:RANGe', str_type=float, choices=[.1, 1., 10., 100., 1000.],
+                                   options=dict(mode=self.mode),
+                                   options_lim=dict(mode=ch_freqperi) ) # Setting this disables auto range
+
+
         # Auto zero doubles the time to take each point
-        self.zero = scpiDevice('VOLTage:ZERO:AUTO', str_type=bool) # Also use ONCE (immediate zero, then off)
-        self.autorange = scpiDevice('VOLTage:RANGE:AUTO', str_type=bool) # Also use ONCE (immediate zero, then off)
-        self.range = scpiDevice('VOLTage:RANGE', str_type=float, choices=[.1, 1., 10., 100., 1000.]) # Setting this disables auto range
-        self.null_en = scpiDevice('VOLTage:NULL', str_type=bool)
-        self.null_val = scpiDevice('VOLTage:NULL:VALue', str_type=float)
+        ch_zero = ch[['volt', 'curr', 'res', 'temp']] # same as ch_aper_nplc wihtout fres
+        self.zero = scpiDevice('{mode}:ZERO:AUTO', str_type=bool,
+                                   options=dict(mode=self.mode),
+                                   options_lim=dict(mode=ch_zero) ) # Also use ONCE (immediate zero, then off)
+        ch_range = ch[[0, 1, 2,  4, 5,  9, 10]] # everything except continuity, diode, freq, per and temperature
+        self.autorange = scpiDevice('{mode}:RANGE:AUTO', str_type=bool,
+                                   options=dict(mode=self.mode),
+                                   options_lim=dict(mode=ch_range) ) # Also use ONCE (immediate autorange, then off)
+        # TODO handle all ranges:
+        #  VOLT: [.1, 1., 10., 100., 1000.]
+        #  current: [.1e-3, 1e-3, 1e-2, 1e-1, 1, 3]
+        #  res: [100, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9]  # 100 Ohm to 1GOhm
+        self.range = scpiDevice('VOLTage:RANGe', str_type=float, choices=[.1, 1., 10., 100., 1000.]) # Setting this disables auto range
+        ch_null = ch[[0, 1, 2,  4, 5,  7, 8, 9, 10, 11]] # everything except continuity and diode
+        self.null_en = scpiDevice('{mode}:NULL', str_type=bool,
+                                  options=dict(mode=self.mode), options_lim=dict(mode=ch_null) )
+        self.null_val = scpiDevice('{mode}:NULL:VALue', str_type=float,
+                                  options=dict(mode=self.mode), options_lim=dict(mode=ch_null) )
+        self.voltdc_impedance_autoHigh = scpiDevice('VOLTage:IMPedance:AUTO', str_type=bool, doc='When True and V range <= 10V then impedance >10 GO else it is 10 MOhm')
+        self.temperature_transducer = scpiDevice('TEMPerature:TRANsducer:TYPE', choices=ChoiceStrings('FRTD', 'RTD', 'FTHermistor', 'THERmistor'))
+        # TODO handle temperature transducer subtypes
+        #      handle Resis, FrES, OCOMP
+        #      volt/current ac/dc peak
         ch = ChoiceStrings('NULL', 'DB', 'DBM', 'AVERage', 'LIMit')
         self.math_func = scpiDevice('CALCulate:FUNCtion', choices=ch)
         self.math_state = scpiDevice('CALCulate:STATe', str_type=bool)
@@ -1469,16 +1527,6 @@ class agilent_multi_34410A(visaInstrumentAsync):
         #      there seems to be some inteligent buffering going on, which is different in agilent and NI visas
         # When wait_on_event timesout, it produces the VisaIOError (VI_ERROR_TMO) exception
         #        the error code is available as VisaIOErrorInstance.error_code
-        # in [sense:] subsystem:
-        #  VOLTage:AC:BANDwidth, CURRent:AC:BANDwidth
-        #  (VOLTage:AC, VOLTage[:DC], CURRent:AC, CURRent[:DC], RESistance, FRESistance, FREQuency, PERiod, TEMPerature, CAPacitance):NULL
-        #  :RANGe (all except Temperature)
-        #  :NLPC, APERture:ENABled (only VOLTage[:DC], CURRent[:DC], RES, FRES, TEMP)
-        #  :APERture (only VOLTage[:DC], CURRent[:DC], RES, FRES, FREQ, PERiod, TEMP)
-        # IMPedance:AUTO (VOLTage[:DC])
-        # ZERO:AUTO ((VOLTage[:DC], CURRent[:DC], RES, TEMP)
-        # OCOMpensated (RES and FRES)
-        #  FRES and RES parameters are the same.
 
 
 
