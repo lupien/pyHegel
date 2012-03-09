@@ -715,6 +715,21 @@ class scpiDevice(BaseDevice):
         if t == None or (type(t) == type and issubclass(t, basestring)):
             return valstr
         return t(valstr)
+    def _check_option(self, option, val):
+        if option not in self._options.keys():
+                raise KeyError, self.perror('This device does not handle option "%s".'%option)
+        lim = self._options_lim.get(option)
+        if isinstance(lim, tuple):
+            if lim[0] != None and val<lim[0]:
+                return self.perror('Option "%s" needs to be >= %r, instead it was %r'%(option, lim[0], val))
+            if lim[1] != None and val>lim[1]:
+                return self.perror('Option "%s" needs to be <= %r, instead it was %r'%(option, lim[1], val))
+        elif lim == None:
+            pass
+        else: # assume we have some list/set/Choice like object
+            if val not in lim:
+                return self.perror('Option "%s" needs to be one of %r, instead it was %r'%(option, lim, val))
+        return None
     def _combine_options(self, **kwarg):
         options = self._options.copy()  # get default values first
         lims = self._options_lim
@@ -724,21 +739,18 @@ class scpiDevice(BaseDevice):
         # for testing.
         for k, v in options.iteritems():
             if isinstance(v, BaseDevice) and k not in kwarg:
-                kwarg[k] = v.getcache()
+                val = v.getcache()
+                kwarg[k] = val
+                ck = self._check_option(k, val)
+                if ck != None:
+                    # There was an error, returned value not currently valid
+                    # so return it instead of dictionnary
+                    return ck
         for k, v in kwarg.iteritems():
-            if k not in keys:
-                raise KeyError, self.perror('This device does not handle option "%s".'%k)
-            lim = lims.get(k)
-            if isinstance(lim, tuple):
-                if lim[0] != None and v<lim[0]:
-                    raise ValueError, self.perror('Option "%s" needs to be >= %r, instead it was %r'%(k, lim[0], v))
-                if lim[1] != None and v>lim[1]:
-                    raise ValueError, self.perror('Option "%s" needs to be <= %r, instead it was %r'%(k, lim[1], v))
-            elif lim == None:
-                pass
-            else: # assume we have some list/set/Choice like object
-                if v not in lim:
-                    raise ValueError, self.perror('Option "%s" needs to be one of %r, instead it was %r'%(k, lim, v))
+            ck = self._check_option(k, v)
+            if ck != None:
+                # in case of error, raise it
+                raise ValueError, ck
         # everything checks out so use those kwarg
         options.update(kwarg)
         return options
@@ -747,6 +759,10 @@ class scpiDevice(BaseDevice):
            raise NotImplementedError, self.perror('This device does not handle _setdev')
         val = self._tostr(val)
         options = self._combine_options(**kwarg)
+        if not isinstance(options, dict):
+            # There was an error in default options, raise error
+            # options is the error string
+            raise ValueError, options
         command = self._setdev_p + ' ' + val
         command = command.format(**options)
         self.instr.write(command)
@@ -754,6 +770,9 @@ class scpiDevice(BaseDevice):
         if self._getdev_p == None:
            raise NotImplementedError, self.perror('This device does not handle _getdev')
         options = self._combine_options(**kwarg)
+        if not isinstance(options, dict):
+            # There was an error in default options, so skip asking instrument
+            return None
         command = self._getdev_p
         command = command.format(**options)
         ret = self.instr.ask(command)
