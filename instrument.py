@@ -660,11 +660,27 @@ class MemoryDevice(BaseDevice):
 
 class scpiDevice(BaseDevice):
     def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None,
-                 choices=None, doc='', **extrak):
+                 choices=None, doc='', options={}, options_lim={}, **extrak):
         """
            str_type can be float, int, None
            If choices is a subclass of ChoiceBase, then str_Type will be
            set to that object if unset.
+           If only getstr is not given and autoget is true and
+           a getstr is created by appending '?' to setstr.
+
+           options is a list of optional parameters for get and set.
+                  It is a dictionnary, where the keys are the option name
+                  and the values are the default value for each option.
+                  If the value is a device. Then by default the cache of the
+                  device is used.
+                  An option like 'ch' can be used in the setstr/getstr parameter
+                     as {ch} (see string.format)
+           options_lim is the range of values: It can be
+                      -None (the default) which means no limit
+                      -a tuple of (min, max)
+                               either one can be None to be unset
+                      -a list of choices (the object needs to handle __contains__)
+
         """
         if setstr == None and getstr == None:
             raise ValueError, 'At least one of setstr or getstr needs to be specified'
@@ -675,6 +691,8 @@ class scpiDevice(BaseDevice):
         if getstr == None and autoget:
             getstr = setstr+'?'
         self._getdev_p = getstr
+        self._options = options
+        self._options_lim = options_lim
         self.type = str_type
     def _tostr(self, val):
         # This function converts from val to a str for the command
@@ -697,15 +715,48 @@ class scpiDevice(BaseDevice):
         if t == None or (type(t) == type and issubclass(t, basestring)):
             return valstr
         return t(valstr)
-    def _setdev(self, val):
+    def _combine_options(self, **kwarg):
+        options = self._options.copy()  # get default values first
+        lims = self._options_lim
+        keys = options.keys()
+        # get values from devices when needed.
+        # The list of correct values could be a subset so push them to kwarg
+        # for testing.
+        for k, v in options.iteritems():
+            if isinstance(v, BaseDevice) and k not in kwarg:
+                kwarg[k] = v.getcache()
+        for k, v in kwarg.iteritems():
+            if k not in keys:
+                raise KeyError, self.perror('This device does not handle option "%s".'%k)
+            lim = lims.get(k)
+            if isinstance(lim, tuple):
+                if lim[0] != None and v<lim[0]:
+                    raise ValueError, self.perror('Option "%s" needs to be >= %r, instead it was %r'%(k, lim[0], v))
+                if lim[1] != None and v>lim[1]:
+                    raise ValueError, self.perror('Option "%s" needs to be <= %r, instead it was %r'%(k, lim[1], v))
+            elif lim == None:
+                pass
+            else: # assume we have some list/set/Choice like object
+                if v not in lim:
+                    raise ValueError, self.perror('Option "%s" needs to be one of %r, instead it was %r'%(k, lim, v))
+        # everything checks out so use those kwarg
+        options.update(kwarg)
+        return options
+    def _setdev(self, val, **kwarg):
         if self._setdev_p == None:
            raise NotImplementedError, self.perror('This device does not handle _setdev')
         val = self._tostr(val)
-        self.instr.write(self._setdev_p+' '+val)
-    def _getdev(self):
+        options = self._combine_options(**kwarg)
+        command = self._setdev_p + ' ' + val
+        command = command.format(**options)
+        self.instr.write(command)
+    def _getdev(self, **kwarg):
         if self._getdev_p == None:
            raise NotImplementedError, self.perror('This device does not handle _getdev')
-        ret = self.instr.ask(self._getdev_p)
+        options = self._combine_options(**kwarg)
+        command = self._getdev_p
+        command = command.format(**options)
+        ret = self.instr.ask(command)
         return self._fromstr(ret)
 
 def _decode_block_header(s):
@@ -1357,6 +1408,9 @@ class agilent_multi_34410A(visaInstrumentAsync):
         self.current_aperture = scpiDevice('CURRent:APERture', str_type=float) # DC, in seconds
         self.res_aperture = scpiDevice('RESistance:APERture', str_type=float)
         self.four_res_aperture = scpiDevice('FRESistance:APERture', str_type=float)
+        self.aperture = scpiDevice('{mode}:APERture', str_type=float, min = 0, max = 1.1,
+                                   options=dict(mode=self.mode),
+                                   options_lim=dict(mode=ChoiceStrings('VOLTage', 'CURRent', 'RESistance', 'FRESistance')))
         # Auto zero doubles the time to take each point
         self.zero = scpiDevice('VOLTage:ZERO:AUTO', str_type=bool) # Also use ONCE (immediate zero, then off)
         self.autorange = scpiDevice('VOLTage:RANGE:AUTO', str_type=bool) # Also use ONCE (immediate zero, then off)
