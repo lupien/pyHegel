@@ -1418,7 +1418,6 @@ class agilent_rf_33522A(visaInstrument):
     def phase_sync(self):
         self.write('PHASe:SYNChronize')
 
-#TODO: handle multiconf stuff VOLT, CURR nlpc ...
 class agilent_multi_34410A(visaInstrumentAsync):
     def math_clear(self):
         self.write('CALCulate:AVERage:CLEar')
@@ -1490,7 +1489,6 @@ class agilent_multi_34410A(visaInstrumentAsync):
         self.freq_period_volt_range = devOption(ch_freqperi, '{mode}:VOLTage:RANGe', str_type=float,
                                                 choices=[.1, 1., 10., 100., 1000.]) # Setting this disables auto range
 
-        # Auto zero doubles the time to take each point
         ch_zero = ch[['volt', 'curr', 'res', 'temp']] # same as ch_aper_nplc wihtout fres
         self.zero = devOption(ch_zero, '{mode}:ZERO:AUTO', str_type=bool,
                               doc='Enabling auto zero double the time to take each point (the value and a zero correction is done for each point)') # Also use ONCE (immediate zero, then off)
@@ -1505,8 +1503,21 @@ class agilent_multi_34410A(visaInstrumentAsync):
         self.null_en = devOption(ch_null, '{mode}:NULL', str_type=bool)
         self.null_val = devOption(ch_null, '{mode}:NULL:VALue', str_type=float)
         self.voltdc_impedance_autoHigh = scpiDevice('VOLTage:IMPedance:AUTO', str_type=bool, doc='When True and V range <= 10V then impedance >10 GO else it is 10 MOhm')
-        self.temperature_transducer = scpiDevice('TEMPerature:TRANsducer:TYPE', choices=ChoiceStrings('FRTD', 'RTD', 'FTHermistor', 'THERmistor'))
-        # TODO handle temperature transducer subtypes
+        tch = ChoiceStrings('FRTD', 'RTD', 'FTHermistor', 'THERmistor')
+        self.temperature_transducer = scpiDevice('TEMPerature:TRANsducer:TYPE', choices=tch)
+        # TODO limit the values for subtype
+        self.temperature_transducer_subtype = scpiDevice('TEMPerature:TRANsducer:{trans}:TYPE', 
+                                        options=dict(trans=self.temperature_transducer),
+                                        str_type=float)
+        tch_rtd = tch[['frtd', 'rtd']]
+        self.temperature_transducer_rtd_ref = scpiDevice('TEMPerature:TRANsducer:{trans}:RESistance',
+                                        min = 49, max= 2.1e3, str_type=float,
+                                        options=dict(trans=self.temperature_transducer),
+                                        options_lim=dict(trans=tch_rtd))
+        self.temperature_transducer_rtd_off = scpiDevice('TEMPerature:TRANsducer:{trans}:OCOMpensated', str_type=bool,
+                                        options=dict(trans=self.temperature_transducer),
+                                        options_lim=dict(trans=tch_rtd))
+
         ch_compens = ch[['res', 'fres']]
         self.res_offset_comp = devOption(ch_compens, '{mode}:OCOMpensated', str_type=bool)
         ch_peak = ch[['volt', 'volt:ac', 'curr', 'curr:ac']]
