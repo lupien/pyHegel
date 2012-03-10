@@ -1422,12 +1422,38 @@ class agilent_multi_34410A(visaInstrumentAsync):
     def math_clear(self):
         self.write('CALCulate:AVERage:CLEar')
     def _current_config(self, dev_obj=None, options={}):
-        # handle different modes properly
-        return self._conf_helper('mode', 'nplc', 'aperture',
-                                 'aperture_en', 'zero', 'autorange',
-                                 'trig_src', 'trig_delay', 'trig_count',
-                                 'sample_count', 'sample_src', 'sample_timer',
-                                 'trig_delayauto', 'line_freq')
+        mode = self.mode.getcache()
+        choices = self.mode.choices
+        baselist =('mode', 'trig_src', 'trig_delay', 'trig_count',
+                   'sample_count', 'sample_src', 'sample_timer', 'trig_delayauto',
+                   'line_freq', 'math_func')
+        if mode in choices[['curr:ac', 'volt:ac']]:
+            extra = ('bandwidth', 'autorange', 'range',
+                     'null_en', 'null_val', 'peak_mode_en')
+        elif mode in choices[['volt', 'curr']]:
+            extra = ('nplc', 'aperture', 'aperture_en', 'zero', 'autorange', 'range',
+                     'null_en', 'null_val', 'peak_mode_en')
+            if mode in choices[['volt']]:
+                extra += ('voltdc_impedance_autoHigh',)
+        elif mode in choices[['cont', 'diode']]:
+            extra = ()
+        elif mode in choices[['freq', 'period']]:
+            extra = ('aperture','null_en', 'null_val',  'freq_period_p_band',
+                        'freq_period_autorange', 'freq_period_volt_range')
+        elif mode in choices[['res', 'fres']]:
+            extra = ('nplc', 'aperture', 'aperture_en', 'autorange', 'range',
+                     'null_en', 'null_val', 'res_offset_comp')
+            if mode in choices[['res']]:
+                extra += ('zero',)
+        elif mode in choices[['cap']]:
+            extra = ('autorange', 'range', 'null_en', 'null_val')
+        elif mode in choices[['temp']]:
+            extra = ('nplc', 'aperture', 'aperture_en', 'null_en', 'null_val',
+                     'zero', 'temperature_transducer', 'temperature_transducer_subtype')
+            t_ch = self.temperature_transducer.choices
+            if self.temperature_transducer.getcache() in t_ch[['rtd', 'frtd']]:
+                extra += ('temperature_transducer_rtd_ref', 'temperature_transducer_rtd_off')
+        return self._conf_helper(*(baselist + extra))
     def set_long_avg(self, time, force=False):
         # update mode first, so aperture applies to correctly
         self.mode.get()
@@ -1538,11 +1564,11 @@ class agilent_multi_34410A(visaInstrumentAsync):
         self.math_func = scpiDevice('CALCulate:FUNCtion', choices=ch)
         self.math_state = scpiDevice('CALCulate:STATe', str_type=bool)
         self.math_avg = scpiDevice(getstr='CALCulate:AVERage:AVERage?', str_type=float, trig=True)
-        self.math_count = scpiDevice(getstr='CALCulate:AVERage:COUNt?', str_type=float)
-        self.math_max = scpiDevice(getstr='CALCulate:AVERage:MAXimum?', str_type=float)
-        self.math_min = scpiDevice(getstr='CALCulate:AVERage:MINimum?', str_type=float)
-        self.math_ptp = scpiDevice(getstr='CALCulate:AVERage:PTPeak?', str_type=float)
-        self.math_sdev = scpiDevice(getstr='CALCulate:AVERage:SDEViation?', str_type=float)
+        self.math_count = scpiDevice(getstr='CALCulate:AVERage:COUNt?', str_type=float, trig=True)
+        self.math_max = scpiDevice(getstr='CALCulate:AVERage:MAXimum?', str_type=float, trig=True)
+        self.math_min = scpiDevice(getstr='CALCulate:AVERage:MINimum?', str_type=float, trig=True)
+        self.math_ptp = scpiDevice(getstr='CALCulate:AVERage:PTPeak?', str_type=float, trig=True)
+        self.math_sdev = scpiDevice(getstr='CALCulate:AVERage:SDEViation?', str_type=float, trig=True)
         ch = ChoiceStrings('IMMediate', 'BUS', 'EXTernal')
         self.trig_src = scpiDevice('TRIGger:SOURce', choices=ch)
         self.trig_delay = scpiDevice('TRIGger:DELay', str_type=float) # seconds
