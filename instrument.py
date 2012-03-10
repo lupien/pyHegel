@@ -223,6 +223,9 @@ class BaseDevice(object):
                   trig=False, delay=False, redir_async=None):
         # instr and name updated by instrument's _create_devs
         # doc is inserted before the above doc
+        # autoinit can be False, True or a number.
+        # The number affects the default implementation of force_get:
+        # Bigger numbers are initialized first. 0 is not initialized, True is 1
         # setget makes us get the value after setting in
         #  this is usefull for instruments that could change the value
         #  under us.
@@ -613,9 +616,13 @@ class BaseInstrument(object):
         if time.time()-self._last_force < 2:
             # less than 2s since last force, skip it
             return
+        l = []
         for s, obj in self.devs_iter():
             if obj._autoinit:
-                obj.get()
+                l.append( (float(obj._autoinit), obj) )
+        l.sort(reverse=True)
+        for flag,obj in l:
+            obj.get()
         self._last_force = time.time()
     def iprint(self, force=False):
         if force:
@@ -659,7 +666,7 @@ class MemoryDevice(BaseDevice):
         self._cache = val
 
 class scpiDevice(BaseDevice):
-    def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None,
+    def __init__(self,setstr=None, getstr=None,  autoinit=True, autoget=True, str_type=None,
                  choices=None, doc='', options={}, options_lim={}, **extrak):
         """
            str_type can be float, int, None
@@ -680,13 +687,20 @@ class scpiDevice(BaseDevice):
                       -a tuple of (min, max)
                                either one can be None to be unset
                       -a list of choices (the object needs to handle __contains__)
+           By default, autoinit=True is transformed to 10 (higher priority)
+           unless options contains another device, then it is set to 1.
 
         """
         if setstr == None and getstr == None:
             raise ValueError, 'At least one of setstr or getstr needs to be specified'
         if isinstance(choices, ChoiceBase) and str_type == None:
             str_type = choices
-        BaseDevice.__init__(self, doc=doc, choices=choices, **extrak)
+        if autoinit == True:
+            autoinit = 10
+            test = [ True for k,v in options.iteritems() if isinstance(v, BaseDevice)]
+            if len(test):
+                autoinit = 1
+        BaseDevice.__init__(self, doc=doc, autoinit=autoinit, choices=choices, **extrak)
         self._setdev_p = setstr
         if getstr == None and autoget:
             getstr = setstr+'?'
@@ -694,6 +708,7 @@ class scpiDevice(BaseDevice):
         self._options = options
         self._options_lim = options_lim
         self.type = str_type
+        self._option_cache = {}
     def _tostr(self, val):
         # This function converts from val to a str for the command
         t = self.type
@@ -715,6 +730,17 @@ class scpiDevice(BaseDevice):
         if t == None or (type(t) == type and issubclass(t, basestring)):
             return valstr
         return t(valstr)
+    def _get_option_values(self, extradict={}):
+        optionsIter = self._options.iteritems()
+        d = {k:v.getcache() for k, v in optionsIter if isinstance(v, BaseDevice)}
+        d.update(extradict)
+        return d
+    def getcache(self):
+        #we need to check if we still are using the same options
+        curr_cache = self._get_option_values()
+        if self._option_cache != curr_cache:
+            self.setcache(None)
+        return super(scpiDevice, self).getcache()
     def _check_option(self, option, val):
         if option not in self._options.keys():
                 raise KeyError, self.perror('This device does not handle option "%s".'%option)
@@ -731,17 +757,13 @@ class scpiDevice(BaseDevice):
                 return self.perror('Option "%s" needs to be one of %r, instead it was %r'%(option, lim, val))
         return None
     def _combine_options(self, **kwarg):
-        options = self._options.copy()  # get default values first
-        lims = self._options_lim
-        keys = options.keys()
         # get values from devices when needed.
         # The list of correct values could be a subset so push them to kwarg
         # for testing.
-        for k, v in options.iteritems():
-            if isinstance(v, BaseDevice) and k not in kwarg:
-                val = v.getcache()
-                kwarg[k] = val
-                ck = self._check_option(k, val)
+        options = self._get_option_values(kwarg)
+        for k,v in options.iteritems():
+            if k not in kwarg:
+                ck = self._check_option(k, v)
                 if ck != None:
                     # There was an error, returned value not currently valid
                     # so return it instead of dictionnary
@@ -753,6 +775,7 @@ class scpiDevice(BaseDevice):
                 raise ValueError, ck
         # everything checks out so use those kwarg
         options.update(kwarg)
+        self._option_cache = options
         return options
     def _setdev(self, val, **kwarg):
         if self._setdev_p == None:
@@ -1407,6 +1430,8 @@ class agilent_multi_34410A(visaInstrumentAsync):
                                  'sample_count', 'sample_src', 'sample_timer',
                                  'trig_delayauto', 'line_freq')
     def set_long_avg(self, time, force=False):
+        # update mode first, so aperture applies to correctly
+        self.mode.get()
         line_period = 1/self.line_freq.getcache()
         if time > 1.:
             width = 10*line_period
@@ -1424,9 +1449,15 @@ class agilent_multi_34410A(visaInstrumentAsync):
           'CURRent:AC', 'VOLTage:AC', 'CAPacitance', 'CONTinuity', 'CURRent', 'VOLTage',
           'DIODe', 'FREQuency', 'PERiod', 'RESistance', 'FRESistance', 'TEMPerature', quotes=True)
         self.mode = scpiDevice('FUNC', choices=ch)
+        def devOption(lims, *arg, **kwarg):
+            kwarg.update(options=dict(mode=self.mode))
+            kwarg.update(options_lim=dict(mode=lims))
+            return scpiDevice(*arg, **kwarg)
+
         # _decode_float64_avg is needed because count points are returned
         # fetch? and read? return sample_count*trig_count data values (comma sep)
         self.fetch = scpiDevice(getstr='FETCh?',str_type=_decode_float64_avg, autoinit=False, trig=True) #You can't ask for fetch after an aperture change. You need to read some data first.
+        # autoinit false because it can take too long to readval
         self.readval = scpiDevice(getstr='READ?',str_type=_decode_float64_avg, autoinit=False, redir_async=self.fetch) # similar to INItiate followed by FETCh.
         self.fetch_all = scpiDevice(getstr='FETCh?',str_type=_decode_float64, autoinit=False, trig=True)
         self.fetch_std = scpiDevice(getstr='FETCh?',str_type=_decode_float64_std, autoinit=False, trig=True, doc="""
@@ -1442,9 +1473,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
         aper_max = float(self.ask('volt:aper? max'))
         aper_min = float(self.ask('volt:aper? min'))
         # TODO handle freq, period where valid values are .001, .010, .1, 1 (between .001 and 1 can use setget)
-        self.aperture = scpiDevice('{mode}:APERture', str_type=float, min = aper_min, max = aper_max, setget=True,
-                                   options=dict(mode=self.mode),
-                                   options_lim=dict(mode=ch_aper) )
+        self.aperture = devOption(ch_aper, '{mode}:APERture', str_type=float, min = aper_min, max = aper_max, setget=True)
         self.aperture_en = scpiDevice('{mode}:APERture:ENabled', str_type=bool,
                                    options=dict(mode=self.mode),
                                    options_lim=dict(mode=ch_aper_nplc) )
@@ -1453,19 +1482,19 @@ class agilent_multi_34410A(visaInstrumentAsync):
                                    options=dict(mode=self.mode),
                                    options_lim=dict(mode=ch_aper_nplc) )
         ch_band = ch[['curr:ac', 'volt:ac']]
-        self.bandwidth = scpiDevice('{mode}:BANDwidth', str_type=int,
+        self.bandwidth = scpiDevice('{mode}:BANDwidth', str_type=float,
                                    choices=[3, 20, 200],
                                    options=dict(mode=self.mode),
                                    options_lim=dict(mode=ch_band) ) # in Hz
         ch_freqperi = ch[['freq', 'per']]
-        self.fp_band = scpiDevice('{mode}:RANGe:LOWer', str_type=int,
+        self.freq_period_p_band = scpiDevice('{mode}:RANGe:LOWer', str_type=float,
                                    choices=[3, 20, 200],
                                    options=dict(mode=self.mode),
                                    options_lim=dict(mode=ch_freqperi) ) # in Hz
-        self.fp_volt_autorange = scpiDevice('{mode}:VOLTage:RANGe:AUTO', str_type=bool,
+        self.freq_period_autorange = scpiDevice('{mode}:VOLTage:RANGe:AUTO', str_type=bool,
                                    options=dict(mode=self.mode),
                                    options_lim=dict(mode=ch_freqperi) ) # Also use ONCE (immediate autorange, then off)
-        self.fp_volt_range = scpiDevice('{mode}:VOLTage:RANGe', str_type=float, choices=[.1, 1., 10., 100., 1000.],
+        self.freq_period_volt_range = scpiDevice('{mode}:VOLTage:RANGe', str_type=float, choices=[.1, 1., 10., 100., 1000.],
                                    options=dict(mode=self.mode),
                                    options_lim=dict(mode=ch_freqperi) ) # Setting this disables auto range
 
