@@ -1453,7 +1453,6 @@ class agilent_multi_34410A(visaInstrumentAsync):
             kwarg.update(options=dict(mode=self.mode))
             kwarg.update(options_lim=dict(mode=lims))
             return scpiDevice(*arg, **kwarg)
-
         # _decode_float64_avg is needed because count points are returned
         # fetch? and read? return sample_count*trig_count data values (comma sep)
         self.fetch = scpiDevice(getstr='FETCh?',str_type=_decode_float64_avg, autoinit=False, trig=True) #You can't ask for fetch after an aperture change. You need to read some data first.
@@ -1474,50 +1473,33 @@ class agilent_multi_34410A(visaInstrumentAsync):
         aper_min = float(self.ask('volt:aper? min'))
         # TODO handle freq, period where valid values are .001, .010, .1, 1 (between .001 and 1 can use setget)
         self.aperture = devOption(ch_aper, '{mode}:APERture', str_type=float, min = aper_min, max = aper_max, setget=True)
-        self.aperture_en = scpiDevice('{mode}:APERture:ENabled', str_type=bool,
-                                   options=dict(mode=self.mode),
-                                   options_lim=dict(mode=ch_aper_nplc) )
-        self.nplc = scpiDevice('{mode}:NPLC', str_type=float,
-                                   choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100],
-                                   options=dict(mode=self.mode),
-                                   options_lim=dict(mode=ch_aper_nplc) )
+        self.aperture_en = devOption(ch_aper_nplc, '{mode}:APERture:ENabled', str_type=bool)
+        self.nplc = devOption(ch_aper_nplc, '{mode}:NPLC', str_type=float,
+                                   choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100])
         ch_band = ch[['curr:ac', 'volt:ac']]
-        self.bandwidth = scpiDevice('{mode}:BANDwidth', str_type=float,
-                                   choices=[3, 20, 200],
-                                   options=dict(mode=self.mode),
-                                   options_lim=dict(mode=ch_band) ) # in Hz
+        self.bandwidth = devOption(ch_band, '{mode}:BANDwidth', str_type=float,
+                                   choices=[3, 20, 200]) # in Hz
         ch_freqperi = ch[['freq', 'per']]
-        self.freq_period_p_band = scpiDevice('{mode}:RANGe:LOWer', str_type=float,
-                                   choices=[3, 20, 200],
-                                   options=dict(mode=self.mode),
-                                   options_lim=dict(mode=ch_freqperi) ) # in Hz
-        self.freq_period_autorange = scpiDevice('{mode}:VOLTage:RANGe:AUTO', str_type=bool,
-                                   options=dict(mode=self.mode),
-                                   options_lim=dict(mode=ch_freqperi) ) # Also use ONCE (immediate autorange, then off)
-        self.freq_period_volt_range = scpiDevice('{mode}:VOLTage:RANGe', str_type=float, choices=[.1, 1., 10., 100., 1000.],
-                                   options=dict(mode=self.mode),
-                                   options_lim=dict(mode=ch_freqperi) ) # Setting this disables auto range
-
+        self.freq_period_p_band = devOption(ch_freqperi, '{mode}:RANGe:LOWer', str_type=float,
+                                   choices=[3, 20, 200]) # in Hz
+        self.freq_period_autorange = devOption(ch_freqperi, '{mode}:VOLTage:RANGe:AUTO', str_type=bool) # Also use ONCE (immediate autorange, then off)
+        self.freq_period_volt_range = devOption(ch_freqperi, '{mode}:VOLTage:RANGe', str_type=float,
+                                                choices=[.1, 1., 10., 100., 1000.]) # Setting this disables auto range
 
         # Auto zero doubles the time to take each point
         ch_zero = ch[['volt', 'curr', 'res', 'temp']] # same as ch_aper_nplc wihtout fres
-        self.zero = scpiDevice('{mode}:ZERO:AUTO', str_type=bool,
-                                   options=dict(mode=self.mode),
-                                   options_lim=dict(mode=ch_zero) ) # Also use ONCE (immediate zero, then off)
+        self.zero = devOption(ch_zero, '{mode}:ZERO:AUTO', str_type=bool,
+                              doc='Enabling auto zero double the time to take each point (the value and a zero correction is done for each point)') # Also use ONCE (immediate zero, then off)
         ch_range = ch[[0, 1, 2,  4, 5,  9, 10]] # everything except continuity, diode, freq, per and temperature
-        self.autorange = scpiDevice('{mode}:RANGE:AUTO', str_type=bool,
-                                   options=dict(mode=self.mode),
-                                   options_lim=dict(mode=ch_range) ) # Also use ONCE (immediate autorange, then off)
+        self.autorange = devOption(ch_range, '{mode}:RANGE:AUTO', str_type=bool) # Also use ONCE (immediate autorange, then off)
         # TODO handle all ranges:
         #  VOLT: [.1, 1., 10., 100., 1000.]
         #  current: [.1e-3, 1e-3, 1e-2, 1e-1, 1, 3]
         #  res: [100, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9]  # 100 Ohm to 1GOhm
         self.range = scpiDevice('VOLTage:RANGe', str_type=float, choices=[.1, 1., 10., 100., 1000.]) # Setting this disables auto range
         ch_null = ch[[0, 1, 2,  4, 5,  7, 8, 9, 10, 11]] # everything except continuity and diode
-        self.null_en = scpiDevice('{mode}:NULL', str_type=bool,
-                                  options=dict(mode=self.mode), options_lim=dict(mode=ch_null) )
-        self.null_val = scpiDevice('{mode}:NULL:VALue', str_type=float,
-                                  options=dict(mode=self.mode), options_lim=dict(mode=ch_null) )
+        self.null_en = devOption(ch_null, '{mode}:NULL', str_type=bool)
+        self.null_val = devOption(ch_null, '{mode}:NULL:VALue', str_type=float)
         self.voltdc_impedance_autoHigh = scpiDevice('VOLTage:IMPedance:AUTO', str_type=bool, doc='When True and V range <= 10V then impedance >10 GO else it is 10 MOhm')
         self.temperature_transducer = scpiDevice('TEMPerature:TRANsducer:TYPE', choices=ChoiceStrings('FRTD', 'RTD', 'FTHermistor', 'THERmistor'))
         # TODO handle temperature transducer subtypes
