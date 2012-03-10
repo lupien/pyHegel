@@ -1450,8 +1450,12 @@ class agilent_multi_34410A(visaInstrumentAsync):
           'DIODe', 'FREQuency', 'PERiod', 'RESistance', 'FRESistance', 'TEMPerature', quotes=True)
         self.mode = scpiDevice('FUNC', choices=ch)
         def devOption(lims, *arg, **kwarg):
-            kwarg.update(options=dict(mode=self.mode))
-            kwarg.update(options_lim=dict(mode=lims))
+            options = kwarg.pop('options', {}).copy()
+            options_lim = kwarg.pop('options_lim', {}).copy()
+            options.update(mode=self.mode)
+            options_lim.update(mode=lims)
+            kwarg.update(options=options)
+            kwarg.update(options_lim=options_lim)
             return scpiDevice(*arg, **kwarg)
         # _decode_float64_avg is needed because count points are returned
         # fetch? and read? return sample_count*trig_count data values (comma sep)
@@ -1503,8 +1507,22 @@ class agilent_multi_34410A(visaInstrumentAsync):
         self.voltdc_impedance_autoHigh = scpiDevice('VOLTage:IMPedance:AUTO', str_type=bool, doc='When True and V range <= 10V then impedance >10 GO else it is 10 MOhm')
         self.temperature_transducer = scpiDevice('TEMPerature:TRANsducer:TYPE', choices=ChoiceStrings('FRTD', 'RTD', 'FTHermistor', 'THERmistor'))
         # TODO handle temperature transducer subtypes
-        #      handle Resis, FrES, OCOMP
-        #      volt/current ac/dc peak
+        ch_compens = ch[['res', 'fres']]
+        self.res_offset_comp = devOption(ch_compens, '{mode}:OCOMpensated', str_type=bool)
+        ch_peak = ch[['volt', 'volt:ac', 'curr', 'curr:ac']]
+        self.peak_mode_en = devOption(ch_peak, '{mode}:PEAK:STATe', str_type=bool)
+        peak_op = dict(peak=self.peak_mode_en)
+        peak_op_lim = dict(peak=[True])
+        self.fetch_peaks_ptp = devOption(ch_peak, 'FETCh:{mode}:PTPeak', str_type=float,
+                                         doc='Call this after a fetch or readval',
+                                         options=peak_op, options_lim=peak_op_lim, autoinit=False, trig=True)
+        ch_peak_minmax = ch[['volt', 'curr']]
+        self.fetch_peaks_min = devOption(ch_peak_minmax, 'FETCh:{mode}:PEAK:MINimum', str_type=float,
+                                         doc='Call this after a fetch or readval',
+                                         options=peak_op, options_lim=peak_op_lim, autoinit=False, trig=True)
+        self.fetch_peaks_max = devOption(ch_peak_minmax, 'FETCh:{mode}:PEAK:MAXimum', str_type=float,
+                                         doc='Call this after a fetch or readval',
+                                         options=peak_op, options_lim=peak_op_lim, autoinit=False, trig=True)
         ch = ChoiceStrings('NULL', 'DB', 'DBM', 'AVERage', 'LIMit')
         self.math_func = scpiDevice('CALCulate:FUNCtion', choices=ch)
         self.math_state = scpiDevice('CALCulate:STATe', str_type=bool)
