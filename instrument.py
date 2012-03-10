@@ -205,6 +205,9 @@ def wait_on_event(task_or_event, check_state = None, max_time=None):
              QtCore.QEventLoop.AllEvents, 20) # 20 ms max
 
 class BaseDevice(object):
+    @property
+    def __doc__(self):
+        b = \
     """
         ----------------
         All devices provide a get method. 
@@ -218,6 +221,9 @@ class BaseDevice(object):
          dev() which is the same as getcache
          dev(val) which is the same as set(val)
     """
+        if self.choices:
+            return self._doc+'-------------\n Possible value to set: %s'%repr(self.choices)+b
+        return self._doc+b
     def __init__(self, autoinit=True, doc='', setget=False,
                   min=None, max=None, choices=None, multi=False,
                   trig=False, delay=False, redir_async=None):
@@ -244,9 +250,7 @@ class BaseDevice(object):
         self.min = min
         self.max = max
         self.choices = choices
-        if choices:
-            doc+='-------------\n Possible value to set: %s'%repr(choices)
-        self.__doc__ = doc+BaseDevice.__doc__
+        self._doc = doc
         # obj is used by _get_conf_header
         self._format = dict(file=False, multi=multi, graph=[],
                             append=False, header=None, bin=False,
@@ -992,6 +996,37 @@ class ChoiceIndex(ChoiceBase):
     def __repr__(self):
         return repr(self.values)
 
+class ChoiceDevDep(ChoiceBase):
+    """ This class is a wrapper around a dictionnary of lists
+        or other choices.
+        The correct list selected from the dictionnary keys, according
+        to the current value of dev.
+        The keys can be values or and object that handles 'in' testing.
+        A default choice can be given with a key of None
+    """
+    def __init__(self, dev, choices):
+        self.choices = choices
+        self.dev = dev
+    def _get_choice(self):
+        val = self.dev.getcache()
+        for k, v in self.choices.iteritems():
+            if isinstance(k, (tuple, ChoiceBase)) and val in k:
+                return v
+            elif val == k:
+                return v
+        return self.choices.get(None, [])
+    # call and tostr will only be used if str_typ is set to this class.
+    #  This can be done if all the choices are instance of ChoiceBase
+    def __call__(self, input_str):
+        return self._get_choice()(input_str)
+    def tostr(self, input_choice):
+        return self._get_choice().tostr(input_choice)
+    def __contains__(self, x):
+        return x in self._get_choice()
+    def __repr__(self):
+        return repr(self._get_choice())
+
+
 def make_choice_list(list_values, start_exponent, end_exponent):
     """
     given list_values=[1,3]
@@ -1520,22 +1555,22 @@ class agilent_multi_34410A(visaInstrumentAsync):
                               doc='Enabling auto zero double the time to take each point (the value and a zero correction is done for each point)') # Also use ONCE (immediate zero, then off)
         ch_range = ch[[0, 1, 2,  4, 5,  9, 10]] # everything except continuity, diode, freq, per and temperature
         self.autorange = devOption(ch_range, '{mode}:RANGE:AUTO', str_type=bool) # Also use ONCE (immediate autorange, then off)
-        # TODO handle all ranges:
-        #  VOLT: [.1, 1., 10., 100., 1000.]
-        #  current: [.1e-3, 1e-3, 1e-2, 1e-1, 1, 3]
-        #  res: [100, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9]  # 100 Ohm to 1GOhm
-        self.range = scpiDevice('VOLTage:RANGe', str_type=float, choices=[.1, 1., 10., 100., 1000.]) # Setting this disables auto range
+        range_ch = ChoiceDevDep(self.mode, {ch[['volt', 'volt:ac']]:[.1, 1., 10., 100., 1000.],
+                                            ch[['curr', 'curr:ac']]:[.1e-3, 1e-3, 1e-2, 1e-1, 1, 3],
+                                            ch[['fres', 'res']]:[1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9] }) # in V, A, Ohm
+        self.range = devOption(ch_range, '{mode}:RANGe', str_type=float, choices=range_ch) # Setting this disables auto range
         ch_null = ch[[0, 1, 2,  4, 5,  7, 8, 9, 10, 11]] # everything except continuity and diode
         self.null_en = devOption(ch_null, '{mode}:NULL', str_type=bool)
         self.null_val = devOption(ch_null, '{mode}:NULL:VALue', str_type=float)
         self.voltdc_impedance_autoHigh = scpiDevice('VOLTage:IMPedance:AUTO', str_type=bool, doc='When True and V range <= 10V then impedance >10 GO else it is 10 MOhm')
         tch = ChoiceStrings('FRTD', 'RTD', 'FTHermistor', 'THERmistor')
         self.temperature_transducer = scpiDevice('TEMPerature:TRANsducer:TYPE', choices=tch)
-        # TODO limit the values for subtype
-        self.temperature_transducer_subtype = scpiDevice('TEMPerature:TRANsducer:{trans}:TYPE', 
-                                        options=dict(trans=self.temperature_transducer),
-                                        str_type=float)
         tch_rtd = tch[['frtd', 'rtd']]
+        ch_temp_typ = ChoiceDevDep(self.temperature_transducer, {tch_rtd:[85], None:[2252, 5000, 10000]})
+        self.temperature_transducer_subtype = scpiDevice('TEMPerature:TRANsducer:{trans}:TYPE',
+                                        choices = ch_temp_typ,
+                                        options=dict(trans=self.temperature_transducer),
+                                        str_type=int)
         self.temperature_transducer_rtd_ref = scpiDevice('TEMPerature:TRANsducer:{trans}:RESistance',
                                         min = 49, max= 2.1e3, str_type=float,
                                         options=dict(trans=self.temperature_transducer),
