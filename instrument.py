@@ -205,9 +205,6 @@ def wait_on_event(task_or_event, check_state = None, max_time=None):
              QtCore.QEventLoop.AllEvents, 20) # 20 ms max
 
 class BaseDevice(object):
-    @property
-    def __doc__(self):
-        b = \
     """
         ----------------
         All devices provide a get method. 
@@ -221,9 +218,6 @@ class BaseDevice(object):
          dev() which is the same as getcache
          dev(val) which is the same as set(val)
     """
-        if self.choices:
-            return self._doc+'-------------\n Possible value to set: %s'%repr(self.choices)+b
-        return self._doc+b
     def __init__(self, autoinit=True, doc='', setget=False,
                   min=None, max=None, choices=None, multi=False,
                   trig=False, delay=False, redir_async=None):
@@ -255,6 +249,34 @@ class BaseDevice(object):
         self._format = dict(file=False, multi=multi, graph=[],
                             append=False, header=None, bin=False,
                             options={}, obj=self)
+    def __getattribute__(self, name):
+        # we override __doc__ so for instances we return the result from _get_docstring
+        # But when asking for __doc__ on the class we get the original docstring
+        # Note that __doc__ is automatically set for every class (defaults to None)
+        #  and it does not refer to its parent __doc__.
+        # Also __doc__ is not writable. To make it writable, it needs to be
+        # overwritten in a metaclass (cls.__doc__=cls.__doc__ is enough)
+        # Another option is to set __doc__ = property(_get_docstring) in all
+        # classes (or use a metaclass to do that automatically) but then
+        # asking for __doc__ on the class does not return a string but a property object.
+        if name == '__doc__':
+            return self._get_docstring()
+        return super(BaseDevice, self).__getattribute__(name)
+    def _get_docstring(self):
+        doc_base = BaseDevice.__doc__
+        if doc_base == None:
+            doc_base = ''
+        doc = self._doc
+        extra = ''
+        if self.choices:
+            extra = '\n-------------\n Possible value to set: %s\n'%repr(self.choices)
+        elif self.min != None and self.max != None:
+            extra = '\n-------------\n Value between %r and %r\n'%(self.min, self.max)
+        elif self.min != None:
+            extra = '\n-------------\n Value at least %r\n'%(self.min)
+        elif self.max != None:
+            extra = '\n-------------\n Value at most %r\n'%(self.max)
+        return doc + extra + doc_base
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val, **kwarg):
