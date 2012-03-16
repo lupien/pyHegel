@@ -18,6 +18,7 @@ import subprocess
 import time
 import threading
 import weakref
+from collections import OrderedDict  # this is a subclass of dict
 from PyQt4 import QtGui, QtCore
 from scipy.optimize import brentq as brentq_rootsolver
 
@@ -616,6 +617,14 @@ class BaseInstrument(object):
         raise NotImplementedError, self.perror('This instrument class does not implement write')
     def ask(self, question):
         raise NotImplementedError, self.perror('This instrument class does not implement ask')
+    def ask_write(self, command):
+        """
+        Automatically selects between ask or write depending on the presence of a ?
+        """
+        if '?' in command:
+            return self.ask(command)
+        else:
+            self.write(command)
     def init(self, full=False):
         """ Do instrument initialization (full=True)/reset (full=False) here """
         pass
@@ -886,6 +895,51 @@ def _decode_float64_avg(s):
 def _decode_float64_std(s):
     return _decode_block_auto(s, t=np.float64).std(ddof=1)
 
+class quoted_string(object):
+    def __init__(self, quote_char='"'):
+        self._quote_char = quote_char
+    def __call__(self, quoted_str):
+        quote_char = self._quote_char
+        if quote_char == quoted_str[0] and quote_char == quoted_str[-1]:
+            return quoted_str[1:-1]
+        else:
+            print 'Warning, string <%s> does not start and end with <%s>'%(quoted_str, quote_char)
+            return quoted_str
+    def tostr(self, unquoted_str):
+        quote_char = self._quote_char
+        if quote_char in unquoted_str:
+            raise ValueError, 'The given string already contains a quote :%s:'%quote_char
+        return quote_char+unquoted_str+quote_char
+
+class quoted_list(quoted_string):
+    def __init__(self, sep=',', **kwarg):
+        super(quoted_list,self).__init__(**kwarg)
+        self._sep = sep
+    def __call__(self, quoted_l):
+        unquoted = super(quoted_list,self).__call__(quoted_l)
+        return unquoted.split(self._sep)
+    def tostr(self, unquoted_l):
+        unquoted = string.join(unquoted_l, sep=self._sep)
+        return super(quoted_list,self).tostr(unquoted)
+
+class quoted_dict(quoted_list):
+    def __init__(self, empty='NO CATALOG', **kwarg):
+        super(quoted_dict,self).__init__(**kwarg)
+        self._empty = empty
+    def __call__(self, quoted_l):
+        l = super(quoted_dict,self).__call__(quoted_l)
+        if l == [self._empty]:
+            return OrderedDict()
+        return OrderedDict(zip(l[0::2], l[1::2]))
+    def tostr(self, d):
+        if d == {}:
+            l = [self._empty]
+        else:
+            l = []
+            for k,v in d.iteritems():
+                l.extend([k ,v])
+        return super(quoted_dict,self).tostr(l)
+
 class ChoiceBase(object):
     pass
 
@@ -1047,6 +1101,43 @@ class ChoiceDevDep(ChoiceBase):
         return x in self._get_choice()
     def __repr__(self):
         return repr(self._get_choice())
+
+class ChoiceDev(ChoiceBase):
+    """
+     Get the choices from a device
+     Wether device return a dict or a list, it should work the same
+     For a dict you can use keys or values (when keys fail)
+    """
+    def __init__(self, dev, sub_type=None):
+        self.dev = dev
+        self.sub_type = sub_type
+    def _get_choices(self):
+        return self.dev.getcache()
+    # call and tostr will only be used if str_typ is set to this class.
+    #  This can be done if all the choices are instance of ChoiceBase
+    def __call__(self, input_str):
+        if self.sub_type != None:
+            input_str = self.sub_type(input_str)
+        return input_str
+    def tostr(self, input_choice):
+        choices = self._get_choices()
+        if isinstance(choices, dict):
+            if input_choice not in choices.keys() and input_choice in choices.values():
+                ch = [k for k,v in choices.iteritems() if v == input_choice][0]
+        else:
+            ch = input_str
+        if self.sub_type != None:
+            ch = self.sub_type.tostr(ch)
+        return ch
+    def __contains__(self, x):
+        choices = self._get_choices()
+        if isinstance(choices, dict):
+            if x in choices.keys():
+                return True
+            choices = choices.values()
+        return x in choices
+    def __repr__(self):
+        return repr(self._get_choices())
 
 
 def make_choice_list(list_values, start_exponent, end_exponent):
@@ -1734,13 +1825,70 @@ class agilent_EXA(visaInstrument):
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
-class agilent_PNAL(visaInstrument):
+class agilent_PNAL(visaInstrumentAsync):
     def init(self, full=False):
         self.write(':format REAL,64')
         self.write(':format:border swap')
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('bandwidth', 'freq_start', 'freq_stop','average_count')
+    def abort(self):
+        self.write('ABORt')
+    def create_measurement(self, name, param, ch=None):
+        """
+        name: any unique, non-empty string
+        param: Any S parameter as S11 or S1_1 (second form only for double-digit port numbers S10_1)
+               Ratio measurement, any 2 physical receiver separated by / and followed by , and source port
+               like A/R1,3
+               Non-Ratio measurement: Any receiver followed by , and source port like A,4
+               Ratio and non-ratio can also use logical receiver notation
+               ADC measurement: ADC receiver, then , then source por like AI1,2
+               Balanced measurment: ...
+
+               Warning, if the name already exists, an error is produced.
+        """
+        if ch==None:
+            ch=self.current_channel.getcache()
+        # TODO allow changing a trace with calc:par:MODify:EXTended "param"
+        #      works on selected trace
+        command = 'CALCulate{ch}:PARameter:EXTended "{name}","{param}"'.format(ch=ch, name=name, param=param)
+        self.write(command)
+    def delete_measurement(self, name=None, ch=None):
+        """ delete a measurement.
+            if name == None: delete all measurements for ch
+            see channel_list for the available measurments
+        """
+        if ch==None:
+            ch=self.current_channel.getcache()
+        if name != None:
+            command = 'CALCulate{ch}:PARameter:DELete "{name}"'.format(ch=ch, name=name)
+        else:
+            command = 'CALCulate{ch}:PARameter:DELete:ALL'.format(ch=ch)
+        self.write(command)
     def _create_devs(self):
+        self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
+        self.self_test_results = scpiDevice(getstr='*tst?', str_type=int, doc="""
+            Flag bits:
+                0=Phase Unlock
+                1=Source unleveled
+                2=Unused
+                3=EEprom write fail
+                4=YIG cal failed
+                5=Ramp cal failed'""")
+        self.current_channel = MemoryDevice(1, min=1, max=200)
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_channel)
+            kwarg.update(options=options)
+            return scpiDevice(*arg, **kwarg)
+        self.channel_list = devChOption(getstr='CALCulate{ch}:PARameter:CATalog:EXTended?', str_type=quoted_dict(), doc='Note that some , are replaced by _')
+        self.select_trace = devChOption('CALCulate{ch}:PARameter:SELect', choices=ChoiceDev(self.channel_list, quoted_string()))
+        self.select_trace_N = devChOption('CALCulate{ch}:PARameter:MNUMber', str_type=int, min=1, doc='The number is from the Tr1 annotation next to the parameter nane on the PNA screen')
+        # select_trace needs to be set for most of the calc commands
+        #calc:par:TNUMber and WNUMber don't exist for our PNAL
+        self.edelay_length = devChOption('CALCulate{ch}:CORRection:EDELay:DISTance', str_type=float)
+        self.edelay_length_unit = devChOption('CALC{ch}:CORR:EDEL:UNIT', choices=ChoiceStrings('METer', 'FEET', 'INCH'))
+        self.edelay_length_medium = devChOption('CALC{ch}:CORR:EDEL:MEDium', choices=ChoiceStrings('COAX', 'WAVEguide'))
+        self.edelay_time = devChOption('CALC{ch}:CORR:EDEL', str_type=float, min=-10, max=10, doc='Set delay in seconds')
         self.bandwidth = scpiDevice(':sense1:bandwidth',str_type=float)
         self.average_count = scpiDevice(getstr=':sense:average:count?',str_type=int)
         self.freq_start = scpiDevice(':sense:freq:start', str_type=float, min=10e6, max=40e9)
