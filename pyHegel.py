@@ -737,6 +737,15 @@ def get(dev, filename=None, keep=False, **extrap):
     except KeyboardInterrupt:
         print 'CTRL-C pressed!!!!!!' 
 
+def setget(dev, val=None, **kwarg):
+    """
+    Either calls set or get depending on the presence of a value
+    """
+    if val == None:
+        return get(dev, **kwarg)
+    else:
+        set(dev, val, **kwarg)
+
 def getasync(devs, filename=None, **kwarg):
     if filename != None:
         raise ValueError, 'getasync does not currently handle the filename option'
