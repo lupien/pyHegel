@@ -702,7 +702,7 @@ class MemoryDevice(BaseDevice):
 
 class scpiDevice(BaseDevice):
     def __init__(self,setstr=None, getstr=None,  autoinit=True, autoget=True, str_type=None,
-                 choices=None, doc='', options={}, options_lim={}, **extrak):
+                 choices=None, doc='', options={}, options_lim={}, options_apply=[], **kwarg):
         """
            str_type can be float, int, None
            If choices is a subclass of ChoiceBase, then str_Type will be
@@ -722,6 +722,7 @@ class scpiDevice(BaseDevice):
                       -a tuple of (min, max)
                                either one can be None to be unset
                       -a list of choices (the object needs to handle __contains__)
+           options_apply is a list of options that need to be set. In that order when defined.
            By default, autoinit=True is transformed to 10 (higher priority)
            unless options contains another device, then it is set to 1.
 
@@ -735,13 +736,14 @@ class scpiDevice(BaseDevice):
             test = [ True for k,v in options.iteritems() if isinstance(v, BaseDevice)]
             if len(test):
                 autoinit = 1
-        BaseDevice.__init__(self, doc=doc, autoinit=autoinit, choices=choices, **extrak)
+        BaseDevice.__init__(self, doc=doc, autoinit=autoinit, choices=choices, **kwarg)
         self._setdev_p = setstr
         if getstr == None and autoget:
             getstr = setstr+'?'
         self._getdev_p = getstr
         self._options = options
         self._options_lim = options_lim
+        self._options_apply = options_apply
         self.type = str_type
         self._option_cache = {}
     def _tostr(self, val):
@@ -766,10 +768,11 @@ class scpiDevice(BaseDevice):
             return valstr
         return t(valstr)
     def _get_option_values(self, extradict={}):
-        optionsIter = self._options.iteritems()
-        d = {k:v.getcache() for k, v in optionsIter if isinstance(v, BaseDevice)}
-        d.update(extradict)
-        return d
+        opt = self._options.copy()
+        d = {k:v.getcache() for k, v in opt.iteritems() if isinstance(v, BaseDevice)}
+        opt.update(d)
+        opt.update(extradict)
+        return opt
     def getcache(self):
         #we need to check if we still are using the same options
         curr_cache = self._get_option_values()
@@ -780,6 +783,13 @@ class scpiDevice(BaseDevice):
         if option not in self._options.keys():
                 raise KeyError, self.perror('This device does not handle option "%s".'%option)
         lim = self._options_lim.get(option)
+        # if no limits were given but this is a device, use the limits from the device.
+        # TODO use dev.check (trap error)
+        if lim == None and isinstance(self._options[option], BaseDevice):
+            dev = self._options[option]
+            lim = (dev.min, dev.max)
+            if dev.choices != None:
+                lim = dev.choices
         if isinstance(lim, tuple):
             if lim[0] != None and val<lim[0]:
                 return self.perror('Option "%s" needs to be >= %r, instead it was %r'%(option, lim[0], val))
@@ -795,6 +805,20 @@ class scpiDevice(BaseDevice):
         # get values from devices when needed.
         # The list of correct values could be a subset so push them to kwarg
         # for testing.
+        for k, v in kwarg.iteritems():
+            ck = self._check_option(k, v)
+            if ck != None:
+                # in case of error, raise it
+                raise ValueError, ck
+        # Some device need to keep track of current value so we set them
+        # if changed
+        for k in self._options_apply:
+            if k in kwarg.keys():
+                v = kwarg[k]
+                opt_dev = self._options[k]
+                if opt_dev.getcache() != v:
+                    opt_dev.set(v)
+        # Now get default values and check them if necessary
         options = self._get_option_values(kwarg)
         for k,v in options.iteritems():
             if k not in kwarg:
@@ -803,11 +827,6 @@ class scpiDevice(BaseDevice):
                     # There was an error, returned value not currently valid
                     # so return it instead of dictionnary
                     return ck
-        for k, v in kwarg.iteritems():
-            ck = self._check_option(k, v)
-            if ck != None:
-                # in case of error, raise it
-                raise ValueError, ck
         # everything checks out so use those kwarg
         options.update(kwarg)
         self._option_cache = options
@@ -835,6 +854,9 @@ class scpiDevice(BaseDevice):
         command = command.format(**options)
         ret = self.instr.ask(command)
         return self._fromstr(ret)
+    def check(self, val, **kwarg):
+        #TODO handle checking of kwarg
+        super(scpiDevice, self).check(val)
 
 def _decode_block_header(s):
     """
@@ -888,6 +910,7 @@ _decode_float32 = functools.partial(_decode_block_auto, t=np.float32)
 _decode_uint32 = functools.partial(_decode_block_auto, t=np.uint32)
 _decode_uint8_bin = functools.partial(_decode_block, t=np.uint8)
 _decode_uint16_bin = functools.partial(_decode_block, t=np.uint16)
+_decode_complex128 = functools.partial(_decode_block_auto, t=np.complex128)
 
 def _decode_float64_avg(s):
     return _decode_block_auto(s, t=np.float64).mean()
@@ -1833,6 +1856,7 @@ class agilent_PNAL(visaInstrumentAsync):
         return self._conf_helper('bandwidth', 'freq_start', 'freq_stop','average_count')
     def abort(self):
         self.write('ABORt')
+    # TODO handle ch and other parameters more like scpiDevice...
     def create_measurement(self, name, param, ch=None):
         """
         name: any unique, non-empty string
@@ -1864,6 +1888,11 @@ class agilent_PNAL(visaInstrumentAsync):
         else:
             command = 'CALCulate{ch}:PARameter:DELete:ALL'.format(ch=ch)
         self.write(command)
+    def restart_averaging(self, ch=None):
+        if ch==None:
+            ch=self.current_channel.getcache()
+        command = 'SENSe{ch}:AVERage:CLEar'.format(ch=ch)
+        self.write(command)
     def _create_devs(self):
         self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
         self.self_test_results = scpiDevice(getstr='*tst?', str_type=int, doc="""
@@ -1878,33 +1907,64 @@ class agilent_PNAL(visaInstrumentAsync):
         def devChOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(ch=self.current_channel)
-            kwarg.update(options=options)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
         self.channel_list = devChOption(getstr='CALCulate{ch}:PARameter:CATalog:EXTended?', str_type=quoted_dict(), doc='Note that some , are replaced by _')
         self.select_trace = devChOption('CALCulate{ch}:PARameter:SELect', choices=ChoiceDev(self.channel_list, quoted_string()))
-        self.select_trace_N = devChOption('CALCulate{ch}:PARameter:MNUMber', str_type=int, min=1, doc='The number is from the Tr1 annotation next to the parameter nane on the PNA screen')
+        def devCalcOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(trace=self.select_trace)
+            app = kwarg.pop('options_apply', ['ch', 'trace'])
+            kwarg.update(options=options, options_apply=app)
+            return devChOption(*arg, **kwarg)
         # select_trace needs to be set for most of the calc commands
         #calc:par:TNUMber and WNUMber don't exist for our PNAL
-        self.edelay_length = devChOption('CALCulate{ch}:CORRection:EDELay:DISTance', str_type=float)
-        self.edelay_length_unit = devChOption('CALC{ch}:CORR:EDEL:UNIT', choices=ChoiceStrings('METer', 'FEET', 'INCH'))
-        self.edelay_length_medium = devChOption('CALC{ch}:CORR:EDEL:MEDium', choices=ChoiceStrings('COAX', 'WAVEguide'))
-        self.edelay_time = devChOption('CALC{ch}:CORR:EDEL', str_type=float, min=-10, max=10, doc='Set delay in seconds')
-        self.bandwidth = scpiDevice(':sense1:bandwidth',str_type=float)
-        self.average_count = scpiDevice(getstr=':sense:average:count?',str_type=int)
-        self.freq_start = scpiDevice(':sense:freq:start', str_type=float, min=10e6, max=40e9)
-        self.freq_stop = scpiDevice(':sense:freq:stop', str_type=float, min=10e6, max=40e9)
-        self.freq_cw= scpiDevice(':sense:freq:cw', str_type=float, min=10e6, max=40e9)
-        self.x1 = scpiDevice(getstr=':sense1:X?', autoinit=False)
-        self.curx1 = scpiDevice(getstr=':calc1:X?', autoinit=False)
-        self.cur_data = scpiDevice(getstr=':calc1:data? fdata', autoinit=False)
-        self.cur_cplxdata = scpiDevice(getstr=':calc1:data? sdata', autoinit=False)
-        self.select_m = scpiDevice(':calc1:par:mnum', autoinit=False)
-        self.select_i = scpiDevice(':calc1:par:sel', autoinit=False)
-        self.select_w = scpiDevice(getstr=':syst:meas1:window?', autoinit=False)
-        self.select_t = scpiDevice(getstr=':syst:meas1:trace?', autoinit=False)
+        self.select_trace_N = devCalcOption('CALCulate{ch}:PARameter:MNUMber', str_type=int, min=1, doc='The number is from the Tr1 annotation next to the parameter nane on the PNA screen')
+        self.edelay_length = devCalcOption('CALCulate{ch}:CORRection:EDELay:DISTance', str_type=float)
+        self.edelay_length_unit = devCalcOption('CALC{ch}:CORR:EDEL:UNIT', choices=ChoiceStrings('METer', 'FEET', 'INCH'))
+        self.edelay_length_medium = devCalcOption('CALC{ch}:CORR:EDEL:MEDium', choices=ChoiceStrings('COAX', 'WAVEguide'))
+        self.edelay_time = devCalcOption('CALC{ch}:CORR:EDEL', str_type=float, min=-10, max=10, doc='Set delay in seconds')
+        self.snap_png = scpiDevice(getstr='HCOPy:SDUMp:DATA:FORMat PNG;:HCOPy:SDUMp:DATA?', str_type=_decode_block_base, autoinit=False)
+        self.snap_png._format['bin']='.png'
+        self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
+        self.bandwidth = devChOption('SENSe{ch}:BANDwidth', str_type=float, setget=True) # can obtain min max
+        self.bandwidth_lf_enh = devChOption('SENSe{ch}:BANDwidth:TRACk', str_type=bool)
+        self.average_count = devChOption(getstr='SENSe{ch}:AVERage:COUNt?', str_type=int)
+        self.average_mode = devChOption('SENSe{ch}:AVERage:MODE', choices=ChoiceStrings('POINt', 'SWEep'))
+        self.average_en = devChOption('SENSe{ch}:AVERage', str_type=bool)
+        self.coupling_mode = devChOption('SENSe{ch}:COUPle', choices=ChoiceStrings('ALL', 'NONE'), doc='ALL means sweep mode set to chopped (trans and refl measured on same sweep)\nNONE means set to alternate, imporves mixer bounce and isolation but slower')
+        self.freq_start = devChOption('SENSe{ch}:FREQuency:STARt', str_type=float, min=10e6, max=40e9)
+        self.freq_stop = devChOption('SENSe{ch}:FREQuency:STOP', str_type=float, min=10e6, max=40e9)
+        self.freq_cw= devChOption('SENSe{ch}:FREQuency:CW', str_type=float, min=10e6, max=40e9)
+        self.ext_ref = scpiDevice(getstr='SENSe:ROSCillator:SOURce?', str_type=str)
+        self.npoints = devChOption('SENSe{ch}:SWEep:POINts', str_type=int, min=1)
+        self.sweep_gen = devChOption('SENSe{ch}:SWEep:GENeration', choices=ChoiceStrings('STEPped', 'ANALog'))
+        self.sweep_gen_pointsweep =devChOption('SENSe{ch}:SWEep:GENeration:POINtsweep', str_type=bool, doc='When true measure rev and fwd at each frequency before stepping')
+        self.sweep_fast_en =devChOption('SENSe{ch}:SWEep:SPEed', choices=ChoiceStrings('FAST', 'NORMal'), doc='FAST increases the speed of sweep by almost a factor of 2 at a small cost in data quality')
+        self.sweep_time = devChOption('SENSe{ch}:SWEep:TIME', str_type=float, min=0, max=86400.)
+        self.sweep_type = devChOption('SENSe{ch}:SWEep:TYPE', choices=ChoiceStrings('LINear', 'LOGarithmic', 'POWer', 'CW', 'SEGMent', 'PHASe'))
+        self.x_axis = devChOption(getstr='SENSe{ch}:X?', str_type=_decode_float64, autoinit=False)
+        # TODO add other usefull CALC stuff like corr, marker, smoothing...
+        self.calc_x_axis = devCalcOption(getstr='CALC{ch}:X?', str_type=_decode_float64, autoinit=False)
+        self.calc_fdata = devCalcOption(getstr='CALC{ch}:DATA? FDATA', str_type=_decode_float64, autoinit=False)
+        # the f vs s. s is complex data, includes error terms but not equation editor (Except for math?)
+        #   the f adds equation editor, trace math, {gating, phase corr (elect delay, offset, port extension), mag offset}, formating and smoothing
+        self.calc_sdata = devCalcOption(getstr='CALC{ch}:DATA? SDATA', str_type=_decode_complex128, autoinit=False)
+        self.calc_fmem = devCalcOption(getstr='CALC{ch}:DATA? FMEM', str_type=_decode_float64, autoinit=False)
+        self.calc_smem = devCalcOption(getstr='CALC{ch}:DATA? SMEM', str_type=_decode_complex128, autoinit=False)
+        traceN_options = dict(trace=1)
+        traceN_options_lim = dict(trace=(1,None))
+        self.traceN_name = scpiDevice(getstr=':SYSTem:MEASurement{trace}:NAME?', str_type=quoted_string(),
+                                      options = traceN_options, options_lim = traceN_options_lim)
+        self.traceN_window = scpiDevice(getstr=':SYSTem:MEASurement{trace}:WINDow?', str_type=int,
+                                      options = traceN_options, options_lim = traceN_options_lim)
+        # windowTrace restarts at 1 for each window
+        self.traceN_windowTrace = scpiDevice(getstr=':SYSTem:MEASurement{trace}:TRACe?', str_type=int,
+                                      options = traceN_options, options_lim = traceN_options_lim)
         # for max min power, ask source:power? max and source:power? min
-        self.power_dbm_port1 = scpiDevice(':SOURce1:POWer1', str_type=float)
-        self.power_dbm_port2 = scpiDevice(':SOURce1:POWer2', str_type=float)
+        self.power_dbm_port1 = devChOption(':SOURce{ch}:POWer1', str_type=float)
+        self.power_dbm_port2 = devChOption(':SOURce{ch}:POWer2', str_type=float)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
