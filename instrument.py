@@ -805,6 +805,8 @@ class scpiDevice(BaseDevice):
         # get values from devices when needed.
         # The list of correct values could be a subset so push them to kwarg
         # for testing.
+        # clean up kwarg by removing all None values
+        kwarg = { k:v for k, v in kwarg.iteritems() if v != None}
         for k, v in kwarg.iteritems():
             ck = self._check_option(k, v)
             if ck != None:
@@ -857,6 +859,20 @@ class scpiDevice(BaseDevice):
     def check(self, val, **kwarg):
         #TODO handle checking of kwarg
         super(scpiDevice, self).check(val)
+
+class ReadvalDev(BaseDevice):
+    def __init__(self, dev, **kwarg):
+        self._slave_dev = dev
+        super(ReadvalDev,self).__init__(redir_async=dev, **kwarg)
+    def getdev(self, **kwarg):
+        self._async_trig()
+        while not self._async_detect():
+            pass
+        ret = self._slave_dev.get(**kwarg)
+        self._last_filename = self._slave_dev._last_filename
+        return ret
+    def getformat(self, **kwarg):
+        return self._slave_dev.getformat(**kwarg)
 
 def _decode_block_header(s):
     """
@@ -1144,11 +1160,10 @@ class ChoiceDev(ChoiceBase):
         return input_str
     def tostr(self, input_choice):
         choices = self._get_choices()
+        ch = input_choice
         if isinstance(choices, dict):
-            if input_choice not in choices.keys() and input_choice in choices.values():
+            if ch not in choices.keys() and ch in choices.values():
                 ch = [k for k,v in choices.iteritems() if v == input_choice][0]
-        else:
-            ch = input_str
         if self.sub_type != None:
             ch = self.sub_type.tostr(ch)
         return ch
@@ -1852,14 +1867,12 @@ class agilent_PNAL(visaInstrumentAsync):
     def init(self, full=False):
         self.write(':format REAL,64')
         self.write(':format:border swap')
-    def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('bandwidth', 'freq_start', 'freq_stop','average_count')
     def abort(self):
         self.write('ABORt')
     # TODO handle ch and other parameters more like scpiDevice...
     def create_measurement(self, name, param, ch=None):
         """
-        name: any unique, non-empty string
+        name: any unique, non-empty string. If it already exists, we change its param
         param: Any S parameter as S11 or S1_1 (second form only for double-digit port numbers S10_1)
                Ratio measurement, any 2 physical receiver separated by / and followed by , and source port
                like A/R1,3
@@ -1867,32 +1880,85 @@ class agilent_PNAL(visaInstrumentAsync):
                Ratio and non-ratio can also use logical receiver notation
                ADC measurement: ADC receiver, then , then source por like AI1,2
                Balanced measurment: ...
-
-               Warning, if the name already exists, an error is produced.
         """
-        if ch==None:
-            ch=self.current_channel.getcache()
-        # TODO allow changing a trace with calc:par:MODify:EXTended "param"
-        #      works on selected trace
-        command = 'CALCulate{ch}:PARameter:EXTended "{name}","{param}"'.format(ch=ch, name=name, param=param)
+        ch_list = self.channel_list.get(ch=ch)
+        ch=self.current_channel.getcache()
+        if name in ch_list:
+            self.select_trace.set(trace=name)
+            command = 'CALCulate{ch}:PARameter:MODify:EXTended "{param}"'.format(ch=ch, param=param)
+        else:
+            command = 'CALCulate{ch}:PARameter:EXTended "{name}","{param}"'.format(ch=ch, name=name, param=param)
         self.write(command)
     def delete_measurement(self, name=None, ch=None):
         """ delete a measurement.
             if name == None: delete all measurements for ch
             see channel_list for the available measurments
         """
-        if ch==None:
-            ch=self.current_channel.getcache()
+        ch_list = self.channel_list.get(ch=ch)
+        ch=self.current_channel.getcache()
         if name != None:
+            if name not in ch_list:
+                raise ValueError, self.perror('Invalid Trace name')
             command = 'CALCulate{ch}:PARameter:DELete "{name}"'.format(ch=ch, name=name)
         else:
             command = 'CALCulate{ch}:PARameter:DELete:ALL'.format(ch=ch)
         self.write(command)
     def restart_averaging(self, ch=None):
-        if ch==None:
-            ch=self.current_channel.getcache()
+        #sets ch if necessary
+        if not self.average_en.get(ch=ch):
+            return
+        ch=self.current_channel.getcache()
         command = 'SENSe{ch}:AVERage:CLEar'.format(ch=ch)
         self.write(command)
+    def _fetch_getformat(self, **kwarg):
+        # TODO handle column titles when saving to a file
+        fmt = self.fetch._format
+        fmt.update(multi=False, graphs=[])
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_getdev(self, ch=None, traces=None, unit='default', mem=False):
+        """
+           traces can be a single value or a list of values.
+                    The values are strings representing the trace or the trace number
+           unit can be default (real, imag)
+                       db_deg (db, deg)
+                       cmplx  (complexe number), Note that this cannot be written to file
+        """
+        # this also sets the current channel
+        ch_list = self.channel_list.get(ch=ch)
+        if traces == None:
+            traces = ch_list.values()
+        if not isinstance(traces, (tuple, list)):
+            traces = [traces]
+        getdata = self.calc_sdata
+        if mem:
+            getdata = self.calc_smem
+        ret = []
+        for t in traces:
+            if not isinstance(t, basestring):
+                t = self.traceN_name.get(trace=t)
+            v = getdata.get(trace=t)
+            if unit == 'db_deg':
+                r = 20.*np.log10(np.abs(v))
+                theta = np.angle(v, deg=True)
+                ret.append(r)
+                ret.append(theta)
+            elif unit == 'cmplx':
+                ret.append(v)
+            else:
+                ret.append(v.real)
+                ret.append(v.imag)
+        ret = np.asarray(ret)
+        if ret.shape[0]==1:
+            ret=ret[0]
+        return ret
+    def _current_config(self, dev_obj=None, options={}):
+        # These all refer to the current channel
+        return self._conf_helper('freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
+                                 'power_dbm_port1', 'power_dbm_port2',
+                                 'npoints', 'sweep_gen', 'sweep_gen_pointsweep',
+                                 'sweep_fast_en', 'sweep_time', 'sweep_type',
+                                 'bandwidth', 'bandwidth_lf_enh',
+                                 'average_count', 'average_mode', 'average_en')
     def _create_devs(self):
         self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
         self.self_test_results = scpiDevice(getstr='*tst?', str_type=int, doc="""
@@ -1947,10 +2013,10 @@ class agilent_PNAL(visaInstrumentAsync):
         self.x_axis = devChOption(getstr='SENSe{ch}:X?', str_type=_decode_float64, autoinit=False)
         # TODO add other usefull CALC stuff like corr, marker, smoothing...
         self.calc_x_axis = devCalcOption(getstr='CALC{ch}:X?', str_type=_decode_float64, autoinit=False)
-        self.calc_fdata = devCalcOption(getstr='CALC{ch}:DATA? FDATA', str_type=_decode_float64, autoinit=False)
+        self.calc_fdata = devCalcOption(getstr='CALC{ch}:DATA? FDATA', str_type=_decode_float64, autoinit=False, trig=True)
         # the f vs s. s is complex data, includes error terms but not equation editor (Except for math?)
         #   the f adds equation editor, trace math, {gating, phase corr (elect delay, offset, port extension), mag offset}, formating and smoothing
-        self.calc_sdata = devCalcOption(getstr='CALC{ch}:DATA? SDATA', str_type=_decode_complex128, autoinit=False)
+        self.calc_sdata = devCalcOption(getstr='CALC{ch}:DATA? SDATA', str_type=_decode_complex128, autoinit=False, trig=True)
         self.calc_fmem = devCalcOption(getstr='CALC{ch}:DATA? FMEM', str_type=_decode_float64, autoinit=False)
         self.calc_smem = devCalcOption(getstr='CALC{ch}:DATA? SMEM', str_type=_decode_complex128, autoinit=False)
         traceN_options = dict(trace=1)
@@ -1965,6 +2031,8 @@ class agilent_PNAL(visaInstrumentAsync):
         # for max min power, ask source:power? max and source:power? min
         self.power_dbm_port1 = devChOption(':SOURce{ch}:POWer1', str_type=float)
         self.power_dbm_port2 = devChOption(':SOURce{ch}:POWer2', str_type=float)
+        self._devwrap('fetch', autoinit=False, trig=True)
+        self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
