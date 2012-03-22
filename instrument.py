@@ -220,7 +220,7 @@ class BaseDevice(object):
          dev(val) which is the same as set(val)
     """
     def __init__(self, autoinit=True, doc='', setget=False,
-                  min=None, max=None, choices=None, multi=False,
+                  min=None, max=None, choices=None, multi=False, graph=[],
                   trig=False, delay=False, redir_async=None):
         # instr and name updated by instrument's _create_devs
         # doc is inserted before the above doc
@@ -247,7 +247,7 @@ class BaseDevice(object):
         self.choices = choices
         self._doc = doc
         # obj is used by _get_conf_header
-        self._format = dict(file=False, multi=multi, graph=[],
+        self._format = dict(file=False, multi=multi, graph=graph,
                             append=False, header=None, bin=False,
                             options={}, obj=self)
     def __getattribute__(self, name):
@@ -1957,8 +1957,9 @@ class agilent_PNAL(visaInstrumentAsync):
         return ret
     def _current_config(self, dev_obj=None, options={}):
         # These all refer to the current channel
+        # some like calib_en depend on trace
         return self._conf_helper('freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
-                                 'power_dbm_port1', 'power_dbm_port2',
+                                 'power_dbm_port1', 'power_dbm_port2', 'calib_en',
                                  'npoints', 'sweep_gen', 'sweep_gen_pointsweep',
                                  'sweep_fast_en', 'sweep_time', 'sweep_type',
                                  'bandwidth', 'bandwidth_lf_enh', 'cont_trigger',
@@ -1995,6 +1996,7 @@ class agilent_PNAL(visaInstrumentAsync):
         self.edelay_length_unit = devCalcOption('CALC{ch}:CORR:EDEL:UNIT', choices=ChoiceStrings('METer', 'FEET', 'INCH'))
         self.edelay_length_medium = devCalcOption('CALC{ch}:CORR:EDEL:MEDium', choices=ChoiceStrings('COAX', 'WAVEguide'))
         self.edelay_time = devCalcOption('CALC{ch}:CORR:EDEL', str_type=float, min=-10, max=10, doc='Set delay in seconds')
+        self.calib_en = devCalcOption('CALC{ch}:CORR', str_type=bool)
         self.snap_png = scpiDevice(getstr='HCOPy:SDUMp:DATA:FORMat PNG;:HCOPy:SDUMp:DATA?', str_type=_decode_block_base, autoinit=False)
         self.snap_png._format['bin']='.png'
         self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
@@ -2015,7 +2017,6 @@ class agilent_PNAL(visaInstrumentAsync):
         self.sweep_time = devChOption('SENSe{ch}:SWEep:TIME', str_type=float, min=0, max=86400.)
         self.sweep_type = devChOption('SENSe{ch}:SWEep:TYPE', choices=ChoiceStrings('LINear', 'LOGarithmic', 'POWer', 'CW', 'SEGMent', 'PHASe'))
         self.x_axis = devChOption(getstr='SENSe{ch}:X?', str_type=_decode_float64, autoinit=False)
-        # TODO add other usefull CALC stuff like corr, marker, smoothing...
         self.calc_x_axis = devCalcOption(getstr='CALC{ch}:X?', str_type=_decode_float64, autoinit=False)
         self.calc_fdata = devCalcOption(getstr='CALC{ch}:DATA? FDATA', str_type=_decode_float64, autoinit=False, trig=True)
         # the f vs s. s is complex data, includes error terms but not equation editor (Except for math?)
@@ -2023,6 +2024,26 @@ class agilent_PNAL(visaInstrumentAsync):
         self.calc_sdata = devCalcOption(getstr='CALC{ch}:DATA? SDATA', str_type=_decode_complex128, autoinit=False, trig=True)
         self.calc_fmem = devCalcOption(getstr='CALC{ch}:DATA? FMEM', str_type=_decode_float64, autoinit=False)
         self.calc_smem = devCalcOption(getstr='CALC{ch}:DATA? SMEM', str_type=_decode_complex128, autoinit=False)
+        def devMkrOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mkr=1)
+            options_lim = kwarg.pop('options_lim', {}).copy()
+            options_lim.update(mkr=(1,10))
+            kwarg.update(options=options, options_lim=options_lim, autoinit=False)
+            return devCalcOption(*arg, **kwarg)
+        self.marker_en = devMkrOption('CALC{ch}:MARKer{mkr}', str_type=bool)
+        marker_funcs = ChoiceStrings('MAXimum', 'MINimum', 'RPEak', 'LPEak', 'NPEak', 'TARGet', 'LTARget', 'RTARget', 'COMPression')
+        self.marker_trac_func = devMkrOption('CALC{ch}:MARKer{mkr}:FUNCtion', choices=marker_funcs)
+        # This screws up iprint
+        #self.marker_exec = devMkrOption('CALC{ch}:MARKer{mkr}:FUNCTION:EXECute', choices=marker_funcs, autoget=False)
+        self.marker_target = devMkrOption('CALC{ch}:MARKer{mkr}:TARGet', str_type=float)
+        marker_format = ChoiceStrings('DEFault', 'MLINear', 'MLOGarithmic', 'IMPedance', 'ADMittance', 'PHASe', 'IMAGinary', 'REAL',
+                                      'POLar', 'GDELay', 'LINPhase', 'LOGPhase', 'KELVin', 'FAHRenheit', 'CELSius')
+        self.marker_format = devMkrOption('CALC{ch}:MARKer{mkr}:FORMat', choices=marker_format)
+        self.marker_trac_en = devMkrOption('CALC{ch}:MARKer{mkr}:FUNCtion:TRACking', str_type=bool)
+        self.marker_discrete_en = devMkrOption('CALC{ch}:MARKer{mkr}:DISCrete', str_type=bool)
+        self.marker_x = devMkrOption('CALC{ch}:MARKer{mkr}:X', str_type=float, trig=True)
+        self.marker_y = devMkrOption('CALC{ch}:MARKer{mkr}:Y', str_type=_decode_float64, multi=['real', 'imag'], graph=[0,1], trig=True)
         traceN_options = dict(trace=1)
         traceN_options_lim = dict(trace=(1,None))
         self.traceN_name = scpiDevice(getstr=':SYSTem:MEASurement{trace}:NAME?', str_type=quoted_string(),
