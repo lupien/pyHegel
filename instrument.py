@@ -864,9 +864,9 @@ class ReadvalDev(BaseDevice):
     def __init__(self, dev, **kwarg):
         self._slave_dev = dev
         super(ReadvalDev,self).__init__(redir_async=dev, **kwarg)
-    def getdev(self, **kwarg):
-        self._async_trig()
-        while not self._async_detect():
+    def _getdev(self, **kwarg):
+        self.instr._async_trig()
+        while not self.instr._async_detect():
             pass
         ret = self._slave_dev.get(**kwarg)
         self._last_filename = self._slave_dev._last_filename
@@ -1326,7 +1326,7 @@ class visaInstrumentAsync(visaInstrument):
                 print 'Unread event queue!'
         except:
             pass
-        self.write('INITiate;*OPC') # this assume trig_src is immediate
+        self.write('INITiate;*OPC') # this assume trig_src is immediate for agilent multi
 
 class yokogawa_gs200(visaInstrument):
     # TODO: implement multipliers, units. The multiplier
@@ -1867,9 +1867,13 @@ class agilent_PNAL(visaInstrumentAsync):
     def init(self, full=False):
         self.write(':format REAL,64')
         self.write(':format:border swap')
+        super(agilent_PNAL, self).init(full=full)
+    def _async_trig(self):
+        # Not that this waits for one scan but not for the end of averaging
+        self.cont_trigger.set(False)
+        super(agilent_PNAL, self)._async_trig()
     def abort(self):
         self.write('ABORt')
-    # TODO handle ch and other parameters more like scpiDevice...
     def create_measurement(self, name, param, ch=None):
         """
         name: any unique, non-empty string. If it already exists, we change its param
@@ -1957,7 +1961,7 @@ class agilent_PNAL(visaInstrumentAsync):
                                  'power_dbm_port1', 'power_dbm_port2',
                                  'npoints', 'sweep_gen', 'sweep_gen_pointsweep',
                                  'sweep_fast_en', 'sweep_time', 'sweep_type',
-                                 'bandwidth', 'bandwidth_lf_enh',
+                                 'bandwidth', 'bandwidth_lf_enh', 'cont_trigger',
                                  'average_count', 'average_mode', 'average_en')
     def _create_devs(self):
         self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
