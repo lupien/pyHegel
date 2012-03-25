@@ -1864,6 +1864,31 @@ class agilent_EXA(visaInstrument):
         super(type(self),self)._create_devs()
 
 class agilent_PNAL(visaInstrumentAsync):
+    """
+    To use this instrument, the most useful device is probably:
+        fetch
+    Some commands are available:
+        abort
+        create_measurement
+        delete_measurement
+        restart_averaging
+    Other useful devices:
+        channel_list
+        current_channel
+        select_trace
+        select_traceN
+        freq_start, freq_stop, freq_cw
+        power_dbm_port1, power_dbm_port2
+        marker_x, marker_y
+        snap_png
+
+    Note that almost all devices/commands require a channel.
+    It can be specified with the ch option or will use the last specified
+    one if left to the default.
+    A lot of other commands require a selected trace (per channel)
+    The active one can be selected with the trace option or select_trace, select_traceN
+    If unspecified, the last one is used.
+    """
     def init(self, full=False):
         self.write(':format REAL,64')
         self.write(':format:border swap')
@@ -1926,6 +1951,7 @@ class agilent_PNAL(visaInstrumentAsync):
            unit can be default (real, imag)
                        db_deg (db, deg)
                        cmplx  (complexe number), Note that this cannot be written to file
+           mem when True, selects the memory trace instead of the active one.
         """
         # this also sets the current channel
         ch_list = self.channel_list.get(ch=ch)
@@ -1955,6 +1981,8 @@ class agilent_PNAL(visaInstrumentAsync):
         if ret.shape[0]==1:
             ret=ret[0]
         return ret
+    def get_xscale(self):
+        return self.x_axis.get()
     def _current_config(self, dev_obj=None, options={}):
         # These all refer to the current channel
         # some like calib_en depend on trace
@@ -2016,34 +2044,42 @@ class agilent_PNAL(visaInstrumentAsync):
         self.sweep_fast_en =devChOption('SENSe{ch}:SWEep:SPEed', choices=ChoiceStrings('FAST', 'NORMal'), doc='FAST increases the speed of sweep by almost a factor of 2 at a small cost in data quality')
         self.sweep_time = devChOption('SENSe{ch}:SWEep:TIME', str_type=float, min=0, max=86400.)
         self.sweep_type = devChOption('SENSe{ch}:SWEep:TYPE', choices=ChoiceStrings('LINear', 'LOGarithmic', 'POWer', 'CW', 'SEGMent', 'PHASe'))
-        self.x_axis = devChOption(getstr='SENSe{ch}:X?', str_type=_decode_float64, autoinit=False)
-        self.calc_x_axis = devCalcOption(getstr='CALC{ch}:X?', str_type=_decode_float64, autoinit=False)
+        self.x_axis = devChOption(getstr='SENSe{ch}:X?', str_type=_decode_float64, autoinit=False, doc='This gets the default x-axis for the channel (some channels can have multiple x-axis')
+        self.calc_x_axis = devCalcOption(getstr='CALC{ch}:X?', str_type=_decode_float64, autoinit=False, doc='Get this x-axis for a particular trace.')
         self.calc_fdata = devCalcOption(getstr='CALC{ch}:DATA? FDATA', str_type=_decode_float64, autoinit=False, trig=True)
         # the f vs s. s is complex data, includes error terms but not equation editor (Except for math?)
         #   the f adds equation editor, trace math, {gating, phase corr (elect delay, offset, port extension), mag offset}, formating and smoothing
         self.calc_sdata = devCalcOption(getstr='CALC{ch}:DATA? SDATA', str_type=_decode_complex128, autoinit=False, trig=True)
         self.calc_fmem = devCalcOption(getstr='CALC{ch}:DATA? FMEM', str_type=_decode_float64, autoinit=False)
         self.calc_smem = devCalcOption(getstr='CALC{ch}:DATA? SMEM', str_type=_decode_complex128, autoinit=False)
+        self.current_mkr = MemoryDevice(1, min=1, max=10)
         def devMkrOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
-            options.update(mkr=1)
-            options_lim = kwarg.pop('options_lim', {}).copy()
-            options_lim.update(mkr=(1,10))
-            kwarg.update(options=options, options_lim=options_lim, autoinit=False)
+            options.update(mkr=self.current_mkr)
+            app = kwarg.pop('options_apply', ['ch', 'trace', 'mkr'])
+            kwarg.update(options=options, options_apply=app, autoinit=False)
             return devCalcOption(*arg, **kwarg)
+        def devMkrEnOption(*arg, **kwarg):
+            # This will check if the marker is currently enabled.
+            options = kwarg.pop('options', {}).copy()
+            options.update(marker_enabled=self.marker_en)
+            options_lim = kwarg.pop('options_lim', {}).copy()
+            options_lim.update(marker_enabled=[True])
+            kwarg.update(options=options, options_lim=options_lim)
+            return devMkrOption(*arg, **kwarg)
         self.marker_en = devMkrOption('CALC{ch}:MARKer{mkr}', str_type=bool)
         marker_funcs = ChoiceStrings('MAXimum', 'MINimum', 'RPEak', 'LPEak', 'NPEak', 'TARGet', 'LTARget', 'RTARget', 'COMPression')
-        self.marker_trac_func = devMkrOption('CALC{ch}:MARKer{mkr}:FUNCtion', choices=marker_funcs)
+        self.marker_trac_func = devMkrEnOption('CALC{ch}:MARKer{mkr}:FUNCtion', choices=marker_funcs)
         # This screws up iprint
         #self.marker_exec = devMkrOption('CALC{ch}:MARKer{mkr}:FUNCTION:EXECute', choices=marker_funcs, autoget=False)
-        self.marker_target = devMkrOption('CALC{ch}:MARKer{mkr}:TARGet', str_type=float)
+        self.marker_target = devMkrEnOption('CALC{ch}:MARKer{mkr}:TARGet', str_type=float)
         marker_format = ChoiceStrings('DEFault', 'MLINear', 'MLOGarithmic', 'IMPedance', 'ADMittance', 'PHASe', 'IMAGinary', 'REAL',
                                       'POLar', 'GDELay', 'LINPhase', 'LOGPhase', 'KELVin', 'FAHRenheit', 'CELSius')
-        self.marker_format = devMkrOption('CALC{ch}:MARKer{mkr}:FORMat', choices=marker_format)
-        self.marker_trac_en = devMkrOption('CALC{ch}:MARKer{mkr}:FUNCtion:TRACking', str_type=bool)
-        self.marker_discrete_en = devMkrOption('CALC{ch}:MARKer{mkr}:DISCrete', str_type=bool)
-        self.marker_x = devMkrOption('CALC{ch}:MARKer{mkr}:X', str_type=float, trig=True)
-        self.marker_y = devMkrOption('CALC{ch}:MARKer{mkr}:Y', str_type=_decode_float64, multi=['real', 'imag'], graph=[0,1], trig=True)
+        self.marker_format = devMkrEnOption('CALC{ch}:MARKer{mkr}:FORMat', choices=marker_format)
+        self.marker_trac_en = devMkrEnOption('CALC{ch}:MARKer{mkr}:FUNCtion:TRACking', str_type=bool)
+        self.marker_discrete_en = devMkrEnOption('CALC{ch}:MARKer{mkr}:DISCrete', str_type=bool)
+        self.marker_x = devMkrEnOption('CALC{ch}:MARKer{mkr}:X', str_type=float, trig=True)
+        self.marker_y = devMkrEnOption('CALC{ch}:MARKer{mkr}:Y', str_type=_decode_float64, multi=['real', 'imag'], graph=[0,1], trig=True)
         traceN_options = dict(trace=1)
         traceN_options_lim = dict(trace=(1,None))
         self.traceN_name = scpiDevice(getstr=':SYSTem:MEASurement{trace}:NAME?', str_type=quoted_string(),
