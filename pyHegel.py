@@ -267,6 +267,7 @@ def _write_conf(f, formats, extra_base=None, **kwarg):
 
 # TODO: add a sweep up down.
 #       could save in 2 files but display on same trace
+#       Add a way to put a comment in the headers
 
 class _Sweep(instrument.BaseInstrument):
     # This MemoryDevice will be shared among different instances

@@ -861,9 +861,11 @@ class scpiDevice(BaseDevice):
         super(scpiDevice, self).check(val)
 
 class ReadvalDev(BaseDevice):
-    def __init__(self, dev, **kwarg):
+    def __init__(self, dev, autoinit=None, **kwarg):
         self._slave_dev = dev
-        super(ReadvalDev,self).__init__(redir_async=dev, **kwarg)
+        if autoinit == None:
+            autoinit = dev._autoinit
+        super(ReadvalDev,self).__init__(redir_async=dev, autoinit=autoinit, **kwarg)
     def _getdev(self, **kwarg):
         self.instr._async_trig()
         while not self.instr._async_detect():
@@ -2030,7 +2032,7 @@ class agilent_PNAL(visaInstrumentAsync):
         self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
         self.bandwidth = devChOption('SENSe{ch}:BANDwidth', str_type=float, setget=True) # can obtain min max
         self.bandwidth_lf_enh = devChOption('SENSe{ch}:BANDwidth:TRACk', str_type=bool)
-        self.average_count = devChOption(getstr='SENSe{ch}:AVERage:COUNt?', str_type=int)
+        self.average_count = devChOption('SENSe{ch}:AVERage:COUNt', str_type=int)
         self.average_mode = devChOption('SENSe{ch}:AVERage:MODE', choices=ChoiceStrings('POINt', 'SWEep'))
         self.average_en = devChOption('SENSe{ch}:AVERage', str_type=bool)
         self.coupling_mode = devChOption('SENSe{ch}:COUPle', choices=ChoiceStrings('ALL', 'NONE'), doc='ALL means sweep mode set to chopped (trans and refl measured on same sweep)\nNONE means set to alternate, imporves mixer bounce and isolation but slower')
@@ -2096,6 +2098,61 @@ class agilent_PNAL(visaInstrumentAsync):
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+# status byte stuff
+# There is a bunch of register groups:
+#  :status:operation     # 8(256)=averaging, 9(512)=user, 10(1024)=device
+#  :status:operation:device  # contains sweep complete 4(16)
+#  :status:operation:averaging1 # handles 1 summary of aver2-42(bit0) and traces 1-14 (bit 1:14)
+#  :                          2 # handles 1 summary of aver3-42(bit0) and traces 15-28 (bit 1:14)
+#  :status:questionable # 9 (512)=inieg, 10(1024)=limit, 11(2048)=define
+#  :status:questionable:integrity
+#  :status:questionable:limit1
+#   ...
+#
+#  sweep complete and opc give the same information. Note that the status event latches
+#   need to be cleared everywhere in order to be reset (STATus:OPERation:AVERaging1, STATus:OPERation:AVERaging2,
+#   STATus:OPERation for and average of trace 15-28)
+#  Note that average:cond stays True as long as the average count as been reached
+#  If average is not enabled, the condition is never set to true
+#
+# For each group there is
+#       :CONDition?   to query instant state
+#       [:EVENt]?     To query and reset latch state
+#       :NTRansition  To set/query the negative transition latching enable bit flag
+#       :PTRansition  To set/query the positive transition latching enable bit flag
+#       :ENABle       To set/query the latch to the next level bit flag
+#  bit flag can be entered in hex as #Hfff or #hff
+#                             oct as #O777 or #o777
+#                             bin as #B111 or #b111
+#  The connection between condition (instantenous) and event (latch) depends
+#  on NTR and PTR. The connection between event (latch) and next level in
+#  status hierarchy depends on ENABLE
+#
+# There are also IEEE status and event groups
+# For event: contains *OPC bit, error reports
+#       *ESR?    To read and reset the event register (latch)
+#       *ESE     To set/query the bit flag that toggles bit 5 of IEEE status
+# For IEEE status: contains :operation (bit 7), :questionable (bit 3)
+#                           event (bit 5), error (bit 2), message available (bit 4)
+#                           Request Service =RQS (bit 6) also MSS (master summary) which
+#                                     is instantenous RQS. RQS is latched
+#                           Not that first bit is bit 0
+# To read error (bit 2): v.ask(':system:error?')
+#   that command is ok even without errors
+# Message available (bit 4) is 1 after a write be before a read if there was
+# a question (?) in the write (i.e. something is waiting to be read)
+#
+#       the RQS (but not MSS) bit is read and reset by serial poll
+#        *STB?   To read (not reset) the IEEE status byte, bit 6 is read as MSS not RQS
+#        *SRE    To set/query the bit flag that controls the RQS bit
+#                      RQS (bit6) is supposed to be ignored.
+# *CLS   is to clear all event registers and empty the error queue.
+#
+# With both GPIB and USB interface activated. They both have their own status registers
+# for STB to OPERATION ...
+# They also have their own error queues and most other settings (active measurement for channel,
+#   data format) seem to also be independent on the 2 interfaces
+
 
 class dummy(BaseInstrument):
     def init(self, full=False):
@@ -2141,7 +2198,7 @@ class LogicalDevice(BaseDevice):
        Need to overwrite force_get method, _current_config
        And may be change getformat
     """
-    def __init__(self, basedev=None, basedevs=None, doc='', setget=None, autoinit=None, **extrak):
+    def __init__(self, basedev=None, basedevs=None, doc='', setget=None, autoinit=None, **kwarg):
         # use either basedev (single one) or basedevs, multiple devices
         #   in the latter _basedev = _basedevs[0]
         # can also leave both blank
@@ -2159,13 +2216,17 @@ class LogicalDevice(BaseDevice):
         doc = self.__doc__+doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev, basedevs)
         if basedev:
             if autoinit == None:
-                extrak['autoinit'] = basedev._autoinit
+                autoinit = basedev._autoinit
             if setget == None:
-                extrak['setget'] = basedev._setget
-            #extrak['trig'] = basedev._trig
-            #extrak['delay'] = basedev._delay
-            extrak['redir_async'] = basedev
-        super(LogicalDevice, self).__init__(doc=doc, **extrak)
+                setget = basedev._setget
+            #kwarg['trig'] = basedev._trig
+            #kwarg['delay'] = basedev._delay
+            kwarg['redir_async'] = basedev
+        if autoinit != None:
+            kwarg['autoinit'] = autoinit
+        if setget != None:
+            kwarg['setget'] = setget
+        super(LogicalDevice, self).__init__(doc=doc, **kwarg)
         if self._basedev:
             self.instr = basedev.instr
         fmt = self._format
