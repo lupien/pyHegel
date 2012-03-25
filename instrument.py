@@ -1868,7 +1868,7 @@ class agilent_EXA(visaInstrument):
 class agilent_PNAL(visaInstrumentAsync):
     """
     To use this instrument, the most useful device is probably:
-        fetch
+        fetch, readval
     Some commands are available:
         abort
         create_measurement
@@ -1883,6 +1883,7 @@ class agilent_PNAL(visaInstrumentAsync):
         power_dbm_port1, power_dbm_port2
         marker_x, marker_y
         snap_png
+        cont_trigger
 
     Note that almost all devices/commands require a channel.
     It can be specified with the ch option or will use the last specified
