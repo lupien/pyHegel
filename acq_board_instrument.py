@@ -499,7 +499,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         return filestr
 
 
-    def _fetch_getdev(self, filename=None, ch=None, unit='default'):
+    def _fetch_getdev(self, filename=None, ch=None, unit='default', xaxis=None):
         """
            fetch is used to obtain possibly large data sets.
            It should only be called after performing an acquisition (run),
@@ -521,6 +521,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             -unit      to change the output format
                        unknown units are treated as 'default'
             -ch        to select which channel to read (can be a list)
+            -xaxis     When True, the first returned column will be the xaxis values
+                       default is True for all except correlations
+                       Not used for Acq or Custom mode
 
            Behavior according to modes:
                Acq:  ch as no effect here
@@ -596,6 +599,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if not self.result_available.getcache():
             raise ValueError, 'Error result not available\n' 
 
+        if xaxis == None:
+            if mode == 'Corr':
+                xaxis = False
+            else:
+                xaxis = True
+
         if mode == 'Acq':
             self.fetch._event_flag.clear()
             if location == 'Remote' and filename != None:
@@ -629,17 +638,23 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 return None
             ret = np.fromstring(self.fetch._rcv_val, np.uint64)
             if unit == 'rate':
-                return ret*1./self.nb_Msample.getcache()* \
+                ret = ret*1./self.nb_Msample.getcache()* \
                         self.sampling_rate.getcache()*self.decimation.getcache()
-            else:
-                return ret
+            if xaxis:
+                ret = np.asarray([self.get_xscale(), ret*1.])
+            return ret
 
         if mode == 'Net':
             if ch == None:
                 ch = 2
             if type(ch) != list:
                 ch = [ch]
-            ret = []
+            if xaxis:
+                ret = [self.get_xscale()]
+                sl = slice(1,None)
+            else:
+                ret = []
+                sl = slice(None)
             if 1 in ch: 
                 self.fetch._event_flag.clear()
                 filestr = self._fetch_filename_helper(filename,'1')
@@ -659,18 +674,21 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                     return None
                 ret.append(np.fromstring(self.fetch._rcv_val, np.complex128))
             ret = np.asarray(ret)
+            if unit == 'amplitude':
+                ret[sl, :] = np.abs(ret[sl, :])
+                ret = ret.real
+            elif unit == 'angle':
+                ret[sl, :] = np.angle(ret[sl, :], deg=True)
+                ret = ret.real
+            elif unit == 'real':
+                ret[sl, :] = ret[sl, :].real
+                ret = ret.real
+            elif unit == 'imag':
+                ret[sl, :] = ret[sl, :].imag
+                ret = ret.real
             if ret.shape[0]==1:
                 ret=ret[0]
-            if unit == 'amplitude':
-                return np.abs(ret)
-            if unit == 'angle':
-                return np.angle(ret, deg=True)
-            if unit == 'real':
-                return ret.real
-            if unit == 'imag':
-                return ret.imag
-            else:
-                return ret
+            return ret
 
         if mode == 'Osc':
             self.fetch._event_flag.clear()
@@ -686,10 +704,14 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             if self.chan_mode.getcache() == 'Dual':
                 ret.shape=(-1,2)
                 ret = ret.T
+            elif xaxis:
+                ret.shape=(1,-1)
             if unit == 'V':
-                return self.convert_bin2v(ret)
-            else:
-                return ret
+                ret = self.convert_bin2v(ret)
+            if xaxis:
+                # make sure ret is floats
+                ret = np.insert(ret*1. , 0, self.get_xscale(), axis=0)
+            return ret
 
         if mode == 'Spec':
             if ch == None:
@@ -699,7 +721,14 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                     ch = self.chan_nb.getcache()
             if type(ch) != list:
                 ch = [ch]
-            ret = []
+            xscale = self.get_xscale()
+            bin_width = xscale[1]-xscale[0]
+            if xaxis:
+                ret = [xscale]
+                sl = slice(1,None)
+            else:
+                ret = []
+                sl = slice(None)
             if 1 in ch:            
                 self.fetch._event_flag.clear()
                 filestr = self._fetch_filename_helper(filename,'1')
@@ -719,27 +748,27 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                     return None
                 ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
             ret = np.asarray(ret)
+            V = ret[sl, :]
+            if unit == 'V2':
+                vret = V*V
+            elif unit == 'V/sHz':
+                vret = V/np.sqrt(bin_width)
+            elif unit == 'W':
+                vret = V*V/50.
+            elif unit == 'W/Hz':
+                vret = V*V/50./bin_width
+            elif unit == 'dBm':
+                vret = 10*np.log10(V*V/50./1e-3)
+            elif unit == 'dBm/Hz':
+                vret = 10*np.log10(V*V/50./1e-3/bin_width)
+            else:
+                vret = V
+            ret[sl, :] = vret
             if ret.shape[0]==1:
                 ret=ret[0]
-            V = ret
-            xscale = self.get_xscale()
-            bin_width = xscale[1]-xscale[0]
-            if unit == 'V2':
-                return V*V
-            elif unit == 'V/sHz':
-                return V/np.sqrt(bin_width)
-            elif unit == 'W':
-                return V*V/50.
-            elif unit == 'W/Hz':
-                return V*V/50./bin_width
-            elif unit == 'dBm':
-                return 10*np.log10(V*V/50./1e-3)
-            elif unit == 'dBm/Hz':
-                return 10*np.log10(V*V/50./1e-3/bin_width)
-            else:
-                return V
 
         if mode == 'Corr':
+            # TODO handle  axis parameter
             ch = self._fetch_get_ch_corr(ch) # always returns a list
             ret = []
             if 0 in ch:

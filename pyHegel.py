@@ -639,6 +639,7 @@ def trace(dev, interval=1, title=''):
 def scope(dev, interval=.1, title='', **kwarg):
     """
        For xscale it uses instr.get_xscale
+       The device needs to handle the xaxis=False option
        interval is in s
        title is for the window title
        kwarg is the list of optional parameters to pass to dev
@@ -650,7 +651,7 @@ def scope(dev, interval=.1, title='', **kwarg):
     xscale = dev.instr.get_xscale()
     t.setLim(xscale)
     while True:
-        v=dev.get(**kwarg)
+        v=dev.get(xaxis=False, **kwarg)
         if v.ndim == 1:
             v.shape=(1,-1)
         t.setPoints(xscale, v)

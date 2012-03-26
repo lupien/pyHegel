@@ -1947,7 +1947,7 @@ class agilent_PNAL(visaInstrumentAsync):
         fmt = self.fetch._format
         fmt.update(multi=False, graphs=[])
         return BaseDevice.getformat(self.fetch, **kwarg)
-    def _fetch_getdev(self, ch=None, traces=None, unit='default', mem=False):
+    def _fetch_getdev(self, ch=None, traces=None, unit='default', mem=False, xaxis=True):
         """
            traces can be a single value or a list of values.
                     The values are strings representing the trace or the trace number
@@ -1955,6 +1955,7 @@ class agilent_PNAL(visaInstrumentAsync):
                        db_deg (db, deg)
                        cmplx  (complexe number), Note that this cannot be written to file
            mem when True, selects the memory trace instead of the active one.
+           xaxis  when True(default), the first column of data is the xaxis
         """
         # this also sets the current channel
         ch_list = self.channel_list.get(ch=ch)
@@ -1965,7 +1966,10 @@ class agilent_PNAL(visaInstrumentAsync):
         getdata = self.calc_sdata
         if mem:
             getdata = self.calc_smem
-        ret = []
+        if xaxis:
+            ret = [self.get_xscale()]
+        else:
+            ret = []
         for t in traces:
             if not isinstance(t, basestring):
                 t = self.traceN_name.get(trace=t)
