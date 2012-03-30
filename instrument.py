@@ -20,6 +20,7 @@ import threading
 import weakref
 from collections import OrderedDict  # this is a subclass of dict
 from PyQt4 import QtGui, QtCore
+import scipy
 from scipy.optimize import brentq as brentq_rootsolver
 
 import traces
@@ -1992,7 +1993,7 @@ class agilent_PNAL(visaInstrumentAsync):
         return ret
     @staticmethod
     def phase_unwrap(phase_deg):
-        return scipy.rad2deg( scipy.unwrap( scipy.def2rad(phase_deg) ) )
+        return scipy.rad2deg( scipy.unwrap( scipy.deg2rad(phase_deg) ) )
     @staticmethod
     def phase_wrap(phase_deg):
         return (phase_deg +180.) % 360 - 180.
@@ -2010,7 +2011,7 @@ class agilent_PNAL(visaInstrumentAsync):
         if delay == 0.:
             delay = -dp/df/360.
             print 'Using delay=', delay
-        return phase_deg + delay*f*360.
+        return phase_deg + delay*freq*360.
     def get_xscale(self):
         return self.x_axis.get()
 
@@ -2022,7 +2023,7 @@ class agilent_PNAL(visaInstrumentAsync):
                                  'npoints', 'sweep_gen', 'sweep_gen_pointsweep',
                                  'sweep_fast_en', 'sweep_time', 'sweep_type',
                                  'bandwidth', 'bandwidth_lf_enh', 'cont_trigger',
-                                 'average_count', 'average_mode', 'average_en')
+                                 'average_count', 'average_mode', 'average_en', options)
     def _create_devs(self):
         self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
         self.self_test_results = scpiDevice(getstr='*tst?', str_type=int, doc="""
