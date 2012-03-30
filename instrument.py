@@ -692,13 +692,16 @@ class BaseInstrument(object):
         pass
 
 class MemoryDevice(BaseDevice):
-    def __init__(self, initval=None, **extrak):
-        BaseDevice.__init__(self, **extrak)
+    def __init__(self, initval=None, **kwarg):
+        kwarg['autoinit'] = False
+        kwarg['setget'] = False
+        BaseDevice.__init__(self, **kwarg)
         self._cache = initval
-        self._setdev_p = True # needed to enable BaseDevice Check
-    def get(self):
+        self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
+        self._getdev_p = True # needed to enable BaseDevice get in Checking mode
+    def _getdev(self):
         return self._cache
-    def set(self, val):
+    def _setdev(self, val):
         self._cache = val
 
 class scpiDevice(BaseDevice):
@@ -1408,7 +1411,7 @@ class sr830_lia(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
                                  'sync_filter', 'reserve_mode',
-                                 'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf')
+                                 'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf', options)
     def _create_devs(self):
         self.freq = scpiDevice('freq', str_type=float, setget=True, min=0.001, max=102e3)
         sens = ChoiceIndex(make_choice_list([2,5,10], -9, -1), normalize=True)
@@ -1512,7 +1515,7 @@ class sr384_rf(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('freq', 'en_lf', 'amp_lf_dbm', 'offset_low',
                                  'en_rf', 'amp_rf_dbm', 'en_hf', 'amp_hf_dbm',
-                                 'phase', 'mod_en')
+                                 'phase', 'mod_en', options)
     def _create_devs(self):
         self.freq = scpiDevice('freq',str_type=float, min=1e-6, max=8.1e9)
         self.offset_low = scpiDevice('ofsl',str_type=float, min=-1.5, max=+1.5) #volts
@@ -1584,7 +1587,7 @@ class sr384_rf(visaInstrument):
 class agilent_rf_33522A(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('ampl1', 'freq1', 'offset1', 'phase1', 'mode1', 'out_en1', 'pulse_width1',
-                                 'ampl2', 'freq2', 'offset2', 'phase2', 'mode2', 'out_en2', 'pulse_width2')
+                                 'ampl2', 'freq2', 'offset2', 'phase2', 'mode2', 'out_en2', 'pulse_width2', options)
     def _create_devs(self):
         # voltage unit depends on front panel/remote selection (sourc1:voltage:unit) vpp, vrms, dbm
         self.ampl1 = scpiDevice('SOUR1:VOLT', str_type=float, min=0.001, max=10)
@@ -1642,7 +1645,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
             t_ch = self.temperature_transducer.choices
             if self.temperature_transducer.getcache() in t_ch[['rtd', 'frtd']]:
                 extra += ('temperature_transducer_rtd_ref', 'temperature_transducer_rtd_off')
-        return self._conf_helper(*(baselist + extra))
+        return self._conf_helper(*(baselist + extra + (options,)))
     def set_long_avg(self, time, force=False):
         # update mode first, so aperture applies to correctly
         self.mode.get()
@@ -1807,7 +1810,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
 
 class lakeshore_322(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('sp')
+        return self._conf_helper('sp', options)
     def _create_devs(self):
         self.crdg = scpiDevice(getstr='CRDG? A', str_type=float)
         self.thermocouple = scpiDevice(getstr='TEMP?', str_type=float)
@@ -1827,7 +1830,7 @@ class lakeshore_322(visaInstrument):
 
 class infiniiVision_3000(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('source', 'mode', 'preamble')
+        return self._conf_helper('source', 'mode', 'preamble', options)
     def _create_devs(self):
         # Note vincent's hegel, uses set to define filename where block data is saved.
         self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', str_type=_decode_block_base, autoinit=False) # returns block of data(always bin with # header)
@@ -1851,7 +1854,7 @@ class agilent_EXA(visaInstrument):
         self.write(':format REAL,64')
         self.write(':format:border swap')
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('bandwidth', 'freq_start', 'freq_stop','average_count')
+        return self._conf_helper('bandwidth', 'freq_start', 'freq_stop','average_count', options)
     def _create_devs(self):
         self.bandwidth = scpiDevice(':bandwidth',str_type=float)
         self.mark1x = scpiDevice(':calc:mark1:x',str_type=float)
@@ -2189,7 +2192,7 @@ class dummy(BaseInstrument):
         self.incr_val = 0
         self.wait = .1
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('volt', 'current', 'other')
+        return self._conf_helper('volt', 'current', 'other', options)
     def _incr_getdev(self):
         ret = self.incr_val
         self.incr_val += 1

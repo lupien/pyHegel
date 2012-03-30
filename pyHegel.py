@@ -99,9 +99,6 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         hdrs.append(setdev.getfullname())
         count += 1
         extra_conf.append(setdev)
-
-    if extra_conf != None and not isinstance(extra_conf, list):
-        extra_conf = [extra_conf]
     for dev in getdevs:
         kwarg = {}
         if isinstance(dev, tuple):
@@ -133,7 +130,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     for x in extra_conf:
         x.force_get()
         hdr = x.getfullname()
-        f = x.getformat(**kwarg)
+        f = x.getformat()
         f['base_conf'] = instrument._get_conf_header(f)
         f['base_hdr_name'] = hdr
         formats.append(f)
