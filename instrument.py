@@ -1874,6 +1874,7 @@ class agilent_PNAL(visaInstrumentAsync):
         create_measurement
         delete_measurement
         restart_averaging
+        phase_unwrap, phase_wrap, phase_flatten
     Other useful devices:
         channel_list
         current_channel
@@ -1952,7 +1953,7 @@ class agilent_PNAL(visaInstrumentAsync):
            traces can be a single value or a list of values.
                     The values are strings representing the trace or the trace number
            unit can be default (real, imag)
-                       db_deg (db, deg)
+                       db_deg (db, deg) , where phase is unwrapped
                        cmplx  (complexe number), Note that this cannot be written to file
            mem when True, selects the memory trace instead of the active one.
            xaxis  when True(default), the first column of data is the xaxis
@@ -1977,6 +1978,7 @@ class agilent_PNAL(visaInstrumentAsync):
             if unit == 'db_deg':
                 r = 20.*np.log10(np.abs(v))
                 theta = np.angle(v, deg=True)
+                theta = self.phase_unwrap(theta)
                 ret.append(r)
                 ret.append(theta)
             elif unit == 'cmplx':
@@ -1988,8 +1990,30 @@ class agilent_PNAL(visaInstrumentAsync):
         if ret.shape[0]==1:
             ret=ret[0]
         return ret
+    @staticmethod
+    def phase_unwrap(phase_deg):
+        return scipy.rad2deg( scipy.unwrap( scipy.def2rad(phase_deg) ) )
+    @staticmethod
+    def phase_wrap(phase_deg):
+        return (phase_deg +180.) % 360 - 180.
+    @staticmethod
+    def phase_flatten(phase_deg, freq, delay=0., ratio=[0,-1]):
+        """
+           Using an unwrapped phase, this removes a slope.
+           if delay is specified, it adds delay*f*360
+           If delay is 0. (default) then it uses 2 points
+           specified by ratio (defaults to first and last)
+           to use to extract slope (delay)
+        """
+        dp = phase_deg[ratio[1]] - phase_deg[ratio[0]]
+        df = freq[ratio[1]] - freq[ratio[0]]
+        if delay == 0.:
+            delay = -dp/df/360.
+            print 'Using delay=', delay
+        return phase_deg + delay*f*360.
     def get_xscale(self):
         return self.x_axis.get()
+
     def _current_config(self, dev_obj=None, options={}):
         # These all refer to the current channel
         # some like calib_en depend on trace
