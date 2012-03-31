@@ -270,9 +270,20 @@ class _Sweep(instrument.BaseInstrument):
     # This MemoryDevice will be shared among different instances
     # So there should only be one instance of this class
     #  Doing it this way allows the instr.dev = val syntax
-    before = instrument.MemoryDevice()
+    before = instrument.MemoryDevice(doc="""
+      When this is a string (not None), it will be executed after the new values is
+      set but BEFORE the out list is read.
+      If you only want a delay, you can also change the beforewait device.
+      The variables i and v represent the current cycle index and the current set value.
+      The variable fwd is True unless in the second cycle of updown.
+      """)
     beforewait = instrument.MemoryDevice(0.02) # provide a default wait so figures are updated
-    after = instrument.MemoryDevice()
+    after = instrument.MemoryDevice(doc="""
+      When this is a string (not None), it will be executed AFTER the out list is read
+      but before the next values is set.
+      The variables i and v represent the current cycle index and the current set value.
+      The variable fwd is True unless in the second cycle of updown.
+      """)
     out = instrument.MemoryDevice(doc="""
       This is the list of device to read (get) for each iteration.
       It can be a single device (or an instrument of it has an alias)
@@ -291,14 +302,33 @@ class _Sweep(instrument.BaseInstrument):
     """)
     path = instrument.MemoryDevice('')
     graph = instrument.MemoryDevice(True)
-    def execbefore(self):
+    updown = instrument.MemoryDevice(['Fwd', 'Rev'], doc="""
+       This parameter selects the mode used when doing updown sweeps.
+       When given a list of 2 strings, these will be included in the filename
+       (just before the extension by default). The 2 strings should be different.
+       One string can be the empty one: ''
+
+       The parameter can also be None. In that case a single file is saved containing
+       but the up and down sweep.
+    """)
+    def execbefore(self, i, v, fwd):
         b = self.before.get()
         if b:
             exec b
-    def execafter(self):
+    def execafter(self, i , v, fwd):
         b = self.after.get()
         if b:
             exec b
+    def _fn_insert_updown(self, filename):
+        fmtr = string.Formatter()
+        present = False
+        for txt, name, spec, conv in fmtr.parse(filename):
+            if name == 'updown':
+                present = True
+        if not present:
+            base, ext = os.path.splitext(filename)
+            filename = base+'{updown}'+ext
+        return filename
     def get_alldevs(self, out=None):
         if out == None:
             out =  self.out.get()
@@ -315,7 +345,7 @@ class _Sweep(instrument.BaseInstrument):
         return '<sweep instrument>'
     def __call__(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
                   close_after=False, title=None, out=None, extra_conf=None,
-                  async=False, reset=False, logspace=False):
+                  async=False, reset=False, logspace=False, updown=False):
         """
             Usage:
                 To define sweep either
@@ -329,7 +359,7 @@ class _Sweep(instrument.BaseInstrument):
                         %02i: for unique 2 digit increment (00, 01 ...)
                               %03i for   3 digits
                      Also available are {datetime}, {date}, {time}
-                                        {start}, {stop}, {npts}
+                                        {start}, {stop}, {npts}, {updown}
                 rate: unused
                 close_after: automatically closes the figure after the sweep when True
                 title: string used for window title
@@ -345,10 +375,14 @@ class _Sweep(instrument.BaseInstrument):
                            exponentially (so it for a nice linear spacing on a log scale)
                           It uses np.logspace internally but start and stop stay the
                           complete values contrary to np.logspace that uses the exponents.
+                updown: When True, the sweep will be done twice, the second being in reverse.
+                        The way the data is saved depends on the updown device.
+                        If it is -1, only do the reverse sweep. Filename is not changed by default.
         """
         dolinspace = True
         if isinstance(start, (list, np.ndarray)):
             span = np.asarray(start)
+            # make start stop extremes for now
             start = min(span)
             stop = max(span)
             npts = len(span)
@@ -359,6 +393,10 @@ class _Sweep(instrument.BaseInstrument):
         except ValueError:
            print 'Wrong start or stop values (outside of valid range). Aborting!'
            return
+        # now make start stop of list, first and last values
+        if not dolinspace:
+            start = span[0]
+            stop = span[-1]
         npts = int(npts)
         if npts < 1:
            raise ValueError, 'npts needs to be at least 1'
@@ -371,10 +409,26 @@ class _Sweep(instrument.BaseInstrument):
             # For checking only take first and last values
             span = span[[0,-1]]
         devs = self.get_alldevs(out)
+        updown_str = self.updown.getcache()
+        updown_same = False
+        if updown_str == None:
+            updown_str = ['', '']
+            updown_same = True
         fullpath = None
+        fullpathrev = None
+        fwd = True
         if filename != None:
-            fullpath = os.path.join(sweep.path.get(), filename)
-            fullpath = _process_filename(fullpath, start=start, stop=stop, npts=npts)
+            basepath = os.path.join(sweep.path.get(), filename)
+            if updown == True:
+                basepath = self._fn_insert_updown(basepath)
+            ind = 0
+            if updown == -1:
+                ind = 1
+                fwd = False
+            now = time.time()
+            fullpath = _process_filename(basepath, now=now, start=start, stop=stop, npts=npts, updown=updown_str[ind])
+            if updown == True and not updown_same:
+                fullpathrev = _process_filename(basepath, now=now, start=start, stop=stop, npts=npts, updown=updown_str[1])
             filename = os.path.basename(fullpath)
         if extra_conf == None:
             extra_conf = [sweep.out]
@@ -382,7 +436,14 @@ class _Sweep(instrument.BaseInstrument):
             extra_conf = [extra_conf, sweep.out]
         else:
             extra_conf.append(sweep.out)
+        if updown==True and updown_same:
+            npts = 2*npts
         hdrs, graphsel, formats = _getheaders(dev, devs, fullpath, npts, extra_conf=extra_conf)
+        if fullpathrev != None:
+            hdrsrev, graphselrev, formatsrev = _getheaders(dev, devs, fullpathrev, npts, extra_conf=extra_conf)
+        else:
+            formatsrev = formats
+        # hdrs and graphsel are the same as the rev versions
         graph = self.graph.get()
         if graph:
             t = traces.Trace()
@@ -404,31 +465,52 @@ class _Sweep(instrument.BaseInstrument):
         if filename != None:
             # Make it unbuffered, windows does not handle line buffer correctly
             f = open(fullpath, 'w', 0)
-            _write_conf(f, formats, extra_base='sweep_options', async=async, reset=reset)
+            _write_conf(f, formats, extra_base='sweep_options', async=async, reset=reset, start=start, stop=stop, updown=updown)
             writevec(f, hdrs+['time'], pre_str='#')
+            if fullpathrev != None:
+                frev = open(fullpathrev, 'w', 0)
+                _write_conf(frev, formatsrev, extra_base='sweep_options', async=async, reset=reset, start=start, stop=stop, updown=updown)
+                writevec(frev, hdrs+['time'], pre_str='#')
+            else:
+                frev = f
         else:
             f = None
+            frev = None
         #TODO get CTRL-C to work properly
         ###############################
         # Start of loop
         ###############################
         try:
-            for i,v in enumerate(span):
-                tme = clock.get()
-                dev.set(v) # TODO replace with move
-                iv = dev.getcache() # in case the instrument changed the value
-                self.execbefore()
-                wait(self.beforewait.get())
-                if async:
-                    vals = _readall_async(devs, formats, i)
-                else:
-                    vals = _readall(devs, formats, i)
-                self.execafter()
-                if f:
-                    writevec(f, [iv]+vals+[tme])
+            cycle_list = [(fwd, f, formats)]
+            ioffset = 0
+            if updown == True:
+                cycle_list = [(True, f, formats), (False, frev, formatsrev)]
+            for cfwd, cf, cformats in cycle_list:
+                cycle_span = span
+                if not cfwd: # doing reverse
+                    cycle_span = span[::-1]
+                for i,v in enumerate(cycle_span):
+                    i += ioffset
+                    tme = clock.get()
+                    dev.set(v) # TODO replace with move
+                    iv = dev.getcache() # in case the instrument changed the value
+                    self.execbefore(i, v, cfwd)
+                    wait(self.beforewait.get())
+                    if async:
+                        vals = _readall_async(devs, cformats, i)
+                    else:
+                        vals = _readall(devs, cformats, i)
+                    self.execafter(i, v, cfwd)
+                    if cf:
+                        writevec(cf, [iv]+vals+[tme])
+                    if graph:
+                        t.addPoint(iv, gsel([iv]+vals))
+                        _checkTracePause(t)
+                        if t.abort_enabled:
+                            break
+                if updown_same:
+                    ioffset = i + 1
                 if graph:
-                    t.addPoint(iv, gsel([iv]+vals))
-                    _checkTracePause(t)
                     if t.abort_enabled:
                         break
         except KeyboardInterrupt:
@@ -436,6 +518,8 @@ class _Sweep(instrument.BaseInstrument):
             pass
         if f:
             f.close()
+        if fullpathrev != None:
+            frev.close()
         if graph and close_after:
             t.window.close()
         if reset: # return to first value
@@ -659,7 +743,7 @@ def scope(dev, interval=.1, title='', **kwarg):
 
 
 _get_filename_i = 0
-def _process_filename(filename, **kwarg):
+def _process_filename(filename, now=None, **kwarg):
     """
     Returns a filename with the following replacements:
         %T:   Date-time like 20120301-173000 (march 1st, 2012 at 17:30:00)
@@ -677,9 +761,12 @@ def _process_filename(filename, **kwarg):
         {datetime}: same as %T
         {date}:     same as %D
         {time}:     same as %t
+
+    The now parameter can be used to specify the time in sec since the epoch
+    to use. Defaults to now.
     """
     global _get_filename_i
-    localtime = time.localtime()
+    localtime = time.localtime(now)
     datestamp = time.strftime('%Y%m%d', localtime)
     timestamp = time.strftime('%H%M%S', localtime)
     dtstamp = datestamp+'-'+timestamp
