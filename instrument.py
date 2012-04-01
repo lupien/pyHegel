@@ -264,7 +264,7 @@ class BaseDevice(object):
         if name == '__doc__':
             return self._get_docstring()
         return super(BaseDevice, self).__getattribute__(name)
-    def _get_docstring(self):
+    def _get_docstring(self, added=''):
         doc_base = BaseDevice.__doc__
         if doc_base == None:
             doc_base = ''
@@ -278,7 +278,7 @@ class BaseDevice(object):
             extra = '\n-------------\n Value at least %r\n'%(self.min)
         elif self.max != None:
             extra = '\n-------------\n Value at most %r\n'%(self.max)
-        return doc + extra + doc_base
+        return doc + added + extra + doc_base
     # for cache consistency
     #    get should return the same thing set uses
     def set(self, val, **kwarg):
@@ -713,6 +713,7 @@ class scpiDevice(BaseDevice):
            set to that object if unset.
            If only getstr is not given and autoget is true and
            a getstr is created by appending '?' to setstr.
+           If autoget is false and there is no getstr, autoinit is set to False.
 
            options is a list of optional parameters for get and set.
                   It is a dictionnary, where the keys are the option name
@@ -733,6 +734,9 @@ class scpiDevice(BaseDevice):
         """
         if setstr == None and getstr == None:
             raise ValueError, 'At least one of setstr or getstr needs to be specified'
+        if setstr != None and getstr == None and autoget == False:
+            # we don't have get, so we remove autoinit to prevent problems with cache and force_get (iprint)
+            autoinit = False
         if isinstance(choices, ChoiceBase) and str_type == None:
             str_type = choices
         if autoinit == True:
@@ -750,6 +754,35 @@ class scpiDevice(BaseDevice):
         self._options_apply = options_apply
         self.type = str_type
         self._option_cache = {}
+    def _get_docstring(self, added=''):
+        # we don't include options starting with _
+        if len(self._options) > 0:
+            added = '---------- Optional Parameters\n'
+            for optname, optval in self._options.iteritems():
+                basedev = False
+                if isinstance(optval, BaseDevice):
+                    basedev = True
+                if optname[0] != '_':
+                    added += '{optname}: has default value {optval!r}'.format(optname=optname, optval=optval)
+                    lim = self._options_lim.get(optname, None)
+                    if lim != None:
+                        if basedev:
+                            added += '        current choices (above device): '
+                        else:
+                            added += '        current choices: '
+                        if isinstance(lim, tuple):
+                            if lim[0] == None and lim[1] == None:
+                                added += 'any value allowed'
+                            else:
+                                if lim[0] != None:
+                                    added += '%r <= '%lim[0]
+                                added += '%s'%optname
+                                if lim[1] != None:
+                                    added += ' <= %r'%lim[1]
+                        else:
+                            added += repr(lim)
+                        added += '\n'
+        super(scpiDevice, self)._get_docstring(added=added)
     def _tostr(self, val):
         # This function converts from val to a str for the command
         t = self.type
@@ -2097,16 +2130,16 @@ class agilent_PNAL(visaInstrumentAsync):
         def devMkrEnOption(*arg, **kwarg):
             # This will check if the marker is currently enabled.
             options = kwarg.pop('options', {}).copy()
-            options.update(marker_enabled=self.marker_en)
+            options.update(_marker_enabled=self.marker_en)
             options_lim = kwarg.pop('options_lim', {}).copy()
-            options_lim.update(marker_enabled=[True])
+            options_lim.update(_marker_enabled=[True])
             kwarg.update(options=options, options_lim=options_lim)
             return devMkrOption(*arg, **kwarg)
         self.marker_en = devMkrOption('CALC{ch}:MARKer{mkr}', str_type=bool)
         marker_funcs = ChoiceStrings('MAXimum', 'MINimum', 'RPEak', 'LPEak', 'NPEak', 'TARGet', 'LTARget', 'RTARget', 'COMPression')
         self.marker_trac_func = devMkrEnOption('CALC{ch}:MARKer{mkr}:FUNCtion', choices=marker_funcs)
-        # This screws up iprint
-        #self.marker_exec = devMkrOption('CALC{ch}:MARKer{mkr}:FUNCTION:EXECute', choices=marker_funcs, autoget=False)
+        # This is set only
+        self.marker_exec = devMkrOption('CALC{ch}:MARKer{mkr}:FUNCTION:EXECute', choices=marker_funcs, autoget=False)
         self.marker_target = devMkrEnOption('CALC{ch}:MARKer{mkr}:TARGet', str_type=float)
         marker_format = ChoiceStrings('DEFault', 'MLINear', 'MLOGarithmic', 'IMPedance', 'ADMittance', 'PHASe', 'IMAGinary', 'REAL',
                                       'POLar', 'GDELay', 'LINPhase', 'LOGPhase', 'KELVin', 'FAHRenheit', 'CELSius')
