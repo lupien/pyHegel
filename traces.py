@@ -126,17 +126,65 @@ def time_stripdate(x, first=None):
     dt[5]=0 # tm_sec
     offset = time.mktime(dt)
     return x-offset
-    
-    
 
-class Trace(FigureManagerQT):
-    def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False):
+class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class so need object to make it new one (so super works properly for childs)
+    # A useful subclass will need at least to include update
+    def __init__(self, width=9.00, height=7.00, dpi=72):
         self.fig = Figure(figsize=(width,height),dpi=dpi)
         self.canvas = FigureCanvas(self.fig)
         FigureManagerQT.__init__(self,self.canvas,-1)
         self.MainWidget = self.window
         self.setWindowTitle('Trace...')
         self.isclosed = False
+        #########
+        _figlist.append(self)
+        self.window.connect(self.window, QtCore.SIGNAL('destroyed()'),
+             self.close_slot)
+    def close_slot(self):
+        self.isclosed = True
+        _figlist.remove(self)
+
+    def mykey_press(self, event):
+        # TODO add a Rescale
+        # based on FigureManagerBase.key_press
+        all = rcParams['keymap.all_axes']
+        if event.inaxes is None:
+            return
+        if (event.key.isdigit() and event.key!='0') or event.key in all:
+              # if it was the axes, where the event was raised
+            if not (event.key in all):
+                n = int(event.key)-1
+            for i, a in enumerate(self.canvas.figure.get_axes()):
+                # consider axes, in which the event was raised
+                # FIXME: Why only this axes?
+                if event.x is not None and event.y is not None \
+                       and a.in_axes(event):
+                    if event.key in all:
+                        a.zorder = 0
+                    else:
+                        a.zorder = 1 if i==n else 0
+
+    def setWindowTitle(self, title):
+        self.set_window_title(title)
+    def draw(self):
+        if self.isclosed:
+            return
+        self.canvas.draw()
+    def show(self):
+        if self.isclosed:
+            return
+        self.fig.canvas.window().show()
+    def hide(self):
+        if self.isclosed:
+            return
+        self.fig.canvas.window().hide()
+    def savefig(self,*args,**kwargs):
+        self.fig.savefig(*args, **kwargs)
+
+
+class Trace(TraceBase):
+    def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False):
+        super(Trace, self).__init__(width=width, height=height, dpi=dpi)
         ax = host_subplot_class(self.fig, 111)
         self.fig.add_subplot(ax)
         self.axs = [ax]
@@ -179,13 +227,6 @@ class Trace(FigureManagerQT):
         self.toolbar.addWidget(self.rescale_button)
         self.rescale_button.connect(self.rescale_button,
               QtCore.SIGNAL('clicked()'), self.rescale_button_press)
-        #########
-        _figlist.append(self)
-        self.window.connect(self.window, QtCore.SIGNAL('destroyed()'),
-             self.close_slot)
-    def close_slot(self):
-        self.isclosed = True
-        _figlist.remove(self)
     def pause_button_press(self, state):
         self.pause_enabled = state
     def abort_button_press(self, state):
@@ -199,26 +240,6 @@ class Trace(FigureManagerQT):
             ax.set_autoscaley_on(True)
             ax.autoscale(enable=None)
         self.draw()
-    def mykey_press(self, event):
-        # TODO add a Rescale
-        # based on FigureManagerBase.key_press
-        all = rcParams['keymap.all_axes']
-        if event.inaxes is None:
-            return
-        if (event.key.isdigit() and event.key!='0') or event.key in all:
-              # if it was the axes, where the event was raised
-            if not (event.key in all):
-                n = int(event.key)-1
-            for i, a in enumerate(self.canvas.figure.get_axes()):
-                # consider axes, in which the event was raised
-                # FIXME: Why only this axes?
-                if event.x is not None and event.y is not None \
-                       and a.in_axes(event):
-                    if event.key in all:
-                        a.zorder = 0
-                    else:
-                        a.zorder = 1 if i==n else 0
-
     def set_xlogscale(self, enable=True):
         s = {True:'log', False:'linear'}
         self.axs[0].set_xscale(s[enable])
@@ -233,8 +254,6 @@ class Trace(FigureManagerQT):
         self.update()
     def set_xlabel(self, label):
         self.axs[0].set_xlabel(label)
-    def setWindowTitle(self, title):
-        self.set_window_title(title)
     def addPoint(self, x, ys):
         if self.time_mode:
             # convert from sec since epoch to matplotlib date format
@@ -304,20 +323,6 @@ class Trace(FigureManagerQT):
             ax.autoscale(enable=None)
         self.first_update = False
         self.draw()
-    def draw(self):
-        if self.isclosed:
-            return
-        self.canvas.draw()
-    def show(self):
-        if self.isclosed:
-            return
-        self.fig.canvas.window().show()
-    def hide(self):
-        if self.isclosed:
-            return
-        self.fig.canvas.window().hide()
-    def savefig(self,*args,**kwargs):
-        self.fig.savefig(*args, **kwargs)
 
 def plot_time(x, *extrap, **extrak):
     """
@@ -351,7 +356,7 @@ class Sleeper(QtGui.QWidget):
         sl.close()
     """
     def __init__(self, sleep=1.): # default 1 min
-        super(type(self),self).__init__()
+        super(Sleeper, self).__init__()
         self.bar = QtGui.QProgressBar()
         self.bar.setMaximum(1000)
         self.pause_button = QtGui.QPushButton('Pause')
