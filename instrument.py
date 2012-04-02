@@ -763,7 +763,7 @@ class scpiDevice(BaseDevice):
                 if isinstance(optval, BaseDevice):
                     basedev = True
                 if optname[0] != '_':
-                    added += '{optname}: has default value {optval!r}'.format(optname=optname, optval=optval)
+                    added += '{optname}: has default value {optval!r}\n'.format(optname=optname, optval=optval)
                     lim = self._options_lim.get(optname, None)
                     if lim != None:
                         if basedev:
@@ -782,7 +782,7 @@ class scpiDevice(BaseDevice):
                         else:
                             added += repr(lim)
                         added += '\n'
-        super(scpiDevice, self)._get_docstring(added=added)
+        return super(scpiDevice, self)._get_docstring(added=added)
     def _tostr(self, val):
         # This function converts from val to a str for the command
         t = self.type
