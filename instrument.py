@@ -1421,9 +1421,9 @@ class sr830_lia(visaInstrument):
     To read more than one channel at a time use snap
     Otherwise you can use x, y, t, theta and snap
     """
+    # TODO setup snapsel to use the names instead of the numbers
     _snap_type = {1:'x', 2:'y', 3:'R', 4:'theta', 5:'Aux_in1', 6:'Aux_in2',
                   7:'Aux_in3', 8:'Aux_in4', 9:'Ref_Freq', 10:'Ch1', 11:'Ch2'}
-    _filter_slope_v = np.arange(4)+1
     def init(self, full=False):
         # This empties the instrument buffers
         self._clear()
@@ -1455,17 +1455,21 @@ class sr830_lia(visaInstrument):
         self.phase = scpiDevice('phas', str_type=float, min=-360., max=729.90, setget=True)
         timeconstants = ChoiceIndex(make_choice_list([10, 30], -6, 3), normalize=True)
         self.timeconstant = scpiDevice('oflt', choices=timeconstants)
-        self.filter_slope = scpiDevice('ofsl', str_type=int, min=0, max=3, doc='0: 6 dB/oct\n1: 12\n2: 18\n3: 24\n')
+        filter_slopes=ChoiceIndex([6, 12, 18, 24])
+        self.filter_slope = scpiDevice('ofsl', choices=filter_slopes, doc='in dB/oct\n')
         self.sync_filter = scpiDevice('sync', str_type=bool)
         self.x = scpiDevice(getstr='outp? 1', str_type=float, delay=True)
         self.y = scpiDevice(getstr='outp? 2', str_type=float, delay=True)
         self.r = scpiDevice(getstr='outp? 3', str_type=float, delay=True)
         self.theta = scpiDevice(getstr='outp? 4', str_type=float, delay=True)
-        self.input_conf = scpiDevice('isrc', str_type=int, min=0, max=3, doc='0: A\n1: A-B\n2: I(1MOhm)\n3: I(100 MOhm)\n')
+        input_conf = ChoiceIndex(['A', 'A-B', 'I1', 'I100'])
+        self.input_conf = scpiDevice('isrc', choices=input_conf, doc='For currents I1 refers to 1 MOhm, I100 refers to 100 MOhm\n')
         self.grounded_conf = scpiDevice('ignd', str_type=bool)
         self.dc_coupled_conf = scpiDevice('icpl', str_type=bool)
-        self.reserve_mode = scpiDevice('rmod', str_type=int, min=0, max=2, doc='0: High reserve\n1: Normal\n2: Low noise\n')
-        self.linefilter_conf = scpiDevice('ilin', str_type=int, min=0, max=3, doc='0: No filters\n1: line notch\n2: 2xline notch:\n3: both line, 2xline notch\n')
+        reserve_mode = ChoiceIndex(['high', 'normal', 'low'])
+        self.reserve_mode = scpiDevice('rmod', choices=reserve_mode)
+        linefilter = ChoiceIndex(['none', 'line', '2xline', 'both'])
+        self.linefilter_conf = scpiDevice('ilin', choices=linefilter, doc='Selects the notch filters')
         # status: b0=Input/Reserver ovld, b1=Filter ovld, b2=output ovld, b3=unlock,
         # b4=range change (accross 200 HZ, hysteresis), b5=indirect time constant change
         # b6=triggered, b7=unused
@@ -1491,12 +1495,13 @@ class sr830_lia(visaInstrument):
         """
         Calculates the fraction of a step function that is obtained after
         n_time_constant*time_constant time when using n_filter
+        n_filter is the order of the filter: 1, 2, 3 ...
         By default time_constant and n_filter are the current ones
-        When sec is Truem the input time is in sec, not in time_constants
+        When sec is True the input time is in sec, not in time_constants
         """
         if n_filter == None:
             n_filter = self.filter_slope.getcache()
-            n_filter = self._filter_slope_v[n_filter]
+            n_filter = self.filter_slope.choices.index(n_filter)+1
         if time_constant == None:
             time_constant = self.timeconstant.getcache()
         if sec:
@@ -1527,7 +1532,7 @@ class sr830_lia(visaInstrument):
         """
         if n_filter == None:
             n_filter = self.filter_slope.getcache()
-            n_filter = self._filter_slope_v[n_filter]
+            n_filter = self.filter_slope.choices.index(n_filter)+1
         if time_constant == None:
             time_constant = self.timeconstant.getcache()
         func = lambda x: self.find_fraction(x, n_filter, time_constant)-frac
