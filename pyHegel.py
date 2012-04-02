@@ -311,6 +311,10 @@ class _Sweep(instrument.BaseInstrument):
        The parameter can also be None. In that case a single file is saved containing
        but the up and down sweep.
     """)
+    next_file_i = instrument.MemoryDevice(0,doc="""
+    This number is used, and incremented automatically when {next_i:02} is used (for 00 to 99).
+     {next_i:03}  is used for 000 to 999, etc
+    """)
     def execbefore(self, i, v, fwd):
         b = self.before.get()
         if b:
@@ -358,6 +362,8 @@ class _Sweep(instrument.BaseInstrument):
                         %D: for date string
                         %02i: for unique 2 digit increment (00, 01 ...)
                               %03i for   3 digits
+                              The unicity is only checked for the first file of updown.
+                              It is kept the same for the second one.
                      Also available are {datetime}, {date}, {time}
                                         {start}, {stop}, {npts}, {updown}
                 rate: unused
@@ -426,9 +432,11 @@ class _Sweep(instrument.BaseInstrument):
                 ind = 1
                 fwd = False
             now = time.time()
-            fullpath = _process_filename(basepath, now=now, start=start, stop=stop, npts=npts, updown=updown_str[ind])
+            fullpath, unique_i = _process_filename(basepath, now=now, start=start, stop=stop, npts=npts, updown=updown_str[ind])
             if updown == True and not updown_same:
-                fullpathrev = _process_filename(basepath, now=now, start=start, stop=stop, npts=npts, updown=updown_str[1])
+                ni = self.next_file_i.getcache()-1
+                fullpathrev, unique_i = _process_filename(basepath, now=now, next_i=ni, start_i=unique_i, search=False,
+                                                start=start, stop=stop, npts=npts, updown=updown_str[1])
             filename = os.path.basename(fullpath)
         if extra_conf == None:
             extra_conf = [sweep.out]
@@ -611,7 +619,7 @@ class _Snap(object):
             raise ValueError, 'Snap. No devices set for out'
         if filename != None:
             filename = os.path.join(sweep.path.get(), filename)
-            filename = _process_filename(filename)
+            filename, unique_i = _process_filename(filename)
         if filename == None:
             filename = self.filename
         elif filename != self.filename:
@@ -664,7 +672,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     fullpath = None
     if filename != None:
         fullpath = os.path.join(sweep.path.get(), filename)
-        fullpath = _process_filename(fullpath)
+        fullpath, unique_i = _process_filename(fullpath)
         filename = os.path.basename(fullpath)
     if title == None:
         title = filename
@@ -742,37 +750,60 @@ def scope(dev, interval=.1, title='', **kwarg):
             break
 
 
-_get_filename_i = 0
-def _process_filename(filename, now=None, **kwarg):
+def _process_filename(filename, now=None, next_i=None, start_i=0, search=True, **kwarg):
     """
-    Returns a filename with the following replacements:
+    Returns a filename and an integer with the following replacements:
         %T:   Date-time like 20120301-173000 (march 1st, 2012 at 17:30:00)
         %D:   Just the date part like 20120310
         %t:   Just the time part like 173000
         %i, %01i %02i ...:
-              Is replaced by the an integer. The integer is automatically
+              Is replaced by the an integer. When search is True (default)
+              The integer is automatically
               incremented in order to prevent collision with existing names.
+              The first integer tried is start_i. If set to None, it will
+              be the same as next_i
               When using the 0n version, n digit are used, with left padding
               of 0: so %02i produces: 00, 01, 02, 03 ... 09, 10, 11 .. 99, 100
                    and %03i would produce 000, 001 ....
+              The integer is returned with the filename
     There are also name replacements. All keyword arguments can be used for
     replacement using the string.format syntax.
     Variables always present:
         {datetime}: same as %T
         {date}:     same as %D
         {time}:     same as %t
+        {next_i:02}, {next_i:03} is replaced by next_i with the correct number of
+                digit. When next_i is None, the value used is sweep.next_file_i
+                When used, even if not None, sweep.next_file_i is auto incremented
+                to the next value.
 
     The now parameter can be used to specify the time in sec since the epoch
     to use. Defaults to now.
     """
-    global _get_filename_i
+    if next_i == None:
+        ni = sweep.next_file_i.getcache()
+    else:
+        ni = next_i
+    auto_si = False
+    if start_i == None:
+        start_i = ni
+        auto_si = True
+    filename_i = start_i
     localtime = time.localtime(now)
     datestamp = time.strftime('%Y%m%d', localtime)
     timestamp = time.strftime('%H%M%S', localtime)
     dtstamp = datestamp+'-'+timestamp
-    kwarg.update(datetime=dtstamp, date=datestamp, time=timestamp)
-    filename = filename.format(**kwarg)
+    kwarg.update(datetime=dtstamp, date=datestamp, time=timestamp, next_i=ni)
+    fmtr = string.Formatter()
+    ni_present = False
+    si_changed = False
     changed = False
+    for txt, name, spec, conv in fmtr.parse(filename):
+        if name != None:
+            changed = True
+        if name == 'next_i':
+            ni_present = True
+    filename = filename.format(**kwarg)
     if '%T' in filename:
         filename = filename.replace('%T', dtstamp)
         changed = True
@@ -786,13 +817,19 @@ def _process_filename(filename, now=None, **kwarg):
         # Note that there is a possible race condition here
         # it is still possible to overwrite a file if it
         # is created between the check and the file creation
-        while os.path.exists(filename%_get_filename_i):
-           _get_filename_i += 1
-        filename = filename % _get_filename_i
+        if search:
+            while os.path.exists(filename%filename_i):
+                filename_i += 1
+        filename = filename % filename_i
+        if auto_si:
+            ni = filename_i
         changed = True
+        si_changed = True
     if changed:
         print 'Using filename: '+filename
-    return filename
+    if ni_present or (auto_si and si_changed):
+        sweep.next_file_i.set(ni+1)
+    return filename, filename_i
 
 
 ### get overides get the mathplotlib
@@ -815,7 +852,7 @@ def get(dev, filename=None, keep=False, **extrap):
     if filename != None:
         dev.force_get()
         filename = os.path.join(sweep.path.get(), filename)
-        filename = _process_filename(filename)
+        filename, unique_i = _process_filename(filename)
         extrap.update(filename=filename)
         extrap.update(keep=keep)
     try:
@@ -854,7 +891,7 @@ def make_dir(directory, setsweep=True):
         and changes sweep.path to point there unless
         setsweep is False
     """
-    dirname = _process_filename(directory)
+    dirname, unique_i = _process_filename(directory)
     if not os.path.exists(dirname):
         os.makedirs(dirname)
     if setsweep:
