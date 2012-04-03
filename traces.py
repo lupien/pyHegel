@@ -337,7 +337,6 @@ def lots_avg(n):
     return lambda x: x.reshape((-1, n)).mean(axis=1)
 
 class TraceLots(TraceBase):
-    # block_size in points
     def __init__(self, filename, width=9.00, height=7.00, dpi=72,
                  block_size=10*1024, dtype=np.uint8, trans=None):
         """
@@ -395,6 +394,104 @@ class TraceLots(TraceBase):
         self.vals = vals
     def update(self):
         self.mainplot.set_ydata(self.vals)
+        self.draw()
+
+class TraceWater(TraceBase):
+    def __init__(self, xy, y=None, width=9.00, height=7.00, dpi=72,
+                 block_size=10*1024, xoffset=0., yoffset=0.):
+        """
+        This makes a waterfall plot with adjustable spacing
+        Either specify x and y with the same dimensions, or x
+        can contain x and y as the first index.
+        So y should have shape (ncurves, nptspercurve)
+        x is the same or (2, ncurves, nptspercurve)
+        """
+        super(TraceWater, self).__init__(width=width, height=height, dpi=dpi)
+        ax = self.fig.add_subplot(111)
+        self.ax = ax
+        if y == None:
+            self.y = xy[1]
+            self.x = xy[0]
+        else:
+            self.y = y
+            self.x = xy
+        self.dx = float(self.x.max() - self.x.min())
+        self.dy = float(self.y.max() - self.y.min())
+        self.ncurves = self.x.shape[0]
+        #self.hbar = QtGui.QScrollBar(QtCore.Qt.Horizontal)
+        #self.vbar = QtGui.QScrollBar(QtCore.Qt.Vertical)
+        self.hbar = QtGui.QSlider(QtCore.Qt.Horizontal)
+        self.vbar = QtGui.QSlider(QtCore.Qt.Vertical)
+        self.hbar_rev = QtGui.QCheckBox('Reverse')
+        #### handle central widget layout
+        self.central_widget = QtGui.QWidget()
+        layout = QtGui.QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout_top = QtGui.QHBoxLayout()
+        layout_top.setContentsMargins(0, 0, 0, 0)
+        layout_bottom = QtGui.QHBoxLayout()
+        layout_bottom.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(layout_top)
+        layout.addLayout(layout_bottom)
+        # The QMainWindow.centralWidget is self.canvas
+        layout_top.addWidget(self.canvas)
+        layout_top.addWidget(self.vbar)
+        layout_bottom.addWidget(self.hbar)
+        layout_bottom.addWidget(self.hbar_rev)
+        self.central_widget.setLayout(layout)
+        self.MainWidget.setCentralWidget(self.central_widget)
+        ####
+        self.hbar.setMaximum(100)
+        self.vbar.setMaximum(100)
+        self.vbar.setInvertedAppearance(True)
+        self.vbar.setInvertedControls(True)
+        self.set_xy_offset(xoffset, yoffset)
+        self.central_widget.connect(self.hbar,
+              QtCore.SIGNAL('valueChanged(int)'), self.update)
+        self.central_widget.connect(self.vbar,
+              QtCore.SIGNAL('valueChanged(int)'), self.update)
+        self.central_widget.connect(self.hbar_rev,
+              QtCore.SIGNAL('stateChanged(int)'), self.update)
+        self.update()
+    def set_xy_offset(self, xo, yo):
+        if xo < 0:
+            self.hbar_rev.setCheckState(True)
+            xo = -xo
+        else:
+            self.hbar_rev.setCheckState(False)
+        if xo == 0:
+            h = 0
+        else:
+            xo /= self.dx/2.
+            h = int( (np.log10(xo)*50.)+100. )
+        if yo == 0:
+            v = 100
+        else:
+            yo /= self.dy
+            v = int( -(np.log10(yo)*50.) )
+        self.hbar.setValue(h)
+        self.vbar.setValue(v)
+    def get_xy_offset(self):
+        h = self.hbar.value()
+        v = self.vbar.value()
+        if h == 0:
+            xo = 0
+        else:
+            xo = 10.**((h-100)/50.)
+        xo *=  self.dx/2
+        if v == 100:
+            yo = 0
+        else:
+            yo = 10.**((-v)/50.)
+        yo *=  self.dy
+        if self.hbar_rev.checkState():
+            xo = -xo
+        return xo, yo
+    def update(self, foo=None):
+        self.ax.cla()
+        xo, yo = self.get_xy_offset()
+        v = np.arange(self.ncurves)
+        self.ax.plot(self.x.T + v*xo, self.y.T + v*yo)
         self.draw()
 
 
