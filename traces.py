@@ -324,6 +324,52 @@ class Trace(TraceBase):
         self.first_update = False
         self.draw()
 
+class TraceLots(TraceBase):
+    # block_size in points
+    def __init__(self, filename, width=9.00, height=7.00, dpi=72, block_size=10*1024, dtype=np.uint8):
+        super(TraceLots, self).__init__(width=width, height=height, dpi=dpi)
+        self.filename = filename
+        self.dtype = dtype
+        self.byte_per_point = 1
+        if dtype().nbytes == 2:
+            self.byte_per_point = 2
+        self.block_nbpoints = block_size
+        self.block_size = block_size*self.byte_per_point
+        self.fh = open(filename, 'rb')
+        ax = self.fig.add_subplot(111)
+        self.ax = ax
+        self.fh.seek(0, 2) # go to end of file
+        self.nbpoints = self.fh.tell() / self.byte_per_point
+        self.readit() # sets self.vals
+        self.mainplot = ax.plot(self.vals)[0]
+        self.bar = QtGui.QScrollBar(QtCore.Qt.Horizontal)
+        self.bar.setMaximum(self.nbpoints/block_size*2 -1) # every step is half a block size
+        self.bar_label = QtGui.QLabel()
+        self.central_widget = QtGui.QWidget()
+        self.central_layout = QtGui.QVBoxLayout()
+        self.central_layout.setContentsMargins(0, 0, 0, 0)
+        # The QMainWindow.centralWidget is self.canvas
+        self.central_layout.addWidget(self.canvas)
+        self.central_layout.addWidget(self.bar)
+        self.central_layout.addWidget(self.bar_label)
+        self.central_widget.setLayout(self.central_layout)
+        self.MainWidget.setCentralWidget(self.central_widget)
+        self.bar.connect(self.bar,
+              QtCore.SIGNAL('valueChanged(int)'), self.bar_update)
+        self.bar_update(0)
+    def bar_update(self, val):
+        offset = val * self.block_nbpoints /2
+        self.bar_label.setText('offest: {:,}'.format(offset))
+        self.readit(offset)
+        self.update()
+    def readit(self, offset=0):
+        self.fh.seek(offset*self.byte_per_point)
+        self.vals = np.fromfile(self.fh, dtype=self.dtype, count=self.block_size)
+    def update(self):
+        self.mainplot.set_ydata(self.vals)
+        self.draw()
+
+
 def plot_time(x, *extrap, **extrak):
     """
        The same as plot_date, but takes in the time in sec since epoch
