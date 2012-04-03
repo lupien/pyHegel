@@ -324,12 +324,37 @@ class Trace(TraceBase):
         self.first_update = False
         self.draw()
 
+def lots_pick(n):
+    """
+    This returns a fucntion that will pick one out of every n point
+    """
+    return lambda x: x[::n]
+
+def lots_avg(n):
+    """
+    This returns a fucntion that will return the average of blocks of n points
+    """
+    return lambda x: x.reshape((-1, n)).mean(axis=1)
+
 class TraceLots(TraceBase):
     # block_size in points
-    def __init__(self, filename, width=9.00, height=7.00, dpi=72, block_size=10*1024, dtype=np.uint8):
+    def __init__(self, filename, width=9.00, height=7.00, dpi=72,
+                 block_size=10*1024, dtype=np.uint8, trans=None):
+        """
+        This class allows the exploration of very large raw (binary) data file.
+        The filename has to be provided.
+        block_size is the number of points to show at a time
+         (the slider will move in increments of half of this)
+        dtype is a numpy dtype for the data (uint8, uint16 ...)
+        trans is a transformation function on the data.
+              The function takes the read data as input and must return
+              the data to display.
+              See lots_pick and lots_avg as possible functions
+        """
         super(TraceLots, self).__init__(width=width, height=height, dpi=dpi)
         self.filename = filename
         self.dtype = dtype
+        self.trans = trans
         self.byte_per_point = 1
         if dtype().nbytes == 2:
             self.byte_per_point = 2
@@ -364,7 +389,10 @@ class TraceLots(TraceBase):
         self.update()
     def readit(self, offset=0):
         self.fh.seek(offset*self.byte_per_point)
-        self.vals = np.fromfile(self.fh, dtype=self.dtype, count=self.block_size)
+        vals = np.fromfile(self.fh, dtype=self.dtype, count=self.block_size)
+        if self.trans != None:
+            vals = self.trans(vals)
+        self.vals = vals
     def update(self):
         self.mainplot.set_ydata(self.vals)
         self.draw()
