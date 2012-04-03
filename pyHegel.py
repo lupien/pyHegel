@@ -34,6 +34,7 @@ def help_pyHegel():
         scope
         _process_filename
         make_dir
+        readfile
         iprint
         ilist
         dlist
@@ -52,6 +53,8 @@ def help_pyHegel():
         clock
     """
     print help_pyHegel.__doc__
+
+print '\n\n---------\n For available commands, type "help_pyHegel()"\n---------'
 
 def reset_pyHegel():
     """

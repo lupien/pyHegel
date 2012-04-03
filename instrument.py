@@ -1649,6 +1649,28 @@ class agilent_rf_33522A(visaInstrument):
         self.write('PHASe:SYNChronize')
 
 class agilent_multi_34410A(visaInstrumentAsync):
+    """
+    This controls the agilent digital multimeters.
+    Note that most of the devices requires a proper selection of the
+    mode first. They can behave differently in various mode.
+
+    Important devices:
+     readval  (default alias), same as initiating a measurement, waiting then fetch
+     fetch
+     fetch_all   (returns more than one value when count >1)
+     fetch_std   (returns the standard deviation when count >1)
+     mode
+     aperture
+     aperture_en
+     nplc
+     sample_count
+     range
+     autorange
+     zero
+    Useful method:
+     set_long_avg  To average for even longer than 1s (controls aperture and sample_count)
+
+    """
     def math_clear(self):
         self.write('CALCulate:AVERage:CLEar')
     def _current_config(self, dev_obj=None, options={}):
@@ -1685,6 +1707,12 @@ class agilent_multi_34410A(visaInstrumentAsync):
                 extra += ('temperature_transducer_rtd_ref', 'temperature_transducer_rtd_off')
         return self._conf_helper(*(baselist + extra + (options,)))
     def set_long_avg(self, time, force=False):
+        """
+        Select a time in seconds.
+        It will change the aperture accordingly.
+        If time is greater than 1 s, an alternative mode
+        with a smaller aperture (10 nplc) and a repeat count is used.
+        """
         # update mode first, so aperture applies to correctly
         self.mode.get()
         line_period = 1/self.line_freq.getcache()
