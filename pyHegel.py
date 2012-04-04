@@ -7,6 +7,7 @@
 
 import numpy as np
 import os
+import glob
 import time
 import re
 import string
@@ -542,6 +543,60 @@ class _Sweep(instrument.BaseInstrument):
 sweep = _Sweep()
 
 wait = traces.wait
+
+#TODO add handling of title column and extracting headers
+def readfile(filename, nojoin=False):
+    """
+    This function will return a numpy array containing all the data in the
+    file.
+    By default the path is joined with sweep.path (unless absolute).
+     nojoin set to True prevents this
+    filename can contain a glob (*) parameter to combine many files.
+    or be a list of files or glob.
+    The result of a glob is sorted.
+    When reading multiple files, they need to have the same shape.
+       glob examples:
+         base_other_*.txt   (* matches any string, including empty one )
+         base_other_??.txt  (? matches a single character )
+         base_other[abc]_.txt  ([abc] matches a single character among abc
+                                [a-zA-F] matches a single character in ranges
+                                   a-z and A-F
+                                [!...] does not match any of the characters (or ranges)
+                                   in ... )
+        *, ? and [ can be escaped with a \\
+
+    For a single file, the returned array as shape (n_columns, n_rows)
+    so selecting a column in a data file is the first index dimension.
+    For multiple files, the shape is (n_columns, n_files, n_rows)
+     or (nfiles, n_rows) if the files contain only a single column
+    """
+    if not isinstance(filename, (list, tuple, np.ndarray)):
+        filename = [filename]
+    filelist = []
+    for fglob in filename:
+        if not nojoin:
+            fglob = os.path.join(sweep.path.get(), fglob)
+        fl = glob.glob(fglob)
+        fl.sort()
+        filelist.extend(fl)
+    if len(filelist) > 1:
+        print 'Found %i files'%len(filelist)
+        multi = True
+    else:
+        multi = False
+    ret = []
+    for fn in filelist:
+        ret.append(np.loadtxt(fn).T)
+    if not multi:
+        return ret[0]
+    ret = np.asarray(ret)
+    if ret.ndim == 3:
+        return ret.swapaxes(0,1)
+    else:
+        return ret
+
+
+
 
 ###  set overides set builtin function
 def set(dev, value, **kwarg):
