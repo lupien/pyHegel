@@ -401,8 +401,10 @@ class TraceWater(TraceBase):
                  block_size=10*1024, xoffset=0., yoffset=0., xlog=False, ylog=False):
         """
         This makes a waterfall plot with adjustable spacing
-        Either specify x and y with the same dimensions, or x
+        Either specify x and y with the same dimensions, or xy
         can contain x and y as the first index.
+        xy can be left None, which will make the x axis the index of the points
+        When x and y are given separatelly, x can be a 1D vector
         So y should have shape (ncurves, nptspercurve)
         x is the same or (2, ncurves, nptspercurve)
         xoffset and yoffset are fractions of full scale (or of half scale for x)
@@ -416,11 +418,15 @@ class TraceWater(TraceBase):
         else:
             self.y = y
             self.x = xy
+        if self.x == None:
+            self.x = np.arange(self.y.shape[-1])+.01 # prevents divide by zero
+        if self.x.ndim == 1:
+            self.x = self.x[None, :]
         self.dx = float(self.x.max() - self.x.min())
         self.dy = float(self.y.max() - self.y.min())
         self.xratio = float(self.x.max() / self.x.min())
         self.yratio = float(self.y.max() / self.y.min())
-        self.ncurves = self.x.shape[0]
+        self.ncurves = self.y.shape[0]
         #self.hbar = QtGui.QScrollBar(QtCore.Qt.Horizontal)
         #self.vbar = QtGui.QScrollBar(QtCore.Qt.Vertical)
         self.hbar = QtGui.QSlider(QtCore.Qt.Horizontal)
