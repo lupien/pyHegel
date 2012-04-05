@@ -398,13 +398,14 @@ class TraceLots(TraceBase):
 
 class TraceWater(TraceBase):
     def __init__(self, xy, y=None, width=9.00, height=7.00, dpi=72,
-                 block_size=10*1024, xoffset=0., yoffset=0.):
+                 block_size=10*1024, xoffset=0., yoffset=0., xlog=False, ylog=False):
         """
         This makes a waterfall plot with adjustable spacing
         Either specify x and y with the same dimensions, or x
         can contain x and y as the first index.
         So y should have shape (ncurves, nptspercurve)
         x is the same or (2, ncurves, nptspercurve)
+        xoffset and yoffset are fractions of full scale (or of half scale for x)
         """
         super(TraceWater, self).__init__(width=width, height=height, dpi=dpi)
         ax = self.fig.add_subplot(111)
@@ -417,12 +418,16 @@ class TraceWater(TraceBase):
             self.x = xy
         self.dx = float(self.x.max() - self.x.min())
         self.dy = float(self.y.max() - self.y.min())
+        self.xratio = float(self.x.max() / self.x.min())
+        self.yratio = float(self.y.max() / self.y.min())
         self.ncurves = self.x.shape[0]
         #self.hbar = QtGui.QScrollBar(QtCore.Qt.Horizontal)
         #self.vbar = QtGui.QScrollBar(QtCore.Qt.Vertical)
         self.hbar = QtGui.QSlider(QtCore.Qt.Horizontal)
         self.vbar = QtGui.QSlider(QtCore.Qt.Vertical)
         self.hbar_rev = QtGui.QCheckBox('Reverse')
+        self.xlog = QtGui.QCheckBox('Xlog')
+        self.ylog = QtGui.QCheckBox('Ylog')
         #### handle central widget layout
         self.central_widget = QtGui.QWidget()
         layout = QtGui.QVBoxLayout()
@@ -438,13 +443,18 @@ class TraceWater(TraceBase):
         layout_top.addWidget(self.vbar)
         layout_bottom.addWidget(self.hbar)
         layout_bottom.addWidget(self.hbar_rev)
+        layout_bottom.addWidget(self.xlog)
+        layout_bottom.addWidget(self.ylog)
         self.central_widget.setLayout(layout)
         self.MainWidget.setCentralWidget(self.central_widget)
         ####
-        self.hbar.setMaximum(100)
-        self.vbar.setMaximum(100)
-        self.vbar.setInvertedAppearance(True)
-        self.vbar.setInvertedControls(True)
+        self.max_bar = 100
+        self.gamma = 30.
+        self.hbar.setMaximum(self.max_bar)
+        self.vbar.setMaximum(self.max_bar)
+        #self.vbar.setInvertedAppearance(True)
+        #self.vbar.setInvertedControls(True)
+        self.invert_y = False
         self.set_xy_offset(xoffset, yoffset)
         self.central_widget.connect(self.hbar,
               QtCore.SIGNAL('valueChanged(int)'), self.update)
@@ -452,46 +462,77 @@ class TraceWater(TraceBase):
               QtCore.SIGNAL('valueChanged(int)'), self.update)
         self.central_widget.connect(self.hbar_rev,
               QtCore.SIGNAL('stateChanged(int)'), self.update)
+        self.central_widget.connect(self.xlog,
+              QtCore.SIGNAL('stateChanged(int)'), self.update)
+        self.central_widget.connect(self.ylog,
+              QtCore.SIGNAL('stateChanged(int)'), self.update)
         self.update()
+    def bar_to_x(self, bar, rev=False, invert=False):
+        # invert to change bar direction
+        # rev to make the offset negative
+        # returned value ranges from 0. to 1.
+        mx = self.max_bar
+        gamma = self.gamma
+        if invert:
+            bar = mx - bar
+        if bar == 0:
+            return 0
+        return 10.**((bar-mx)/gamma)
+    def x_to_bar(self, x, invert=False):
+        mx = self.max_bar
+        gamma = self.gamma
+        rev = False
+        if x < 0:
+            rev = True
+            x = -x
+        if x == 0:
+            return 0, rev
+        bar = int(np.log10(x)*gamma) + mx
+        if invert:
+            bar = mx - bar
+        return bar, rev
     def set_xy_offset(self, xo, yo):
-        if xo < 0:
-            self.hbar_rev.setCheckState(True)
-            xo = -xo
-        else:
-            self.hbar_rev.setCheckState(False)
-        if xo == 0:
-            h = 0
-        else:
-            xo /= self.dx/2.
-            h = int( (np.log10(xo)*50.)+100. )
-        if yo == 0:
-            v = 100
-        else:
-            yo /= self.dy
-            v = int( -(np.log10(yo)*50.) )
+        h, rev = self.x_to_bar(xo)
+        self.hbar_rev.setCheckState(rev)
+        v, foo = self.x_to_bar(yo, invert=self.invert_y)
         self.hbar.setValue(h)
         self.vbar.setValue(v)
     def get_xy_offset(self):
         h = self.hbar.value()
         v = self.vbar.value()
-        if h == 0:
-            xo = 0
-        else:
-            xo = 10.**((h-100)/50.)
-        xo *=  self.dx/2
-        if v == 100:
-            yo = 0
-        else:
-            yo = 10.**((-v)/50.)
-        yo *=  self.dy
+        xo = self.bar_to_x(h, rev=self.hbar_rev.checkState())
+        yo = self.bar_to_x(v, invert=self.invert_y)
         if self.hbar_rev.checkState():
             xo = -xo
         return xo, yo
+    def get_scaled_xy_offset(self):
+        xo, yo = self.get_xy_offset()
+        if self.xlog.checkState():
+            xs = self.xratio**(xo/2)
+        else:
+            xs = xo*self.dx/2.
+        if self.ylog.checkState():
+            ys = self.yratio**yo
+        else:
+            ys = yo*self.dy
+        return xs, ys
     def update(self, foo=None):
         self.ax.cla()
-        xo, yo = self.get_xy_offset()
+        xs, ys = self.get_scaled_xy_offset()
         v = np.arange(self.ncurves)
-        self.ax.plot(self.x.T + v*xo, self.y.T + v*yo)
+        x = self.x.T
+        y = self.y.T
+        if self.xlog.checkState():
+            self.ax.set_xscale('log')
+            x = x * xs**v
+        else:
+            x = x + xs*v
+        if self.ylog.checkState():
+            self.ax.set_yscale('log')
+            y = y * ys**v
+        else:
+            y = y + v*ys
+        self.ax.plot(x, y)
         self.draw()
 
 
