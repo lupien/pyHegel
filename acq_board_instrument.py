@@ -766,6 +766,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             ret[sl, :] = vret
             if ret.shape[0]==1:
                 ret=ret[0]
+            return ret
 
         if mode == 'Corr':
             # TODO handle  axis parameter
