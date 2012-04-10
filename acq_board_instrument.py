@@ -201,6 +201,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     This instrument controls the fast acquisition cards (Ulraview 8 and 14bit)
     To use, first make sure the data acquisition server is started
       Ctrl_Carte_Acquisition.exe
+    One way to start it, from pyHegel, is to use:
+        !start /D \Codes\Ctrl_Carte_Acquistion\Release cmd /K Ctrl_Carte_Acquistion.exe 0
     Then this instrument can be loaded. This instrument requires an ip address
     (can be a dns name) and a port number since the communication with
     the server is through a network connection. If running pyHegel on the
