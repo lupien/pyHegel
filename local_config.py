@@ -26,5 +26,6 @@ conf = dict( yo1 = (instrument.yokogawa_gs200, (10,)),
              s500 = (instrument.infiniiVision_3000, ('USB0::2391::6050::MY51135769::INSTR',)),
              s200 = (instrument.infiniiVision_3000, ('USB0::0x0957::0x1796::MY51135849',)),
              # acq board
-             acq1 = (acq_board_instrument.Acq_Board_Instrument, ('127.0.0.1', 50000))
+             acq1 = (acq_board_instrument.Acq_Board_Instrument, ('127.0.0.1', 50000)),
+             acq2 = (acq_board_instrument.Acq_Board_Instrument, ('127.0.0.1', 50001))
         )
