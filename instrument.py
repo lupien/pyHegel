@@ -1670,6 +1670,10 @@ class agilent_multi_34410A(visaInstrumentAsync):
     Useful method:
      set_long_avg  To average for even longer than 1s (controls aperture and sample_count)
 
+    Do NOT use the mode parameter of devices (like fetch) when creating
+    files (sweep, trace, ...) because the headers in the file might be incorrect.
+    Set it first.
+
     """
     def math_clear(self):
         self.write('CALCulate:AVERage:CLEar')
