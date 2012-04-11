@@ -2158,7 +2158,7 @@ class agilent_PNAL(visaInstrumentAsync):
             options = kwarg.pop('options', {}).copy()
             options.update(mkr=self.current_mkr)
             app = kwarg.pop('options_apply', ['ch', 'trace', 'mkr'])
-            kwarg.update(options=options, options_apply=app, autoinit=False)
+            kwarg.update(options=options, options_apply=app)
             return devCalcOption(*arg, **kwarg)
         def devMkrEnOption(*arg, **kwarg):
             # This will check if the marker is currently enabled.
