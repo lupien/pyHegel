@@ -105,12 +105,12 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         extra_conf.append(setdev)
     reuse_dict = {}
     for dev in getdevs:
-        reuse = reuse_dict.get(dev,0)
-        reuse_dict[dev] = reuse + 1
         kwarg = {}
         if isinstance(dev, tuple):
             kwarg = dev[1]
             dev = dev[0]
+        reuse = reuse_dict.get(dev,0)
+        reuse_dict[dev] = reuse + 1
         dev.force_get()
         hdr = dev.getfullname()
         f = dev.getformat(**kwarg)
