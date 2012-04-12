@@ -2174,16 +2174,19 @@ class agilent_PNAL(visaInstrumentAsync):
         if dev_obj in [self.marker_x, self.marker_y]:
             extra = self._conf_helper('marker_format', 'marker_trac_func', 'marker_trac_en',
                               'marker_y', 'marker_discrete_en', 'marker_target')
+        traces_opt = self._fetch_traces_helper(options.get('traces'))
         if dev_obj in [self.readval, self.fetch]:
             cal = []
             traces = []
-            for t in self._fetch_traces_helper(options.get('traces')):
-                cal.append(self.calib_en(trace=t))
+            for t in traces_opt:
+                cal.append(self.calib_en.get(trace=t))
                 name, param = self.select_trace.choices[t]
                 traces.append(name+'='+param)
         else:
-            cal = self.calib_en()
-            traces = self.select_trace.choices[t]
+            t=traces_opt[0]
+            cal = self.calib_en.get(trace=t)
+            name, param = self.select_trace.choices[t]
+            traces = name+'='+param
         extra += ['calib_en=%r'%cal, 'selected_trace=%r'%traces]
         base = self._conf_helper('freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
                                  'power_dbm_port1', 'power_dbm_port2',
