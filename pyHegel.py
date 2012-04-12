@@ -240,6 +240,12 @@ def _checkTracePause(trace):
 #          graph=True/False           When file is True, This says to graph the return value or not
 #                                       TODO implement this
 #          append=True                Dump the data on a line in the file
+#          xaxis=True                 When multi=True or ('col1', 'col2', 'col3', ...)
+#                                     means the first column is the xscale
+#          xaxis=False                the first column is data and not the xscale
+#                                     In both case the get has an override called xaxis
+#                                     which can change it.
+#          xaxis=None                 Means there is no xscale available.
 #          header=['line1', 'line2']  Stuff to dump at head of new file
 #                                       it can also be a function that returns the proper list of strings
 #                                       the functions defaults to instr._current_config if available

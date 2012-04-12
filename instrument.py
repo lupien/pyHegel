@@ -1282,7 +1282,7 @@ class visaInstrument(BaseInstrument):
         self.visa_addr = visa_addr
         if not CHECKING:
             self.visa = visa.instrument(visa_addr)
-        #self.visa.timeout = 3 # in seconds
+        self.visa.timeout = 3 # in seconds
         BaseInstrument.__init__(self)
     #######
     ## Could implement some locking here ....
@@ -1991,6 +1991,7 @@ class agilent_PNAL(visaInstrumentAsync):
         select_trace
         select_traceN
         freq_start, freq_stop, freq_cw
+        power_en
         power_dbm_port1, power_dbm_port2
         marker_x, marker_y
         snap_png
@@ -2189,7 +2190,10 @@ class agilent_PNAL(visaInstrumentAsync):
             traces = name+'='+param
         extra += ['calib_en=%r'%cal, 'selected_trace=%r'%traces]
         base = self._conf_helper('freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
+                                 'power_en', 'power_couple',
+                                 'power_slope', 'power_slope_en',
                                  'power_dbm_port1', 'power_dbm_port2',
+                                 'power_mode_port1', 'power_mode_port2',
                                  'npoints', 'sweep_gen', 'sweep_gen_pointsweep',
                                  'sweep_fast_en', 'sweep_time', 'sweep_type',
                                  'bandwidth', 'bandwidth_lf_enh', 'cont_trigger',
@@ -2302,9 +2306,15 @@ class agilent_PNAL(visaInstrumentAsync):
         # windowTrace restarts at 1 for each window
         self.traceN_windowTrace = scpiDevice(getstr=':SYSTem:MEASurement{trace}:TRACe?', str_type=int,
                                       options = traceN_options, options_lim = traceN_options_lim)
+        self.power_en = scpiDevice('OUTPut', str_type=bool)
+        self.power_couple = devChOption(':SOURce{ch}:POWer:COUPle', str_type=bool)
+        self.power_slope = devChOption(':SOURce{ch}:POWer:SLOPe', str_type=int, min=-2, max=2)
+        self.power_slope_en = devChOption(':SOURce{ch}:POWer:SLOPe:STATe', str_type=bool)
         # for max min power, ask source:power? max and source:power? min
         self.power_dbm_port1 = devChOption(':SOURce{ch}:POWer1', str_type=float)
         self.power_dbm_port2 = devChOption(':SOURce{ch}:POWer2', str_type=float)
+        self.power_mode_port1 = devChOption(':SOURce{ch}:POWer1:MODE', choices=ChoiceStrings('AUTO', 'ON', 'OFF'))
+        self.power_mode_port2 = devChOption(':SOURce{ch}:POWer2:MODE', str_type=float)
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
