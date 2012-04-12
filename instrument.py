@@ -89,6 +89,7 @@ def _write_dev(val, filename, format=format, first=False):
     append = format['append']
     bin = format['bin']
     dev = format['obj']
+    multi = format['multi']
     doheader = True
     if bin:
         doheader = False
@@ -104,9 +105,12 @@ def _write_dev(val, filename, format=format, first=False):
     f=open(filename, open_mode)
     dev._last_filename = filename
     header = _get_conf_header(format)
-    if header and doheader: # if either is not None or not ''
-        for h in header:
-            f.write('#'+h+'\n')
+    if doheader: # if either is not None or not ''
+        if header:
+            for h in header:
+                f.write('#'+h+'\n')
+        if isinstance(multi, tuple):
+            _writevec(f, multi, pre_str='#')
     if append:
         _writevec(f, val)
     else:
@@ -294,7 +298,6 @@ class BaseDevice(object):
     def get(self, **kwarg):
         if not CHECKING:
             self._last_filename = None
-            keep = kwarg.pop('keep', False)
             format = self.getformat(**kwarg)
             kwarg.pop('graph', None) #now remove graph from parameters (was needed by getformat)
             kwarg.pop('bin', None) #same for bin
@@ -306,8 +309,6 @@ class BaseDevice(object):
                 ret = self._getdev(**kwarg)
                 _write_dev(ret, filename, format=format)
                 self._lastget = ret
-                if not keep:
-                    ret = None
             else:
                 ret = self._getdev(**kwarg)
         elif self._getdev_p == None:
@@ -1185,6 +1186,10 @@ class ChoiceDev(ChoiceBase):
      Get the choices from a device
      Wether device return a dict or a list, it should work the same
      For a dict you can use keys or values (when keys fail)
+
+     Indexing with one of the allowed values returns the value for list
+     or the key/value pair for dict.
+     For a list also using a integer is allowed to pick the nth value.
     """
     def __init__(self, dev, sub_type=None):
         self.dev = dev
@@ -1199,10 +1204,9 @@ class ChoiceDev(ChoiceBase):
         return input_str
     def tostr(self, input_choice):
         choices = self._get_choices()
-        ch = input_choice
+        ch = self[input_choice]
         if isinstance(choices, dict):
-            if ch not in choices.keys() and ch in choices.values():
-                ch = [k for k,v in choices.iteritems() if v == input_choice][0]
+            ch = ch[0]
         if self.sub_type != None:
             ch = self.sub_type.tostr(ch)
         return ch
@@ -1213,9 +1217,41 @@ class ChoiceDev(ChoiceBase):
                 return True
             choices = choices.values()
         return x in choices
+    def __getitem__(self, key):
+        choices = self._get_choices()
+        if key not in self and instances(choices, list): # key might be an integer
+            return choices[key]
+        if key in self:
+            if isinstance(choices, dict):
+                if key not in choices.keys() and key in choices.values():
+                    key = [k for k,v in choices.iteritems() if v == key][0]
+                return key, choices[key]
+            else:
+                return key
+        raise IndexError, 'Invalid index. choose among: %r'%choices
     def __repr__(self):
         return repr(self._get_choices())
 
+class ChoiceDevSwitch(ChoiceDev):
+    """
+    Same as ChoiceDev but the value for set/check can also
+    be something other, in which case another function converts it
+    the the base format.
+    """
+    def __init__(self, dev, other_conv, sub_type=None, in_base_type=basestring):
+        self.other_conv = other_conv
+        self.in_base_type = in_base_type
+        super(ChoiceDevSwitch, self).__init__(dev, sub_type=sub_type)
+    def cleanup_entry(self, x):
+        if not isinstance(x, self.in_base_type):
+            x = self.other_conv(x)
+        return x
+    def __getitem__(self, input_choice):
+        input_choice = self.cleanup_entry(input_choice)
+        return super(ChoiceDevSwitch, self).__getitem__(input_choice)
+    def __contains__(self, input_choice):
+        input_choice = self.cleanup_entry(input_choice)
+        return super(ChoiceDevSwitch, self).__contains__(input_choice)
 
 def make_choice_list(list_values, start_exponent, end_exponent):
     """
@@ -2018,10 +2054,50 @@ class agilent_PNAL(visaInstrumentAsync):
         command = 'SENSe{ch}:AVERage:CLEar'.format(ch=ch)
         self.write(command)
     def _fetch_getformat(self, **kwarg):
-        # TODO handle column titles when saving to a file
+        unit = kwarg.get('unit', 'default')
+        xaxis = kwarg.get('xaxis', True)
+        ch = kwarg.get('ch', None)
+        traces = kwarg.get('traces', None)
+        if ch != None:
+            self.current_channel.set(ch)
+        traces = self._fetch_traces_helper(traces)
+        if xaxis:
+            sweeptype = self.sweep_type.getcache()
+            choice = self.sweep_type.choices
+            if sweeptype in choice[['linear', 'log', 'segment']]:
+                multi = 'freq(Hz)'
+            elif sweeptype in choice[['power']]:
+                multi = 'power(dBm)'
+            elif sweeptype in choice[['CW']]:
+                multi = 'time(s)'
+            else: # PHASe
+                multi = 'deg' # TODO check this
+            multi = [multi]
+        else:
+            multi = []
+        # we don't handle cmplx because it cannot be saved anyway so no header or graph
+        if unit == 'db_deg':
+            names = ['dB', 'deg']
+        else:
+            names = ['real', 'imag']
+        for t in traces:
+            name, param = self.select_trace.choices[t]
+            basename = name+'='+param+'_'
+            multi.extend( [basename+n for n in names])
         fmt = self.fetch._format
-        fmt.update(multi=False, graphs=[])
+        multi = tuple(multi)
+        fmt.update(multi=multi, graphs=[])
         return BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_traces_helper(self, traces):
+        # assume ch is selected
+        ch_list = self.channel_list.getcache()
+        if isinstance(traces, (tuple, list)):
+            traces = traces[:] # make a copy
+        elif traces != None:
+            traces = [traces]
+        else: # traces == None
+            traces = ch_list.keys()
+        return traces
     def _fetch_getdev(self, ch=None, traces=None, unit='default', mem=False, xaxis=True):
         """
            traces can be a single value or a list of values.
@@ -2032,22 +2108,19 @@ class agilent_PNAL(visaInstrumentAsync):
            mem when True, selects the memory trace instead of the active one.
            xaxis  when True(default), the first column of data is the xaxis
         """
-        # this also sets the current channel
-        ch_list = self.channel_list.get(ch=ch)
-        if traces == None:
-            traces = ch_list.values()
-        if not isinstance(traces, (tuple, list)):
-            traces = [traces]
+        if ch != None:
+            self.current_channel.set(ch)
+        traces = self._fetch_traces_helper(traces)
         getdata = self.calc_sdata
         if mem:
             getdata = self.calc_smem
         if xaxis:
-            ret = [self.get_xscale()]
+            # get the x axis of the first trace selected
+            self.select_trace.set(traces[0])
+            ret = [self.calc_x_axis.get()]
         else:
             ret = []
         for t in traces:
-            if not isinstance(t, basestring):
-                t = self.traceN_name.get(trace=t)
             v = getdata.get(trace=t)
             if unit == 'db_deg':
                 r = 20.*np.log10(np.abs(v))
@@ -2090,13 +2163,35 @@ class agilent_PNAL(visaInstrumentAsync):
 
     def _current_config(self, dev_obj=None, options={}):
         # These all refer to the current channel
-        # some like calib_en depend on trace
-        return self._conf_helper('freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
-                                 'power_dbm_port1', 'power_dbm_port2', 'calib_en',
+        # calib_en depends on trace
+        if options.has_key('ch'):
+            self.current_channel.set(options['ch'])
+        if options.has_key('trace'):
+            self.select_trace.set(options['trace'])
+        if options.has_key('mkr'):
+            self.current_mkr.set(options['mkr'])
+        extra = []
+        if dev_obj in [self.marker_x, self.marker_y]:
+            extra = self._conf_helper('marker_format', 'marker_trac_func', 'marker_trac_en',
+                              'marker_y', 'marker_discrete_en', 'marker_target')
+        if dev_obj in [self.readval, self.fetch]:
+            cal = []
+            traces = []
+            for t in self._fetch_traces_helper(options.get('traces')):
+                cal.append(self.calib_en(trace=t))
+                name, param = self.select_trace.choices[t]
+                traces.append(name+'='+param)
+        else:
+            cal = self.calib_en()
+            traces = self.select_trace.choices[t]
+        extra += ['calib_en=%r'%cal, 'selected_trace=%r'%traces]
+        base = self._conf_helper('freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
+                                 'power_dbm_port1', 'power_dbm_port2',
                                  'npoints', 'sweep_gen', 'sweep_gen_pointsweep',
                                  'sweep_fast_en', 'sweep_time', 'sweep_type',
                                  'bandwidth', 'bandwidth_lf_enh', 'cont_trigger',
                                  'average_count', 'average_mode', 'average_en', options)
+        return extra+base
     def _create_devs(self):
         self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
         self.self_test_results = scpiDevice(getstr='*tst?', str_type=int, doc="""
@@ -2106,7 +2201,7 @@ class agilent_PNAL(visaInstrumentAsync):
                 2=Unused
                 3=EEprom write fail
                 4=YIG cal failed
-                5=Ramp cal failed'""")
+                5=Ramp cal failed""")
         self.current_channel = MemoryDevice(1, min=1, max=200)
         def devChOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
@@ -2115,7 +2210,15 @@ class agilent_PNAL(visaInstrumentAsync):
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
         self.channel_list = devChOption(getstr='CALCulate{ch}:PARameter:CATalog:EXTended?', str_type=quoted_dict(), doc='Note that some , are replaced by _')
-        self.select_trace = devChOption('CALCulate{ch}:PARameter:SELect', choices=ChoiceDev(self.channel_list, quoted_string()))
+        select_trace_choices = ChoiceDevSwitch(self.channel_list,
+                                               lambda t: self.traceN_name.get(trace=t),
+                                               sub_type=quoted_string())
+        self.select_trace = devChOption('CALCulate{ch}:PARameter:SELect',
+                                        choices=select_trace_choices, doc="""
+                Select the trace using either the trace name (standard ones are 'CH1_S11_1')
+                which are unique, the trace param like 'S11' which might not be unique
+                (in which case the first one is used), or even the trace number
+                whiche are also unique.""")
         def devCalcOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(trace=self.select_trace)
@@ -2124,7 +2227,9 @@ class agilent_PNAL(visaInstrumentAsync):
             return devChOption(*arg, **kwarg)
         # select_trace needs to be set for most of the calc commands
         #calc:par:TNUMber and WNUMber don't exist for our PNAL
-        self.select_trace_N = devCalcOption('CALCulate{ch}:PARameter:MNUMber', str_type=int, min=1, doc='The number is from the Tr1 annotation next to the parameter nane on the PNA screen')
+        # since select_trace handles the number here we make it only a get
+        # but MNUMber could also be a set.
+        self.select_trace_N = devCalcOption(getstr='CALCulate{ch}:PARameter:MNUMber?', str_type=int, doc='The number is from the Tr1 annotation next to the parameter nane on the PNA screen')
         self.edelay_length = devCalcOption('CALCulate{ch}:CORRection:EDELay:DISTance', str_type=float)
         self.edelay_length_unit = devCalcOption('CALC{ch}:CORR:EDEL:UNIT', choices=ChoiceStrings('METer', 'FEET', 'INCH'))
         self.edelay_length_medium = devCalcOption('CALC{ch}:CORR:EDEL:MEDium', choices=ChoiceStrings('COAX', 'WAVEguide'))
@@ -2184,7 +2289,7 @@ class agilent_PNAL(visaInstrumentAsync):
         self.marker_trac_en = devMkrEnOption('CALC{ch}:MARKer{mkr}:FUNCtion:TRACking', str_type=bool)
         self.marker_discrete_en = devMkrEnOption('CALC{ch}:MARKer{mkr}:DISCrete', str_type=bool)
         self.marker_x = devMkrEnOption('CALC{ch}:MARKer{mkr}:X', str_type=float, trig=True)
-        self.marker_y = devMkrEnOption('CALC{ch}:MARKer{mkr}:Y', str_type=_decode_float64, multi=['real', 'imag'], graph=[0,1], trig=True)
+        self.marker_y = devMkrEnOption('CALC{ch}:MARKer{mkr}:Y', str_type=_decode_float64, multi=['val1', 'val2'], graph=[0,1], trig=True)
         traceN_options = dict(trace=1)
         traceN_options_lim = dict(trace=(1,None))
         self.traceN_name = scpiDevice(getstr=':SYSTem:MEASurement{trace}:NAME?', str_type=quoted_string(),

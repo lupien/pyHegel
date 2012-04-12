@@ -103,7 +103,10 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         hdrs.append(setdev.getfullname())
         count += 1
         extra_conf.append(setdev)
+    reuse_dict = {}
     for dev in getdevs:
+        reuse = reuse_dict.get(dev,0)
+        reuse_dict[dev] = reuse + 1
         kwarg = {}
         if isinstance(dev, tuple):
             kwarg = dev[1]
@@ -111,17 +114,18 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         dev.force_get()
         hdr = dev.getfullname()
         f = dev.getformat(**kwarg)
-        f['basename'] = _dev_filename(root, hdr, npts, append=f['append'])
+        f['basename'] = _dev_filename(root, hdr, npts, reuse, append=f['append'])
         f['base_conf'] = instrument._get_conf_header(f)
         f['base_hdr_name'] = hdr
         formats.append(f)
-        if f['file'] == True or f['multi'] == True:
+        multi = f['multi']
+        if f['file'] == True or multi == True or isinstance(multi, tuple):
             hdrs.append(hdr)
-            if f['file'] == True and f['graph'] == True:
+            if f['file'] == True and f['graph'] == True: # When using file, the device could return an interesting scalar.
                 graphsel.append(count)
             count += 1
-        elif f['multi']: # it is a list of header names
-            hdr_list = [ hdr+'.'+h for h in f['multi']]
+        elif isinstance(multi, list):
+            hdr_list = [ hdr+'.'+h for h in multi]
             c = len(hdr_list)
             hdrs.extend(hdr_list)
             graph_list = [ g+count for g in f['graph']]
@@ -140,7 +144,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         formats.append(f)
     return hdrs, graphsel, formats
 
-def _dev_filename(root, dev_name, npts, append=False):
+def _dev_filename(root, dev_name, npts, reuse, append=False):
     if root==None:
         name = time.strftime('%Y%m%d-%H%M%S.txt')
         root=os.path.join(sweep.path.get(), name)
@@ -153,6 +157,8 @@ def _dev_filename(root, dev_name, npts, append=False):
     root = os.path.abspath(root)
     root, ext = os.path.splitext(root)
     dev_name = dev_name.replace('.', '_')
+    if reuse > 0:
+        dev_name += '%i'%(reuse+1)
     if append:
         return root + '_'+ dev_name + ext
     n = int(np.log10(maxn))+1
@@ -180,8 +186,7 @@ def _readall(devs, formats, i, async=None):
             val = dev.get(**kwarg)
         if val == None:
             val = i
-        if isinstance(val, list) or isinstance(val, tuple) or \
-           isinstance(val, np.ndarray):
+        if isinstance(val, (list, tuple, np.ndarray)):
             if isinstance(fmt['multi'], list):
                 ret.extend(val)
             else:
@@ -230,6 +235,7 @@ def _checkTracePause(trace):
 #          multi=['head1', 'head2']   Used when device returns multiple values
 #                                     This says so, gives the number of them and their names
 #                                     for headers and graphing
+#                ('head1', 'head2')   like multi=True (save to file) but provides headers
 #          graph=[1,2]                When using multi, this selects the values to graph
 #          graph=True/False           When file is True, This says to graph the return value or not
 #                                       TODO implement this
@@ -579,7 +585,10 @@ def readfile(filename, nojoin=False):
         fl = glob.glob(fglob)
         fl.sort()
         filelist.extend(fl)
-    if len(filelist) > 1:
+    if len(filelist) == 0:
+        print 'No file found'
+        return
+    elif len(filelist) > 1:
         print 'Found %i files'%len(filelist)
         multi = True
     else:
@@ -891,7 +900,7 @@ def _process_filename(filename, now=None, next_i=None, start_i=0, search=True, *
 
 
 ### get overides get the mathplotlib
-def get(dev, filename=None, keep=False, **extrap):
+def get(dev, filename=None, **extrap):
     """
        Get a value from device
        When giving it a filename, data will be saved to it
@@ -903,8 +912,6 @@ def get(dev, filename=None, keep=False, **extrap):
                               %03i for   3 digits
        The path for saving is sweep.path if it is defined otherwise it saves
        in the current directory.
-       keep is used to also return the values when saving to a filename
-        by default, None is returned in that case.
        extrap are all other keyword arguments and depende on the device.
     """
     if filename != None:
@@ -912,7 +919,6 @@ def get(dev, filename=None, keep=False, **extrap):
         filename = os.path.join(sweep.path.get(), filename)
         filename, unique_i = _process_filename(filename)
         extrap.update(filename=filename)
-        extrap.update(keep=keep)
     try:
         return dev.get(**extrap)
     except KeyboardInterrupt:
