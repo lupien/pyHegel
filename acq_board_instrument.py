@@ -272,8 +272,13 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             self._max_sampling = 3000
             self._min_sampling = 1000
             self._min_nb_Msample = 32
-            self._max_nb_Msample = 4294967295
-            self._max_Msample = 4294959104
+            # _max_nb_Msample is unused.
+            # The limit can depend on the code.
+            # The maximum is limited by the 32 bit unsigned integer used to contain the block
+            # and could be limited by the 16 bit hardware counter when not using software_stop
+            # TODO cleanup these limits
+            self._max_nb_Msample = 4294967295 #2**32-1 max unsigned int
+            self._max_Msample = 4294959104    #2*32-8192 (8192=2**13)
             self._min_hist_Msample = 8192
             self._min_corr_Msample = 8192
             self._min_acq_Msample = 32
@@ -286,7 +291,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         else: # ADC14
             self._max_sampling = 400
             self._min_sampling = 20
-            self._max_Msample = 2147479552
+            self._max_Msample = 2147479552 # (2**32-8192)/2
             self._min_hist_Msample = 4096
             self._min_corr_Msample = 4096
             self._min_acq_Msample = 16
