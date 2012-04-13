@@ -468,7 +468,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         fmt = self.fetch._format
         fmt.update(file=False)
         fmt.update(bin=False)
-        fmt.update(multi=False, graphs=[])
+        fmt.update(multi=False, graph=[], xaxis=None)
         mode = self.op_mode.getcache()
         if mode == 'Acq':
             #if self.nb_Msample.getcache() > 64:
@@ -482,6 +482,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             headers = ['ch%i-%i'%(c,i)  for c in ch  for i in range(nbtau)]
             graphs = [(i*nbtau) for i in range(len(ch))]
             fmt.update(multi=headers, graph=graphs)
+        if mode == 'Hist' or mode == 'Net' or mode == 'Spec' or mode == 'Osc':
+            fmt.update(xaxis=True) # This is the default, will be overriden if necessary in BaseDevice.getformat
         return instrument.BaseDevice.getformat(self.fetch, **kwarg)
 
     def _fetch_filename_helper(self, filename, extra=None, newext=None):
@@ -839,24 +841,6 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             return ret
 
 
-    def _readval_getdev(self, **kwarg):
-        """
-        Readval performs the same thing as run_and_wait() followed by fetch.
-        For the arguments, see fetch.
-        Use this for sweep with async off, or with get to automatically
-        start the acquisition before fetching the data.
-        """
-        # TODO may need to check if trigger is already in progress
-        self._async_trig()
-        while not self._async_detect():
-            pass
-        self.readval._last_filename = self.fetch._last_filename
-        ret = self.fetch._getdev(**kwarg)
-        self.readval._last_filename = self.fetch._last_filename
-        return ret
-    def _readval_getformat(self, **kwarg):
-        return self.fetch.getformat(**kwarg)
-
     def _tau_vec_helper(self, i, val):
         self.write('CONFIG:TAU %r %r'%(i, val))
     def _nb_tau_helper(self, N):
@@ -1056,7 +1040,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self._devwrap('fetch', autoinit=False, trig=True)
         self.fetch._event_flag = threading.Event()
         self.fetch._rcv_val = None
-        self._devwrap('readval', autoinit=False, redir_async=self.fetch)
+        self.readval = instrument.ReadvalDev(self.fetch)
         self._devwrap('tau_vec', setget=True)
         self._tau_nb = dummy_device('CONFIG:NB_TAU?')
         self._tau_veci = dummy_device('CONFIG:TAU?')

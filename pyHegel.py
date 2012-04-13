@@ -800,8 +800,7 @@ def trace(dev, interval=1, title=''):
 
 def scope(dev, interval=.1, title='', **kwarg):
     """
-       For xscale it uses instr.get_xscale
-       The device needs to handle the xaxis=False option
+       It uses the x scale if it is returned by dev.
        interval is in s
        title is for the window title
        kwarg is the list of optional parameters to pass to dev
@@ -810,10 +809,23 @@ def scope(dev, interval=.1, title='', **kwarg):
     """
     t = traces.Trace()
     t.setWindowTitle('Scope: '+title)
-    xscale = dev.instr.get_xscale()
-    t.setLim(xscale)
+    fmt = dev.getformat(**kwarg)
+    if fmt['xaxis'] == True:
+        xscale_en = True
+    else:
+        xscale_en = False
+    initialized = False
     while True:
-        v=dev.get(xaxis=False, **kwarg)
+        v=dev.get(**kwarg)
+        if not initialized:
+            initialized = True
+            if xscale_en:
+                xscale = v[0]
+            else:
+                xscale = np.arange(v.shape[-1])
+            t.setLim(xscale)
+        if xscale_en:
+            v = v[1:]
         if v.ndim == 1:
             v.shape=(1,-1)
         t.setPoints(xscale, v)

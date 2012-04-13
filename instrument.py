@@ -246,7 +246,6 @@ class BaseDevice(object):
         self.instr = None
         self.name = 'foo'
         self._cache = None
-        self._lastget = None
         self._autoinit = autoinit
         self._setdev_p = None
         self._getdev_p = None
@@ -259,8 +258,8 @@ class BaseDevice(object):
         self.max = max
         self.choices = choices
         self._doc = doc
-        # obj is used by _get_conf_header
-        self._format = dict(file=False, multi=multi, graph=graph,
+        # obj is used by _get_conf_header and _write_dev
+        self._format = dict(file=False, multi=multi, xaxis=None, graph=graph,
                             append=False, header=None, bin=False,
                             options={}, obj=self)
     def __getattribute__(self, name):
@@ -316,7 +315,6 @@ class BaseDevice(object):
                 filename = kwarg.pop('filename')
                 ret = self._getdev(**kwarg)
                 _write_dev(ret, filename, format=format)
-                self._lastget = ret
             else:
                 ret = self._getdev(**kwarg)
         elif self._getdev_p == None:
@@ -386,6 +384,7 @@ class BaseDevice(object):
         self._format['options'] = kwarg
         #now handle the other overides
         bin = kwarg.pop('bin', None)
+        xaxis = kwarg.pop('xaxis', None)
         # we need to return a copy so changes to dict here and above does not
         # affect the devices dict permanently
         format = self._format.copy()
@@ -394,6 +393,8 @@ class BaseDevice(object):
         if bin != None:
             format['file'] = False
             format['bin'] = bin
+        if xaxis != None and format['xaxis'] != None:
+            format['xaxis'] = xaxis
         return format
     def getfullname(self):
         return self.instr.header()+'.'+self.name
@@ -913,13 +914,14 @@ class ReadvalDev(BaseDevice):
             autoinit = dev._autoinit
         super(ReadvalDev,self).__init__(redir_async=dev, autoinit=autoinit, **kwarg)
     def _getdev(self, **kwarg):
-        self.instr._async_trig()
-        self.instr.wait_after_trig()
+        self.instr.run_and_wait()
         ret = self._slave_dev.get(**kwarg)
         self._last_filename = self._slave_dev._last_filename
         return ret
     def getformat(self, **kwarg):
-        return self._slave_dev.getformat(**kwarg)
+        d = self._slave_dev.getformat(**kwarg)
+        d['obj'] = self
+        return d
 
 def _decode_block_header(s):
     """
@@ -2106,7 +2108,7 @@ class agilent_PNAL(visaInstrumentAsync):
             multi.extend( [basename+n for n in names])
         fmt = self.fetch._format
         multi = tuple(multi)
-        fmt.update(multi=multi, graphs=[])
+        fmt.update(multi=multi, graph=[], xaxis=xaxis)
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_traces_helper(self, traces):
         # assume ch is selected
