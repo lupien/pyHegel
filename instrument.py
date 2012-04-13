@@ -1402,6 +1402,12 @@ class visaInstrumentAsync(visaInstrument):
         waits until the triggered event is finished
         """
         return wait_on_event(self._async_detect)
+    def run_and_wait(self):
+        """
+        This initiate a trigger and waits for it to finish.
+        """
+        self._async_trig()
+        self.wait_after_trig()
     def _async_trig(self):
         if self._get_esr() & 0x01:
             print 'Unread event byte!'
