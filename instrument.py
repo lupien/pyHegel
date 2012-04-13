@@ -198,10 +198,18 @@ class asyncThread(threading.Thread):
         self.join(timeout)
         return not self.is_alive()
 
-def wait_on_event(task_or_event, check_state = None, max_time=None):
+def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
+    # task_or_event_or_func either needs to a wait function with a parameter of
+    # seconds. Or it should be a function accepting a parameter of time in s.
+    # check_state will all to break the loop if check_state._error_state
+    # becomes True
     start_time = time.time()
+    try: # should work for task (threading.Thread) and even (threading.Event)
+        docheck = task_or_event_or_func.wait
+    except AttributeError: # just consider it a function
+        docheck = task_or_event_or_func
     while True:
-        if task_or_event.wait(0.2):
+        if docheck(0.2):
             return True
         if max_time != None and time.time()-start_time > max_time:
             return False
@@ -906,8 +914,7 @@ class ReadvalDev(BaseDevice):
         super(ReadvalDev,self).__init__(redir_async=dev, autoinit=autoinit, **kwarg)
     def _getdev(self, **kwarg):
         self.instr._async_trig()
-        while not self.instr._async_detect():
-            pass
+        self.instr.wait_after_trig()
         ret = self._slave_dev.get(**kwarg)
         self._last_filename = self._slave_dev._last_filename
         return ret
@@ -1375,10 +1382,10 @@ class visaInstrumentAsync(visaInstrument):
                                vpp43.VI_QUEUE)
     def _get_esr(self):
         return int(self.ask('*esr?'))
-    def _async_detect(self):
+    def _async_detect(self, max_time=.5): # 0.5 s max by default
         ev_type = context = None
-        try:  # for 500 ms
-            ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 500)
+        try:
+            ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, int(max_time*1000))
         except visa.VisaIOError, e:
             if e.error_code != vpp43.VI_ERROR_TMO:
                 raise
@@ -1390,6 +1397,11 @@ class visaInstrumentAsync(visaInstrument):
             vpp43.close(context)
             return True
         return False
+    def wait_after_trig(self):
+        """
+        waits until the triggered event is finished
+        """
+        return wait_on_event(self._async_detect)
     def _async_trig(self):
         if self._get_esr() & 0x01:
             print 'Unread event byte!'
@@ -1784,7 +1796,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
         # fetch? and read? return sample_count*trig_count data values (comma sep)
         self.fetch = scpiDevice(getstr='FETCh?',str_type=_decode_float64_avg, autoinit=False, trig=True) #You can't ask for fetch after an aperture change. You need to read some data first.
         # autoinit false because it can take too long to readval
-        self.readval = scpiDevice(getstr='READ?',str_type=_decode_float64_avg, autoinit=False, redir_async=self.fetch) # similar to INItiate followed by FETCh.
+        #self.readval = scpiDevice(getstr='READ?',str_type=_decode_float64_avg, autoinit=False, redir_async=self.fetch) # similar to INItiate followed by FETCh.
         self.fetch_all = scpiDevice(getstr='FETCh?',str_type=_decode_float64, autoinit=False, trig=True)
         self.fetch_std = scpiDevice(getstr='FETCh?',str_type=_decode_float64_std, autoinit=False, trig=True, doc="""
              Use this to obtain the standard deviation(using ddof=1) of the fetch.
@@ -1876,6 +1888,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
         self.sample_src = scpiDevice('SAMPle:SOURce', choices=ch)
         self.sample_timer = scpiDevice('SAMPle:TIMer', str_type=float) # seconds
         self.trig_delayauto = scpiDevice('TRIGger:DELay:AUTO', str_type=bool)
+        self.readval = ReadvalDev(self.fetch)
         self.alias = self.readval
         super(type(self),self)._create_devs()
         # For INITiate: need to wait for completion of triggered measurement before calling it again

@@ -356,8 +356,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     def _async_trig(self):
         #self._run_finished.clear() # now in run itself
         self.run()
-    def _async_detect(self):
-        return instrument.wait_on_event(self._run_finished, check_state=self, max_time=.5)
+    def _async_detect(self, max_time=.5): # 0.5 s max by default
+        return instrument.wait_on_event(self._run_finished, check_state=self, max_time=max_time)
     def wait_after_trig(self):
         """
         waits until the run is finished
