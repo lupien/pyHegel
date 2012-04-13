@@ -2031,6 +2031,7 @@ class agilent_PNAL(visaInstrumentAsync):
         super(agilent_PNAL, self).init(full=full)
     def _async_trig(self):
         # Not that this waits for one scan but not for the end of averaging
+        # TODO handle sweep averaging
         self.cont_trigger.set(False)
         super(agilent_PNAL, self)._async_trig()
     def abort(self):
