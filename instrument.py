@@ -127,9 +127,7 @@ def _write_dev(val, filename, format=format, first=False):
                 val.tofile(f)
         else:
             # force array so single values and lists also work
-            val = np.asarray(val)
-            if val.ndim == 0:
-                val.shape = (1,)
+            val = np.atleast_1d(val)
             np.savetxt(f, val.T, fmt='%.18g', delimiter='\t')
     f.close()
 
