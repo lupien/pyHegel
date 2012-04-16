@@ -1953,6 +1953,102 @@ class lakeshore_322(visaInstrument):
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
+class dict_str(object):
+    def __init__(self, field_names):
+        self.field_names = field_names
+    def __call__(self, fromstr):
+        v = np.fromstring(fromstr, dtype=int, sep=',')
+        if len(v) != len(self.field_names):
+            raise ValueError, 'Invalid number of parameters in class dict_str'
+        return dict(zip(self.field_names, v))
+    def tostr(self, fromdict=None, **kwarg):
+        if fromdict == None:
+            fromdict = kwarg
+        fromdict = fromdict.copy() # don't change incomning argument
+        ret = ''
+        start = True
+        for k in self.field_names:
+            v = fromdict.pop(k, None)
+            if not start:
+                ret += ','
+            else:
+                start = False
+            if v != None:
+                ret += str(v)
+        if fromdict != {}:
+            raise KeyError, 'The following keys in the dictionnary are incorrec: %r'%fromdict.keys()
+        return ret
+
+class lakeshore_340(visaInstrument):
+    """
+       Temperature controller used for He3 system
+       Useful device:
+           s
+           t
+           fetch
+           status_ch
+           current_ch
+       s and t return the sensor or kelvin value of a certain channel
+       which defaults to current_ch
+       status_ch returns the status of ch
+       fetch allows to read all channels
+    """
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('sp', options)
+    def _enabled_list_getdev(self):
+        ret = []
+        for c in self.current_ch.choices:
+            s = self.ask('inset? '+c)
+            en, comp = np.fromstring(s, dtype=int, sep=',')
+            if en:
+                ret.append(c)
+        return ret
+    def _fetch_helper(self, ch=None):
+        if ch == None:
+            ch = self.enabled_list.getcache()
+        if not isinstance(ch, (list, ChoiceBase)):
+            ch = [ch]
+        return ch
+    def _fetch_getformat(self, **kwarg):
+        ch = kwarg.get('ch', None)
+        ch = self._fetch_helper(ch)
+        multi = []
+        graph = []
+        for i, c in enumerate(ch):
+            graph.append(2*i)
+            multi.extend([c+'_T', c+'_S'])
+        fmt = self.fetch._format
+        fmt.update(multi=multi, graph=graph)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_getdev(self, ch=None):
+        ch = self._fetch_helper(ch)
+        ret = []
+        for c in ch:
+            ret.append(self.t.get(ch=c))
+            ret.append(self.s.get())
+        return ret
+    def _create_devs(self):
+        self.current_ch = MemoryDevice('A',
+                                           choices=ChoiceStrings('A', 'B', 'C1', 'C2', 'C3', 'C4', 'D1', 'D2','D3','D4'))
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_ch)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.t = devChOption(getstr='KRDG? {ch}', str_type=float) #in Kelvin
+        self.s = devChOption(getstr='SRDG? {ch}', str_type=float) #in sensor unit: Ohm, V or mV
+        self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=invalid, 16(4)=temp underrange, 
+                               #32(5)=temp overrange, 64(6)=sensor under (<0), 128(7)=sensor overrange
+                               # 000 = valid
+        self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in %
+        self.sp = scpiDevice(setstr='SETP 1,', getstr='SETP? 1', str_type=float)
+        self.alias = self.t
+        self._devwrap('enabled_list')
+        self._devwrap('fetch', autoinit=False)
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+
 class infiniiVision_3000(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('source', 'mode', 'preamble', options)
