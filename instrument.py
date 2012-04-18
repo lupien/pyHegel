@@ -2026,7 +2026,26 @@ class lakeshore_340(visaInstrument):
        fetch allows to read all channels
     """
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('sp', options)
+        if dev_obj == self.fetch:
+            old_ch = self.current_ch.getcache()
+            ch = options.get('ch', None)
+            ch = self._fetch_helper(ch)
+            ch_list = []
+            in_set = []
+            in_crv = []
+            in_type = []
+            for c in ch:
+                ch_list.append(c)
+                in_set.append(self.input_set.get(ch=c))
+                in_crv.append(self.input_crv.get())
+                in_type.append(self.input_type.get())
+            self.current_ch.set(old_ch)
+            base = ['current_ch=%r'%ch_list, 'input_set=%r'%in_set,
+                    'input_crv=%r'%in_crv, 'input_type=%r'%in_type]
+        else:
+            base = self._conf_helper('current_ch', 'input_set', 'input_crv', 'input_type')
+        base += self._conf_helper('current_loop', 'sp', 'pid', options)
+        return base
     def _enabled_list_getdev(self):
         ret = []
         for c in self.current_ch.choices:
@@ -2041,6 +2060,7 @@ class lakeshore_340(visaInstrument):
             ch = [ch]
         return ch
     def _fetch_getformat(self, **kwarg):
+        old_ch = self.current_ch.getcache()
         ch = kwarg.get('ch', None)
         ch = self._fetch_helper(ch)
         multi = []
@@ -2050,13 +2070,16 @@ class lakeshore_340(visaInstrument):
             multi.extend([c+'_T', c+'_S'])
         fmt = self.fetch._format
         fmt.update(multi=multi, graph=graph)
+        self.current_ch.set(old_ch)
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_getdev(self, ch=None):
+        old_ch = self.current_ch.getcache()
         ch = self._fetch_helper(ch)
         ret = []
         for c in ch:
             ret.append(self.t.get(ch=c))
             ret.append(self.s.get())
+        self.current_ch.set(old_ch)
         return ret
     def _create_devs(self):
         rev_str = self.ask('rev?')
@@ -2076,8 +2099,8 @@ class lakeshore_340(visaInstrument):
             app = kwarg.pop('options_apply', ['ch'])
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
-        self.t = devChOption(getstr='KRDG? {ch}', str_type=float) #in Kelvin
-        self.s = devChOption(getstr='SRDG? {ch}', str_type=float) #in sensor unit: Ohm, V or mV
+        self.t = devChOption(getstr='KRDG? {ch}', str_type=float, doc='Return the temperature in Kelvin for the selected sensor(ch)')
+        self.s = devChOption(getstr='SRDG? {ch}', str_type=float, doc='Return the sensor value in Ohm, V(diode), mV (thermocouple), nF (for capacitance)  for the selected sensor(ch)')
         self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=invalid, 16(4)=temp underrange, 
                                #32(5)=temp overrange, 64(6)=sensor under (<0), 128(7)=sensor overrange
                                # 000 = valid
@@ -2086,7 +2109,7 @@ class lakeshore_340(visaInstrument):
         self.input_type = devChOption('INTYPE {ch},{val}', 'INTYPE? {ch}',
                                       str_type=dict_str(['type', 'units', 'coeff', 'exc', 'range']))
         self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
-                                      str_type=dict_str(['filter_en', 'n_points', 'window'], [bool, int, float]))
+                                      str_type=dict_str(['filter_en', 'n_points', 'window'], [bool, int, int]))
         self.current_loop = MemoryDevice(1, choices=[1, 2])
         def devLoopOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
@@ -2097,7 +2120,7 @@ class lakeshore_340(visaInstrument):
         self.pid = devLoopOption('PID {loop},{val}', 'PID? {loop}',
                                  str_type=dict_str(['P', 'I', 'D'], float))
         self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in %
-        self.sp = scpiDevice(setstr='SETP 1,', getstr='SETP? 1', str_type=float)
+        self.sp = devLoopOption(setstr='SETP {loop},{val}', getstr='SETP? {loop}', str_type=float)
         self.alias = self.t
         self._devwrap('enabled_list')
         self._devwrap('fetch', autoinit=False)
