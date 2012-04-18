@@ -238,7 +238,9 @@ def _checkTracePause(trace):
 #                ('head1', 'head2')   like multi=True (save to file) but provides headers
 #          graph=[1,2]                When using multi, this selects the values to graph
 #          graph=True/False           When file is True, This says to graph the return value or not
-#                                       TODO implement this
+#                                       TODO implement this.
+#                                            also allow to select column to plot in multi files
+#                                            use something like traces.TraceWater
 #          append=True                Dump the data on a line in the file
 #          xaxis=True                 When multi=True or ('col1', 'col2', 'col3', ...)
 #                                     means the first column is the xscale
@@ -557,7 +559,8 @@ sweep = _Sweep()
 wait = traces.wait
 
 #TODO add handling of title column and extracting headers
-def readfile(filename, nojoin=False):
+_readfile_lastnames = []
+def readfile(filename, nojoin=False, getnames=True):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -581,7 +584,12 @@ def readfile(filename, nojoin=False):
     so selecting a column in a data file is the first index dimension.
     For multiple files, the shape is (n_columns, n_files, n_rows)
      or (nfiles, n_rows) if the files contain only a single column
+
+    The list of files is saved in the global variable _readfile_lastnames.
+    When the parameter getnames=True, the return value is a tuple
+    (array, filenames_list)
     """
+    global _readfile_lastnames
     if not isinstance(filename, (list, tuple, np.ndarray)):
         filename = [filename]
     filelist = []
@@ -591,6 +599,7 @@ def readfile(filename, nojoin=False):
         fl = glob.glob(fglob)
         fl.sort()
         filelist.extend(fl)
+    _readfile_lastnames = filelist
     if len(filelist) == 0:
         print 'No file found'
         return
@@ -604,9 +613,13 @@ def readfile(filename, nojoin=False):
         ret.append(np.loadtxt(fn).T)
     if not multi:
         return ret[0]
-    ret = np.asarray(ret)
+    # convert into a nice numpy array. The data is copied and made contiguous
+    ret = np.array(ret)
     if ret.ndim == 3:
-        return ret.swapaxes(0,1)
+        # we make a copy to make it a nice contiguous array
+        ret = ret.swapaxes(0,1).copy()
+    if getnames:
+        return (ret, filenames)
     else:
         return ret
 

@@ -127,9 +127,7 @@ def _write_dev(val, filename, format=format, first=False):
                 val.tofile(f)
         else:
             # force array so single values and lists also work
-            val = np.asarray(val)
-            if val.ndim == 0:
-                val.shape = (1,)
+            val = np.atleast_1d(val)
             np.savetxt(f, val.T, fmt='%.18g', delimiter='\t')
     f.close()
 
@@ -714,6 +712,28 @@ class MemoryDevice(BaseDevice):
     def _setdev(self, val):
         self._cache = val
 
+def _tostr_helper(val, t):
+    # This function converts from val to a str for the command
+    if t == bool: # True= 1 or ON, False= 0 or OFF
+        return str(int(bool(val)))
+    if t == float or t == int:
+        # use repr instead of str to keep full precision
+        return repr(val)
+    if t == None or (type(t) == type and issubclass(t, basestring)):
+        return val
+    return t.tostr(val)
+
+def _fromstr_helper(valstr, t):
+    # This function converts from the query result to a value
+    if t == bool: # it is '1' or '2'
+        return bool(int(valstr))
+    if t == float or t == int:
+        return t(valstr)
+    if t == None or (type(t) == type and issubclass(t, basestring)):
+        return valstr
+    return t(valstr)
+
+
 class scpiDevice(BaseDevice):
     def __init__(self,setstr=None, getstr=None,  autoinit=True, autoget=True, str_type=None,
                  choices=None, doc='', options={}, options_lim={}, options_apply=[], **kwarg):
@@ -732,6 +752,9 @@ class scpiDevice(BaseDevice):
                   device is used.
                   An option like 'ch' can be used in the setstr/getstr parameter
                      as {ch} (see string.format)
+                  For the setstr string you can use {val} to specify the position of the
+                  value, otherwise ' {val}' is automatically appended. Note that if specify
+                  {val} in the setstr, autoget is disabled.
            options_lim is the range of values: It can be
                       -None (the default) which means no limit
                       -a tuple of (min, max)
@@ -756,6 +779,15 @@ class scpiDevice(BaseDevice):
                 autoinit = 1
         BaseDevice.__init__(self, doc=doc, autoinit=autoinit, choices=choices, **kwarg)
         self._setdev_p = setstr
+        if setstr != None:
+            fmtr = string.Formatter()
+            val_present = False
+            for txt, name, spec, conv in fmtr.parse(setstr):
+                if name == 'val':
+                    val_present = True
+                    autoget = False
+            if not val_present:
+                self._setdev_p = setstr+' {val}'
         if getstr == None and autoget:
             getstr = setstr+'?'
         self._getdev_p = getstr
@@ -796,24 +828,11 @@ class scpiDevice(BaseDevice):
     def _tostr(self, val):
         # This function converts from val to a str for the command
         t = self.type
-        if t == bool: # True= 1 or ON, False= 0 or OFF
-            return str(int(bool(val)))
-        if t == float or t == int:
-            # use repr instead of str to keep full precision
-            return repr(val)
-        if t == None or (type(t) == type and issubclass(t, basestring)):
-            return val
-        return t.tostr(val)
+        return _tostr_helper(val, t)
     def _fromstr(self, valstr):
         # This function converts from the query result to a value
         t = self.type
-        if t == bool: # it is '1' or '2'
-            return bool(int(valstr))
-        if t == float or t == int:
-            return t(valstr)
-        if t == None or (type(t) == type and issubclass(t, basestring)):
-            return valstr
-        return t(valstr)
+        return _fromstr_helper(valstr, t)
     def _get_option_values(self, extradict={}):
         opt = self._options.copy()
         d = {k:v.getcache() for k, v in opt.iteritems() if isinstance(v, BaseDevice)}
@@ -889,8 +908,8 @@ class scpiDevice(BaseDevice):
             # There was an error in default options, raise error
             # options is the error string
             raise ValueError, options
-        command = self._setdev_p + ' ' + val
-        command = command.format(**options)
+        command = self._setdev_p
+        command = command.format(val=val, **options)
         self.instr.write(command)
     def _getdev(self, **kwarg):
         if self._getdev_p == None:
@@ -1952,6 +1971,159 @@ class lakeshore_322(visaInstrument):
         self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in %
         self.sp = scpiDevice(setstr='SETP 1,', getstr='SETP? 1', str_type=float)
         self.alias = self.tb
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+
+class dict_str(object):
+    def __init__(self, field_names, fmts=int, sep=','):
+        """
+        fmts can be a single value or a list of converters
+        the same length as field_names
+        """
+        self.field_names = field_names
+        if not isinstance(fmts, (list, np.ndarray)):
+            fmts = [fmts]*len(field_names)
+        self.fmts = fmts
+        self.sep = sep
+    def __call__(self, fromstr):
+        v_base = fromstr.split(self.sep)
+        if len(v_base) != len(self.field_names):
+            raise ValueError, 'Invalid number of parameters in class dict_str'
+        v_conv = []
+        for val, fmt in zip(v_base, self.fmts):
+            v_conv.append(_fromstr_helper(val, fmt))
+        return dict(zip(self.field_names, v_conv))
+    def tostr(self, fromdict=None, **kwarg):
+        if fromdict == None:
+            fromdict = kwarg
+        fromdict = fromdict.copy() # don't change incomning argument
+        ret = ''
+        start = True
+        for k, fmt in zip(self.field_names, self.fmts):
+            v = fromdict.pop(k, None)
+            if not start:
+                ret += ','
+            else:
+                start = False
+            if v != None:
+                ret += _tostr_helper(v, fmt)
+        if fromdict != {}:
+            raise KeyError, 'The following keys in the dictionnary are incorrec: %r'%fromdict.keys()
+        return ret
+
+class lakeshore_340(visaInstrument):
+    """
+       Temperature controller used for He3 system
+       Useful device:
+           s
+           t
+           fetch
+           status_ch
+           current_ch
+       s and t return the sensor or kelvin value of a certain channel
+       which defaults to current_ch
+       status_ch returns the status of ch
+       fetch allows to read all channels
+    """
+    def _current_config(self, dev_obj=None, options={}):
+        if dev_obj == self.fetch:
+            old_ch = self.current_ch.getcache()
+            ch = options.get('ch', None)
+            ch = self._fetch_helper(ch)
+            ch_list = []
+            in_set = []
+            in_crv = []
+            in_type = []
+            for c in ch:
+                ch_list.append(c)
+                in_set.append(self.input_set.get(ch=c))
+                in_crv.append(self.input_crv.get())
+                in_type.append(self.input_type.get())
+            self.current_ch.set(old_ch)
+            base = ['current_ch=%r'%ch_list, 'input_set=%r'%in_set,
+                    'input_crv=%r'%in_crv, 'input_type=%r'%in_type]
+        else:
+            base = self._conf_helper('current_ch', 'input_set', 'input_crv', 'input_type')
+        base += self._conf_helper('current_loop', 'sp', 'pid', options)
+        return base
+    def _enabled_list_getdev(self):
+        ret = []
+        for c in self.current_ch.choices:
+            d = self.input_set.get(ch=c)
+            if d['enabled']:
+                ret.append(c)
+        return ret
+    def _fetch_helper(self, ch=None):
+        if ch == None:
+            ch = self.enabled_list.getcache()
+        if not isinstance(ch, (list, ChoiceBase)):
+            ch = [ch]
+        return ch
+    def _fetch_getformat(self, **kwarg):
+        old_ch = self.current_ch.getcache()
+        ch = kwarg.get('ch', None)
+        ch = self._fetch_helper(ch)
+        multi = []
+        graph = []
+        for i, c in enumerate(ch):
+            graph.append(2*i)
+            multi.extend([c+'_T', c+'_S'])
+        fmt = self.fetch._format
+        fmt.update(multi=multi, graph=graph)
+        self.current_ch.set(old_ch)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_getdev(self, ch=None):
+        old_ch = self.current_ch.getcache()
+        ch = self._fetch_helper(ch)
+        ret = []
+        for c in ch:
+            ret.append(self.t.get(ch=c))
+            ret.append(self.s.get())
+        self.current_ch.set(old_ch)
+        return ret
+    def _create_devs(self):
+        rev_str = self.ask('rev?')
+        conv = dict_str(['master_rev_date', 'master_rev_num', 'master_serial_num', 'sw1', 'input_rev_date',
+                         'input_rev_num', 'option_id', 'option_rev_date', 'option_rev_num'], fmts=str)
+        rev_dic = conv(rev_str)
+        ch_Base = ChoiceStrings('A', 'B')
+        ch_3462_3464 = ChoiceStrings('A', 'B', 'C', 'D') # 3462=2 other channels, 3464=2 thermocouple
+        ch_3468 = ChoiceStrings('A', 'B', 'C1', 'C2', 'C3', 'C4', 'D1', 'D2','D3','D4') # 2 groups of 4, limited rate, limited current sources (10u or 1m)
+        ch_3465 = ChoiceStrings('A', 'B', 'C') # single capacitance
+        ch_opt = {'3462':ch_3462_3464, '3464':ch_3462_3464, '3468':ch_3468, '3465':ch_3465}
+        ch_opt_sel = ch_opt.get(rev_dic['option_id'], ch_Base)
+        self.current_ch = MemoryDevice('A', choices=ch_opt_sel)
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_ch)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.t = devChOption(getstr='KRDG? {ch}', str_type=float, doc='Return the temperature in Kelvin for the selected sensor(ch)')
+        self.s = devChOption(getstr='SRDG? {ch}', str_type=float, doc='Return the sensor value in Ohm, V(diode), mV (thermocouple), nF (for capacitance)  for the selected sensor(ch)')
+        self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=invalid, 16(4)=temp underrange, 
+                               #32(5)=temp overrange, 64(6)=sensor under (<0), 128(7)=sensor overrange
+                               # 000 = valid
+        self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}', str_type=dict_str(['enabled', 'compens'],[bool, int]))
+        self.input_crv = devChOption('INCRV {ch},{val}', 'INCRV? {ch}', str_type=int)
+        self.input_type = devChOption('INTYPE {ch},{val}', 'INTYPE? {ch}',
+                                      str_type=dict_str(['type', 'units', 'coeff', 'exc', 'range']))
+        self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
+                                      str_type=dict_str(['filter_en', 'n_points', 'window'], [bool, int, int]))
+        self.current_loop = MemoryDevice(1, choices=[1, 2])
+        def devLoopOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(loop=self.current_loop)
+            app = kwarg.pop('options_apply', ['loop'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.pid = devLoopOption('PID {loop},{val}', 'PID? {loop}',
+                                 str_type=dict_str(['P', 'I', 'D'], float))
+        self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in %
+        self.sp = devLoopOption(setstr='SETP {loop},{val}', getstr='SETP? {loop}', str_type=float)
+        self.alias = self.t
+        self._devwrap('enabled_list')
+        self._devwrap('fetch', autoinit=False)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
