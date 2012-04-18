@@ -2330,13 +2330,13 @@ class agilent_PNAL(visaInstrumentAsync):
                                       options = traceN_options, options_lim = traceN_options_lim)
         self.power_en = scpiDevice('OUTPut', str_type=bool)
         self.power_couple = devChOption(':SOURce{ch}:POWer:COUPle', str_type=bool)
-        self.power_slope = devChOption(':SOURce{ch}:POWer:SLOPe', str_type=int, min=-2, max=2)
+        self.power_slope = devChOption(':SOURce{ch}:POWer:SLOPe', str_type=float, min=-2, max=2)
         self.power_slope_en = devChOption(':SOURce{ch}:POWer:SLOPe:STATe', str_type=bool)
         # for max min power, ask source:power? max and source:power? min
         self.power_dbm_port1 = devChOption(':SOURce{ch}:POWer1', str_type=float)
         self.power_dbm_port2 = devChOption(':SOURce{ch}:POWer2', str_type=float)
         self.power_mode_port1 = devChOption(':SOURce{ch}:POWer1:MODE', choices=ChoiceStrings('AUTO', 'ON', 'OFF'))
-        self.power_mode_port2 = devChOption(':SOURce{ch}:POWer2:MODE', str_type=float)
+        self.power_mode_port2 = devChOption(':SOURce{ch}:POWer2:MODE', choices=ChoiceStrings('AUTO', 'ON', 'OFF'))
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
