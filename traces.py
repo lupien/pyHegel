@@ -297,7 +297,11 @@ class Trace(TraceBase):
                 self.axs.append(ax)
                 # add them to figure so selecting axes (press 1, 2, a) works properly
                 self.fig.add_axes(ax)
-                ax.set_xlim(self.xmin, self.xmax, auto=False)
+                if self.time_mode:
+                    autox=True
+                else:
+                    autox=False
+                ax.set_xlim(self.xmin, self.xmax, auto=autox)
             self.crvs = []
             #self.ax.clear()
         x = self.xs
