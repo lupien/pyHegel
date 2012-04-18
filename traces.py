@@ -5,6 +5,7 @@
 # key codes compared to gtk so add missing ones needed for FigureManagerQT
 
 import time
+import functools
 
 from PyQt4 import QtCore, QtGui
 import numpy as np
@@ -181,12 +182,17 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
     def savefig(self,*args,**kwargs):
         self.fig.savefig(*args, **kwargs)
 
+def _offsetText_helper(self):
+    self._update_offsetText_orig()
+    x,y = self.offsetText.xytext
+    self.offsetText.xytext = (x+self._offsetText_xshift, y)
 
 class Trace(TraceBase):
     def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False):
         super(Trace, self).__init__(width=width, height=height, dpi=dpi)
         ax = host_subplot_class(self.fig, 111)
         self.fig.add_subplot(ax)
+        self.offset = 50
         self.axs = [ax]
         self.xs = None
         self.ys = None
@@ -203,6 +209,8 @@ class Trace(TraceBase):
             tlabels.set_rotation(10)
             tlabels.set_rotation_mode('default')
             tlabels.set_verticalalignment('top')
+        self.canvas_resizeEvent_orig = self.canvas.resizeEvent
+        self.canvas.resizeEvent = self.windowResize
         self.update()
         # handle status better for twinx (pressing 1 or 2 selects axis)
         self.canvas.mpl_connect('key_press_event', self.mykey_press)
@@ -275,25 +283,43 @@ class Trace(TraceBase):
     def setlegend(self, str_lst):
         self.legend_strs = str_lst
         self.update()
+    def windowResize(self, event):
+        self.canvas_resizeEvent_orig(event)
+        self.do_resize()
+    def do_resize(self, draw=True):
+        if self.xs == None:
+            return
+        ndim = self.ys.shape[1]
+        offset = self.offset
+        rel_dx, rel_dy = self.fig.transFigure.inverted().transform((offset,0))
+        right = .95-(ndim-1)*rel_dx
+        if right < .5:
+            right = .5
+        self.fig.subplots_adjust(left=rel_dx*1.5, right=right)
+        if draw:
+            self.draw()
     def update(self):
         if self.xs == None:
            self.draw()
            return
         if self.first_update:
+            self.do_resize(draw=False)
             ndim = self.ys.shape[1]
-            right = .95-(ndim-1)*.1
-            if right < .5:
-                right = .5
-            #offset = (.95-right)/(ndim-1)
-            offset = 50
-            self.fig.subplots_adjust(right=right)
+            offset = self.offset
             host = self.axs[0]
             # cycle over all extra axes
             for i in range(ndim-1):
                 ax = host.twinx()
                 new_fixed_axis = ax.get_grid_helper().new_fixed_axis
                 ax.axis['right'] = new_fixed_axis(loc='right', axes=ax, offset=(offset*i,0))
-                ax.axis['right'].toggle(all=True)
+                axr = ax.axis['right']
+                axr.toggle(all=True)
+                # Now fix problem with offset string always on same spot for all right axes
+                axr._update_offsetText_orig = axr._update_offsetText
+                axr._offsetText_xshift = offset*i
+                axr._update_offsetText = functools.partial(_offsetText_helper, axr)
+                if ndim > 2:
+                    axr.offsetText.set_rotation(20)
                 self.axs.append(ax)
                 # add them to figure so selecting axes (press 1, 2, a) works properly
                 self.fig.add_axes(ax)
