@@ -28,6 +28,15 @@ import traces
 _globaldict = dict() # This is set in pynoise.py
 CHECKING = False
 
+###################
+###  New exceptions
+class InvalidArgument(ValueError):
+    pass
+
+class InvalidAutoArgument(InvalidArgument):
+    pass
+###################
+
 class ProxyMethod(object):
     def __init__(self, bound_method):
         #self.class_of_method = bound_method.im_class
@@ -668,7 +677,10 @@ class BaseInstrument(object):
                 l.append( (float(obj._autoinit), obj) )
         l.sort(reverse=True)
         for flag,obj in l:
-            obj.get()
+            try:
+                obj.get()
+            except InvalidAutoArgument:
+                pass
         self._last_force = time.time()
     def iprint(self, force=False):
         if force:
@@ -879,7 +891,7 @@ class scpiDevice(BaseDevice):
             ck = self._check_option(k, v)
             if ck != None:
                 # in case of error, raise it
-                raise ValueError, ck
+                raise InvalidArgument, ck
         # Some device need to keep track of current value so we set them
         # if changed
         for k in self._options_apply:
@@ -896,7 +908,7 @@ class scpiDevice(BaseDevice):
                 if ck != None:
                     # There was an error, returned value not currently valid
                     # so return it instead of dictionnary
-                    return ck
+                    raise InvalidAutoArgument, ck
         # everything checks out so use those kwarg
         options.update(kwarg)
         self._option_cache = options
@@ -906,20 +918,17 @@ class scpiDevice(BaseDevice):
            raise NotImplementedError, self.perror('This device does not handle _setdev')
         val = self._tostr(val)
         options = self._combine_options(**kwarg)
-        if not isinstance(options, dict):
-            # There was an error in default options, raise error
-            # options is the error string
-            raise ValueError, options
         command = self._setdev_p
         command = command.format(val=val, **options)
         self.instr.write(command)
     def _getdev(self, **kwarg):
         if self._getdev_p == None:
            raise NotImplementedError, self.perror('This device does not handle _getdev')
-        options = self._combine_options(**kwarg)
-        if not isinstance(options, dict):
-            # There was an error in default options, so skip asking instrument
-            return None
+        try:
+            options = self._combine_options(**kwarg)
+        except InvalidAutoArgument:
+            self.setcache(None)
+            raise
         command = self._getdev_p
         command = command.format(**options)
         ret = self.instr.ask(command)
