@@ -688,14 +688,17 @@ class BaseInstrument(object):
                 pass
         self._last_force = time.time()
     def iprint(self, force=False):
+        poptions = np.get_printoptions()
         if force:
             self.force_get()
         ret = ''
+        np.set_printoptions(threshold=50)
         for s, obj in self.devs_iter():
             if self.alias == obj:
                 ret += 'alias = '
             val = obj.getcache()
             ret += s+" = "+repr(val)+"\n"
+        np.set_printoptions(**poptions)
         return ret
     def _info(self):
         return self.find_global_name(), self.__class__.__name__, id(self)
