@@ -334,7 +334,12 @@ class BaseDevice(object):
         return ret
     def getcache(self):
         if self._cache==None and self._autoinit:
-           return self.get()
+            # This can fail, but getcache should not care for
+            #InvalidAutoArgument exceptions
+            try:
+                return self.get()
+            except InvalidAutoArgument:
+                self._cache = None
         return self._cache
     def _do_redir_async(self):
         obj = self
@@ -1258,7 +1263,7 @@ class ChoiceDev(ChoiceBase):
         return x in choices
     def __getitem__(self, key):
         choices = self._get_choices()
-        if key not in self and instances(choices, list): # key might be an integer
+        if key not in self and isinstance(choices, list): # key might be an integer
             return choices[key]
         if key in self:
             if isinstance(choices, dict):
