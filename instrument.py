@@ -313,6 +313,8 @@ class BaseDevice(object):
                 filename = kwarg.pop('filename')
                 ret = self._getdev(**kwarg)
                 _write_dev(ret, filename, format=format)
+                if format['bin']:
+                    ret = None
             else:
                 ret = self._getdev(**kwarg)
         elif self._getdev_p == None:
@@ -2377,6 +2379,8 @@ class agilent_PNAL(visaInstrumentAsync):
                 cal.append(self.calib_en.get(trace=t))
                 name, param = self.select_trace.choices[t]
                 traces.append(name+'='+param)
+        elif dev_obj == self.snap_png:
+            traces = cal='Unknown'
         else:
             t=traces_opt[0]
             cal = self.calib_en.get(trace=t)
@@ -2414,7 +2418,7 @@ class agilent_PNAL(visaInstrumentAsync):
         select_trace_choices = ChoiceDevSwitch(self.channel_list,
                                                lambda t: self.traceN_name.get(trace=t),
                                                sub_type=quoted_string())
-        self.select_trace = devChOption('CALCulate{ch}:PARameter:SELect',
+        self.select_trace = devChOption('CALCulate{ch}:PARameter:SELect', autoinit=8,
                                         choices=select_trace_choices, doc="""
                 Select the trace using either the trace name (standard ones are 'CH1_S11_1')
                 which are unique, the trace param like 'S11' which might not be unique
@@ -2478,7 +2482,7 @@ class agilent_PNAL(visaInstrumentAsync):
             options_lim.update(_marker_enabled=[True])
             kwarg.update(options=options, options_lim=options_lim)
             return devMkrOption(*arg, **kwarg)
-        self.marker_en = devMkrOption('CALC{ch}:MARKer{mkr}', str_type=bool)
+        self.marker_en = devMkrOption('CALC{ch}:MARKer{mkr}', str_type=bool, autoinit=5)
         marker_funcs = ChoiceStrings('MAXimum', 'MINimum', 'RPEak', 'LPEak', 'NPEak', 'TARGet', 'LTARget', 'RTARget', 'COMPression')
         self.marker_trac_func = devMkrEnOption('CALC{ch}:MARKer{mkr}:FUNCtion', choices=marker_funcs)
         # This is set only
