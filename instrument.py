@@ -2167,25 +2167,165 @@ class infiniiVision_3000(visaInstrument):
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
-class agilent_EXA(visaInstrument):
+class agilent_EXA(visaInstrumentAsync):
+    """
+    To use this instrument, the most useful device is probably:
+        fetch, readval
+    Some commands are available:
+        abort
+    Note that almost all devices/commands require a channel.
+    It can be specified with the ch option or will use the last specified
+    one if left to the default.
+    A lot of other commands require a selected trace (per channel)
+    The active one can be selected with the trace option or select_trace, select_traceN
+    If unspecified, the last one is used.
+    """
     def init(self, full=False):
         self.write(':format REAL,64')
         self.write(':format:border swap')
+        super(agilent_EXA, self).init(full=full)
+    def _async_trig(self):
+        self.cont_trigger.set(False)
+        super(agilent_EXA, self)._async_trig()
+    def abort(self):
+        self.write('ABORt')
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('bandwidth', 'freq_start', 'freq_stop','average_count', options)
+    def _fetch_getformat(self, **kwarg):
+        pass
+    def restart_averaging(self):
+        command = ':AVERage:CLEar'
+        self.write(command)
+    def peak_search(self, mkr=None, next=False):
+        """
+        next can be True (same as finding next)
+        left  to find the left
+        right to find the next peak to the right
+        """
+        if mkr == None:
+            mkr = self.current_mkr.getcache()
+        if mkr<1 or mkr>12:
+            raise ValueError, self.perror('mkr need to be between 1 and 12')
+        if next == True:
+            next = ':NEXT'
+        elif next:
+            next = ':'+next
+        else:
+            next = ''
+        self.write('CALCulate:MARKer{mkr}:MAXimum'.format(mkr=mkr)+next)
+    def marker_to_center_freq(self, mkr=None):
+        if mkr == None:
+            mkr = self.current_mkr.getcache()
+        if mkr<1 or mkr>12:
+            raise ValueError, self.perror('mkr need to be between 1 and 12')
+        self.write('CALCulate:MARKer{mkr}:CENTer'.format(mkr=mkr))
     def _create_devs(self):
-        self.bandwidth = scpiDevice(':bandwidth',str_type=float)
-        self.mark1x = scpiDevice(':calc:mark1:x',str_type=float)
-        self.mark1y = scpiDevice(getstr=':calc:mark1:y?',str_type=float)
-        self.average_count = scpiDevice(getstr=':average:count?',str_type=float)
-        self.freq_start = scpiDevice(':freq:start', str_type=float, min=10e6, max=12.6e9)
-        self.freq_stop = scpiDevice(':freq:stop', str_type=float, min=10e6, max=12.6e9)
-        # TODO handle multiple channels
-        self.trace1 = scpiDevice(getstr=':trace? trace1', str_type=_decode_float64, multi=True, autoinit=False)
-        self.fetch1 = scpiDevice(getstr=':fetch:san1?', autoinit=False)
-        self.read1 = scpiDevice(getstr=':read:san1?', autoinit=False)
+        ql = quoted_list(sep=', ')
+        instrument_mode_list = ql(self.ask(':INSTrument:CATalog?'))
+        # the list is name number, make it only name
+        instrument_mode_list = [i.split(' ')[0] for i in instrument_mode_list]
+        self.instrument_mode = scpiDevice(':INSTrument', choices=ChoiceStrings(*instrument_mode_list))
+        # This list depends on instrument mode: These are measurement type
+        self.config_mode_list = scpiDevice(getstr=':CONFigure:CATalog?', str_type=ql)
+        # From the list: SAN=SANalyzer
+        self.config_mode = scpiDevice(':CONFigure:{val}:NDEFault', ':CONFigure?')
+        self.attenuation_db = scpiDevice(':POWer:ATTenuation', str_type=float)
+        self.attenuation_auto = scpiDevice(':POWer:ATTenuation:AUTO', str_type=bool)
+        self.y_unit = scpiDevice('UNIT:POWer', choices=ChoiceStrings('DBM', 'DBMV', 'DBMA', 'DBUV', 'DBUA', 'DBUVM', 'DBUAM', 'DBPT', 'DBG', 'V', 'W', 'A'))
+        self.uW_path_bypass = scpiDevice(':POWer:MW:PATH', choices=ChoiceStrings('STD', 'LNPath', 'MPBypass', 'FULL'))
+        self.uW_presel_bypass = scpiDevice(':POWer:MW:PRESelector', str_type=bool)
+        self.preamp_en = scpiDevice(':POWer:GAIN', str_type=bool)
+        self.preamp_band = scpiDevice(':POWer:GAIN:BAND', choices=ChoiceStrings('LOW', 'FULL'))
+        self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
+        minfreq = float(self.ask(':FREQ:START? min'))
+        maxfreq = float(self.ask(':FREQ:STOP? max'))
+        self.freq_start = scpiDevice(':FREQuency:STARt', str_type=float, min=minfreq, max=maxfreq-10.)
+        self.freq_center = scpiDevice(':FREQuency:CENTer', str_type=float, min=minfreq, max=maxfreq)
+        self.freq_stop = scpiDevice(':FREQuency:STOP', str_type=float, min=minfreq, max=maxfreq)
+        self.freq_offset = scpiDevice(':FREQuency:OFFset', str_type=float, min=-500e-9, max=500e9)
+        self.input_coupling = scpiDevice(':INPut:COUPling', choices=ChoiceStrings('AC', 'DC'))
+        self.gain_correction_db = scpiDevice(':CORREction:SA:GAIN', str_type=float)
+        self.ext_ref = scpiDevice(getstr=':ROSCillator:SOURce?', str_type=str)
+        self.ext_ref_mode = scpiDevice(':ROSCillator:SOURce:TYPE', choices=ChoiceStrings('INTernal', 'EXTernal', 'SENSe'))
+        self.sweep_time = scpiDevice(':SWEep:TIME', str_type=float, min=1e-6, max=6000) # in sweep: 1ms-4000s, in zero span: 1us-6000s
+        self.sweep_time_auto = scpiDevice(':SWEep:TIME:AUTO', str_type=bool)
+        self.sweep_time_rule = scpiDevice(':SWEep:TIME:AUTO:RULes', choices=ChoiceStrings('NORMal', 'ACCuracy', 'SRESponse'))
+        self.sweep_time_rule_auto = scpiDevice(':SWEep:TIME:AUTO:RULes:AUTO', str_type=bool)
+        self.sweep_type = scpiDevice(':SWEep:TYPE', choices=ChoiceStrings('FFT', 'SWEep'))
+        self.sweep_type_auto = scpiDevice(':SWEep:TYPE:AUTO', str_type=bool)
+        self.sweep_type_rule = scpiDevice(':SWEep:TYPE:AUTO:RULes', choices=ChoiceStrings('SPEEd', 'DRANge'))
+        self.sweep_type_rule_auto = scpiDevice(':SWEep:TYPE:AUTO:RULes:AUTO', str_type=bool)
+        self.sweep_fft_width = scpiDevice(':SWEep:FFT:WIDTh', str_type=float)
+        self.sweep_fft_width_auto = scpiDevice(':SWEep:FFT:WIDTh:AUTO', str_type=bool)
+        self.sweep_npoints = scpiDevice(':SWEep:POINts', str_type=int, min=1, max=40001)
+        # For SAN measurement
+        self.bw_res = scpiDevice(':BANDwidth', str_type=float, min=1, max=8e6)
+        self.bw_res_auto = scpiDevice(':BANDwidth:AUTO', str_type=bool)
+        self.bw_video = scpiDevice(':BANDwidth:VIDeo', str_type=float, min=1, max=50e6)
+        self.bw_video_auto = scpiDevice(':BANDwidth:VIDeo:AUTO', str_type=bool)
+        self.bw_video_auto_ratio = scpiDevice(':BANDwidth:VIDeo:RATio', str_type=float, min=1e-5, max=3e6)
+        self.bw_video_auto_ratio_auto = scpiDevice(':BANDwidth:VIDeo:RATio:AUTO', str_type=bool)
+        self.bw_res_span = scpiDevice(':FREQuency:SPAN:BANDwidth:RATio', str_type=float, min=2, max=10000)
+        self.bw_res_span_auto = scpiDevice(':FREQuency:SPAN:BANDwidth:RATio:AUTO', str_type=bool)
+        self.bw_res_shape = scpiDevice(':BANDwidth:SHAPe', choices=ChoiceStrings('GAUSsian', 'FLATtop'))
+        self.bw_res_gaussian_type = scpiDevice(':BANDwidth:TYPE', choices=ChoiceStrings('DB3', 'DB6', 'IMPulse', 'NOISe'))
+        self.average_count = scpiDevice(':AVERage:COUNt',str_type=int, min=1, max=10000)
+        self.average_type = scpiDevice(':AVERage:TYPE', choices=ChoiceStrings('RMS', 'LOG', 'SCALar'))
+        self.average_type_auto = scpiDevice(':AVERage:TYPE:AUTO', str_type=bool)
+        self.freq_span = scpiDevice(':FREQuency:SPAN', str_type=float, min=0, doc='You can select 0 span, otherwise minimum span is 10 Hz')
+        # Trace dependent
+        self.current_trace = MemoryDevice(1, min=1, max=6)
+        def devTraceOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(trace=self.current_trace)
+            app = kwarg.pop('options_apply', ['trace'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        # trace 0 is special, The others are 1-6 and return x,y pairs
+        # trace 0:  margin/limit fail, F, F, F, N dB points result, current avg count, npoints sweep, F, F, F , Mkr1xy, Mkr2xy, .., Mkr12xy
+        self.fetch_base = devTraceOption(getstr=':FETCh:{measurement}{trace}?',
+                                         str_type=_decode_float64, autoinit=False, trig=True, options=dict(measurement=self.config_mode))
+        self.fetch0_base = scpiDevice(getstr=':FETCh:{measurement}0?', str_type=str, autoinit=False, trig=True, options=dict(measurement=self.config_mode))
+        self.trace_type = devTraceOption(':TRACe{trace}:TYPE', choices=ChoiceStrings('WRITe', 'AVERage', 'MAXHold', 'MINHold'))
+        self.trace_updating = devTraceOption(':TRACe{trace}:UPDate', str_type=bool)
+        self.trace_displaying = devTraceOption(':TRACe{trace}:DISPlay', str_type=bool)
+        self.trace_detector = devTraceOption(':DETector:TRACe{trace}', choices=ChoiceStrings('AVERage', 'NEGative', 'NORMal', 'POSitive', 'SAMPle', 'QPEak', 'EAVerage', 'RAVerage'))
+        self.trace_detector_auto = devTraceOption(':DETector:TRACe{trace}:AUTO', str_type=bool)
+        self.get_trace = devTraceOption(getstr=':TRACe? TRACE{trace}', str_type=_decode_float64, autoinit=False, trig=True)
+        # TODO implement trace math, ADC dither, swept IF gain FFT IF gain
+        # marker dependent
+        self.current_mkr = MemoryDevice(1, min=1, max=12)
+        def devMkrOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mkr=self.current_mkr)
+            app = kwarg.pop('options_apply', ['mkr'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.marker_mode = devMkrOption(':CALCulate:MARKer{mkr}:MODE', choices=ChoiceStrings('POSition', 'DELTa', 'FIXed', 'OFF'))
+        self.marker_x = devMkrOption(':CALCulate:MARKer{mkr}:X', str_type=float, trig=True)
+        self.marker_x_unit = devMkrOption(':CALCulate:MARKer{mkr}:X:READout', choices=ChoiceStrings('FREQuency', 'TIME', 'ITIMe', 'PERiod'))
+        self.marker_x_unit_auto = devMkrOption(':CALCulate:MARKer{mkr}:X:READout:AUTO', str_type=bool)
+        self.marker_y = devMkrOption(':CALCulate:MARKer{mkr}:Y', str_type=float, trig=True)
+        self.marker_z = devMkrOption(':CALCulate:MARKer{mkr}:Z', str_type=float, trig=True) # for spectrogram mode
+        self.marker_ref = devMkrOption(':CALCulate:MARKer{mkr}:REFerence', str_type=int, min=1, max=12)
+        self.marker_trace = devMkrOption(':CALCulate:MARKer{mkr}:TRACe', str_type=int, min=1, max=6)
+        self.marker_function = devMkrOption(':CALCulate:MARKer{mkr}:FUNCtion', choices=ChoiceStrings('NOISe', 'BPOWer', 'BDENsity', 'OFF'))
+        self.marker_function_band_span = devMkrOption(':CALCulate:MARKer{mkr}:FUNCtion:BAND:SPAN', str_type=float, min=0)
+        self.marker_function_band_left = devMkrOption(':CALCulate:MARKer{mkr}:FUNCtion:BAND:LEFT', str_type=float, min=0)
+        self.marker_function_band_right = devMkrOption(':CALCulate:MARKer{mkr}:FUNCtion:BAND:RIGHt', str_type=float, min=0)
+        self.peak_search_continuous = devMkrOption(':CALCulate:MARKer{mkr}:CPSearch', str_type=bool)
+
+        self._devwrap('fetch', autoinit=False, trig=True)
+        self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+# status byte stuff
+# There is a bunch of register groups:
+#  :status:operation
+#  :status:questionable
+#  :status:questionable:power
+#  :status:questionable:frequency
+# ALSO see comments below agilent_PNAL
 
 class agilent_PNAL(visaInstrumentAsync):
     """
