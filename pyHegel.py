@@ -9,6 +9,7 @@ import numpy as np
 import os
 import glob
 import time
+import csv
 import re
 import string
 import sys
@@ -558,9 +559,40 @@ sweep = _Sweep()
 
 wait = traces.wait
 
+
+def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0):
+    f=open(filename, 'r')
+    reader = csv.reader(f)
+    X=[]
+    for line in reader:
+        try:
+            conv = map(dtype, line)
+        except ValueError:
+            # skip this line
+            continue
+        if conv != []:
+            X.append(conv)
+    X = np.array(X)
+    # following loadtxt
+    if not ndmin in [0, 1, 2]:
+        raise ValueError('Illegal value of ndmin keyword: %s' % ndmin)
+    # Tweak the size and shape of the arrays - remove extraneous dimensions
+    if X.ndim > ndmin:
+        X = np.squeeze(X)
+    # and ensure we have the minimum number of dimensions asked for
+    # - has to be in this order for the odd case ndmin=1, X.squeeze().ndim=0
+    if X.ndim < ndmin:
+        if ndmin == 1:
+            X = np.atleast_1d(X)
+        elif ndmin == 2:
+            X = np.atleast_2d(X).T
+    if unpack:
+        return X.T
+    return X
+
 #TODO add handling of title column and extracting headers
 _readfile_lastnames = []
-def readfile(filename, nojoin=False, getnames=True):
+def readfile(filename, nojoin=False, getnames=True, csv='auto'):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -584,6 +616,11 @@ def readfile(filename, nojoin=False, getnames=True):
     so selecting a column in a data file is the first index dimension.
     For multiple files, the shape is (n_columns, n_files, n_rows)
      or (nfiles, n_rows) if the files contain only a single column
+
+    The csv option can be True, False or 'auto'. When in auto, the file extension
+    is used to detect wheter to use csv or not. When csv is used
+    the column separator is ',' and all lines not containing only numerical
+    are automatically skipped.
 
     The list of files is saved in the global variable _readfile_lastnames.
     When the parameter getnames=True, the return value is a tuple
@@ -610,7 +647,17 @@ def readfile(filename, nojoin=False, getnames=True):
         multi = False
     ret = []
     for fn in filelist:
-        ret.append(np.loadtxt(fn).T)
+        if csv=='auto':
+            if fn.lower().endswith('.csv'):
+                docsv = True
+            else:
+                docsv = False
+        else:
+            docsv = csv
+        if docsv:
+            ret.append(loadtxt_csv(fn).T)
+        else:
+            ret.append(np.loadtxt(fn).T)
     if not multi:
         return ret[0]
     # convert into a nice numpy array. The data is copied and made contiguous
