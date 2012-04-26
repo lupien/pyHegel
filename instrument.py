@@ -1015,6 +1015,11 @@ _decode_uint8_bin = functools.partial(_decode_block, t=np.uint8)
 _decode_uint16_bin = functools.partial(_decode_block, t=np.uint16)
 _decode_complex128 = functools.partial(_decode_block_auto, t=np.complex128)
 
+def _decode_float64_2col(s):
+    v = _decode_block_auto(s, t=np.float64)
+    v.shape = (-1,2)
+    return v.T
+
 def _decode_float64_avg(s):
     return _decode_block_auto(s, t=np.float64).mean()
 
@@ -2171,6 +2176,7 @@ class agilent_EXA(visaInstrumentAsync):
     """
     To use this instrument, the most useful device is probably:
         fetch, readval
+        marker_x, marker_y
     Some commands are available:
         abort
     Note that almost all devices/commands require a channel.
@@ -2179,8 +2185,16 @@ class agilent_EXA(visaInstrumentAsync):
     A lot of other commands require a selected trace (per channel)
     The active one can be selected with the trace option or select_trace, select_traceN
     If unspecified, the last one is used.
+
+    Note about fetch_base and get_trace. They both return the same y data
+    The units are given by y_unit and it is not affected by y offset.
+    get_trace is immediate, fetch_base waits for the end of the current sweep
+    if needed (including averaging).
+    fetch_base includes the correct x scale. It can be different from the currently active
+    x scale when not updating. x-scales are affected by freq offset.
     """
     def init(self, full=False):
+        self.Ro = 50
         self.write(':format REAL,64')
         self.write(':format:border swap')
         super(agilent_EXA, self).init(full=full)
@@ -2189,10 +2203,211 @@ class agilent_EXA(visaInstrumentAsync):
         super(agilent_EXA, self)._async_trig()
     def abort(self):
         self.write('ABORt')
+    def _current_config_trace_helper(self, traces=None):
+        # traces needs to be a list or None
+        just_one = False
+        if not isinstance(traces, (list)):
+            just_one = True
+            traces = [traces]
+        trace_conf = ['current_trace', 'trace_type', 'trace_updating', 'trace_displaying',
+                                      'trace_detector', 'trace_detector_auto']
+        ret = []
+        for t in traces:
+            if t != None:
+                self.current_trace.set(t)
+            tret = []
+            for n in trace_conf:
+                # follows _conf_helper
+                val = _repr_or_string(getattr(self, n).getcache())
+                tret.append(val)
+            if ret == []:
+                ret = tret
+            else:
+                ret = [old+', '+new for old, new in zip(ret, tret)]
+        if just_one:
+            ret = [n+'='+v for n, v in zip(trace_conf, ret)]
+        else:
+            ret = [n+'=['+v+']' for n, v in zip(trace_conf, ret)]
+        return ret
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('bandwidth', 'freq_start', 'freq_stop','average_count', options)
+        # Assume SA instrument mode, SAN measurement (config)
+        if options.has_key('trace'):
+            self.current_trace.set(options['trace'])
+        if options.has_key('mkr'):
+            self.current_mkr.set(options['mkr'])
+        extra = []
+        base_conf = self._conf_helper('instrument_mode', 'meas_mode', 'attenuation_db', 'attenuation_auto', 'y_unit', 'uW_path_bypass',
+                                 'uW_presel_bypass', 'preamp_en', 'preamp_band', 'cont_trigger',
+                                 'freq_span', 'freq_start', 'freq_center', 'freq_stop', 'freq_offset', 'input_coupling',
+                                 'gain_correction_db', 'ext_ref', 'ext_ref_mode', 'sweep_time', 'sweep_time_auto',
+                                 'sweep_time_rule', 'sweep_time_rule_auto', 'sweep_type', 'sweep_type_auto', 'sweep_type_rule',
+                                 'sweep_type_rule_auto', 'sweep_fft_width', 'sweep_fft_width_auto', 'sweep_npoints',
+                                 'bw_res', 'bw_res_auto', 'bw_video', 'bw_video_auto', 'bw_video_auto_ratio', 'bw_video_auto_ratio_auto',
+                                 'bw_res_span', 'bw_res_span_auto', 'bw_res_shape', 'bw_res_gaussian_type',
+                                 'average_count', 'average_type', 'average_type_auto', options)
+        # trace
+        if dev_obj in [self.readval, self.fetch]:
+            traces_opt = self._fetch_traces_helper(options.get('traces'), options.get('updating'))
+            extra = self._current_config_trace_helper(traces_opt)
+        elif dev_obj in [self.fetch_base, self.get_trace]:
+            extra = self._current_config_trace_helper()
+        # marker dependent
+        if dev_obj in [self.marker_x, self.marker_y, self.marker_z]:
+            extra = self._conf_helper('current_mkr', 'marker_mode', 'marker_x_unit', 'marker_x_unit_auto', 'marker_ref', 'marker_trace',
+                                      'marker_x', 'marker_y', 'marker_z', 'marker_trace',
+                                      'marker_function', 'marker_function_band_span', 'marker_function_band_left',
+                                      'marker_function_band_right', 'peak_search_continuous')
+            old_trace = self.current_trace.get()
+            extra += self._current_config_trace_helper(self.marker_trace.getcache())
+            self.current_trace.set(old_trace)
+        return extra+base_conf
+    def _noise_eq_bw_getdev(self):
+        bw = self.bw_res.get()
+        bw_mode = self.bw_res_shape.get()
+        if bw_mode in self.bw_res_shape.choices[['gaussian']]:
+            # The filters are always the same
+            # but they are reported differently
+            gaus_type = self.bw_res_gaussian_type.get()
+            ch = self.bw_res_gaussian_type.choices
+            'DB3', 'DB6', 'IMPulse', 'NOISe'
+            if gaus_type in ch[['DB3']]:
+                f = 1.   # The 3dB full with is 2*sqrt(log(2))*sigma
+            elif gaus_type in ch[['DB6']]:
+                f = 1.41  # should be sqrt(2)
+            elif gaus_type in ch[['noise']]:
+                f = 1.05  # should be sqrt(pi)/(2*sqrt(log(2))) (equivalent bw for power)
+            elif gaus_type in ch[['impulse']]:
+                f = 1.47  # impulse bw is equivalent bw for volt: sqrt(2*pi)/(2*sqrt(log(2)))
+            # normalize to 3dB BW
+            bw = bw/f
+            # Now obtain equivalent noise BW
+            bw = bw * np.sqrt(np.pi)/(2*np.sqrt(np.log(2)))
+        # flat is about the correct filter except for some correction/rounding?
+        # TODO test this and fix the factors above.
+        return bw
     def _fetch_getformat(self, **kwarg):
-        pass
+        unit = kwarg.get('unit', 'default')
+        xaxis = kwarg.get('xaxis', True)
+        traces = kwarg.get('traces', None)
+        updating = kwarg.get('updating', True)
+        traces = self._fetch_traces_helper(traces, updating)
+        if xaxis:
+            zero_span = self.freq_span.getcache() == 0
+            if zero_span:
+                multi = 'time(s)'
+            else:
+                multi = 'freq(Hz)'
+            multi = [multi]
+        else:
+            multi = []
+        for t in traces:
+            multi.append('trace%i'%t)
+        fmt = self.fetch._format
+        multi = tuple(multi)
+        fmt.update(multi=multi, graph=[], xaxis=xaxis)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_traces_helper(self, traces, updating=True):
+        """
+        When updating is True, only updating trace are selected when
+        traces=None. Otherwise all visible traces are selected.
+        """
+        if isinstance(traces, (tuple, list)):
+            pass
+        elif traces != None:
+            traces = [traces]
+        else: # traces == None
+            traces = []
+            old_trace = self.current_trace.get()
+            for t in range(1,7):
+                if updating and self.trace_updating.get(trace=t):
+                    traces.append(t)
+                elif not updating and self.trace_displaying.get(trace=t):
+                    traces.append(t)
+            self.current_trace.set(old_trace)
+        return traces
+    def _convert_unit(self, v, from_unit, to_unit, bw):
+        Ro = self.Ro
+        if to_unit == 'default':
+            return v
+        from_unit = from_unit.upper()
+        db_list = ['DBM', 'DBMV', 'DBMA', 'DBUV', 'DBUA', 'DBUVM', 'DBUAM', 'DBPT', 'DBG']
+        db_ref = [1e-3, 2e-8, 5e-5, 2e-14, 5e-11, 0, 0, 0, 0] # in W
+        if from_unit in db_list:
+            in_db = True
+            i = db_list.index(from_unit)
+            in_ref = db_ref[i]
+            if in_ref == 0:
+                raise ValueError, self.perror("Don't know how to convert from antenna unit %s"%from_unit)
+        else: # V, W and A
+            in_db = False
+            # convert to W
+            if from_unit == 'V':
+                v = v**2 / Ro
+            elif from_unit == 'A':
+                v = v**2 * Ro
+        to_db_list = ['dBm', 'dBm_Hz']
+        to_lin_list = ['W', 'W_Hz', 'V', 'V_Hz', 'V2', 'V2_Hz']
+        if to_unit not in to_db_list+to_lin_list:
+            raise ValueError, self.perror("Invalid conversion unit: %s"%to_unit)
+        if not to_unit.endswith('_Hz'):
+            bw = 0
+        if to_unit in to_db_list:
+            if in_db:
+                v = v + 10*np.log10(in_ref/1e-3)
+            else: # in is in W
+                v = 10.*np.log10(v/1e-3)
+            if bw:
+                v -= 10*np.log10(bw)
+        else: # W, V and V2 and _Hz variants
+            if in_db:
+                v = in_ref*10.**(v/10.)
+            if to_unit in ['V', 'V_Hz']:
+                bw = np.sqrt(bw)
+                v = np.sqrt(v*Ro)
+            elif to_unit in ['V2', 'V2_Hz']:
+                v = v*Ro
+            if bw:
+                v /= bw
+        return v
+    def _fetch_getdev(self, traces=None, updating=True, unit='default', xaxis=True):
+        """
+           traces can be a single value or a list of values.
+                    The values are integer representing the trace number (1-6)
+           updating is used when traces is None. When True (default) only updating traces
+                    are fetched. Otherwise all visible traces are fetched.
+           unit can be default (whatever the instrument gives) or
+                       dBm    for dBm
+                       W      for Watt
+                       V      for Volt
+                       V2     for Volt**2
+                       dBm_Hz for noise density
+                       W_Hz   for W/Hz
+                       V_Hz   for V/sqrt(Hz)
+                       V2_Hz  for V**2/Hz
+                 It can be a single value or a vector the same length as traces
+           xaxis  when True(default), the first column of data is the xaxis
+
+           This version of fetch uses get_trace instead of fetch_base so it never
+           block. It assumes all the data have the same x-scale (should be the
+           case when they are all updating).
+        """
+        traces = self._fetch_traces_helper(traces, updating)
+        if xaxis:
+            ret = [self.get_xscale()]
+        else:
+            ret = []
+        if not isinstance(unit, (list, tuple)):
+            unit = [unit]*len(traces)
+        base_unit = self.y_unit.get()
+        noise_bw = self.noise_eq_bw.get()
+        for t, u in zip(traces, unit):
+            v = self.get_trace.get(trace=t)
+            v = self._convert_unit(v, base_unit, u, noise_bw)
+            ret.append(v)
+        ret = np.asarray(ret)
+        if ret.shape[0]==1:
+            ret=ret[0]
+        return ret
     def restart_averaging(self):
         command = ':AVERage:CLEar'
         self.write(command)
@@ -2219,6 +2434,23 @@ class agilent_EXA(visaInstrumentAsync):
         if mkr<1 or mkr>12:
             raise ValueError, self.perror('mkr need to be between 1 and 12')
         self.write('CALCulate:MARKer{mkr}:CENTer'.format(mkr=mkr))
+    def get_xscale(self):
+        """
+        Returns the currently active x scale. It uses cached values so make sure
+        they are up to date.
+        This scale is recalculated but produces the same values (within floating
+        point errors) as the instrument.
+        """
+        zero_span = self.freq_span.getcache() == 0
+        if zero_span:
+            offset = start = 0
+            stop = self.sweep_time.getcache()
+        else:
+            start = self.freq_start.getcache()
+            stop = self.freq_stop.getcache()
+            offset = self.freq_offset.getcache()
+        npts = self.sweep_npoints.getcache()
+        return np.linspace(start+offset, stop+offset, npts)
     def _create_devs(self):
         ql = quoted_list(sep=', ')
         instrument_mode_list = ql(self.ask(':INSTrument:CATalog?'))
@@ -2226,9 +2458,9 @@ class agilent_EXA(visaInstrumentAsync):
         instrument_mode_list = [i.split(' ')[0] for i in instrument_mode_list]
         self.instrument_mode = scpiDevice(':INSTrument', choices=ChoiceStrings(*instrument_mode_list))
         # This list depends on instrument mode: These are measurement type
-        self.config_mode_list = scpiDevice(getstr=':CONFigure:CATalog?', str_type=ql)
+        self.meas_mode_list = scpiDevice(getstr=':CONFigure:CATalog?', str_type=ql)
         # From the list: SAN=SANalyzer
-        self.config_mode = scpiDevice(':CONFigure:{val}:NDEFault', ':CONFigure?')
+        self.meas_mode = scpiDevice(':CONFigure:{val}:NDEFault', ':CONFigure?')
         self.attenuation_db = scpiDevice(':POWer:ATTenuation', str_type=float)
         self.attenuation_auto = scpiDevice(':POWer:ATTenuation:AUTO', str_type=bool)
         self.y_unit = scpiDevice('UNIT:POWer', choices=ChoiceStrings('DBM', 'DBMV', 'DBMA', 'DBUV', 'DBUA', 'DBUVM', 'DBUAM', 'DBPT', 'DBG', 'V', 'W', 'A'))
@@ -2259,7 +2491,7 @@ class agilent_EXA(visaInstrumentAsync):
         self.sweep_fft_width_auto = scpiDevice(':SWEep:FFT:WIDTh:AUTO', str_type=bool)
         self.sweep_npoints = scpiDevice(':SWEep:POINts', str_type=int, min=1, max=40001)
         # For SAN measurement
-        self.bw_res = scpiDevice(':BANDwidth', str_type=float, min=1, max=8e6)
+        self.bw_res = scpiDevice(':BANDwidth', str_type=float, min=1, max=8e6, setget=True)
         self.bw_res_auto = scpiDevice(':BANDwidth:AUTO', str_type=bool)
         self.bw_video = scpiDevice(':BANDwidth:VIDeo', str_type=float, min=1, max=50e6)
         self.bw_video_auto = scpiDevice(':BANDwidth:VIDeo:AUTO', str_type=bool)
@@ -2284,8 +2516,8 @@ class agilent_EXA(visaInstrumentAsync):
         # trace 0 is special, The others are 1-6 and return x,y pairs
         # trace 0:  margin/limit fail, F, F, F, N dB points result, current avg count, npoints sweep, F, F, F , Mkr1xy, Mkr2xy, .., Mkr12xy
         self.fetch_base = devTraceOption(getstr=':FETCh:{measurement}{trace}?',
-                                         str_type=_decode_float64, autoinit=False, trig=True, options=dict(measurement=self.config_mode))
-        self.fetch0_base = scpiDevice(getstr=':FETCh:{measurement}0?', str_type=str, autoinit=False, trig=True, options=dict(measurement=self.config_mode))
+                                         str_type=_decode_float64_2col, autoinit=False, trig=True, options=dict(measurement=self.meas_mode))
+        self.fetch0_base = scpiDevice(getstr=':FETCh:{measurement}0?', str_type=str, autoinit=False, trig=True, options=dict(measurement=self.meas_mode))
         self.trace_type = devTraceOption(':TRACe{trace}:TYPE', choices=ChoiceStrings('WRITe', 'AVERage', 'MAXHold', 'MINHold'))
         self.trace_updating = devTraceOption(':TRACe{trace}:UPDate', str_type=bool)
         self.trace_displaying = devTraceOption(':TRACe{trace}:DISPlay', str_type=bool)
@@ -2315,6 +2547,7 @@ class agilent_EXA(visaInstrumentAsync):
         self.marker_function_band_right = devMkrOption(':CALCulate:MARKer{mkr}:FUNCtion:BAND:RIGHt', str_type=float, min=0)
         self.peak_search_continuous = devMkrOption(':CALCulate:MARKer{mkr}:CPSearch', str_type=bool)
 
+        self._devwrap('noise_eq_bw')
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
@@ -2446,7 +2679,7 @@ class agilent_PNAL(visaInstrumentAsync):
         # assume ch is selected
         ch_list = self.channel_list.getcache()
         if isinstance(traces, (tuple, list)):
-            traces = traces[:] # make a copy
+            traces = traces[:] # make a copy so it can be modified without affecting caller. I don't think this is necessary anymore but keep it anyway.
         elif traces != None:
             traces = [traces]
         else: # traces == None
