@@ -2258,28 +2258,78 @@ class agilent_EXA(visaInstrumentAsync):
             self.current_trace.set(old_trace)
         return extra+base_conf
     def _noise_eq_bw_getdev(self):
+        """
+        Using the bw_res and bw_res_shape this estimates the bandwith
+        necessary to convert the data into power density.
+
+        For gaussian filters the error in the estimate compared to the marker
+        result is at most 0.06 dB (1.4% error) at 4 MHz (DB3),
+        otherwise it is mostly within 0.01 dB (0.23%)
+        For Flattop filters the error is at most -0.45 dB at 8 MHz (11%),
+        otherwise it is mostly 0.040 - 0.050 (0.92-1.12%), centered around
+        0.045 dB (1.0% offset) for bw below 120 kHz. (EXA N9010A, MY51170142)
+        The correction means the equivalent bandwidth used for markers is
+        1% greater than the selected value of the flat bandwidth. To correct
+        for this, you can substract the noise density by 0.045 dB (or divide by
+        1.010 if linear power scale).
+
+        To see this errors, or to obtain the same factor as for the markers,
+        set the instrument in the following way:
+            -select resolution bandwidth (range, type ...)
+            -setup a trace (assume units are dB...)
+            -on trace put 2 markers at the same position
+            -First marker shows just the raw value
+            -Second marker setup to show noise (either noise or band density function)
+            -Set band span for second marker to 0 (or the a single bin)
+            -Then the bandwith used for marker calculation is
+             10**((marker1-marker2)/10)
+        You can see both by enabling the marker table. Note that for the function
+        results the Y and function column should be the same here, but when the
+        band span is larger they will be different. The Y value is the value of
+        the function when the sweep has reached the marker position so it uses
+        old values after the marker and so is not a valid result. You should
+        consider the function result as the proper one. That is the value
+        returned by marker_y devce in that case.
+
+        The band power function is the integral of the band density over the
+        selected band span (a span of 0 is the same as a span of one bin).
+        So when band span is one bin:
+            band_power(dBm)-band_density(dBm) = 10*log10(bin_width(Hz))
+            bin_width = (freq_stop-freq_start)/(npoints-1)
+
+        The distinction between the noise function and the band density function
+        is that the noise function tries to apply correction for non-ideal
+        detectors (peak, negative peak) or wrong averaging (volt, log Pow).
+        The correction is calculated assuming the incoming signal is purely noise,
+        and considers the video bandwidth.
+        The band density function makes no such assumption and will return
+        incorrect values for wrong detector/averaging. The best result is normally
+        obtained with averaging detector in RMS mode.
+        """
         bw = self.bw_res.get()
         bw_mode = self.bw_res_shape.get()
         if bw_mode in self.bw_res_shape.choices[['gaussian']]:
-            # The filters are always the same
-            # but they are reported differently
-            gaus_type = self.bw_res_gaussian_type.get()
-            ch = self.bw_res_gaussian_type.choices
-            'DB3', 'DB6', 'IMPulse', 'NOISe'
-            if gaus_type in ch[['DB3']]:
-                f = 1.   # The 3dB full with is 2*sqrt(log(2))*sigma
-            elif gaus_type in ch[['DB6']]:
-                f = 1.41  # should be sqrt(2)
-            elif gaus_type in ch[['noise']]:
-                f = 1.05  # should be sqrt(pi)/(2*sqrt(log(2))) (equivalent bw for power)
-            elif gaus_type in ch[['impulse']]:
-                f = 1.47  # impulse bw is equivalent bw for volt: sqrt(2*pi)/(2*sqrt(log(2)))
-            # normalize to 3dB BW
-            bw = bw/f
-            # Now obtain equivalent noise BW
-            bw = bw * np.sqrt(np.pi)/(2*np.sqrt(np.log(2)))
-        # flat is about the correct filter except for some correction/rounding?
-        # TODO test this and fix the factors above.
+            # The filters are always the same. They are defined for db3
+            # but they are reported differently in the other modes.
+            # We need the noise one.
+            # In theory:
+            #  The 3dB full width is 2*sqrt(log(2))*sigma
+            #  The 6dB full width is sqrt(2) times 3dB
+            #  The noise width is sqrt(pi)/(2*sqrt(log(2))) times 3dB (and is equivalent bw for power: from integral of V**2)
+            #  The impulse width is sqrt(2) times noise (and is equivalent bw for amplitude: from integral of V)
+            # In practice we use the noise and it is probably related to the
+            # 3dB by some calibration. The conversion factor between 3dB and noise returned by
+            # the instrument is not a constant (it is ~1.065).
+            old_gaus_type = self.bw_res_gaussian_type.get()
+            self.bw_res_gaussian_type.set('noise')
+            bw = self.bw_res.get()
+            self.bw_res_gaussian_type.set(old_gaus_type)
+        else: # flat
+            # Normally the equivalent noise bandwidth of a flat filter
+            # is the bw of the filter. However, in practice, it could be different.
+            bw = self.bw_res.get()
+            # TODO maybe decide to apply the correction
+            #bw *= 1.01
         return bw
     def _fetch_getformat(self, **kwarg):
         unit = kwarg.get('unit', 'default')
