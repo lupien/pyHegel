@@ -2179,12 +2179,8 @@ class agilent_EXA(visaInstrumentAsync):
         marker_x, marker_y
     Some commands are available:
         abort
-    Note that almost all devices/commands require a channel.
-    It can be specified with the ch option or will use the last specified
-    one if left to the default.
-    A lot of other commands require a selected trace (per channel)
-    The active one can be selected with the trace option or select_trace, select_traceN
-    If unspecified, the last one is used.
+    A lot of other commands require a selected trace or a mkr
+    see current_trace, current_mkr
 
     Note about fetch_base and get_trace. They both return the same y data
     The units are given by y_unit and it is not affected by y offset.
@@ -2243,7 +2239,7 @@ class agilent_EXA(visaInstrumentAsync):
                                  'sweep_time_rule', 'sweep_time_rule_auto', 'sweep_type', 'sweep_type_auto', 'sweep_type_rule',
                                  'sweep_type_rule_auto', 'sweep_fft_width', 'sweep_fft_width_auto', 'sweep_npoints',
                                  'bw_res', 'bw_res_auto', 'bw_video', 'bw_video_auto', 'bw_video_auto_ratio', 'bw_video_auto_ratio_auto',
-                                 'bw_res_span', 'bw_res_span_auto', 'bw_res_shape', 'bw_res_gaussian_type',
+                                 'bw_res_span', 'bw_res_span_auto', 'bw_res_shape', 'bw_res_gaussian_type', 'noise_eq_bw',
                                  'average_count', 'average_type', 'average_type_auto', options)
         # trace
         if dev_obj in [self.readval, self.fetch]:
@@ -2292,7 +2288,7 @@ class agilent_EXA(visaInstrumentAsync):
         updating = kwarg.get('updating', True)
         traces = self._fetch_traces_helper(traces, updating)
         if xaxis:
-            zero_span = self.freq_span.getcache() == 0
+            zero_span = self.freq_span.get() == 0
             if zero_span:
                 multi = 'time(s)'
             else:
@@ -2441,15 +2437,15 @@ class agilent_EXA(visaInstrumentAsync):
         This scale is recalculated but produces the same values (within floating
         point errors) as the instrument.
         """
-        zero_span = self.freq_span.getcache() == 0
+        zero_span = self.freq_span.get() == 0
         if zero_span:
             offset = start = 0
-            stop = self.sweep_time.getcache()
+            stop = self.sweep_time.get()
         else:
-            start = self.freq_start.getcache()
-            stop = self.freq_stop.getcache()
-            offset = self.freq_offset.getcache()
-        npts = self.sweep_npoints.getcache()
+            start = self.freq_start.get()
+            stop = self.freq_stop.get()
+            offset = self.freq_offset.get()
+        npts = self.sweep_npoints.get()
         return np.linspace(start+offset, stop+offset, npts)
     def _create_devs(self):
         ql = quoted_list(sep=', ')
@@ -2547,7 +2543,7 @@ class agilent_EXA(visaInstrumentAsync):
         self.marker_function_band_right = devMkrOption(':CALCulate:MARKer{mkr}:FUNCtion:BAND:RIGHt', str_type=float, min=0)
         self.peak_search_continuous = devMkrOption(':CALCulate:MARKer{mkr}:CPSearch', str_type=bool)
 
-        self._devwrap('noise_eq_bw')
+        self._devwrap('noise_eq_bw', autoinit=.5) # This should be initialized after the devices it depends on (if it uses getcache)
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
