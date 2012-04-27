@@ -2431,6 +2431,8 @@ class agilent_EXA(visaInstrumentAsync):
                        V_Hz   for V/sqrt(Hz)
                        V2_Hz  for V**2/Hz
                  It can be a single value or a vector the same length as traces
+                 See noise_eq_bw device for information about the
+                 bandwidth used for _Hz unit conversion.
            xaxis  when True(default), the first column of data is the xaxis
 
            This version of fetch uses get_trace instead of fetch_base so it never
@@ -2537,6 +2539,12 @@ class agilent_EXA(visaInstrumentAsync):
         self.sweep_fft_width_auto = scpiDevice(':SWEep:FFT:WIDTh:AUTO', str_type=bool)
         self.sweep_npoints = scpiDevice(':SWEep:POINts', str_type=int, min=1, max=40001)
         # For SAN measurement
+        # available bandwidths gaussian db3:
+        #   b = around(logspace(0,1,25),1)[:-1]; b[-2]-=.1; b[10:17] +=.1
+        #   r = (b*10**arange(7)[:,None]).ravel()
+        #   rgaus = append(r[:-12], [4e6,5e6, 6e6, 8e6])
+        # and flat:
+        #   rflat = append(r[11:-35], [3.9e5, 4.3e5, 5.1e5, 6.2e5, 7.5e5, 1e6, 1.5e6, 3e6, 4e6, 5e6, 6e6, 8e6])
         self.bw_res = scpiDevice(':BANDwidth', str_type=float, min=1, max=8e6, setget=True)
         self.bw_res_auto = scpiDevice(':BANDwidth:AUTO', str_type=bool)
         self.bw_video = scpiDevice(':BANDwidth:VIDeo', str_type=float, min=1, max=50e6)
