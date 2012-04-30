@@ -592,7 +592,7 @@ def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0):
 
 #TODO add handling of title column and extracting headers
 _readfile_lastnames = []
-def readfile(filename, nojoin=False, getnames=True, csv='auto'):
+def readfile(filename, nojoin=False, getnames=False, csv='auto'):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -666,7 +666,7 @@ def readfile(filename, nojoin=False, getnames=True, csv='auto'):
         # we make a copy to make it a nice contiguous array
         ret = ret.swapaxes(0,1).copy()
     if getnames:
-        return (ret, filenames)
+        return (ret, filelist)
     else:
         return ret
 
