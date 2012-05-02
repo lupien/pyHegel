@@ -3055,6 +3055,8 @@ def _asDevice(dev):
 class LogicalDevice(BaseDevice):
     """
        Base device for logical devices.
+       Devices can be a device (instrument which will use the alias device)
+       or a tuple (device, dict), where dict is the default parameters to pass to get/set/check.
        Need to define instr attribute for getasync and get_xscale (scope)
         also _basedev for default implementation of force_get
              (can be None)
@@ -3067,16 +3069,36 @@ class LogicalDevice(BaseDevice):
         # can also leave both blank
         # autoinit defaults to the one from _basedev
         # self.instr set to self._basedev.inst if available
+        basedev_orig = basedev
+        basedevs_orig = basedevs
+        basedev_kwarg={}
         if basedev != None:
+            if isinstance(basedev, tuple):
+                basedev_kwarg = basedev[1]
+                basedev = basedev[0]
             basedev = _asDevice(basedev) # deal with instr.alias
+        basedevs_kwarg=[]
         if basedevs != None:
+            basedevs = basedevs[:] # make a copy of the list so we don't change the original
             for i, dev in enumerate(basedevs):
+                if isinstance(dev, tuple):
+                    basedevs_kwarg.append(dev[1])
+                    dev = dev[0]
+                else:
+                    basedevs_kwarg.append({})
                 dev = _asDevice(dev) # deal with instr.alias
                 basedevs[i] = dev
             basedev = basedevs[0]
+            self._basedevs_N = len(basedevs)
+        else:
+            self._basedevs_N = -1
         self._basedev_internal = basedev
+        self._basedev_kwarg = basedev_kwarg
         self._basedevs = basedevs
-        doc = self.__doc__+doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev, basedevs)
+        self._basedevs_kwarg = basedevs_kwarg
+        # TODO fix the problem here
+        #doc = self.__doc__+doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev, basedevs)
+        doc = doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev_orig, basedevs_orig)
         if basedev:
             if autoinit == None:
                 autoinit = basedev._autoinit
@@ -3136,17 +3158,35 @@ class LogicalDevice(BaseDevice):
         obj = self._do_redir_async()
         return obj.instr._get_async(async, self,
                            trig=obj._trig, delay=obj._delay, **kwarg)
-    def _current_config_addbase(self, head, options={}):
+    def _combine_kwarg(self, kwarg_dict, base=None):
+        if base == None:
+            base = self._basedev_kwarg
+        kwarg = base.copy()
+        kwarg.update(kwarg_dict)
+        return kwarg
+    def _current_config_addbase(self, head, options=None):
+        # When using basedevs, options needs to be a list of dict
         devs = self._basedevs
+        kwargs = self._basedevs_kwarg
+        if options == None:
+            options = {}
         if not devs:
             if self._basedev:
                 devs = [self._basedev]
+                kwargs = [self._basedev_kwarg]
+                options = [options]
             else:
                 devs = []
-        for dev in devs:
+                kwargs = []
+                options = []
+        if options == {}:
+            options = [{}] * self._basedevs_N
+        for dev, kwarg, opt in zip(devs, kwargs, options):
+            kwarg = kwarg.copy()
+            kwarg.update(opt)
             head.append('::'+dev.getfullname())
-            frmt = dev.getformat()
-            base = _get_conf_header_util(frmt['header'], dev, options)
+            frmt = dev.getformat(**kwarg)
+            base = _get_conf_header(frmt)
             if base != None:
                 head.extend(base)
         return head
@@ -3172,17 +3212,20 @@ class ScalingDevice(LogicalDevice):
         return raw * self._scale + self._offset
     def conv_todev(self, val):
         return (val - self._offset) / self._scale
-    def _getdev(self):
-        raw = self._basedev.get()
+    def _getdev(self, **kwarg):
+        kwarg = self._combine_kwarg(kwarg)
+        raw = self._basedev.get(**kwarg)
         val = self.conv_fromdev(raw)
         return val, raw
-    def _setdev(self, val):
-        self._basedev.set(self.conv_todev(val))
+    def _setdev(self, val, **kwarg):
+        kwarg = self._combine_kwarg(kwarg)
+        self._basedev.set(self.conv_todev(val), **kwarg)
         # read basedev cache, in case the values is changed by setget mode.
         self._cache = self.conv_fromdev(self._basedev.getcache())
-    def check(self, val):
+    def check(self, val, **kwarg):
+        kwarg = self._combine_kwarg(kwarg)
         raw = self.conv_todev(val)
-        self._basedev.check(raw)
+        self._basedev.check(raw, **kwarg)
 
 class FunctionDevice(LogicalDevice):
     """
@@ -3217,15 +3260,18 @@ class FunctionDevice(LogicalDevice):
         b += diff/1e6
         x = brentq_rootsolver(func, a, b)
         return x
-    def _getdev(self):
-        raw = self._basedev.get()
+    def _getdev(self, **kwarg):
+        kwarg = self._combine_kwarg(kwarg)
+        raw = self._basedev.get(**kwarg)
         val = self.from_raw(raw)
         return val, raw
-    def _setdev(self, val):
-        self._basedev.set(self.to_raw(val))
-    def check(self, val):
+    def _setdev(self, val, **kwarg):
+        kwarg = self._combine_kwarg(kwarg)
+        self._basedev.set(self.to_raw(val), **kwarg)
+    def check(self, val, **kwarg):
+        kwarg = self._combine_kwarg(kwarg)
         raw = self.to_raw(val)
-        self._basedev.check(raw)
+        self._basedev.check(raw, **kwarg)
 
 
 class LimitDevice(LogicalDevice):
@@ -3261,12 +3307,15 @@ class LimitDevice(LogicalDevice):
     def _current_config(self, dev_obj=None, options={}):
         head = ['Limiting:: min=%r max=%r basedev=%s'%(self.min, self.max, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
-    def _getdev(self):
-        return self._basedev.get()
-    def _setdev(self, val):
-        self._basedev.set(val)
-    def check(self, val):
-        self._basedev.check(val)
+    def _getdev(self, **kwarg):
+        kwarg = self._combine_kwarg(kwarg)
+        return self._basedev.get(**kwarg)
+    def _setdev(self, val, **kwarg):
+        kwarg = self._combine_kwarg(kwarg)
+        self._basedev.set(val, **kwarg)
+    def check(self, val, **kwarg):
+        kwarg = self._combine_kwarg(kwarg)
+        self._basedev.check(val, **kwarg)
         super(type(self), self).check(val)
 
 
@@ -3277,20 +3326,38 @@ class CopyDevice(LogicalDevice):
        On writing it will write to basedev[0], basdev[1] ...
        setget option does nothing here.
        basedevs is a list of dev
+
+       The kwarg of get are the ones of basedevs[0]
+       For set and check, the kw argument is a list of
+       dictionaries of kwarg for each device.
+       When initializing, the devices can be tuple (device, dict)
+       where dict will be the default kwarg to pass to the device.
+       These can be overriden by the kw argument.
     """
     def __init__(self, basedevs , doc='', **extrak):
         super(type(self), self).__init__(basedevs=basedevs, doc=doc, **extrak)
     def _current_config(self, dev_obj=None, options={}):
         head = ['Copy:: %r'%(self._basedevs)]
-        return self._current_config_addbase(head, options=options)
-    def _getdev(self):
-        return self._basedevs[0].get()
-    def _setdev(self, val):
-        for dev in self._basedevs:
-            dev.set(val)
-    def check(self, val):
-        for dev in self._basedevs:
-            dev.check(val)
+        return self._current_config_addbase(head, options=options.get('kw', None))
+    def _getdev(self, **kwarg):
+        kwarg = self._combine_kwarg(kwarg, base=self._basedevs_kwarg[0])
+        return self._basedevs[0].get(**kwarg)
+    def _setdev(self, val, kw=None):
+        if kw == None:
+            kw = [{}]*self._basedevs_N
+        if len(kw) != self._basedevs_N:
+            raise ValueError, self.perror('When using kw, it needs to have the correct number of elements. Was %i, should have been %i.'%(len(kw), self._basedevs_N))
+        for dev, kwarg, kw_over in zip(self._basedevs, self._basedevs_kwarg, kw):
+            kwarg = self._combine_kwarg(kw_over, base=kwarg)
+            dev.set(val, **kwarg)
+    def check(self, val, kw=None):
+        if kw == None:
+            kw = [{}]*self._basedevs_N
+        if len(kw) != self._basedevs_N:
+            raise ValueError, self.perror('When using kw, it needs to have the correct number of elements. Was %i, should have been %i.'%(len(kw), self._basedevs_N))
+        for dev, kwarg, kw_over in zip(self._basedevs, self._basedevs_kwarg, kw):
+            kwarg = self._combine_kwarg(kw_over, base=kwarg)
+            dev.check(val, **kwarg)
     def force_get(self):
         for dev in self._basedevs:
             dev.force_get()
@@ -3317,15 +3384,16 @@ class ExecuteDevice(LogicalDevice):
             self._format['multi'] = multi
             self._format['graph'] = [0]
     def getformat(self, **kwarg):
-        basefmt = self._basedev.getformat()
+        kwarg_base = self._combine_kwarg(kwarg)
+        basefmt = self._basedev.getformat(**kwarg_base)
         self._format['file'] = True
         self._format['bin'] = basefmt['bin']
         return super(type(self), self).getformat(**kwarg)
     def _current_config(self, dev_obj=None, options={}):
         head = ['Execute:: command="%s" basedev=%s'%(self._command, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
-    def _getdev(self, filename=None):
-        kwarg={}
+    def _getdev(self, filename=None, **kwarg):
+        kwarg = self._combine_kwarg(kwarg)
         if filename != None:
             kwarg['filename'] = filename
         ret = self._basedev.get(**kwarg)
