@@ -2174,13 +2174,15 @@ class infiniiVision_3000(visaInstrument):
 
 class agilent_EXA(visaInstrumentAsync):
     """
-    To use this instrument, the most useful device is probably:
+    To use this instrument, the most useful devices are probably:
         fetch, readval
         marker_x, marker_y
     Some commands are available:
         abort
     A lot of other commands require a selected trace or a mkr
     see current_trace, current_mkr
+    They are both memory device on the computer. They are not changeable from
+    the hardware itself.
 
     Note about fetch_base and get_trace. They both return the same y data
     The units are given by y_unit and it is not affected by y offset.
