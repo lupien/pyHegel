@@ -1573,7 +1573,14 @@ class sr830_lia(visaInstrument):
         # b4=range change (accross 200 HZ, hysteresis), b5=indirect time constant change
         # b6=triggered, b7=unused
         self.status_byte = scpiDevice(getstr='LIAS?', str_type=int)
-        self._devwrap('snap', delay=True)
+        self._devwrap('snap', delay=True, doc="""
+            This device obtains simultaneous readings from many inputs.
+            To select the inputs, use the parameter
+             sel
+            which is [1,2] by default.
+            The numbers are taken from the following dictionnary:
+                %r
+                """%self._snap_type)
         self.alias = self.snap
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
