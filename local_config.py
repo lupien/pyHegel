@@ -28,5 +28,7 @@ conf = dict( yo1 = (instrument.yokogawa_gs200, (10,)),
              s200 = (instrument.infiniiVision_3000, ('USB0::0x0957::0x1796::MY51135849',)),
              # acq board
              acq1 = (acq_board_instrument.Acq_Board_Instrument, ('127.0.0.1', 50000)),
-             acq2 = (acq_board_instrument.Acq_Board_Instrument, ('127.0.0.1', 50001))
+             acq2 = (acq_board_instrument.Acq_Board_Instrument, ('127.0.0.1', 50001)),
+             # MXG generator is gpib 19
+             mxg1 = (instrument.agilent_rf_MXG, ('USB0::0x0957::0x1F01::MY50140552',))
         )
