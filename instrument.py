@@ -1902,9 +1902,13 @@ class agilent_multi_34410A(visaInstrumentAsync):
     def set_long_avg(self, time, force=False):
         """
         Select a time in seconds.
-        It will change the aperture accordingly.
+        It will change the aperture accordingly (and round it to the nearest nplc
+        unless force=True).
         If time is greater than 1 s, an alternative mode
-        with a smaller aperture (10 nplc) and a repeat count is used.
+        with a smaller aperture (10 nplc) and a repeat count is used. That
+        mode also waits trig_delay between each count.
+        In that mode, you can use fetch_std to return the statistical error
+        on the measurement.
         """
         # update mode first, so aperture applies to correctly
         self.mode.get()
@@ -1912,6 +1916,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
         if time > 1.:
             width = 10*line_period
             count = round(time/width)
+            self.sample_src.set('immediate')
         else:
            count = 1
            width = time
