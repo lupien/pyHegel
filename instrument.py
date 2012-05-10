@@ -1774,6 +1774,9 @@ class agilent_rf_MXG(visaInstrument):
         rf_en
         mod_en
         freq_cw
+    The alc devices refer to automatic level (amplitude) control.
+    Available methods:
+        phase_sync
     """
     def _current_config(self, dev_obj=None, options={}):
         # TODO Get the proper config
