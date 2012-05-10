@@ -1399,6 +1399,13 @@ class visaInstrument(BaseInstrument):
         return self.visa.ask(question)
     def idn(self):
         return self.ask('*idn?')
+    def factory_reset(self):
+        """
+        This returns the instrument to a known state.
+        Use CAREFULLY!
+        """
+        self.write('*RST')
+        self.force_get()
     def _clear(self):
         self.visa.clear()
     @property
