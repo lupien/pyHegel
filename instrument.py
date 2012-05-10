@@ -1776,7 +1776,7 @@ class agilent_rf_MXG(visaInstrument):
                                  'freq_multiplier', 'freq_offset', 'freq_offset_en', 'freq_reference', 'freq_reference_en',
                                  'phase', 'mod_en', 'mod_am_en', 'mod_fm_en', 'mod_phase_en', 'mod_pulse_en', options)
     def _create_devs(self):
-        self.available_options = scpiDevice(getstr='*opt?')
+        self.installed_options = scpiDevice(getstr='*OPT?')
         self.oscillator_source = scpiDevice(getstr=':ROSCillator:SOURce?', str_type=str)
         self.rf_en = scpiDevice(':OUTPut', str_type=bool)
         self.ampl = scpiDevice(':POWer', str_type=float, doc='unit depends on device ampl_unit', setget=True)
@@ -2325,7 +2325,7 @@ class agilent_EXA(visaInstrumentAsync):
             self.current_mkr.set(options['mkr'])
         extra = []
         base_conf = self._conf_helper('instrument_mode', 'meas_mode', 'attenuation_db', 'attenuation_auto', 'y_unit', 'uW_path_bypass',
-                                 'uW_presel_bypass', 'preamp_en', 'preamp_band', 'cont_trigger',
+                                 'auxif_sel', 'preamp_en', 'preamp_band', 'cont_trigger',
                                  'freq_span', 'freq_start', 'freq_center', 'freq_stop', 'freq_offset', 'input_coupling',
                                  'gain_correction_db', 'ext_ref', 'ext_ref_mode', 'sweep_time', 'sweep_time_auto',
                                  'sweep_time_rule', 'sweep_time_rule_auto', 'sweep_type', 'sweep_type_auto', 'sweep_type_rule',
@@ -2592,6 +2592,7 @@ class agilent_EXA(visaInstrumentAsync):
         npts = self.sweep_npoints.get()
         return np.linspace(start+offset, stop+offset, npts)
     def _create_devs(self):
+        self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
         ql = quoted_list(sep=', ')
         instrument_mode_list = ql(self.ask(':INSTrument:CATalog?'))
         # the list is name number, make it only name
@@ -2605,7 +2606,7 @@ class agilent_EXA(visaInstrumentAsync):
         self.attenuation_auto = scpiDevice(':POWer:ATTenuation:AUTO', str_type=bool)
         self.y_unit = scpiDevice('UNIT:POWer', choices=ChoiceStrings('DBM', 'DBMV', 'DBMA', 'DBUV', 'DBUA', 'DBUVM', 'DBUAM', 'DBPT', 'DBG', 'V', 'W', 'A'))
         self.uW_path_bypass = scpiDevice(':POWer:MW:PATH', choices=ChoiceStrings('STD', 'LNPath', 'MPBypass', 'FULL'))
-        self.uW_presel_bypass = scpiDevice(':POWer:MW:PRESelector', str_type=bool)
+        self.auxif_sel = scpiDevice(':OUTPut:AUX', choices=ChoiceStrings('SIF', 'OFF')) # others could be AIF and LOGVideo if options are installed
         self.preamp_en = scpiDevice(':POWer:GAIN', str_type=bool)
         self.preamp_band = scpiDevice(':POWer:GAIN:BAND', choices=ChoiceStrings('LOW', 'FULL'))
         self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
