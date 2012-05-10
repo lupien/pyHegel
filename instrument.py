@@ -1026,6 +1026,10 @@ def _decode_float64_avg(s):
 def _decode_float64_std(s):
     return _decode_block_auto(s, t=np.float64).std(ddof=1)
 
+def _decode_float64_meanstd(s):
+    data = _decode_block_auto(s, t=np.float64)
+    return data.std(ddof=1)/np.sqrt(len(data))
+
 class quoted_string(object):
     def __init__(self, quote_char='"'):
         self._quote_char = quote_char
@@ -1951,8 +1955,9 @@ class agilent_multi_34410A(visaInstrumentAsync):
         # autoinit false because it can take too long to readval
         #self.readval = scpiDevice(getstr='READ?',str_type=_decode_float64_avg, autoinit=False, redir_async=self.fetch) # similar to INItiate followed by FETCh.
         self.fetch_all = scpiDevice(getstr='FETCh?',str_type=_decode_float64, autoinit=False, trig=True)
-        self.fetch_std = scpiDevice(getstr='FETCh?',str_type=_decode_float64_std, autoinit=False, trig=True, doc="""
+        self.fetch_std = scpiDevice(getstr='FETCh?',str_type=_decode_float64_meanstd, autoinit=False, trig=True, doc="""
              Use this to obtain the standard deviation(using ddof=1) of the fetch.
+             It is the standard deviation of the mean (it decreases when the averaging is longer).
              This will only return something usefull for long time averages where
              count is > 1. This is the case with set_long_avg(time) for time longer
              than 1s.
