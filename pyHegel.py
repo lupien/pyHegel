@@ -20,6 +20,7 @@ from gc import collect as collect_garbage
 import traces
 import instrument
 import local_config
+import util
 
 def help_pyHegel():
     """
@@ -50,6 +51,7 @@ def help_pyHegel():
         task
         top
         kill
+        All the commands in util (savefig, merge_pdf, ...)
     Available instruments:
         sweep
         clock
@@ -70,6 +72,7 @@ def reset_pyHegel():
     reload(local_config.instrument)
     reload(local_config.acq_board_instrument)
     reload(local_config)
+    reload(util)
     execfile('pyHegel.py', globals())
 
 # exec in ipython with run -i otherwise
