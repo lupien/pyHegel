@@ -2287,6 +2287,7 @@ class agilent_EXA(visaInstrumentAsync):
     To use this instrument, the most useful devices are probably:
         fetch, readval
         marker_x, marker_y
+        snap_png
     Some commands are available:
         abort
     A lot of other commands require a selected trace or a mkr
@@ -2713,6 +2714,12 @@ class agilent_EXA(visaInstrumentAsync):
         self.marker_function_band_left = devMkrOption(':CALCulate:MARKer{mkr}:FUNCtion:BAND:LEFT', str_type=float, min=0)
         self.marker_function_band_right = devMkrOption(':CALCulate:MARKer{mkr}:FUNCtion:BAND:RIGHt', str_type=float, min=0)
         self.peak_search_continuous = devMkrOption(':CALCulate:MARKer{mkr}:CPSearch', str_type=bool)
+
+        #following http://www.mathworks.com/matlabcentral/fileexchange/30791-taking-a-screenshot-of-an-agilent-signal-analyzer-over-a-tcpip-connection
+        #note that because of *OPC?, the returned string is 1;#....
+        self.snap_png = scpiDevice(getstr=r':MMEMory:STORe:SCReen "C:\TEMP\SCREEN.PNG";*OPC?;:MMEMory:DATA? "C:\TEMP\SCREEN.PNG"',
+                                   str_type=lambda x:_decode_block_base(x[2:]), autoinit=False)
+        self.snap_png._format['bin']='.png'
 
         self._devwrap('noise_eq_bw', autoinit=.5) # This should be initialized after the devices it depends on (if it uses getcache)
         self._devwrap('fetch', autoinit=False, trig=True)
