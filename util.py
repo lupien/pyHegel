@@ -22,6 +22,7 @@ import pylab
 def merge_pdf(filelist, outname):
     """
     This merges many pdf files (a list of names filelist) into one (outname).
+    To obtain a list you could use the glob.glob function if necessary.
 
     You can obtain the same thing on the command line with the pdftk
     command. (Install it with cygwin on windows)
@@ -30,11 +31,18 @@ def merge_pdf(filelist, outname):
     if not pyPdf_loaded:
         raise ImportError, 'Missing pyPdf package. You need to install that.'
     output = PdfFileWriter()
+    in_files = []
     for f in filelist:
-        input = PdfFileReader(file(f, 'rb'))
+        in_file = file(f, 'rb')
+        in_files.append(in_file)
+        input = PdfFileReader(in_file)
         for page in input.pages:
             output.addPage(page)
-    output.write(file(outname, 'wb'))
+    of = file(outname, 'wb')
+    output.write(of)
+    for f in in_files:
+        f.close()
+    of.close()
 
 _savefig_list=[]
 _savefig_enabled=False

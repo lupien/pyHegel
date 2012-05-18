@@ -602,7 +602,7 @@ def readfile(filename, nojoin=False, getnames=False, csv='auto'):
     By default the path is joined with sweep.path (unless absolute).
      nojoin set to True prevents this
     filename can contain a glob (*) parameter to combine many files.
-    or be a list of files or glob.
+    or be a list of files or glob. (the glob.glob function is used internally)
     The result of a glob is sorted.
     When reading multiple files, they need to have the same shape.
        glob examples:
