@@ -374,10 +374,12 @@ class _Sweep(instrument.BaseInstrument):
                   async=False, reset=False, logspace=False, updown=False):
         """
             Usage:
+                dev is the device to sweep.
                 To define sweep either
                   set start, stop and npts (then uses linspace internally
                                                        or logspace)
                   or just set start with a list of values
+
                 filename to use
                     use %T: for date time string (20120115-145030)
                         %t: for time string only
@@ -385,13 +387,23 @@ class _Sweep(instrument.BaseInstrument):
                         %02i: for unique 2 digit increment (00, 01 ...)
                               %03i for   3 digits
                               The unicity is only checked for the first file of updown.
+                              The search always start at 0.
                               It is kept the same for the second one.
                      Also available are {datetime}, {date}, {time}
                                         {start}, {stop}, {npts}, {updown}
+                                        {next_i:02}
+                      these use the str.format replacements.
+                        {next_i:02}, {next_i:03} is replaced by sweep.next_file_i
+                           with the correct number of digit.
+                           When used, sweep.next_file_i is auto incremented
+                           to the next value.
                 rate: unused
                 close_after: automatically closes the figure after the sweep when True
                 title: string used for window title
-                out: list of devices.  (This overrides sweep.out)
+                out: list of devices to read. Can also be a single device.
+                     This has the same syntax and overrides sweep.out.
+                     See sweep.out documentation for more advanced used
+                     (devices with options)
                 extra_conf: list of devices to dump configuration headers at head
                             of data file. It isdone automatically for sweep device and
                             the out devices. This allows to add other instruments.
@@ -679,7 +691,7 @@ def readfile(filename, nojoin=False, getnames=False, csv='auto'):
 ###  set overides set builtin function
 def set(dev, value, **kwarg):
     """
-       Change la valeur de dev
+       Change the value of device dev.
     """
     dev.set(value, **kwarg)
 
