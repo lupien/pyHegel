@@ -485,9 +485,27 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             ch = self._fetch_get_ch_corr(ch)
             nbtau = len(self.tau_vec.getcache())
             headers = ['ch%i-%i'%(c,i)  for c in ch  for i in range(nbtau)]
+            # only the first tau is shown
             graphs = [(i*nbtau) for i in range(len(ch))]
             fmt.update(multi=headers, graph=graphs)
-        if mode == 'Hist' or mode == 'Net' or mode == 'Spec' or mode == 'Osc':
+        if mode == 'Net':
+            ch = kwarg.get('ch')
+            if ch == None:
+                ch = 2
+            if type(ch) != list:
+                ch = [ch]
+            nb_harm = self.nb_harm.getcache()
+            unit = kwarg.get('unit', 'default')
+            if unit == 'default':
+                names = ['-real', '-imag']
+            elif unit == 'amp_deg':
+                names = ['-R', '-theta']
+            else:
+                names = ['']
+            headers = ['ch%i-harm%i%s'%(c,i,n) for c in ch  for i in range(nb_harm) for n in names]
+            graphs = range(len(headers))
+            fmt.update(multi=headers, graph=graphs)
+        if mode == 'Hist' or mode == 'Spec' or mode == 'Osc':
             fmt.update(xaxis=True) # This is the default, will be overriden if necessary in BaseDevice.getformat
         return instrument.BaseDevice.getformat(self.fetch, **kwarg)
 
@@ -532,7 +550,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             -ch        to select which channel to read (can be a list)
             -xaxis     When True, the first returned column will be the xaxis values
                        default is True for all except correlations
-                       Not used for Acq or Custom mode
+                       Not used for Acq, Net or Custom mode
 
            Behavior according to modes:
                Acq:  ch as no effect here
@@ -561,11 +579,13 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                Note asking for a channel that was not measured will probably fail.
 
                Net: by default, returns the various harmonics of ch=2,
-                    as a complex number in V (peak).
-                    unit='amplitude' returns abs(result)
+                    as 2 doubles (real, imag) in V (peak).
+                    unit='amp_deg' returns 2 doubles (abs(result), angle(result, deg=True))
+                    unit='amp' returns abs(result)
                     unit='angle' returns angle(result, deg=True)
                     unit='real' returns result.real
                     unit='imag' returns result.imag
+                    unit='cmplx' returns result as complex numbers, Note that this cannot be written to file
                Spec: by default, returns amplitudes in Volts of
                         ch=[1,2] in Dual or of the selected channel in Single
                     unit='V2' returns the V^2
@@ -658,12 +678,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 ch = 2
             if type(ch) != list:
                 ch = [ch]
-            if xaxis:
-                ret = [self.get_xscale()]
-                sl = slice(1,None)
-            else:
-                ret = []
-                sl = slice(None)
+            ret = []
             if 1 in ch: 
                 self.fetch._event_flag.clear()
                 filestr = self._fetch_filename_helper(filename,'1')
@@ -682,19 +697,35 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 if self.fetch._rcv_val == None:
                     return None
                 ret.append(np.fromstring(self.fetch._rcv_val, np.complex128))
-            ret = np.asarray(ret)
-            if unit == 'amplitude':
-                ret[sl, :] = np.abs(ret[sl, :])
-                ret = ret.real
+            ret_cmplx = np.asarray(ret)
+            ret_real = ret_cmplx.copy()
+            ret_real.dtype = np.float64
+            ret_real.shape = (-1, 2)
+            ret_x = ret_cmplx.real
+            ret_y = ret_cmplx.imag
+            ret_amp = np.abs(ret_cmplx)
+            ret_deg = np.angle(ret_complx, deg=True)
+
+            # default format is real x, y
+            ret = ret_real
+            if unit == 'default':
+                pass
+            elif unit == 'amp_deg':
+                ret[:,0] = ret_amp
+                ret[:,1] = ret_deg
+            if unit == 'amp':
+                ret = ret_amp
             elif unit == 'angle':
-                ret[sl, :] = np.angle(ret[sl, :], deg=True)
-                ret = ret.real
+                ret = ret_deg
             elif unit == 'real':
-                ret[sl, :] = ret[sl, :].real
-                ret = ret.real
+                ret = ret_x
             elif unit == 'imag':
-                ret[sl, :] = ret[sl, :].imag
-                ret = ret.real
+                ret = ret_y
+            elif unit = 'cmplx':
+                ret = ret_cmplx
+            else:
+                # TODO Make errors like this for all other use of wrong unit
+                raise ValueError, 'Invalid unit'
             if ret.shape[0]==1:
                 ret=ret[0]
             return ret
