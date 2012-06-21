@@ -502,7 +502,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 names = ['-R', '-theta']
             else:
                 names = ['']
-            headers = ['ch%i-harm%i%s'%(c,i,n) for c in ch  for i in range(nb_harm) for n in names]
+            headers = ['ch%i-harm%i%s'%(c,i+1,n) for c in ch  for i in range(nb_harm) for n in names]
             graphs = range(len(headers))
             fmt.update(multi=headers, graph=graphs)
         if mode == 'Hist' or mode == 'Spec' or mode == 'Osc':
@@ -700,20 +700,20 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             ret_cmplx = np.asarray(ret)
             ret_real = ret_cmplx.copy()
             ret_real.dtype = np.float64
-            ret_real.shape = (-1, 2)
+            ret_real.shape = (ret_cmplx.shape[0], -1, 2)
             ret_x = ret_cmplx.real
             ret_y = ret_cmplx.imag
             ret_amp = np.abs(ret_cmplx)
-            ret_deg = np.angle(ret_complx, deg=True)
+            ret_deg = np.angle(ret_cmplx, deg=True)
 
             # default format is real x, y
             ret = ret_real
             if unit == 'default':
                 pass
             elif unit == 'amp_deg':
-                ret[:,0] = ret_amp
-                ret[:,1] = ret_deg
-            if unit == 'amp':
+                ret[:,:,0] = ret_amp
+                ret[:,:,1] = ret_deg
+            elif unit == 'amp':
                 ret = ret_amp
             elif unit == 'angle':
                 ret = ret_deg
@@ -721,7 +721,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
                 ret = ret_x
             elif unit == 'imag':
                 ret = ret_y
-            elif unit = 'cmplx':
+            elif unit == 'cmplx':
                 ret = ret_cmplx
             else:
                 # TODO Make errors like this for all other use of wrong unit
