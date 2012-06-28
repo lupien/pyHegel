@@ -960,7 +960,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         headers = [ 'c%i'%i for i in c]
         fmt.update(multi=headers, graph=range(len(headers)))
         return instrument.BaseDevice.getformat(self.hist_cs, c=c)
-    def _hist_ms_getdev(self, c=[1,2,3,4,5]):
+    def _hist_cs_getdev(self, c=[1,2,3,4,5]):
         """
            hist_cs has optionnal parameter c=[1,2,3,4,5]
            It specifies which of the cumulants to obtain and returns
@@ -1160,7 +1160,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             return 1./rate*np.arange(N)
         elif mode == 'Hist':
             N = self._bit_resolution
-            return self.convert_bin2v(np.arange(N))
+            return self.convert_bin2v(np.arange(N), auto_inv=False)
         elif mode == 'Corr':
             return np.array(self.tau_vec.getcache())*1./rate
 
