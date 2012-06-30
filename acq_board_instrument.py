@@ -950,35 +950,35 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if i != None and append:
             raise ValueError, 'Choose either i or append, not both'
 
-    def _hist_ms_getformat(self, filename=None, m=[1,2,3,4,5], **kwarg):
-        if not isinstance(m, (list, tuple, set, np.ndarray)):
-            m=[m]
-        m=sorted(set(m)) # removes duplicates, and sort
-        if min(m)<1 or max(m)>5:
+    def _hist_cs_getformat(self, filename=None, c=[1,2,3,4,5], **kwarg):
+        if not isinstance(c, (list, tuple, set, np.ndarray)):
+            c=[c]
+        c=sorted(set(c)) # removes duplicates, and sort
+        if min(c)<1 or max(c)>5:
             raise ValueError, 'Selector out of range, should be 1-5'
-        fmt = self.hist_ms._format
-        headers = [ 'm%i'%i for i in m]
+        fmt = self.hist_cs._format
+        headers = [ 'c%i'%i for i in c]
         fmt.update(multi=headers, graph=range(len(headers)))
-        return instrument.BaseDevice.getformat(self.hist_ms, m=m, **kwarg)
-    def _hist_ms_getdev(self, m=[1,2,3,4,5]):
+        return instrument.BaseDevice.getformat(self.hist_cs, c=c, **kwarg)
+    def _hist_cs_getdev(self, c=[1,2,3,4,5]):
         """
-           hist_ms has optionnal parameter m=[1,2,3,4,5]
-           It specifies which of the moment to obtain and returns
+           hist_cs has optionnal parameter c=[1,2,3,4,5]
+           It specifies which of the cumulants to obtain and returns
            a list of the selected ones. By default, all are selected.
         """
-        if not isinstance(m, (list, tuple, np.ndarray)):
-            m=[m]
+        if not isinstance(c, (list, tuple, np.ndarray)):
+            c=[c]
         ret = []
-        if 1 in m:
-            ret.append(self.hist_m1.get())
-        if 2 in m:
-            ret.append(self.hist_m2.get())
-        if 3 in m:
-            ret.append(self.hist_m3.get())
-        if 4 in m:
-            ret.append(self.hist_m4.get())
-        if 5 in m:
-            ret.append(self.hist_m5.get())
+        if 1 in c:
+            ret.append(self.hist_c1.get())
+        if 2 in c:
+            ret.append(self.hist_c2.get())
+        if 3 in c:
+            ret.append(self.hist_c3.get())
+        if 4 in c:
+            ret.append(self.hist_c4.get())
+        if 5 in c:
+            ret.append(self.hist_c5.get())
         return ret
 
         #device member
@@ -1047,12 +1047,12 @@ class Acq_Board_Instrument(instrument.visaInstrument):
 
         # Results
         #histogram result
-        self.hist_m1 = acq_device(getstr = 'DATA:HIST:M1?', str_type = float, autoinit=False, trig=True)
-        self.hist_m2 = acq_device(getstr = 'DATA:HIST:M2?', str_type = float, autoinit=False, trig=True)
-        self.hist_m3 = acq_device(getstr = 'DATA:HIST:M3?', str_type = float, autoinit=False, trig=True)
-        self.hist_m4 = acq_device(getstr = 'DATA:HIST:M4?', str_type = float, autoinit=False, trig=True)
-        self.hist_m5 = acq_device(getstr = 'DATA:HIST:M5?', str_type = float, autoinit=False, trig=True)
-        self._devwrap('hist_ms', autoinit=False, trig=True)
+        self.hist_c1 = acq_device(getstr = 'DATA:HIST:C1?', str_type = float, autoinit=False, trig=True)
+        self.hist_c2 = acq_device(getstr = 'DATA:HIST:C2?', str_type = float, autoinit=False, trig=True)
+        self.hist_c3 = acq_device(getstr = 'DATA:HIST:C3?', str_type = float, autoinit=False, trig=True)
+        self.hist_c4 = acq_device(getstr = 'DATA:HIST:C4?', str_type = float, autoinit=False, trig=True)
+        self.hist_c5 = acq_device(getstr = 'DATA:HIST:C5?', str_type = float, autoinit=False, trig=True)
+        self._devwrap('hist_cs', autoinit=False, trig=True)
         
         # network analyzer result
         self.custom_result1 = acq_device(getstr = 'DATA:CUST:RESULT1?',str_type = float, autoinit=False, trig=True)
@@ -1160,7 +1160,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
             return 1./rate*np.arange(N)
         elif mode == 'Hist':
             N = self._bit_resolution
-            return self.convert_bin2v(np.arange(N))
+            return self.convert_bin2v(np.arange(N), auto_inv=False)
         elif mode == 'Corr':
             return np.array(self.tau_vec.getcache())*1./rate
 
@@ -1263,9 +1263,9 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         Activates the histogram mode.
 
         Get the data either from
-          hist_m1, hist_m2, hist_m3, hist_m4, hist_m5
-        which return the moments of the last acquisition
-          hist_ms (any combination of the above)
+          hist_c1, hist_c2, hist_c3, hist_c4, hist_c5
+        which return the cumulants of the last acquisition
+          hist_cs (any combination of the above)
         or fetch (readval) to capture the full histogram.
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
