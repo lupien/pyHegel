@@ -1765,6 +1765,89 @@ class agilent_rf_33522A(visaInstrument):
     def phase_sync(self):
         self.write('PHASe:SYNChronize')
 
+class agilent_rf_PSG(visaInstrument):
+    """
+    This controls a PSG signal generetor
+    Most useful devices:
+        ampl
+        ampl_unit
+        rf_en
+        mod_en
+        freq_cw
+    The alc devices refer to automatic level (amplitude) control.
+    Available methods:
+        phase_sync
+    """
+    def _current_config(self, dev_obj=None, options={}):
+        # TODO Get the proper config
+        return self._conf_helper('oscillator_source', 'rf_en', 'ampl', 'ampl_unit', 'amp_flatness_corr_en',
+                                 'ampl_offset_db', 'ampl_reference_dbm', 'ampl_reference_en',
+                                 'ampl_protection', 'ampl_mode', 'ampl_start', 'ampl_stop',
+                                 'alc_en', 'alc_source', 'alc_bw', 'alc_bw_auto_en',
+                                 'attenuation_db', 'attenuation_auto_en', 'amp_flatness_corr_en',
+                                 'output_blanking_en', 'output_blanking_auto_en',
+                                 'freq_mode', 'freq_cw', 'freq_start', 'freq_stop',
+                                 'freq_multiplier', 'freq_offset', 'freq_offset_en', 'freq_reference', 'freq_reference_en',
+                                 'phase', 'mod_en', 'mod_am_en', 'mod_fm_en', 'mod_phase_en', 'mod_pulse_en', options)
+    def _create_devs(self):
+        self.installed_options = scpiDevice(getstr='*OPT?')
+        self.oscillator_source = scpiDevice(getstr=':ROSCillator:SOURce?', str_type=str)
+        self.rf_en = scpiDevice(':OUTPut', str_type=bool)
+        self.ampl = scpiDevice(':POWer', str_type=float, doc='unit depends on device ampl_unit', setget=True)
+        self.ampl_unit = scpiDevice(':UNIT:POWer', choices=ChoiceStrings('DBM', 'DBUV', 'DBUVEMF', 'V', 'VEMF', 'DB'),
+                                    doc='Note that EMF are 2x above the base unit (power arriving at infinite impedance load)')
+        # unit:volt:type affects volt scale like power:alc:search:ref:level, which are not user changeable
+        self.ampl_offset_db = scpiDevice(':POWer:OFFset', str_type=float, min=-200, max=+200)
+        self.ampl_reference_dbm = scpiDevice(':POWer:REFerence', str_type=float, doc='This value is always in dBm')
+        self.ampl_reference_en = scpiDevice(':POWer:REFerence:STATe', str_type=bool)
+        self.ampl_mode = scpiDevice(':POWer:MODE', choices=ChoiceStrings('FIXed', 'LIST'))
+        #self.ampl_optimize_lownoise = scpiDevice(':POWer:NOISe', str_type=bool)
+        self.ampl_protection = scpiDevice(':POWer:PROTection', str_type=bool, doc='When enabled, sets the attenuation to maximum when performing a power search. Could decrease the life of the attenuator.')
+        self.ampl_start = scpiDevice(':POWer:STARt', str_type=float, doc='unit depends on device ampl_unit', setget=True)
+        self.ampl_stop = scpiDevice(':POWer:STOP', str_type=float, doc='unit depends on device ampl_unit', setget=True)
+        # TODO handle the search stuff for when alc is off
+        self.alc_en = scpiDevice(':POWer:ALC', str_type=bool)
+        self.alc_source = scpiDevice(':POWer:ALC:SOURce', choices=ChoiceStrings('INTernal', 'DIODe'))
+        # The alc_bw don't seem to have a front panel control. It might not do anything for the
+        # generator N5183A we used.
+        self.alc_bw = scpiDevice(':POWer:ALC:BANDwidth', str_type=float)
+        self.alc_bw_auto_en = scpiDevice(':POWer:ALC:BANDwidth:AUTO', str_type=bool)
+        self.attenuation_db = scpiDevice(':POWer:ATTenuation', str_type=float, min=0, max=15, setget=True)
+        self.attenuation_auto_en = scpiDevice(':POWer:ATTenuation:AUTO', str_type=bool)
+        self.amp_flatness_corr_en = scpiDevice(':CORRection', str_type=bool)
+        self.output_blanking_en = scpiDevice(':OUTPut:BLANKing:STATe', str_type=bool)
+        self.output_blanking_auto_en = scpiDevice(':OUTPut:BLANKing:AUTO', str_type=bool)
+        self.freq_mode = scpiDevice(':FREQuency:MODE', choices=ChoiceStrings('CW', 'FIXed', 'LIST'), doc='CW and FIXed are the same, LIST means sweeping')
+        minfreq = float(self.ask(':FREQ? min'))
+        maxfreq = float(self.ask(':FREQ? max'))
+        self.freq_cw = scpiDevice(':FREQuency', str_type=float, min=minfreq, max=maxfreq)
+        self.freq_center = scpiDevice('FREQuency:CENTer', str_type=float, min=minfreq, max=maxfreq)
+        self.freq_start = scpiDevice('FREQuency:STARt', str_type=float, min=minfreq, max=maxfreq)
+        self.freq_stop = scpiDevice('FREQuency:STOP', str_type=float, min=minfreq, max=maxfreq)
+        # TODO SPAN range is probably something else
+        self.freq_span = scpiDevice('FREQuency:SPAN', str_type=float, min=0, max=maxfreq)
+        self.freq_multiplier = scpiDevice(':FREQuency:MULTiplier', str_type=float, min=-1000, max=1000, doc='The range is -1000 to -0.001 and 0.001 to 1000')
+        self.freq_offset = scpiDevice(':FREQuency:OFFSet', str_type=float, min=-200e9, max=200e9)
+        self.freq_offset_en = scpiDevice(':FREQuency:OFFSet:STATe', str_type=bool)
+        self.freq_reference = scpiDevice(':FREQuency:REFerence', str_type=float, min=0, max=maxfreq)
+        self.freq_reference_en = scpiDevice(':FREQuency:REFerence:STATe', str_type=bool)
+        self.phase = scpiDevice(':PHASe', str_type=float, min=-3.14, max=3.14, doc='Adjust phase arounf ref. In rad.')
+        # TODO handle the marker stuff
+        self.mod_en = scpiDevice(':OUTPut:MODulation:STATe', str_type=bool)
+        self.mod_am_en = scpiDevice(':AM:STATe', str_type=bool)
+        self.mod_fm_en = scpiDevice(':FM:STATe', str_type=bool)
+        self.mod_phase_en = scpiDevice(':PM:STATe', str_type=bool)
+        self.mod_pulse_en = scpiDevice(':PULM:STATe', str_type=bool)
+        self.alias = self.freq_cw
+        # This needs to be last to complete creation
+        super(agilent_rf_PSG,self)._create_devs()
+    def phase_sync(self):
+        """
+        Sets the current output phase as a zero reference.
+        """
+        self.write('PHASe:REFerence')
+
+
 class agilent_rf_MXG(visaInstrument):
     """
     This controls a MXG signal generetor
@@ -1790,59 +1873,10 @@ class agilent_rf_MXG(visaInstrument):
                                  'freq_multiplier', 'freq_offset', 'freq_offset_en', 'freq_reference', 'freq_reference_en',
                                  'phase', 'mod_en', 'mod_am_en', 'mod_fm_en', 'mod_phase_en', 'mod_pulse_en', options)
     def _create_devs(self):
-        self.installed_options = scpiDevice(getstr='*OPT?')
-        self.oscillator_source = scpiDevice(getstr=':ROSCillator:SOURce?', str_type=str)
-        self.rf_en = scpiDevice(':OUTPut', str_type=bool)
-        self.ampl = scpiDevice(':POWer', str_type=float, doc='unit depends on device ampl_unit', setget=True)
-        self.ampl_unit = scpiDevice(':UNIT:POWer', choices=ChoiceStrings('DBM', 'DBUV', 'DBUVEMF', 'V', 'VEMF', 'DB'),
-                                    doc='Note that EMF are 2x above the base unit (power arriving at infinite impedance load)')
-        # unit:volt:type affects volt scale like power:alc:search:ref:level, which are not user changeable
-        self.ampl_offset_db = scpiDevice(':POWer:OFFset', str_type=float, min=-200, max=+200)
-        self.ampl_reference_dbm = scpiDevice(':POWer:REFerence', str_type=float, doc='This value is always in dBm')
-        self.ampl_reference_en = scpiDevice(':POWer:REFerence:STATe', str_type=bool)
         self.ampl_min_lim = scpiDevice(':POWer:MINimum:LIMit', choices=ChoiceStrings('LOW', 'HIGH'))
-        self.ampl_mode = scpiDevice(':POWer:MODE', choices=ChoiceStrings('FIXed', 'LIST'))
-        #self.ampl_optimize_lownoise = scpiDevice(':POWer:NOISe', str_type=bool)
-        self.ampl_protection = scpiDevice(':POWer:PROTection', str_type=bool, doc='When enabled, sets the attenuation to maximum when performing a power search. Could decrease the life of the attenuator.')
-        self.ampl_start = scpiDevice(':POWer:STARt', str_type=float, doc='unit depends on device ampl_unit', setget=True)
-        self.ampl_stop = scpiDevice(':POWer:STOP', str_type=float, doc='unit depends on device ampl_unit', setget=True)
         self.ampl_user_max = scpiDevice(':POWer:USER:MAX', str_type=float, doc='unit depends on device ampl_unit', setget=True)
         self.ampl_user_max_en = scpiDevice(':POWer:USER:ENABle', str_type=bool)
-        # TODO handle the search stuff for when alc is off
-        self.alc_en = scpiDevice(':POWer:ALC', str_type=bool)
-        self.alc_source = scpiDevice(':POWer:ALC:SOURce', choices=ChoiceStrings('INTernal', 'DIODe'))
-        # The alc_bw don't seem to have a front panel control. It might not do anything for the
-        # generator N5183A we used.
-        self.alc_bw = scpiDevice(':POWer:ALC:BANDwidth', str_type=float)
-        self.alc_bw_auto_en = scpiDevice(':POWer:ALC:BANDwidth:AUTO', str_type=bool)
-        self.attenuation_db = scpiDevice(':POWer:ATTenuation', str_type=float, min=0, max=15, setget=True)
-        self.attenuation_auto_en = scpiDevice(':POWer:ATTenuation:AUTO', str_type=bool)
-        self.amp_flatness_corr_en = scpiDevice(':CORRection', str_type=bool)
-        self.output_blanking_en = scpiDevice(':OUTPut:BLANKing:STATe', str_type=bool)
-        self.output_blanking_auto_en = scpiDevice(':OUTPut:BLANKing:AUTO', str_type=bool)
-        self.freq_mode = scpiDevice(':FREQuency:MODE', choices=ChoiceStrings('CW', 'FIXed', 'LIST'), doc='CW and FIXed are the same, LIST means sweeping')
-        minfreq = float(self.ask(':FREQ? min'))
-        maxfreq = float(self.ask(':FREQ? max'))
-        self.freq_cw = scpiDevice(':FREQuency', str_type=float, min=minfreq, max=maxfreq)
         self.freq_low_spurs_en = scpiDevice(':FREQuency:LSPurs:STATe', str_type=bool)
-        self.freq_center = scpiDevice('FREQuency:CENTer', str_type=float, min=minfreq, max=maxfreq)
-        self.freq_start = scpiDevice('FREQuency:STARt', str_type=float, min=minfreq, max=maxfreq)
-        self.freq_stop = scpiDevice('FREQuency:STOP', str_type=float, min=minfreq, max=maxfreq)
-        # TODO SPAN range is probably something else
-        self.freq_span = scpiDevice('FREQuency:SPAN', str_type=float, min=0, max=maxfreq)
-        self.freq_multiplier = scpiDevice(':FREQuency:MULTiplier', str_type=float, min=-1000, max=1000, doc='The range is -1000 to -0.001 and 0.001 to 1000')
-        self.freq_offset = scpiDevice(':FREQuency:OFFSet', str_type=float, min=-200e9, max=200e9)
-        self.freq_offset_en = scpiDevice(':FREQuency:OFFSet:STATe', str_type=bool)
-        self.freq_reference = scpiDevice(':FREQuency:REFerence', str_type=float, min=0, max=maxfreq)
-        self.freq_reference_en = scpiDevice(':FREQuency:REFerence:STATe', str_type=bool)
-        self.phase = scpiDevice(':PHASe', str_type=float, min=-3.14, max=3.14, doc='Adjust phase arounf ref. In rad.')
-        # TODO handle the marker stuff
-        self.mod_en = scpiDevice(':OUTPut:MODulation:STATe', str_type=bool)
-        self.mod_am_en = scpiDevice(':AM:STATe', str_type=bool)
-        self.mod_fm_en = scpiDevice(':FM:STATe', str_type=bool)
-        self.mod_phase_en = scpiDevice(':PM:STATe', str_type=bool)
-        self.mod_pulse_en = scpiDevice(':PULM:STATe', str_type=bool)
-        self.alias = self.freq_cw
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
     def phase_sync(self):
