@@ -946,6 +946,13 @@ class scpiDevice(BaseDevice):
         super(scpiDevice, self).check(val)
 
 class ReadvalDev(BaseDevice):
+    """
+    This devices behaves like doing a run_and_wait followed by
+    a fetch.
+    When in async mode, it simply does the fetch.
+    It has the same parameters as the fetch device, so look for the
+    documentation of fetch.
+    """
     def __init__(self, dev, autoinit=None, **kwarg):
         self._slave_dev = dev
         if autoinit == None:

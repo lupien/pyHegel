@@ -950,7 +950,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         if i != None and append:
             raise ValueError, 'Choose either i or append, not both'
 
-    def _hist_cs_getformat(self, filename=None, c=[1,2,3,4,5]):
+    def _hist_cs_getformat(self, filename=None, c=[1,2,3,4,5], **kwarg):
         if not isinstance(c, (list, tuple, set, np.ndarray)):
             c=[c]
         c=sorted(set(c)) # removes duplicates, and sort
@@ -959,7 +959,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         fmt = self.hist_cs._format
         headers = [ 'c%i'%i for i in c]
         fmt.update(multi=headers, graph=range(len(headers)))
-        return instrument.BaseDevice.getformat(self.hist_cs, c=c)
+        return instrument.BaseDevice.getformat(self.hist_cs, c=c, **kwarg)
     def _hist_cs_getdev(self, c=[1,2,3,4,5]):
         """
            hist_cs has optionnal parameter c=[1,2,3,4,5]
