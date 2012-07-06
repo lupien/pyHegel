@@ -1627,3 +1627,94 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self.write('STATUS:CONFIG_OK True')
         self._run_finished.clear()
         self.write('RUN')
+
+
+##############################################################
+# Histogram correction algo
+##############################################################
+
+from scipy.special import erfinv
+
+class HistoSmooth(object):
+    def __init__(self, data=None, cutoff=1000):
+        self.corr_bincenter = None
+        self.corr_binwidth = None
+        if data != None:
+            self.find_corr_x(data, cutoff)
+    def find_corr_x(self, data,  cutoff=1000):
+        N = data.shape[-1]
+        bins = np.arange(N, dtype=float)
+        if data.ndim == 2:
+            x = data[0] # unused.
+            h = data[1]
+        else:
+            x = bins
+            h = data.copy()
+        cum_h = h.cumsum(dtype=float) # same length as h: cum_h[0] = h[0]
+        sum_h = h.sum(dtype=float)
+        norm_cum_h = cum_h/sum_h
+        tmp = self.calc_cum(h, corrected=False)
+        xo = tmp[0]
+        sigma = np.sqrt(tmp[1])
+        bin_right = erfinv(2*norm_cum_h -1)*np.sqrt(2)*sigma + xo
+        left_w = np.where(cum_h < cutoff)[0]
+        right_w = np.where(cum_h > sum_h-cutoff)[0]
+        Nl = len(left_w)
+        Nr = len(right_w)
+        # below cutuff we step by 1
+        bin_right[:Nl] = bin_right[Nl] - 1 - np.arange(Nl)[::-1]
+        # above cutuff we step by 1
+        bin_right[-Nr:] = bin_right[N-Nr] + 1 + np.arange(Nr)
+        # the first bin will be set to 1
+        bin_width = np.ones(N, dtype=float)
+        bin_width[1:] = np.diff(bin_right)
+        self.corr_binwidth = bin_width
+        self.corr_bincenter = bin_right - 0.5*bin_width
+
+    def corr_hist(self, data):
+        N = data.shape[-1]
+        bins = np.arange(N, dtype=float)
+        if data.ndim >= 2:
+            x = data[0]
+            h = data[1]
+        else:
+            x = bins
+            h = data.copy()
+        dx = x[-1] - x[0]
+        xo = (x[0] + x[-1])/2.
+        x = self.corr_bincenter
+        x = (x-N/2.)*dx/N + xo
+        return np.array([x, h/self.corr_binwidth])
+
+    def calc_cum(self, data, corrected=True):
+        """ This functions calculates cumulants up to 5
+        data can have multiple columns.
+             With only one column, it is the histogram
+             With multiple columns, the first has dimension of 2 (x-axis, histogram)
+                  The last column will be the histogram (in between they are the
+                  data set index like files...)
+
+        """
+        N = data.shape[-1]
+        bins = np.arange(N, dtype=float)
+        if data.ndim >= 2:
+            x = data[0]
+            h = data[1]
+        else:
+            x = bins
+            h = data.copy()
+        dx = x[-1] - x[0]
+        xo = (x[0] + x[-1])/2.
+        if corrected:
+            x = self.corr_bincenter
+            x = (x-N/2.)*dx/N + xo
+        norm_h = h/h.sum(axis=-1, dtype=float)
+        c1 = np.sum(x*norm_h)
+        c2 = np.sum((x-c1)**2 *norm_h)
+        c3 = np.sum((x-c1)**3 *norm_h)
+        cent_moment4 = np.sum((x-c1)**4 *norm_h)
+        cent_moment5 = np.sum((x-c1)**5 *norm_h)
+        c4 = cent_moment4 - 3.*c2**2
+        c5 = cent_moment5 - 10.*c2*c3
+        return np.array([c1, c2, c3, c4, c5])
+
