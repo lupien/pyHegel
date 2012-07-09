@@ -2302,6 +2302,114 @@ class lakeshore_340(visaInstrument):
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
+class lakeshore_370(visaInstrument):
+    """
+       Temperature controller used for dilu system
+       Useful device:
+           s
+           t
+           fetch
+           status_ch
+           current_ch
+           pid
+           still_raw
+       s and t return the sensor(Ohm) or kelvin value of a certain channel
+       which defaults to current_ch
+       status_ch returns the status of ch
+       fetch allows to read all channels
+    """
+    def init(self, full=False):
+        if full and isinstance(self.visa, visa.SerialInstrument):
+            self.visa.parity = True
+            self.visa.data_bits = 7
+            self.visa.term_chars = '\r\n'
+        super(lakeshore_370, self).init(full=full)
+    def _current_config(self, dev_obj=None, options={}):
+        if dev_obj == self.fetch:
+            old_ch = self.current_ch.getcache()
+            ch = options.get('ch', None)
+            ch = self._fetch_helper(ch)
+            ch_list = []
+            in_set = []
+            for c in ch:
+                ch_list.append(c)
+                in_set.append(self.input_set.get(ch=c))
+            self.current_ch.set(old_ch)
+            base = ['current_ch=%r'%ch_list, 'input_set=%r'%in_set]
+        else:
+            base = self._conf_helper('current_ch', 'input_set')
+        base += self._conf_helper('sp', 'pid', 'still_raw', options)
+        return base
+    def _enabled_list_getdev(self):
+        ret = []
+        for c in self.current_ch.choices:
+            d = self.input_set.get(ch=c)
+            if d['enabled']:
+                ret.append(c)
+        return ret
+    def _fetch_helper(self, ch=None):
+        if ch == None:
+            ch = self.enabled_list.getcache()
+        if not isinstance(ch, (list, ChoiceBase)):
+            ch = [ch]
+        return ch
+    def _fetch_getformat(self, **kwarg):
+        old_ch = self.current_ch.getcache()
+        ch = kwarg.get('ch', None)
+        ch = self._fetch_helper(ch)
+        multi = []
+        graph = []
+        for i, c in enumerate(ch):
+            graph.append(2*i)
+            multi.extend([str(c)+'_T', str(c)+'_S'])
+        fmt = self.fetch._format
+        fmt.update(multi=multi, graph=graph)
+        self.current_ch.set(old_ch)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_getdev(self, ch=None):
+        old_ch = self.current_ch.getcache()
+        ch = self._fetch_helper(ch)
+        ret = []
+        for c in ch:
+            ret.append(self.t.get(ch=c))
+            ret.append(self.s.get())
+        self.current_ch.set(old_ch)
+        return ret
+    def _create_devs(self):
+        ch_opt_sel = range(1, 17)
+        self.current_ch = MemoryDevice(1, choices=ch_opt_sel)
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_ch)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.t = devChOption(getstr='RDGK? {ch}', str_type=float, doc='Return the temperature in Kelvin for the selected sensor(ch)')
+        self.s = devChOption(getstr='RDGR? {ch}', str_type=float, doc='Return the sensor value in Ohm for the selected sensor(ch)')
+        self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=CS OVL, 2(1)=VCM OVL, 4(2)=VMIX OVL, 8(3)=VDIF OVL
+                               #16(4)=R. OVER, 32(5)=R. UNDER, 64(6)=T. OVER, 128(7)=T. UNDER
+                               # 000 = valid
+        self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}', str_type=dict_str(['enabled', 'dwell', 'pause', 'curvno', 'tempco'],[bool, int, int, int]))
+        self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
+                                      str_type=dict_str(['filter_en', 'settle_time', 'window'], [bool, int, int]))
+        self.scan = scpiDevice('SCAN', str_type=dict_str(['ch', 'autoscan_en'], [int, bool]))
+        #self.current_loop = MemoryDevice(1, choices=[1, 2])
+        #def devLoopOption(*arg, **kwarg):
+        #    options = kwarg.pop('options', {}).copy()
+        #    options.update(loop=self.current_loop)
+        #    app = kwarg.pop('options_apply', ['loop'])
+        #    kwarg.update(options=options, options_apply=app)
+        #    return scpiDevice(*arg, **kwarg)
+        self.pid = scpiDevice('PID', str_type=dict_str(['P', 'I', 'D'], float))
+        self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in % or in W
+        self.sp = scpiDevice('SETP', str_type=float)
+        self.still_raw = scpiDevice('STILL', str_type=float)
+        self.alias = self.t
+        self._devwrap('enabled_list')
+        self._devwrap('fetch', autoinit=False)
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+
 class infiniiVision_3000(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('source', 'mode', 'preamble', options)
