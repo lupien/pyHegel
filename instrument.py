@@ -2367,6 +2367,15 @@ class lakeshore_370(visaInstrument):
         self.current_ch.set(old_ch)
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_getdev(self, ch=None):
+        """
+        Optional parameter:
+            ch: To select which channels to read. Default to all the enabled
+                ones. Otherwise ch=4 selects only channel 4 and
+                ch=[3,5] selects channels 3 and 5.
+
+        For each channels, two values are returned. The tempereture in Kelvin
+        and the sensor value in Ohm.
+        """
         old_ch = self.current_ch.getcache()
         ch = self._fetch_helper(ch)
         ret = []
