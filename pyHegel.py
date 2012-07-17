@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/ipython -i
 # -*- coding: utf-8 -*-
 # vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 #
