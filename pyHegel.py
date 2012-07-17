@@ -55,6 +55,39 @@ def help_pyHegel():
     Available instruments:
         sweep
         clock
+
+    Examples of commands in ipython:
+        # Remember you can use arrows to explore the history and
+        # press tab to see all possible options. For example
+        # type "sweep." then press the tab key.
+        load()
+        load('yo1 dmm2')
+        ;load yo2 dmm2 pna1
+        iprint yo1
+        get yo1
+        get yo1.range
+        iprint dmm1
+        dmm1?
+        dmm1.fetch?
+        get dmm1
+        # Note that ipython can automatically insert parentesis so the following
+        # two lines produce the same result.
+        get dmm1.readval
+        get(dmm1.readval)
+        v=get(dmm1.readval)
+        v2=get(pna1.readval, filename='Test-%T.txt', unit='db_deg')
+        make_dir 'C:/data/testdir/%D'
+        iprint sweep
+        get sweep.path
+        sweep yo1, -1,1,11, 'Test-%T.txt', out=dmm1
+        sweep yo2, -1,1,11, 'Test-{next_i:02}.txt', out=[dmm1, dmm2, pna1.readval], updown=True, async=True
+        # magic functions (don't need quotes)
+        pwd
+        cd c:/data
+        #end session properly so command lines are saved
+        quit()
+        exit()
+        # or type CTRL-D
     """
     print help_pyHegel.__doc__
 
