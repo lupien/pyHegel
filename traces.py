@@ -685,7 +685,26 @@ class Sleeper(QtGui.QWidget):
             self.update_elapsed()
             self.update_timer.start()
 
-sleeper = Sleeper()
+class Delay_init(object):
+    def __init__(self, object_class, *arg, **kwarg):
+        self.object_class = object_class
+        self.arg = arg
+        self.kwarg = kwarg
+        self.obj = None
+    def check_init(self):
+        if self.obj:
+            return
+        self.obj = self.object_class(*self.arg, **self.kwarg)
+    def __call__(self, *arg, **kwarg):
+        return self.obj(*arg, **kwarg)
+    def __getattribute__(self, name):
+        if name in ['__init__', 'check_init', '__call__', 'object_class', 'arg', 'kwarg', 'obj']:
+            return object.__getattribute__(self, name)
+        self.check_init()
+        return self.obj.__getattribute__(name)
+
+sleeper = Delay_init(Sleeper)
+#sleeper = Sleeper()
 
 def sleep(sec):
     sleeper.start_sleep(sec/60.)
