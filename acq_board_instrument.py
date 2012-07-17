@@ -202,7 +202,7 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     To use, first make sure the data acquisition server is started
       Ctrl_Carte_Acquisition.exe
     One way to start it, from pyHegel, is to use:
-        !start /D \Codes\Ctrl_Carte_Acquistion\Release cmd /K Ctrl_Carte_Acquistion.exe 0
+        !start /D \Codes\Carte_Acquisition\Release cmd /K Ctrl_Carte_Acquistion.exe 0
     Then this instrument can be loaded. This instrument requires an ip address
     (can be a dns name) and a port number since the communication with
     the server is through a network connection. If running pyHegel on the
@@ -258,7 +258,14 @@ class Acq_Board_Instrument(instrument.visaInstrument):
         self._clock_src_init_done = False
         
         # try connect to the server
-        self.s.connect((self.host, self.port))
+        try:
+            self.s.connect((self.host, self.port))
+        except socket.error as err:
+            print  err
+            raise IOError, """Unable to connect. The server might not be started or is already used.
+You can start a server with:
+    !start /D \Codes\CarteAcquisition\Release cmd /K Ctrl_Carte_Acquistion.exe
+"""
         self.set_timeout = 5
 
         # status and flag
