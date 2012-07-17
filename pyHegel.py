@@ -308,16 +308,20 @@ class _Sweep(instrument.BaseInstrument):
       """)
     out = instrument.MemoryDevice(doc="""
       This is the list of device to read (get) for each iteration.
-      It can be a single device (or an instrument of it has an alias)
+      It can be a single device (or an instrument if it has an alias)
       It can be a list of devices like [dev1, dev2, dev3]
-      If optional parameters are needed for the device it can be enterred as
+      If optional parameters are needed for a device, it can be enterred as
       a tuple (dev, devparam) where devparam is a dictionnary of optionnal
       parameters.
       For example you could have (acq1.readval, dict(ch=1, unit='V'))
       or another way (acq1.readval, {'ch':1, 'unit':'V'})
+      With more than one device that would be:
+           [dev1, (dev2, dict(dev2opt1=value1, dev2opt2=value2)), dev3]
       Additional parameter are:
           graph:  it allows the selection of which column of multi-column
                   data to graph. It should be a list of column index.
+                  Ex: graph=[0,2,3]
+                  would display the first, third and fourth column of this device.
           bin:    To overwrite filesave format/extension can be
                   any extension like '.bin' or false to save as text.
                   with '.npy', it is saved in npy format
@@ -402,8 +406,8 @@ class _Sweep(instrument.BaseInstrument):
                 title: string used for window title
                 out: list of devices to read. Can also be a single device.
                      This has the same syntax and overrides sweep.out.
-                     See sweep.out documentation for more advanced used
-                     (devices with options)
+                     See sweep.out documentation for more advanced uses
+                     (devices with options).
                 extra_conf: list of devices to dump configuration headers at head
                             of data file. It isdone automatically for sweep device and
                             the out devices. This allows to add other instruments.
