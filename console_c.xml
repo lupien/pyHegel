@@ -91,7 +91,7 @@
 	</mouse>
 	<tabs>
 		<tab title="pyHegel" icon="C:\Program Files (x86)\pythonxy\icons\consolexy.ico" use_default_icon="0">
-			<console shell="cmd.exe /c ipython -pylab -p xy -nopylab_import_all -editor SciTE.exe C:\Codes\pyHegel\pyHegel.py" init_dir="C:\Codes\pyHegel" run_as_user="0" user=""/>
+			<console shell="C:\Python27\Scripts\ipython.bat -pylab -p xy -nopylab_import_all -editor SciTE.exe C:\Codes\pyHegel\pyHegel.py" init_dir="C:\Codes\pyHegel" run_as_user="0" user=""/>
 			<cursor style="1" r="255" g="128" b="0"/>
 			<background type="0" r="0" g="0" b="0">
 				<image file="" relative="0" extend="0" position="0">
