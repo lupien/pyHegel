@@ -1855,7 +1855,7 @@ class agilent_rf_PSG(visaInstrument):
         self.write('PHASe:REFerence')
 
 
-class agilent_rf_MXG(visaInstrument):
+class agilent_rf_MXG(agilent_rf_PSG):
     """
     This controls a MXG signal generetor
     Most useful devices:
