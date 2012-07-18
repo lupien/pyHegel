@@ -5,7 +5,21 @@
 # Programme principale pour remplacer Hegel
 #
 
-import numpy as np
+# In pythonxy version 2.7.2.0
+#  The xy profiles imports numpy, scipy and from numpy *
+#  It also sets the logging into ~\.xy
+# Also the ipython pylab mode imports numpy, numpy as np
+#  matplotlib, matplotlib.pylab as pylab and matplotlib.pyplot as plt
+
+# We do it here again. ipython -pylab should have loaded it but
+# in some situation it is disabled (option  -nopylab_import_all)
+#  This imports: numpy *, numpy.fft *, numpy.random *, numpy.linalg *,
+#                matplotlb.pyplot *, matplotlib.pyplot as plt, numpy as np
+#                numpy.ma as ma
+from matplotlib.pylab import *
+# could also be from pylab import *
+
+#import numpy as np # this is loaded by pylab
 import os
 import glob
 import time
@@ -17,10 +31,12 @@ import threading
 import operator
 from gc import collect as collect_garbage
 
+
 import traces
 import instrument
 import local_config
 import util
+
 
 def help_pyHegel():
     """
@@ -55,6 +71,10 @@ def help_pyHegel():
     Available instruments:
         sweep
         clock
+
+    You can always stop editing a line or running a command by pressing
+    CTRL-C. However, when possible, it is better to stop a sweep or a record
+    by using the abort button of the trace.
 
     Examples of commands in ipython:
         # Remember you can use arrows to explore the history and
@@ -91,7 +111,7 @@ def help_pyHegel():
     """
     print help_pyHegel.__doc__
 
-print '\n\n---------\n For available commands, type "help_pyHegel()"\n---------'
+print '\n\n---------\n For available commands, type "help_pyHegel()"\n---------\n\n'
 
 def reset_pyHegel():
     """
