@@ -183,8 +183,9 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
        rcond is the same as in lstsq
 
        La fonction retourne: pf,resids,pe, extras
-                où extras est: chiNorm, sigmaCorr, rank, s, covar (voir lstsq)
+                où extras est un dict: chiNorm, sigmaCorr, rank, sv, covar (voir lstsq)
                       pe sont les erreurs sur les parametres
+                      sv are the singular values
                         = [] si errors=False
                       même chose pour covar (covar renorm, diag=1)
             Si errors == 1 or True: mode auto (corrige pe si il n'y a pas de s)
@@ -334,7 +335,7 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
     if errors and not errors&8: # force same shape
         if nfits>0 and pe.ndim==1:
            pe = pe[:,None] + np.zeros(nfits)
-    extras = (chiNorm,sigmaCorr,rank,sv,covar)
+    extras = dict(chiNorm=chiNorm, sigmaCorr=sigmaCorr,rank=rank,sv=sv,covar=covar)
     return ((p,func), resids, pe, extras)
 
 
@@ -631,7 +632,7 @@ if __name__ == "__main__":
     rr=leastsq(fn, p0, args=(x,y,ss), full_output=True)
     pre = np.sqrt(rr[1].diagonal())
     print '========== non linear fit start ========='
-    pprint (( 'polyfit', pf[0], pe, extras[4], (extras[4]*pe*pe[:,None]).round(4) ))
+    pprint (( 'polyfit', pf[0], pe, extras['covar'], (extras['covar']*pe*pe[:,None]).round(4) ))
     pprint ( report(x,y,pf,s=ss) )
     pprint (( 'non linear', rr[0],pre, rr[1]/pre/pre[:,None], rr[1].round(4) ))
     pprint ( report(x,y,rr[0],s=ss,func=lambda x,p,param=None:gen_polyeval(x,(p,oneDpoly))) )
