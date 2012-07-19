@@ -253,7 +253,7 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
         pind = np.arange(m)
         adjust = pind[adjust] # in case adjust is a selector
         #we make sure we don't change the order, and don't repeat
-        sel = np.intersect1d_nu(pind, adjust)
+        sel = np.intersect1d(pind, adjust)
         mm = len(sel)
         xo = xx
         xx = xo[:,sel]
@@ -538,7 +538,7 @@ def report(X,Y,pf,func=None, s=1., param=None, adjust=None, filter=None):
         adjust = baseAdj[adjust] # in case adjust is a selector
         #we make sure we don't change the order, and don't repeat
         #could probably use unique1d if it is sorted.
-        m = len(np.intersect1d_nu(baseAdj, adjust))
+        m = len(np.intersect1d(baseAdj, adjust))
     #w = 1./s
     w = (1./s)**2
     # weighted average: yavg =  (sum wi yi)/sum wi
@@ -629,7 +629,7 @@ if __name__ == "__main__":
     (pf,res,pe,extras) = gen_polyfit(x,y,3,s=ss,errors=3)
     p0 = pf[0]*2.
     rr=leastsq(fn, p0, args=(x,y,ss), full_output=True)
-    pre = sqrt(rr[1].diagonal())
+    pre = np.sqrt(rr[1].diagonal())
     print '========== non linear fit start ========='
     pprint (( 'polyfit', pf[0], pe, extras[4], (extras[4]*pe*pe[:,None]).round(4) ))
     pprint ( report(x,y,pf,s=ss) )
@@ -669,11 +669,11 @@ if __name__ == "__main__":
     ((p,f),res,pe,extras) = gen_polyfit(xx,yy,4,s=10,adjust=[0,0,2],
                      p0=np.array([[-1,-20,-3,0],[-.1,-.2,-.3,0],[11,9,13,0]]).T,errors=ER)
     figure(2)
-    plot(xx.T,gen_polyeval(xx,(p[:,0],f)).T,'r',label='fit constant s')
+    plot(xx.T,gen_polyeval(xx,(p[:,0],f)).T,'r',label='fit constant s, adj0,2')
     figure(3)
-    plot(xx.T,gen_polyeval(xx,(p[:,1],f)).T,'r',label='fit constant s')
+    plot(xx.T,gen_polyeval(xx,(p[:,1],f)).T,'r',label='fit constant s, adj0,2')
     figure(4)
-    plot(xx.T,gen_polyeval(xx,(p[:,2],f)).T,'r',label='fit constant s')
+    plot(xx.T,gen_polyeval(xx,(p[:,2],f)).T,'r',label='fit constant s, adj0,2')
     pprint (( 'fit constant s',p,pe,res,extras ))
     pprint ( report(xx,yy,(p,f),s=10,adjust=[0,0,2]) )
     sss[1,20,:]=100
