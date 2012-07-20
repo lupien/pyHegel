@@ -12,6 +12,7 @@ from scipy.special import jn
 from scipy.optimize import leastsq
 # see also scipy.optimize.curve_fit
 import matplotlib.pylab as plt
+import collections
 
 def xcothx(x):
     """
@@ -25,12 +26,6 @@ def xcothx(x):
     # 1e-8 is enough to give exactly 1.
     #return where(x==0, 1., nx/tanh(nx))
     return nx/np.tanh(nx)
-
-
-# the argument names from a function are obtained with:
-# v=inspect.getargspec(sinc)
-# v[0]
-# v.args
 
 def noisePower(V, T, R):
     """
@@ -117,6 +112,100 @@ def noiseRFfit(Vdc, A, Toffset, Vac, T, f=20e9, R=70., N=100):
     Aunit = 4.*kbt/R
     return A*(noiseRF(Vdc, Vac, f, T, R, N)+offset)/Aunit
 noiseRFfit.display_str = r"$ A \left(\left[\sum_{n=-N}^{N} J_n(e V_{AC}/hf)^2 \frac{e V_{DC}-nhf}{2 k_B T} \coth\left(\frac{e V_{DC}-nhf}{2 k_B T} \right)\right] + T_{offset}/T\right)$"
+
+
+
+#########################################################
+def getVarNames(func):
+    """
+    This function finds the name of the parameter as used in the function
+    definition.
+    It returns a tuple (para, kwpara, varargs, varkw, defaults)
+    Where para is a list of the name positional parameters
+          kwpara is a list of the keyword parameters
+          varargs and varkw ar the name for the *arg and **kwarg
+           paramters. They are None if not present.
+          defaults are the default values for the kwpara
+    """
+    (args, varargs, varkw, defaults) = inspect.getargspec(func)
+    Nkw = len(defaults)
+    Nall = len(args)
+    Narg = Nall-Nkw
+    para = args[:Narg]
+    kwpara = args[Narg:]
+    return (para, kwpara, varargs, varkw, defaults)
+
+def toEng(p, pe, signif=2):
+    if pe != 0:
+        pe10 = np.log10(np.abs(pe))
+    else:
+        pe10 = 0
+    if p != 0:
+        p10 = np.log10(np.abs(p))
+    else:
+        p10 = pe10
+    pe10f = int(np.floor(pe10))
+    p10f = int(np.floor(p10))
+    #For pe make the rescaled value
+    # between 9.9 and 0.010
+    pe10Eng = (int(np.floor(pe10+2))/3)*3.
+    #For p make the rescaled value
+    # between 499 and 0.5
+    p10Eng = (int(np.floor(p10 - np.log10(.5)))/3)*3.
+    if pe != 0:
+        expEng = max(pe10Eng, p10Eng)
+        frac_prec = signif-1 - (pe10f-expEng)
+    else:
+        expEng = p10Eng
+        frac_prec = 15-(p10f-expEng) #15 digit of precision
+    if frac_prec < 0:
+        frac_prec = 0
+    pe_rescaled = pe/10.**expEng
+    p_rescaled = p/10.**expEng
+    return p_rescaled, pe_rescaled, expEng, frac_prec
+
+def convVal(p, pe, signif=2):
+    # handle one p, pe at a time
+    p_rescaled, pe_rescaled, expEng, frac_prec = toEng(p, pe, signif=signif)
+    if pe == 0:
+        if p == 0:
+            return '0', None, '0'
+        else:
+            return ( ('%%.%if'%frac_prec)%p_rescaled, None, '%i'%expEng )
+    else:
+        return ( ('%%.%if'%frac_prec)%p_rescaled,
+                 ('%%.%if'%frac_prec)%pe_rescaled, '%i'%expEng )
+
+def printResult(func, p, pe, extra={}, signif=2):
+    (para, kwpara, varargs, varkw, defaults) = getVarNames(func)
+    N = len(p)
+    Npara = len(para) -1
+    para = para[1:] # first para is X
+    if len(pe) != N:
+        raise ValueError, "p and pe don't have the same dimension"
+    if Npara > N:
+        raise ValueError, "The function has too many positional parameters"
+    if Npara < N and varargs == None:
+        raise ValueError, "The function has too little positional parameters"
+    if Npara < N and varargs != None:
+        # create extra names par1, par2, for all needed varargs
+        para.extend(['par%i'%(i+1) for i in range(N-Npara)])
+    kw = collections.OrderedDict(zip(kwpara, defaults))
+    kw.update(extra)
+    ret = []
+    for n,v,ve in zip(para,p,pe):
+        ps, pes, es = convVal(v, ve, signif=signif)
+        if pes == None:
+            ret.append('%s:\t%s\t\tx10$^%s$'%(n, ps, es))
+        else:
+            ret.append('%s:\t%s\t+- %s\tx10$^%s$'%(n, ps, pes, es))
+    ret.extend(['%s:\t%r'%kv for kv in kw.iteritems()])
+    return ret
+
+# the argument names from a function are obtained with:
+# v=inspect.getargspec(sinc)
+# v[0]
+# v.args
 
 def fitcurve(func, x, y, p0, yerr=None, extra={}, **kwarg):
     """
