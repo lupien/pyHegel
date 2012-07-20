@@ -1693,34 +1693,43 @@ class HistoSmooth(object):
         x = (x-N/2.)*dx/N + xo
         return np.array([x, h/self.corr_binwidth])
 
-    def calc_cum(self, data, corrected=True):
+    def calc_cum(self, data, xscale=None, corrected=True):
         """ This functions calculates cumulants up to 5
         data can have multiple columns.
              With only one column, it is the histogram
              With multiple columns, the first has dimension of 2 (x-axis, histogram)
                   The last column will be the histogram (in between they are the
                   data set index like files...)
+        xscale when given is the x-axis, then data is all histogram (..., histogram)
 
         """
         N = data.shape[-1]
         bins = np.arange(N, dtype=float)
-        if data.ndim >= 2:
+        if xscale != None:
+            x = xscale
+            h = data
+        elif data.ndim >= 2:
             x = data[0]
             h = data[1]
         else:
             x = bins
             h = data.copy()
-        dx = x[-1] - x[0]
-        xo = (x[0] + x[-1])/2.
         if corrected:
+            dx = x[..., -1] - x[..., 0]
+            xo = (x[..., 0] + x[..., -1])/2.
+            dx = dx[..., None]
+            xo = xo[..., None]
             x = self.corr_bincenter
+            if x == None:
+                raise ValueError, 'No reference data present. Either add reference data or call with corrected=False'
             x = (x-N/2.)*dx/N + xo
-        norm_h = h/h.sum(axis=-1, dtype=float)
-        c1 = np.sum(x*norm_h)
-        c2 = np.sum((x-c1)**2 *norm_h)
-        c3 = np.sum((x-c1)**3 *norm_h)
-        cent_moment4 = np.sum((x-c1)**4 *norm_h)
-        cent_moment5 = np.sum((x-c1)**5 *norm_h)
+        norm_h = h/h.sum(axis=-1, dtype=float)[..., None]
+        c1 = np.sum(x*norm_h, axis=-1)
+        c1x = c1[..., None]
+        c2 = np.sum((x-c1)**2 *norm_h, axis=-1)
+        c3 = np.sum((x-c1)**3 *norm_h, axis=-1)
+        cent_moment4 = np.sum((x-c1)**4 *norm_h, axis=-1)
+        cent_moment5 = np.sum((x-c1)**5 *norm_h, axis=-1)
         c4 = cent_moment4 - 3.*c2**2
         c5 = cent_moment5 - 10.*c2*c3
         return np.array([c1, c2, c3, c4, c5])
