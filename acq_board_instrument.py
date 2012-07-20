@@ -1726,10 +1726,10 @@ class HistoSmooth(object):
         norm_h = h/h.sum(axis=-1, dtype=float)[..., None]
         c1 = np.sum(x*norm_h, axis=-1)
         c1x = c1[..., None]
-        c2 = np.sum((x-c1)**2 *norm_h, axis=-1)
-        c3 = np.sum((x-c1)**3 *norm_h, axis=-1)
-        cent_moment4 = np.sum((x-c1)**4 *norm_h, axis=-1)
-        cent_moment5 = np.sum((x-c1)**5 *norm_h, axis=-1)
+        c2 = np.sum((x-c1x)**2 *norm_h, axis=-1)
+        c3 = np.sum((x-c1x)**3 *norm_h, axis=-1)
+        cent_moment4 = np.sum((x-c1x)**4 *norm_h, axis=-1)
+        cent_moment5 = np.sum((x-c1x)**5 *norm_h, axis=-1)
         c4 = cent_moment4 - 3.*c2**2
         c5 = cent_moment5 - 10.*c2*c3
         return np.array([c1, c2, c3, c4, c5])
