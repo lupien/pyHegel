@@ -2420,23 +2420,128 @@ class lakeshore_370(visaInstrument):
         super(type(self),self)._create_devs()
 
 class infiniiVision_3000(visaInstrument):
+    """
+     To use this instrument, the most useful devices are probably:
+       fetch  (only works in the main timebase mode, not for roll or XY or zoom)
+       snap_png
+    """
+    def init(self, full=False):
+        self.write(':WAVeform:FORMat WORD') # can be WORD BYTE or ASCii
+        self.write(':WAVeform:BYTeorder LSBFirst') # can be LSBFirst pr MSBFirst
+        self.write(':WAVeform:UNSigned ON') # ON,1 or OFF,0
+        super(visaInstrument, self).init(full=full)
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('source', 'mode', 'preamble', options)
+        # TODO:  improve this
+        return self._conf_helper('source', 'points_mode', 'preamble', options)
+    def digitize(self):
+        """
+        Starts an acquisition
+        """
+        self.write(':DIGitize')
+    def run_trig(self):
+        """
+        The same as pressing run
+        """
+        self.write(':RUN')
+    def stop_trig(self):
+        """
+        The same as pressing stop
+        """
+        self.write(':STOP')
+    def single_trig(self):
+        """
+        The same as pressing single
+        """
+        self.write(':SINGle')
+    def _fetch_ch_helper(self, ch):
+        if ch==None:
+            ch = self.find_all_active_channels()
+        if not isinstance(ch, (list)):
+            ch = [ch]
+        return ch
+    def _fetch_getformat(self, **kwarg):
+        xaxis = kwarg.get('xaxis', True)
+        ch = kwarg.get('ch', None)
+        ch = self._fetch_ch_helper(ch)
+        if xaxis:
+            multi = ['time(s)']
+        else:
+            multi = []
+        for c in ch:
+            multi.append('ch%i'%c)
+        fmt = self.fetch._format
+        multi = tuple(multi)
+        fmt.update(multi=multi, graph=[], xaxis=xaxis)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_getdev(self, ch=None, xaxis=True):
+        """
+            ch=None, xaxis=True
+            ch: a single value or a list of values for the channels to capture
+                a value of None selects all the active ones.(1-4)
+            xaxis: Set to True (default) to return the timebase as the first column
+        """
+        ch = self._fetch_ch_helper(ch)
+        if ch==None:
+            ch = self.find_all_active_channels()
+        if not isinstance(ch, (list)):
+            ch = [ch]
+        ret = []
+        first = True
+        for c in ch:
+            self.source.set('chan%i'%c)
+            pream = self.preamble.get()
+            data = self.data.get()*1. # make it floats
+            data_real = (data - pream['yref']) * pream['yinc'] + pream['yorig']
+            if xaxis and first:
+                first = False
+                ret = [(np.arange(pream['points'])- pream['xref']) * pream['xinc'] + pream['xorig']]
+            ret.append(data_real)
+        ret = np.asarray(ret)
+        if ret.shape[0]==1:
+            ret=ret[0]
+        return ret
+    def find_all_active_channels(self):
+        orig_ch = self.current_channel.get()
+        ret = []
+        for i in range(1,5):
+            if self.channel_display.get(ch=i):
+                ret.append(i)
+        self.current_channel.set(orig_ch)
+        return ret
     def _create_devs(self):
-        # Note vincent's hegel, uses set to define filename where block data is saved.
-        self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', str_type=_decode_block_base, autoinit=False) # returns block of data(always bin with # header)
+        self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', str_type=_decode_block_base, autoinit=False, doc="Use like this: get(s500.snap_png, filename='testname.png')\nThe .png extensions is optional. It will be added if necessary.")
         self.snap_png._format['bin']='.png'
-        self.inksaver = scpiDevice(':HARDcopy:INKSaver', str_type=bool) # ON, OFF 1 or 0
-        # TODO return scaled values, and select channels
-        self.data = scpiDevice(getstr=':waveform:DATA?', str_type=_decode_uint8_bin, autoinit=False) # returns block of data (always header# for asci byte and word)
+        self.inksaver = scpiDevice(':HARDcopy:INKSaver', str_type=bool, doc='This control whether the graticule colors are inverted or not.') # ON, OFF 1 or 0
+        self.data = scpiDevice(getstr=':waveform:DATA?', str_type=_decode_uint16_bin, autoinit=False) # returns block of data (always header# for asci byte and word)
           # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
           #  type (Normal, peak, average, HRes), #points, #avg, xincr, xorg, xref, yincr, yorg, yref
           #  xconv = xorg+x*xincr, yconv= (y-yref)*yincr + yorg
-        self.format = scpiDevice(':WAVeform:FORMat') # WORD, BYTE, ASC
-        self.points = scpiDevice(':WAVeform:POINts') # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
-        self.mode = scpiDevice(':WAVeform:POINts:MODE', choices=ChoiceStrings('NORMal', 'MAXimum', 'RAW'))
-        self.preamble = scpiDevice(getstr=':waveform:PREamble?')
-        self.source = scpiDevice(':WAVeform:SOURce') # CHAN1, CHAN2, CHAN3, CHAN4
+        self.points = scpiDevice(':WAVeform:POINts', str_type=int) # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
+        self.points_mode = scpiDevice(':WAVeform:POINts:MODE', choices=ChoiceStrings('NORMal', 'MAXimum', 'RAW'))
+        self.preamble = scpiDevice(getstr=':waveform:PREamble?', str_type=dict_str(['format', 'type', 'points', 'count', 'xinc', 'xorig', 'xref', 'yinc', 'yorig', 'yref'],[int, int, int, int, float, float, int, float, float, int]))
+        self.waveform_count = scpiDevice(getstr=':WAVeform:COUNt?', str_type=int)
+        self.acq_type = scpiDevice(':ACQuire:TYPE', choices=ChoiceStrings('NORMal', 'AVERage', 'HRESolution', 'PEAK'))
+        self.acq_mode= scpiDevice(':ACQuire:MODE', choices=ChoiceStrings('RTIM', 'SEGM'))
+        self.average_count = scpiDevice(':ACQuire:COUNt', str_type=int, min=2, max=65536)
+        self.acq_samplerate = scpiDevice(getstr=':ACQuire:SRATe?', str_type=float)
+        self.acq_npoints = scpiDevice(getstr=':ACQuire:POINts?', str_type=int)
+        self.current_channel = MemoryDevice(1, min=1, max=4)
+        def devChannelOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_channel)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.source = scpiDevice(':WAVeform:SOURce', choices=ChoiceStrings('CHANnel1', 'CHANnel2', 'CHANnel3', 'CHANnel4'))
+        self.channel_display = devChannelOption('CHANnel{ch}:DISPlay', str_type=bool)
+        self.timebase_mode= scpiDevice(':TIMebase:MODE', choices=ChoiceStrings('MAIN', 'WINDow', 'XY', 'ROLL'))
+        self.timebase_pos= scpiDevice(':TIMebase:POSition', str_type=float) # in seconds from trigger to display ref
+        self.timebase_range= scpiDevice(':TIMebase:RANGe', str_type=float) # in seconds, full scale
+        self.timebase_reference= scpiDevice(':TIMebase:REFerence', choices=ChoiceStrings('LEFT', 'CENTer', 'RIGHt'))
+        self.timebase_scale= scpiDevice(':TIMebase:SCALe', str_type=float) # in seconds, per div
+        #TODO: add a bunch of CHANNEL commands, Then MARKER and MEASure, TRIGger
+        self._devwrap('fetch', autoinit=False, trig=True)
+        #self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
