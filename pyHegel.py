@@ -37,6 +37,37 @@ import instrument
 import local_config
 import util
 
+def _update_sys_path():
+    # This will handle calling of the script in the following ways:
+    #  python -i ./some/partial/path/pyHegel.py
+    #  ipython ./some/partial/path/pyHegel.py
+    #  ipython -i ./some/partial/path/pyHegel.py # in linux
+    #    in ipython
+    #     run ./some/partial/path/pyHegel
+    #     run -i ./some/partial/path/pyHegel
+    # But will not handle calling it this way
+    #  execfile('./some/partial/path/pyHegel.py') # we assume that if execfile is used, that path is already set.
+    #  from pyHegel import *   # for this to work, the path is already set
+    if __name__ != 'main':
+        # importing pyHegel or execfile from a module
+        return
+    partial_path = sys.argv[0] # This is empty for execfile
+    # cwd = os.getcwd()
+    # partial_path = __file__ # This fails on windows for ipython ./some/partial/path/pyHegel
+    # Make it a full path. (only a full path when run under ipython -i in linux)
+    full_path = os.path.abspath(partial_path)
+    # sys.path[0] for the running script is set properly, but it is not passed
+    #  to the ipyhton session (same effect for run)
+    if full_path not in sys.path:
+        sys.path.insert(1, full_path) # Insert after element 0
+
+#try:
+#    if _sys_path_modified:
+#        pass # already updated path.
+#except:
+#    _update_sys_path()
+#    _sys_path_modified = True
+
 
 def help_pyHegel():
     """
