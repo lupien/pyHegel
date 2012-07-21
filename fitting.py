@@ -27,7 +27,7 @@ def xcothx(x):
     #return where(x==0, 1., nx/tanh(nx))
     return nx/np.tanh(nx)
 
-def noisePower(V, T, R):
+def noisePower(V, T, R=50.):
     """
     Use this function to fit the noise power (from a diode).
     T is in Kelvin
@@ -45,7 +45,7 @@ def noisePower(V, T, R):
     return xcothx(v) * (4.*kbt/R)
 noisePower.display_str = r"$2e\frac{V}{R} \coth\left(\frac{eV}{2k_B T}\right)$"
 
-def noisefitV(V, A, T, R, Toffset):
+def noisefitV(V, T, A, Toffset, R=50.):
     """
     Use this function to fit. Based on noisePower.
     Use this when you know the applied DC voltage (in volts) on the sample.
@@ -60,7 +60,7 @@ def noisefitV(V, A, T, R, Toffset):
     return A*(noisePower(V, T, R)+offset)/Aunit
 noisefitV.display_str = r"$\frac{A}{4k_B T/R}\left(2e\frac{V}{R} \coth\left(\frac{eV}{2k_B T}\right) +\frac{4 k_B T_{offset}}{50})\right)$"
 
-def noisefitI(I, Amp, T, R, Toffset):
+def noisefitI(I, T, A, Toffset, R=50.):
     """
     Use this function to fit. Based on noisePower.
     Use this when you know the applied DC current (in amps) on the sample.
@@ -72,10 +72,10 @@ def noisefitI(I, Amp, T, R, Toffset):
     kbt = C.k*T
     offset = 4.*C.k*Toffset/50.
     Aunit = 4.*kbt/R
-    return amp*(noisePower(I*R, T, R)+offset)/Aunit
+    return A*(noisePower(I*R, T, R)+offset)/Aunit
 noisefitI.display_str = r"$\frac{A}{4k_B T/R}\left(2eI \coth\left(\frac{eIR}{2k_B T}\right) +\frac{4 k_B T_{offset}}{50})\right)$"
 
-def noiseRF(Vdc, Vac, f, T, R, N=100):
+def noiseRF(Vdc, T, Vac, f, R=50., N=100):
     """
     Vdc in Volts
     RF signal of Vac (Volts peak) at frequency f (Hz)
@@ -94,7 +94,7 @@ def noiseRF(Vdc, Vac, f, T, R, N=100):
 noiseRF.display_str = r"$\frac{4 k_B T}{R} \sum_{n=-N}^{N} J_n(e V_{AC}/hf)^2 \frac{e V_{DC}-nhf}{2 k_B T} \coth\left(\frac{e V_{DC}-nhf}{2 k_B T}\right)$"
 
 
-def noiseRFfit(Vdc, A, Toffset, Vac, T, f=20e9, R=70., N=100):
+def noiseRFfit(Vdc, T, A, Toffset, Vac, f=20e9, R=70., N=100):
     """
     A is the scale of the fit. It contains the effect of the
     bandwidth and the amplifiers gains. In the measurement unit.
@@ -110,7 +110,7 @@ def noiseRFfit(Vdc, A, Toffset, Vac, T, f=20e9, R=70., N=100):
     kbt = C.k*T
     offset = 4.*C.k*Toffset/50.
     Aunit = 4.*kbt/R
-    return A*(noiseRF(Vdc, Vac, f, T, R, N)+offset)/Aunit
+    return A*(noiseRF(Vdc, T, Vac, f, R, N)+offset)/Aunit
 noiseRFfit.display_str = r"$ A \left(\left[\sum_{n=-N}^{N} J_n(e V_{AC}/hf)^2 \frac{e V_{DC}-nhf}{2 k_B T} \coth\left(\frac{e V_{DC}-nhf}{2 k_B T} \right)\right] + T_{offset}/T\right)$"
 
 
@@ -283,13 +283,13 @@ if __name__ == "__main__":
     import gen_poly
     N = 200
     x = np.linspace(-0.22e-3, 0.21e-3, N)
-    y = noiseRFfit(x, -.22e-3, 8., 0.113e-3, 0.069, f=20e9, R=70., N=100)
+    y = noiseRFfit(x, 0.069, -.22e-3, 8., 0.113e-3, f=20e9, R=70., N=100)
     y += np.random.randn(N) * 1e-5
-    res = fitcurve(noiseRFfit, x, y,[-.003,4.,.01e-3,.05], extra=dict(N=10,f=20e9))
-    fitplot(noiseRFfit, x, y,[-.003,4.,.01e-3,.05], extra=dict(N=10,f=20e9),skip=1, fig=1)
-    res2 = fitplot(noiseRFfit, x, y,[-.003,4.,.01e-3,.05], extra=dict(N=10,f=20e9), fig=2)
-    res3 = fitplot(noiseRFfit, x, y,[-.003,4.,.01e-3,.05], extra=dict(N=10,f=20e9), yerr=1e-5, fig=3)
-    res4 = fitplot(noiseRFfit, x, y,[-.003,4.,.01e-3,.05], extra=dict(N=10,f=20e9), yerr=1e-6, fig=4)
+    res = fitcurve(noiseRFfit, x, y,[0.05, -.003,4.,.01e-3], extra=dict(N=10,f=20e9))
+    fitplot(noiseRFfit, x, y,[.05, -.003,4.,.01e-3], extra=dict(N=10,f=20e9),skip=1, fig=1)
+    res2 = fitplot(noiseRFfit, x, y,[.05, -.003,4.,.01e-3], extra=dict(N=10,f=20e9), fig=2)
+    res3 = fitplot(noiseRFfit, x, y,[.05, -.003,4.,.01e-3], extra=dict(N=10,f=20e9), yerr=1e-5, fig=3)
+    res4 = fitplot(noiseRFfit, x, y,[.05, -.003,4.,.01e-3], extra=dict(N=10,f=20e9), yerr=1e-6, fig=4)
     print '-----------------------------------------'
     print ' Comparison with poly fit'
     linfunc = lambda x, b, m, c:   c*x**2 + m*x + b
