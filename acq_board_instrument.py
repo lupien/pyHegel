@@ -998,6 +998,7 @@ You can start a server with:
         osc_trigmode_str = ['Normal','Auto']
         format_location_str = ['Local','Remote']
         format_type_str = ['Default','ASCII','NPZ']
+        window_str = ['None', 'Bartlett', 'Hann', 'Welch']
         
         #device init
         # Configuration
@@ -1038,6 +1039,7 @@ You can start a server with:
         self.corr_mode = acq_device('CONFIG:CORR_MODE', str_type=acq_bool())
         self.autocorr_single_chan = acq_device('CONFIG:AUTOCORR_SINGLE_CHAN', str_type=acq_bool())
         self.fft_length = acq_device('CONFIG:FFT_LENGTH', str_type=int, min=64, max=2**20)
+        self.fft_window = acq_device('CONFIG:FFT_WINDOW', str_type=str, choices=window_str)
         self.cust_param1 = acq_device('CONFIG:CUST_PARAM1', str_type=float)
         self.cust_param2 = acq_device('CONFIG:CUST_PARAM2', str_type=float)
         self.cust_param3 = acq_device('CONFIG:CUST_PARAM3', str_type=float)
@@ -1307,7 +1309,7 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the number of samples used for histogram (uses min by default)
+        nb_MSample: set the total number of samples used (uses min by default)
                     This number includes both channels.
         """
         self.op_mode.set('Corr')
@@ -1333,7 +1335,7 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the number of samples used for histogram (uses min by default)
+        nb_MSample: set the total number of samples used (uses min by default)
                     This number includes both channels, if both are read.
         autocorr_single_chan: When True, only one channel is read and analyzed
                               otherwise both are read and analyzed.
@@ -1370,7 +1372,7 @@ You can start a server with:
         See tau_vec to set a vector of time displacement between x and y.
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the number of samples used for histogram (uses min by default)
+        nb_MSample: set the total number of samples used (uses min by default)
                     This number includes both channels.
         autocorr_single_chan: When True, only one channel is analyzed for
                               autocorrelation otherwise both are analyzed.
@@ -1414,7 +1416,7 @@ You can start a server with:
         Set sampling_rate and clock_source, or reuse the previous ones by
         default (see set_clock_source).
         signal_freq: initial value for net_signal_freq
-        nb_MSample: set the number of samples used for histogram (uses min by default)
+        nb_MSample: set the total number of samples used (uses min by default)
                     This number includes both channels.
         nb_harm:  the number of harmonics to analyze, defaults to 1.
         lock_in_square: when True, squares the signal before doing the lock-in
@@ -1471,20 +1473,43 @@ You can start a server with:
         self.osc_trig_source(trig_source)
         self.osc_trig_mode(trig_mode)
         
-    def set_spectrum(self,nb_Msample='min', fft_length=1024, chan_mode='Single',
-                     chan_nb=1, sampling_rate=None, clock_source=None):
+    def set_spectrum(self, nb_Msample='min', fft_length=1024, window='Bartlett',
+                     chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         """
         Activates the spectrum analyzer mode (FFT).
 
-        nb_MSample: set the number of samples used for histogram (uses min by default)
+        nb_MSample: set the total number of samples used (uses min by default)
                     This number includes both channels, if both are read.
         fft_length: The number of points used for calculating the FFT.
                     Needs to be a power of 2. defaults to 1024
+        window:     The window to use for the analysis. One of
+                    'None' (square), 'Bartlett' (triangular), 'Hann' (cosine) or
+                    'Welch' (quadratic)
+                    Note that Bartlett is the same as scipy.signal.bartlett(fft_length, sym=False).
+                    'None' is the narowess but can also have the largest sidelobe leakage.
+                     (i.e. when the real frequency falls in between frequency bins,
+                      the peak is much smaller and is spread out over many frequency bins)
+                    'Hann' has the smallest leakage but is also the widest.
+                    For main peak narrowness: 'None' < 'Welch' < 'Bartlett' < 'Hann'
+                    It is the reverse for side lobe importance.
+                    For a signal centered on the frequency bin
+                    you get for the first few bins amplitude:
+                        None:     1.,    0,     0,     0
+                        Welch:    1.,    0.304, 0.076, 0.034
+                        Bartlett: 1.,    0.405, 0.,    0.045
+                        Hann:     1.,    0.5,   0,     0
+                    For a signal in the middle of 2 bins, you get:
+                        None:     0.637, 0.212, 0.127, 0.091
+                        Welch:    0.774, 0.029, 0.006, 0.002
+                        Bartlett: 0.811, 0.090, 0.032, 0.017
+                        Hann:     0.849, 0.170, 0.024, 0.008
+                    See the book "Numerical recipes" for more info (suggests either
+                    Bartlett or Welch).
         chan_mode: Either 'Single' (default) or 'Dual'.
                    In dual, both channels are read.
         chanb_nb: Channel to read when in 'Single' mode. Either 1 (default) or 2.
 
-        Get data from fetch (readval) or from custom_result1-4
+        Get data from fetch (readval).
 
         Set sampling_rate and clock_source, or reuse the previous ones by
         default (see set_clock_source).
@@ -1499,6 +1524,7 @@ You can start a server with:
         self.chan_nb.set(chan_nb)
         self._set_mode_defaults()
         self.fft_length.set(fft_length)
+        self.fft_window.set(window)
 
     def set_custom(self, cust_user_lib, cust_param1, cust_param2, cust_param3, cust_param4,
                    nb_Msample='min',  chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
@@ -1507,15 +1533,13 @@ You can start a server with:
 
         cust_user_lib: the dll file to load into the acquisition server program
         cust_param1-4: the parameters passed to the custom code. All are floats.
-        nb_MSample: set the number of samples used for histogram (uses min by default)
+        nb_MSample: set the total number of samples used (uses min by default)
                     This number includes both channels, if both are read.
-        fft_length: The number of points used for calculating the FFT.
-                    Needs to be a power of 2. defaults to 1024
         chan_mode: Either 'Single' (default) or 'Dual'.
                    In dual, both channels are read.
         chanb_nb: Channel to read when in 'Single' mode. Either 1 (default) or 2.
 
-        Get data from fetch (readval).
+        Get data from fetch (readval) or from custom_result1-4
 
         Set sampling_rate and clock_source, or reuse the previous ones by
         default (see set_clock_source).
