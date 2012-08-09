@@ -194,6 +194,24 @@ class Listen_thread(threading.Thread):
         self.join(timeout)
         return not self.is_alive()
 
+def spectrum_smooth(data, ss=2):
+    """ Takes data as the amplitude of fft (asumming data is folded freq: from 0 to max f)
+        ss is the number of points on the left and right to combine.
+        They are combine as the sum of the squares.
+        The returned values are the amplitude.
+    """
+    if ss == 0:
+        return data
+    d = data**2
+    N = len(d)
+    istart = np.arange(2*ss+1)
+    istop = N + istart
+    res = d*0.
+    dext = np.zeros(N+2*ss)
+    dext[ss:N+ss] = d
+    for b,e in zip(istart, istop):
+        res += dext[b:e]
+    return np.sqrt(res)
 
 # TODO: Add CHECKING verification in init and instrument write/read.
 class Acq_Board_Instrument(instrument.visaInstrument):
@@ -533,7 +551,7 @@ You can start a server with:
         return filestr
 
 
-    def _fetch_getdev(self, filename=None, ch=None, unit='default', xaxis=None):
+    def _fetch_getdev(self, filename=None, ch=None, unit='default', ss=0, xaxis=None):
         """
            fetch is used to obtain possibly large data sets.
            It should only be called after performing an acquisition (run),
@@ -558,6 +576,7 @@ You can start a server with:
             -xaxis     When True, the first returned column will be the xaxis values
                        default is True for all except correlations
                        Not used for Acq, Net or Custom mode
+            -ss        Used to smooth get a stable peak amplitude for spectra
 
            Behavior according to modes:
                Acq:  ch as no effect here
@@ -593,7 +612,7 @@ You can start a server with:
                     unit='real' returns result.real
                     unit='imag' returns result.imag
                     unit='cmplx' returns result as complex numbers, Note that this cannot be written to file
-               Spec: by default, returns amplitudes in Volts of
+               Spec: by default, returns amplitudes in Volts RMS of
                         ch=[1,2] in Dual or of the selected channel in Single
                     unit='V2' returns the V^2
                     unit='V/sHz' returns V/sqrt(bin BW), BW=bandwidth
@@ -601,6 +620,15 @@ You can start a server with:
                     unit='W/Hz' returns power/(bin BW)
                     unit='dBm' returns W converted to dBm
                     unit='dBm/Hz' returns W/Hz converted to dBm
+                    ss  selects the number of points on either side of the
+                        peak to include as the sum of squares (It is like doing a
+                        power integral over -s to +s). ss=0 disables it.
+                        ss=2 when using a window like 'Hann' should make the
+                        peak amplitude stable as a source frequency is swept.
+                        For units that uses the bin BW, it is adjusted to to number of
+                        bins taken together (also adjusting for the edges),
+                        so ss should behave like a rolling window
+                        average.
                Corr: by default, returns the bit^2 of the correlation.
                     unit='V2' returns it in V^2
                       The selectable channels are:
@@ -769,7 +797,6 @@ You can start a server with:
             if type(ch) != list:
                 ch = [ch]
             xscale = self.get_xscale()
-            bin_width = xscale[1]-xscale[0]
             if xaxis:
                 ret = [xscale]
                 sl = slice(1,None)
@@ -784,7 +811,8 @@ You can start a server with:
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
-                ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
+                d = spectrum_smooth(np.fromstring(self.fetch._rcv_val, np.float64), ss)
+                ret.append(d)
             if 2 in ch:
                 self.fetch._event_flag.clear()
                 filestr = self._fetch_filename_helper(filename,'2')
@@ -793,9 +821,18 @@ You can start a server with:
                 instrument.wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
-                ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
+                d = spectrum_smooth(np.fromstring(self.fetch._rcv_val, np.float64), ss)
+                ret.append(d)
             ret = np.asarray(ret)
             V = ret[sl, :]
+            bin_width = (xscale[1]-xscale[0])*(2.*ss+1)
+            if ss != 0:
+                # We need to handle the bin_width on the edges when doing
+                # smoothing because the points past the edges are 0.
+                bin_width = np.zeros_like(V) + bin_width
+                ssbwf = np.arange(ss+1,2*ss+1)/(2.*ss+1)
+                bin_width[..., :ss] *= ssbwf
+                bin_width[..., -ss:] *= ssbwf[::-1]
             if unit == 'V2':
                 vret = V*V
             elif unit == 'V/sHz':
