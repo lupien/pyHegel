@@ -48,25 +48,40 @@ def _update_sys_path():
     # But will not handle calling it this way
     #  execfile('./some/partial/path/pyHegel.py') # we assume that if execfile is used, that path is already set.
     #  from pyHegel import *   # for this to work, the path is already set
-    if __name__ != 'main':
+    if __name__ != '__main__':
         # importing pyHegel or execfile from a module
         return
-    partial_path = sys.argv[0] # This is empty for execfile
+    # Initialize assuming the python filename is the last argument.
+    partial_path = sys.argv[-1] # for execfile this is left over from calling environment (can be empty)
+    # Now check to see if it is another argument.
+    for a in sys.argv:
+        if 'pyHegel.py' in a.lower():
+            partial_path = a
+            break
     # cwd = os.getcwd()
     # partial_path = __file__ # This fails on windows for ipython ./some/partial/path/pyHegel
-    # Make it a full path. (only a full path when run under ipython -i in linux)
-    full_path = os.path.abspath(partial_path)
+    # Make it a full path. (only already a full path when run under ipython -i in linux)
+    full_exec_path = os.path.abspath(partial_path)
     # sys.path[0] for the running script is set properly, but it is not passed
-    #  to the ipyhton session (same effect for run)
+    #  to the ipython session (same effect for run)
+    full_path = os.path.dirname(full_exec_path)
+    # ipython adds to sys.path the path to the executable when running a script
+    # but strips it before returning control to the use (whether it is starting
+    # from os command line or using run).
+    # So we always insert a copy of the fullpath even if it is already there, because
+    # ipython tends to remove one from the list after running a script
+    # and this function will probably be executed only once.
     if full_path not in sys.path:
         sys.path.insert(1, full_path) # Insert after element 0
+    else:
+        sys.path.insert(2, full_path) # Insert after element 1, which is '' for ipython, element 0 is executable path that is stripped.
+    return (full_exec_path, full_path)
 
-#try:
-#    if _sys_path_modified:
-#        pass # already updated path.
-#except:
-#    _update_sys_path()
-#    _sys_path_modified = True
+try:
+    if _sys_path_modified:
+        pass # already updated path.
+except:
+    _sys_path_modified = _update_sys_path()
 
 
 def help_pyHegel():
@@ -157,7 +172,10 @@ def reset_pyHegel():
     reload(local_config.acq_board_instrument)
     reload(local_config)
     reload(util)
-    execfile('pyHegel.py', globals())
+    try:
+        execfile(_sys_path_modified[0], globals())
+    except NameError:
+        execfile('pyHegel.py', globals())
 
 # exec in ipython with run -i otherwise
 #  this globals will not be the same as the command line globals
