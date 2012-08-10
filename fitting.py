@@ -207,9 +207,40 @@ def printResult(func, p, pe, extra={}, signif=2):
 # v[0]
 # v.args
 
-def fitcurve(func, x, y, p0, yerr=None, extra={}, **kwarg):
+def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, **kwarg):
     """
-    The kwarg available are the ones for leastsq: 
+    func is the function. It needs to be of the form:
+          f(x, p1, p2, p3, ..., k1=1, k2=2, ...)
+    can also be defined as
+          f(x, *ps, **ks)
+          where ps will be a list and ks a dictionnary
+    where x is the independent variables. All the others are
+    the parameters (they can be named as you like)
+    The function can also have and attribute display_str that contains
+    the function representation in TeX form (func.disp='$a_1 x+b x^2$')
+
+    x is the independent variable (passed to the function).
+    y is the dependent variable. The fit will minimize sum((func(x,..)-y)**2)
+    p0 is a vector of the initial parameters used for the fit. It needs to be
+    at least as long as all the func parameters without default values.
+
+    yerr when given is the value of the sigma (the error) of all the y.
+         It needs a shape broadcastable to y, so it can be a constant.
+
+    extra is a way to specify any of the function parameters that
+          are not included in the fit. It needs to be a dictionnary.
+          It will be passed to the function evaluation as
+           func(..., **extra)
+          so if extra={'a':1, 'b':2}
+          which is the same as extra=dict(a=1, b=2)
+          then the function will be effectivaly called like:
+           func(..., a=1, b=2)
+    errors controls the handling of the yerr.
+           It can be True (default), or False.
+           When False, yerr are used as fitting weights.
+            w = 1/yerr**2
+
+    The kwarg available are the ones for leastsq (see its documentation):
      ftol
      xtol
      gtol
@@ -217,10 +248,27 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, **kwarg):
      epsfcn
      factor
      diag
+
     Returns pf, chi2, pe, extras
-      extras is chiNorm, sigmaCorr, s, covar
+      pf is the fit result
+      chi2 is the chi square
+      pe are the errors on pf
+          Without a yerr given, or with a yerr and errors=False,
+          it does the neede correction to make chiNornm==1.
+          With a yerr given and errors=True: it takes into account
+          of the yerr and does not consider chiNorm at all.
+
+      extras is chiNorm, sigmaCorr, s, covar, nfev
+       chiNorm is the normalized chi2 (divided by the degree of freedom)
+               When the yerr are properly given (and errrors=True), it should
+               statistically tend to 1.
+       sigmaCorr is the correction factor to give to yerr, or the yerr themselves
+                 (if yerr is not given) thats makes chiNornm==1
+       s are the errors. It is either yerr, when they are given (and errors=True)
+         or the estimated yerr assuming chiNornm==1
+       nfev is the number of functions calls
     """
-    do_corr = False
+    do_corr = not errors
     if yerr == None:
         yerr = 1.
         do_corr = True
@@ -232,18 +280,31 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, **kwarg):
     Ndof = len(x)- len(p)
     chiNorm = chi2/Ndof
     sigmaCorr = np.sqrt(chiNorm)
-    pe = np.sqrt(cov_x.diagonal())
-    pei = 1./pe
-    covar =  cov_x*pei[None,:]*pei[:,None]
+    if cov_x != None:
+        pe = np.sqrt(cov_x.diagonal())
+        pei = 1./pe
+        covar =  cov_x*pei[None,:]*pei[:,None]
+    else: # can happen when with a singular matrix (very flat curvature in some direction)
+        pe = p*0. -1 # same shape as p but with -1
+        covar = None
     s = yerr
     if do_corr:
         pe *= sigmaCorr
-        s *= sigmaCorr
-    extras = dict(mesg=mesg, ier=ier, chiNorm=chiNorm, sigmaCorr=sigmaCorr, s=s, covar=covar)
+        s = yerr*sigmaCorr
+    extras = dict(mesg=mesg, ier=ier, chiNorm=chiNorm, sigmaCorr=sigmaCorr, s=s, covar=covar, nfev=infodict['nfev'])
     return p, chi2, pe, extras
 
 
 def fitplot(func, x, y, p0, yerr=None, extra={}, fig=None, skip=False, **kwarg):
+    """
+    This does the same as fitcurve (see its documentation)
+    but also plots the data, the fit on the top panel and
+    the difference between the fit and the data on the bottom panel.
+
+    fig selects which figure to use. By default it uses the currently active one.
+    skip when True, prevents the fitting. This is useful when trying out initial
+         parameters for the fit.
+    """
     if fig:
         fig=plt.figure(fig)
     else:
