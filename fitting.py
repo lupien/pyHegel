@@ -13,6 +13,7 @@ from scipy.optimize import leastsq
 # see also scipy.optimize.curve_fit
 import matplotlib.pylab as plt
 import collections
+import __builtin__
 
 def xcothx(x):
     """
@@ -128,7 +129,10 @@ def getVarNames(func):
           defaults are the default values for the kwpara
     """
     (args, varargs, varkw, defaults) = inspect.getargspec(func)
-    Nkw = len(defaults)
+    if defaults == None:
+        Nkw = 0
+    else:
+        Nkw = len(defaults)
     Nall = len(args)
     Narg = Nall-Nkw
     para = args[:Narg]
@@ -202,12 +206,51 @@ def printResult(func, p, pe, extra={}, signif=2):
     ret.extend(['%s:\t%r'%kv for kv in kw.iteritems()])
     return ret
 
-# the argument names from a function are obtained with:
-# v=inspect.getargspec(sinc)
-# v[0]
-# v.args
+def _handle_adjust(func, p0, adjust, noadjust):
+    if adjust == None and noadjust == None:
+        return slice(None)
+    Np = len(p0)
+    all_index = range(Np)
+    para, kwpara, varargs, varkw, defaults = getVarNames(func)
+    names = para
+    Npara = len(para)
+    if Npara < Np:
+        names += kwpara[:Np-Npara]
+    if isinstance(adjust, slice):
+        adjust = all_index(adjust)
+    if isinstance(noadjust, slice):
+        adjust = all_index(noadjust)
+    if adjust == None:
+        adjust = all_index
+    if noadjust == None:
+        noadjust = []
+    #s = set() # This fails when running under pyHegel (not on import).
+    s = __builtin__.set()
+    # cleanup adjust. Remove duplicates, handle named variables.
+    for a in adjust:
+        if isinstance(a, basestring):
+            s.add(names.index(a)-1) # -1 to remove the x parameter of f(x, p1, ...)
+        else:
+            s.add(a)
+    # Now cleanup noadjust
+    sna = __builtin__.set()
+    for na in noadjust:
+        if isinstance(na, basestring):
+            sna.add(names.index(na)-1)
+        else:
+            sna.add(na)
+    #Remove noadjust from adjust set
+    s = s-sna
+    adj=list(s)
+    adj.sort()
+    return adj
 
-def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, **kwarg):
+def _adjust_merge(padj, p0, adj):
+    p0 = p0.copy()
+    p0[adj] = padj
+    return p0
+
+def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noadjust=None, **kwarg):
     """
     func is the function. It needs to be of the form:
           f(x, p1, p2, p3, ..., k1=1, k2=2, ...)
@@ -239,6 +282,23 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, **kwarg):
            It can be True (default), or False.
            When False, yerr are used as fitting weights.
             w = 1/yerr**2
+
+    adjust and noadjust select the parameters to fit.
+           They are both lists, or slices.
+           For lists, the elements can be the index of the parameter
+           or the name of the parameter (according to the function definition).
+           noadjust is applied after adjust and removes parameters from
+           fitting. The default is to adjust all the parameters in p0
+           Example: with f(x, a, b, c, d, e, f=1)
+             fitcurve(f,x,y, [1,2,3,4,5], adjust=[1, 2, 'e'])
+              will adjust parameter b, c and e only
+             fitcurve(f,x,y, [1,2,3,4,5], noadjust=[1,2])
+              will adjust parameter a, d and e
+             fitcurve(f,x,y, [1,2,3,4,5], adjust=slice(1,4), noadjust=[1,2])
+              will adjust parameter d only (adjust selects, b,c,d; noadjusts
+              removes b,c)
+             fitcurve(f,x,y, [1,2,3,4,5,6], noadjust=[1,2])
+              will adjust parameter c,d,e and also f
 
     The kwarg available are the ones for leastsq (see its documentation):
      ftol
@@ -272,8 +332,10 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, **kwarg):
     if yerr == None:
         yerr = 1.
         do_corr = True
-    f = lambda p, x, y, yerr: (y-func(x, *p, **extra))/yerr
-    p, cov_x, infodict, mesg, ier = leastsq(f, p0, args=(x, y, yerr), full_output=True, **kwarg)
+    p0 = np.array(p0) # this allows complex indexing lik p0[[1,2,3]]
+    adj = _handle_adjust(func, p0, adjust, noadjust)
+    f = lambda p, x, y, yerr: (y-func(x, *_adjust_merge(p, p0, adj), **extra))/yerr
+    p, cov_x, infodict, mesg, ier = leastsq(f, p0[adj], args=(x, y, yerr), full_output=True, **kwarg)
     if ier not in [1, 2, 3, 4]:
         print 'Problems fitting:', mesg
     chi2 = np.sum(f(p, x, y, yerr)**2)
@@ -292,7 +354,11 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, **kwarg):
         pe *= sigmaCorr
         s = yerr*sigmaCorr
     extras = dict(mesg=mesg, ier=ier, chiNorm=chiNorm, sigmaCorr=sigmaCorr, s=s, covar=covar, nfev=infodict['nfev'])
-    return p, chi2, pe, extras
+    p_all = p0.copy()
+    pe_all = np.zeros_like(p0)
+    p_all[adj] = p
+    pe_all[adj] = pe
+    return p_all, chi2, pe_all, extras
 
 
 def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=False, **kwarg):
