@@ -274,7 +274,7 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, **kwarg):
         do_corr = True
     f = lambda p, x, y, yerr: (y-func(x, *p, **extra))/yerr
     p, cov_x, infodict, mesg, ier = leastsq(f, p0, args=(x, y, yerr), full_output=True, **kwarg)
-    if ier != 1:
+    if ier not in [1, 2, 3, 4]:
         print 'Problems fitting:', mesg
     chi2 = np.sum(f(p, x, y, yerr)**2)
     Ndof = len(x)- len(p)
@@ -295,7 +295,7 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, **kwarg):
     return p, chi2, pe, extras
 
 
-def fitplot(func, x, y, p0, yerr=None, extra={}, fig=None, skip=False, **kwarg):
+def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=False, **kwarg):
     """
     This does the same as fitcurve (see its documentation)
     but also plots the data, the fit on the top panel and
@@ -303,7 +303,8 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, fig=None, skip=False, **kwarg):
 
     fig selects which figure to use. By default it uses the currently active one.
     skip when True, prevents the fitting. This is useful when trying out initial
-         parameters for the fit.
+         parameters for the fit. In this case, the returned values are
+         (chi2, chiNorm)
     """
     if fig:
         fig=plt.figure(fig)
@@ -338,7 +339,14 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, fig=None, skip=False, **kwarg):
             pass
         plt.draw()
         return p, resids, pe, extras
-
+    else:
+        if yerr==None:
+            yerr=1
+        f = lambda p, x, y, yerr: (y-func(x, *p, **extra))/yerr
+        chi2 = np.sum(f(p0, x, y, yerr)**2)
+        Ndof = len(x)- len(p0)
+        chiNorm = chi2/Ndof
+        return chi2, chiNorm
 
 if __name__ == "__main__":
     import gen_poly
