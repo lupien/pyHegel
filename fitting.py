@@ -14,6 +14,7 @@ from scipy.optimize import leastsq
 import matplotlib.pylab as plt
 import collections
 import __builtin__
+import string
 
 def xcothx(x):
     """
@@ -194,7 +195,10 @@ def printResult(func, p, pe, extra={}, signif=2):
     if Npara < N and varargs != None:
         # create extra names par1, par2, for all needed varargs
         para.extend(['par%i'%(i+1) for i in range(N-Npara)])
-    kw = collections.OrderedDict(zip(kwpara, defaults))
+    if defaults != None:
+        kw = collections.OrderedDict(zip(kwpara, defaults))
+    else:
+        kw = {}
     kw.update(extra)
     ret = []
     for n,v,ve in zip(para,p,pe):
@@ -390,6 +394,8 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=Fal
     plt.draw()
     if not skip:
         p, resids, pe, extras = fitcurve(func, x, y, p0, yerr=yerr, extra=extra, **kwarg)
+        res_str = printResult(func, p, pe)
+        print string.join(res_str, '\n')
         #xx.set_ydata(func(xx, *p, **extra))
         plt.sca(ax1)
         plt.cla()
