@@ -305,13 +305,31 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
               will adjust parameter c,d,e and also f
 
     The kwarg available are the ones for leastsq (see its documentation):
-     ftol
-     xtol
-     gtol
-     maxfev
-     epsfcn
-     factor
-     diag
+      The tolerances when set to 0 is the same as the machine precision
+       (2.22044604926e-16 for double). The tests are done as <=
+     ftol: relative tolerance test on chi2
+     xtol: relative tolerance test on largest fitting parameter (they
+           are rescaled by diag)
+     gtol: relative tolerance test on angle of solutions
+     maxfev: maximum number of iterations. When 0 it is set to
+             100*(N+1) or 200*(N+1) if Dfun is given or not. (N is
+             number of fit para).
+     epsfcn: Used in calculation derivatives (when Dfun is not given).
+             will do (f(x)+f(x+p))/p, where p is from sqrt(epsfcn)*x
+             or just sqrt(epsfcn) if x==0. When epsfcn=0 it is equivalent
+             to setting it toe the machine precision.
+     factor: Controls the initial step size.
+     diag:  a vector (the same length as the fitting parameters)
+            that forces the scaling factors (positive values)
+            None (defaults) is auto calculated (mode = 1) and readjusted
+            for each iterations.
+     Dfun:  This is the vector of derivative of the function with
+            respect to the fit parameters.
+            It does not handle adjust/noadjust.
+            It is called as f(p, x, y, yerr)
+     col_deriv: Set to True when Dfun is [f1', f2', f3']
+                It will then internally do a transpose to
+                provide it in Fortran order.
 
     Returns pf, chi2, pe, extras
       pf is the fit result
@@ -331,14 +349,19 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
        s are the errors. It is either yerr, when they are given (and errors=True)
          or the estimated yerr assuming chiNornm==1
        nfev is the number of functions calls
+
+     Note that this routine does not implement limits. If you need to limit
+     the range of the fit, you can make the chi2 grow much larger outside of the
+     range of validity, or you can wrap your variable using modulo arithmetic
+     or some other trick.
     """
     do_corr = not errors
     if yerr == None:
         yerr = 1.
         do_corr = True
-    p0 = np.array(p0) # this allows complex indexing lik p0[[1,2,3]]
+    p0 = np.array(p0, dtype=float) # this allows complex indexing lik p0[[1,2,3]]
     adj = _handle_adjust(func, p0, adjust, noadjust)
-    f = lambda p, x, y, yerr: (y-func(x, *_adjust_merge(p, p0, adj), **extra))/yerr
+    f = lambda p, x, y, yerr: (func(x, *_adjust_merge(p, p0, adj), **extra)-y)/yerr
     p, cov_x, infodict, mesg, ier = leastsq(f, p0[adj], args=(x, y, yerr), full_output=True, **kwarg)
     if ier not in [1, 2, 3, 4]:
         print 'Problems fitting:', mesg
@@ -390,7 +413,7 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=Fal
     pl = plt.plot(xx, func(xx, *p0, **extra), 'r-')[0]
     plt.sca(ax2)
     plt.cla()
-    plt.errorbar(x, y-func(x, *p0, **extra), yerr=yerr, fmt='.')
+    plt.errorbar(x, func(x, *p0, **extra)-y, yerr=yerr, fmt='.')
     plt.draw()
     if not skip:
         p, resids, pe, extras = fitcurve(func, x, y, p0, yerr=yerr, extra=extra, **kwarg)
@@ -403,7 +426,7 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=Fal
         plt.plot(xx, func(xx, *p, **extra), 'r-')
         plt.sca(ax2)
         plt.cla()
-        plt.errorbar(x, y-func(x, *p, **extra), yerr=extras['s'], fmt='.')
+        plt.errorbar(x, func(x, *p, **extra)-y, yerr=extras['s'], fmt='.')
         try:
             plt.sca(ax1)
             plt.title(func.display_str)
@@ -414,7 +437,7 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=Fal
     else:
         if yerr==None:
             yerr=1
-        f = lambda p, x, y, yerr: (y-func(x, *p, **extra))/yerr
+        f = lambda p, x, y, yerr: (func(x, *p, **extra)-y)/yerr
         chi2 = np.sum(f(p0, x, y, yerr)**2)
         Ndof = len(x)- len(p0)
         chiNorm = chi2/Ndof
