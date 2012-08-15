@@ -3199,10 +3199,10 @@ class agilent_PNAL(visaInstrumentAsync):
             self.current_mkr.set(options['mkr'])
         extra = []
         if dev_obj in [self.marker_x, self.marker_y]:
-            extra = self._conf_helper('marker_format', 'marker_trac_func', 'marker_trac_en',
-                              'marker_y', 'marker_discrete_en', 'marker_target')
-        traces_opt = self._fetch_traces_helper(options.get('traces'))
+            extra = self._conf_helper('current_mkr', 'marker_format', 'marker_trac_func', 'marker_trac_en',
+                              'marker_x', 'marker_y', 'marker_discrete_en', 'marker_target')
         if dev_obj in [self.readval, self.fetch]:
+            traces_opt = self._fetch_traces_helper(options.get('traces'))
             cal = []
             traces = []
             for t in traces_opt:
@@ -3212,12 +3212,12 @@ class agilent_PNAL(visaInstrumentAsync):
         elif dev_obj == self.snap_png:
             traces = cal='Unknown'
         else:
-            t=traces_opt[0]
-            cal = self.calib_en.get(trace=t)
+            t=self.select_trace.getcache()
+            cal = self.calib_en.get()
             name, param = self.select_trace.choices[t]
             traces = name+'='+param
         extra += ['calib_en=%r'%cal, 'selected_trace=%r'%traces]
-        base = self._conf_helper('freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
+        base = self._conf_helper('current_channel', 'freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
                                  'power_en', 'power_couple',
                                  'power_slope', 'power_slope_en',
                                  'power_dbm_port1', 'power_dbm_port2',
