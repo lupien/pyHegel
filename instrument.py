@@ -3406,7 +3406,7 @@ class agilent_PNAL(visaInstrumentAsync):
 class agilent_ENA(agilent_PNAL):
     """
     To use this instrument, the most useful device is probably:
-        fetch, readval
+        fetch, readval  : Note that for the ENA the traces must be the trace number (cannot be a string)
     Some commands are available:
         abort
         reset_trig: to return to continuous internal trig (use this after readval, will restart
