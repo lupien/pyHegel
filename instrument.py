@@ -1471,7 +1471,10 @@ class visaInstrumentAsync(visaInstrument):
         """
         self._async_trig()
         self.wait_after_trig()
+    def _async_trigger_helper(self):
+        self.write('INITiate;*OPC') # this assume trig_src is immediate for agilent multi
     def _async_trig(self):
+        # We detect the end of acquisition using *OPC and status byte.
         if self._get_esr() & 0x01:
             print 'Unread event byte!'
         while self.read_status_byte() & 0x40:
@@ -1482,7 +1485,7 @@ class visaInstrumentAsync(visaInstrument):
                 print 'Unread event queue!'
         except:
             pass
-        self.write('INITiate;*OPC') # this assume trig_src is immediate for agilent multi
+        self._async_trigger_helper()
 
 class yokogawa_gs200(visaInstrument):
     # TODO: implement multipliers, units. The multiplier
@@ -3398,6 +3401,186 @@ class agilent_PNAL(visaInstrumentAsync):
 # for STB to OPERATION ...
 # They also have their own error queues and most other settings (active measurement for channel,
 #   data format) seem to also be independent on the 2 interfaces
+
+
+class agilent_ENA(agilent_PNAL):
+    """
+    To use this instrument, the most useful device is probably:
+        fetch, readval
+    Some commands are available:
+        abort
+        reset_trig: to return to continuous internal trig (use this after readval, will restart
+                    the automatic refresh on the instrument display)
+        restart_averaging
+        phase_unwrap, phase_wrap, phase_flatten
+    Other useful devices:
+        channel_list
+        current_channel
+        select_trace
+        freq_start, freq_stop, freq_cw
+        power_en
+        power_dbm_port1, power_dbm_port2
+        marker_x, marker_y
+        cont_trigger
+        trig_source
+
+    Note that almost all devices/commands require a channel.
+    It can be specified with the ch option or will use the last specified
+    one if left to the default.
+    A lot of other commands require a selected trace (per channel)
+    The active one can be selected with the trace option or select_trace, select_traceN
+    If unspecified, the last one is used.
+    """
+    def init(self, full=False):
+        self.write(':format:data REAL')
+        self.write(':format:border swap')
+        self.reset_trig()
+        super(agilent_PNAL, self).init(full=full)
+    def reset_trig(self):
+        self.trig_source.set('INTernal')
+        self.cont_trigger.set(True)
+    def _async_trigger_helper(self):
+        self.trig_source.set('BUS')
+        self.initiate()
+        self.write(':TRIGger:SINGle;*OPC')
+        #self.trig_source.set('INTernal')
+    def _current_config(self, dev_obj=None, options={}):
+        # These all refer to the current channel
+        # calib_en depends on trace
+        if options.has_key('ch'):
+            self.current_channel.set(options['ch'])
+        if options.has_key('trace'):
+            self.select_trace.set(options['trace'])
+        if options.has_key('mkr'):
+            self.current_mkr.set(options['mkr'])
+        extra = []
+        if dev_obj in [self.marker_x, self.marker_y]:
+            extra = self._conf_helper('current_mkr', 'marker_trac_func', 'marker_trac_en', 'marker_x',
+                              'marker_y', 'marker_discrete_en', 'marker_target')
+        if dev_obj in [self.readval, self.fetch]:
+            traces_opt = self._fetch_traces_helper(options.get('traces'))
+            traces = []
+            for t in traces_opt:
+                name, param = self.select_trace.choices[t]
+                traces.append(name+'='+param)
+        else:
+            traces_opt = self._fetch_traces_helper(None) # get all traces
+            name, param = self.select_trace.choices[self.select_trace.getcache()]
+            traces = name+'='+param
+        extra += ['selected_trace=%r'%traces]
+        base = self._conf_helper('current_channel',
+                                 'calib_en', 'freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
+                                 'power_en', 'power_couple',
+                                 'power_slope', 'power_slope_en',
+                                 'power_dbm_port1', 'power_dbm_port2',
+                                 'power_dbm_port3', 'power_dbm_port4',
+                                 'npoints', 'sweep_gen',
+                                 'sweep_time', 'sweep_type',
+                                 'bandwidth', 'cont_trigger',
+                                 'average_count', 'average_en', options)
+        return extra+base
+    def _fetch_traces_helper(self, traces):
+        count = self.select_trace_count.getcache()
+        trace_orig = self.select_trace.getcache()
+        all_tr = range(1,count+1)
+        self.select_trace.choices = {i:('%i'%i, self.trace_meas.get(trace=i)) for i in all_tr}
+        self.select_trace.set(trace_orig)
+        if isinstance(traces, (tuple, list)):
+            traces = traces[:] # make a copy so it can be modified without affecting caller. I don't think this is necessary anymore but keep it anyway.
+        elif traces != None:
+            traces = [traces]
+        else: # traces == None
+            traces = all_tr
+        return traces
+    def initiate(self):
+        """ Enables the current channel for triggering purposes """
+        ch = self.current_channel.getcache()
+        self.write('INITiate%i'%ch)
+    def _create_devs(self):
+        self.create_measurement = None
+        self.delete_measurement = None
+        self.installed_options = scpiDevice(getstr='*OPT?', str_type=str)
+        self.current_channel = MemoryDevice(1, min=1, max=160)
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_channel)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        # Either: CALCulate{ch}:PARameter{tr}:SELect (write only)
+        #         CALCulate{ch}:PARemeter:COUNt
+        # select_trace is needed by PNAL:fetch so we cannot rename it to current_trace.
+        self.select_trace = MemoryDevice(1, min=1, max=16)
+        #self.select_trace = devChOption('CALCulate{ch}:PARameter{val}:SELect', autoinit=8, autoget=False, str_type=int, min=1, max=16)
+        self.select_trace_count = devChOption('CALCulate{ch}:PARameter:COUNt', str_type=int)
+        def devCalcOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(trace=self.select_trace)
+            app = kwarg.pop('options_apply', ['ch', 'trace'])
+            kwarg.update(options=options, options_apply=app)
+            return devChOption(*arg, **kwarg)
+        # select_trace needs to be set for most of the calc commands
+        self.trace_meas = devCalcOption('CALCulate{ch}:PARameter{trace}:DEFine')
+        self.calib_en = devChOption('SENSe{ch}:CORRection:STATe', str_type=bool)
+        self.cont_trigger = devChOption('INITiate{ch}:CONTinuous', str_type=bool)
+        self.bandwidth = devChOption('SENSe{ch}:BANDwidth', str_type=float, setget=True) # can obtain min max
+        self.average_count = devChOption('SENSe{ch}:AVERage:COUNt', str_type=int)
+        self.average_en = devChOption('SENSe{ch}:AVERage', str_type=bool)
+        self.freq_start = devChOption('SENSe{ch}:FREQuency:STARt', str_type=float, min=10e6, max=40e9)
+        self.freq_stop = devChOption('SENSe{ch}:FREQuency:STOP', str_type=float, min=10e6, max=40e9)
+        self.freq_cw= devChOption('SENSe{ch}:FREQuency:CW', str_type=float, min=10e6, max=40e9)
+        self.ext_ref = scpiDevice(getstr='SENSe:ROSCillator:SOURce?', str_type=str)
+        self.npoints = devChOption('SENSe{ch}:SWEep:POINts', str_type=int, min=2, max=20001)
+        self.sweep_gen = devChOption('SENSe{ch}:SWEep:GENeration', choices=ChoiceStrings('STEPped', 'ANALog', 'FSTepped', 'FANalog'))
+        self.sweep_time = devChOption('SENSe{ch}:SWEep:TIME', str_type=float, min=0, max=86400.)
+        self.sweep_type = devChOption('SENSe{ch}:SWEep:TYPE', choices=ChoiceStrings('LINear', 'LOGarithmic', 'POWer', 'SEGMent'))
+        self.calc_x_axis = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:XAXIs?', str_type=_decode_float64, autoinit=False, doc='Get this x-axis for a particular trace.')
+        self.calc_fdata = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:FDATa?', str_type=_decode_float64, autoinit=False, trig=True)
+        # the f vs s. s is complex data, includes error terms but not equation editor (Except for math?)
+        #   the f adds equation editor, trace math, {gating, phase corr (elect delay, offset, port extension), mag offset}, formating and smoothing
+        self.calc_sdata = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:SDATa?', str_type=_decode_complex128, autoinit=False, trig=True)
+        self.calc_fmem = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:FMEMory?', str_type=_decode_float64, autoinit=False)
+        self.calc_smem = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:SMEMory?', str_type=_decode_complex128, autoinit=False)
+        self.current_mkr = MemoryDevice(1, min=1, max=10)
+        def devMkrOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mkr=self.current_mkr)
+            app = kwarg.pop('options_apply', ['ch', 'trace', 'mkr'])
+            kwarg.update(options=options, options_apply=app)
+            return devCalcOption(*arg, **kwarg)
+        def devMkrEnOption(*arg, **kwarg):
+            # This will check if the marker is currently enabled.
+            options = kwarg.pop('options', {}).copy()
+            options.update(_marker_enabled=self.marker_en)
+            options_lim = kwarg.pop('options_lim', {}).copy()
+            options_lim.update(_marker_enabled=[True])
+            kwarg.update(options=options, options_lim=options_lim)
+            return devMkrOption(*arg, **kwarg)
+        self.marker_en = devMkrOption('CALC{ch}:TRACe{trace}:MARKer{mkr}', str_type=bool, autoinit=5)
+        marker_funcs = ChoiceStrings('MAXimum', 'MINimum', 'RPEak', 'LPEak', 'TARGet', 'LTARget', 'RTARget', 'COMPression')
+        self.marker_trac_func = devMkrEnOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:FUNCtion', 'CALC{ch}:MARKer{mkr}:FUNCtion:TYPE?', choices=marker_funcs)
+        # This is set only
+        self.marker_exec = devMkrOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:FUNCTION:EXECute', choices=marker_funcs, autoget=False)
+        self.marker_target = devMkrEnOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:FUNCtion:TARGet', str_type=float)
+        self.marker_trac_en = devMkrEnOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:FUNCtion:TRACking', str_type=bool)
+        self.marker_discrete_en = devMkrEnOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:DISCrete', str_type=bool)
+        self.marker_x = devMkrEnOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:X', str_type=float, trig=True)
+        self.marker_y = devMkrEnOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:Y', str_type=_decode_float64, multi=['val1', 'val2'], graph=[0,1], trig=True)
+        self.power_en = scpiDevice('OUTPut', str_type=bool)
+        self.power_couple = devChOption(':SOURce{ch}:POWer:PORT:COUPle', str_type=bool)
+        self.power_slope = devChOption(':SOURce{ch}:POWer:SLOPe', str_type=float, min=-2, max=2)
+        self.power_slope_en = devChOption(':SOURce{ch}:POWer:SLOPe:STATe', str_type=bool)
+        # for max min power, ask source:power? max and source:power? min
+        self.power_dbm_port1 = devChOption(':SOURce{ch}:POWer:PORT1', str_type=float)
+        self.power_dbm_port2 = devChOption(':SOURce{ch}:POWer:PORT2', str_type=float)
+        self.power_dbm_port3 = devChOption(':SOURce{ch}:POWer:PORT3', str_type=float)
+        self.power_dbm_port4 = devChOption(':SOURce{ch}:POWer:PORT4', str_type=float)
+        self.trig_source = scpiDevice(':TRIGger:SOURce',
+                                      choices=ChoiceStrings('INTernal', 'EXTernal', 'MANual', 'BUS'))
+        self._devwrap('fetch', autoinit=False, trig=True)
+        self.readval = ReadvalDev(self.fetch)
+        # This needs to be last to complete creation
+        super(agilent_PNAL, self)._create_devs()
 
 
 class dummy(BaseInstrument):
