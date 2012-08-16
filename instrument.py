@@ -3199,8 +3199,13 @@ class agilent_PNAL(visaInstrumentAsync):
             self.current_mkr.set(options['mkr'])
         extra = []
         if dev_obj in [self.marker_x, self.marker_y]:
+            # Cannot get cache of marker_x while getting marker_x (end up getting an old cache)
+            if dev_obj == self.marker_x:
+                mxy = 'marker_y'
+            else:
+                mxy = 'marker_x'
             extra = self._conf_helper('current_mkr', 'marker_format', 'marker_trac_func', 'marker_trac_en',
-                              'marker_x', 'marker_y', 'marker_discrete_en', 'marker_target')
+                              mxy, 'marker_discrete_en', 'marker_target')
         if dev_obj in [self.readval, self.fetch]:
             traces_opt = self._fetch_traces_helper(options.get('traces'))
             cal = []
@@ -3455,8 +3460,13 @@ class agilent_ENA(agilent_PNAL):
             self.current_mkr.set(options['mkr'])
         extra = []
         if dev_obj in [self.marker_x, self.marker_y]:
-            extra = self._conf_helper('current_mkr', 'marker_trac_func', 'marker_trac_en', 'marker_x',
-                              'marker_y', 'marker_discrete_en', 'marker_target')
+            # Cannot get cache of marker_x while getting marker_x (end up getting an old cache)
+            if dev_obj == self.marker_x:
+                mxy = 'marker_y'
+            else:
+                mxy = 'marker_x'
+            extra = self._conf_helper('current_mkr', 'marker_trac_func', 'marker_trac_en', mxy,
+                              'marker_discrete_en', 'marker_target')
         if dev_obj in [self.readval, self.fetch]:
             traces_opt = self._fetch_traces_helper(options.get('traces'))
             traces = []
