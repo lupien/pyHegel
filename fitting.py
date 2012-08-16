@@ -163,6 +163,7 @@ def toEng(p, pe, signif=2):
     else:
         expEng = p10Eng
         frac_prec = 15-(p10f-expEng) #15 digit of precision
+    frac_prec = int(frac_prec)
     if frac_prec < 0:
         frac_prec = 0
     pe_rescaled = pe/10.**expEng
@@ -171,15 +172,68 @@ def toEng(p, pe, signif=2):
 
 def convVal(p, pe, signif=2):
     # handle one p, pe at a time
-    p_rescaled, pe_rescaled, expEng, frac_prec = toEng(p, pe, signif=signif)
+    try:
+        p_rescaled, pe_rescaled, expEng, frac_prec = toEng(p, pe, signif=signif)
+    except NotImplementedError:
+        # p is not a numeric type
+        return '%r'%p, None, None
     if pe == 0:
         if p == 0:
             return '0', None, '0'
         else:
-            return ( ('%%.%if'%frac_prec)%p_rescaled, None, '%i'%expEng )
+            return ( '{0!r}'.format(p_rescaled, prec=frac_prec), None, '%i'%expEng )
     else:
-        return ( ('%%.%if'%frac_prec)%p_rescaled,
-                 ('%%.%if'%frac_prec)%pe_rescaled, '%i'%expEng )
+        return ( '{0:.{prec}f}'.format(p_rescaled, prec=frac_prec),
+                 '{0:.{prec}f}'.format(pe_rescaled, prec=frac_prec), '%i'%expEng )
+
+def _split_decimal(s):
+    if s == None:
+        return '', ''
+    try:
+        l, r = s.split('.')
+    except ValueError:
+        l = s
+        r = ''
+    return l, r
+
+def _splitResult(names, ps, pes, signif=2):
+    ret_str = []
+    ret_len = []
+    full_i = []
+    noerr_i = []
+    i = 0
+    for name, p, pe, in zip(names, ps, pes):
+        pstr, pestr, expstr = convVal(p, pe, signif=signif)
+        pstr_l, pstr_r = _split_decimal(pstr)
+        pestr_l, pestr_r = _split_decimal(pestr)
+        if expstr == None:
+            expstr = ''
+        elif pestr == None:
+            noerr_i.append(i)
+        else:
+            full_i.append(i)
+        r = [name, pstr_l, pstr_r, pestr_l, pestr_r, expstr]
+        ret_str.append(r)
+        ret_len.append( map(len,r) )
+        i += 1
+    ret_len = np.array(ret_len)
+    if len(full_i) > 0:
+        ret_maxlen = ret_len[full_i].max(axis=0)
+    else:
+        ret_maxlen = ret_len.max(axis=0)
+        ret_maxlen[2] = 0
+    if len(noerr_i) > 0:
+        ret_max_noerr = ret_len[noerr_i,2].max()
+    else:
+        ret_max_noerr = 0
+    return ret_str, ret_maxlen, ret_max_noerr
+
+#micro sign unicode: 00B5
+_expUnits = {-24:'y', -21:'z', -18:'a', -15:'f', -12:'p', -9:'n', -6:u'µ', -3:'m',
+               0:'', 3:'k', 6:'M', 9:'G', 12:'T', 15:'P', 18:'E', 21:'Z', 24:'Y'}
+
+#rc('text', usetex=True)
+#text(0,0,r'\begin{tabular}{l r@{.}l c r@{.}l l} \hline aa & 123&22&$\pm$&1&33&$\times 10^{-6}$\\ adasd & 5& 777 & \multicolumn{3}{l}{}&55 \\ \hline\hline\end{tabular}')
 
 def printResult(func, p, pe, extra={}, signif=2):
     (para, kwpara, varargs, varkw, defaults) = getVarNames(func)
@@ -190,24 +244,39 @@ def printResult(func, p, pe, extra={}, signif=2):
         raise ValueError, "p and pe don't have the same dimension"
     if Npara > N:
         raise ValueError, "The function has too many positional parameters"
-    if Npara < N and varargs == None:
+    if Npara < N and varargs == None and kwpara == None:
         raise ValueError, "The function has too little positional parameters"
     if Npara < N and varargs != None:
         # create extra names par1, par2, for all needed varargs
         para.extend(['par%i'%(i+1) for i in range(N-Npara)])
+    elif Npara < N and kwpara != None:
+        para.extend(kwpara[:N-Npara])
+        kwpara = kwpara[N-Npara:]
+        defaults = defaults[N-Npara:]
     if defaults != None:
         kw = collections.OrderedDict(zip(kwpara, defaults))
     else:
         kw = {}
     kw.update(extra)
+    splits, maxlen, maxlen_noerr = _splitResult(para+kw.keys(), list(p)+kw.values(), list(pe)+[0]*len(kw), signif=signif)
+    maxlen[0] += 1 # because of += ':'
+    # unicode: plus-minus = 00B1, multiplication(times) = 00D7
+    err_len = maxlen[2]+maxlen[3]+maxlen[4]+4 # +4 is for ' ± ' and the '.'
+    noerr = max(maxlen_noerr, err_len)
+    if noerr == maxlen_noerr:
+        maxlen[4] += noerr - err_len
+    kwargs = dict(l=maxlen, noerr=noerr)
     ret = []
-    for n,v,ve in zip(para,p,pe):
-        ps, pes, es = convVal(v, ve, signif=signif)
-        if pes == None:
-            ret.append('%s:\t%s\t\tx10$^%s$'%(n, ps, es))
+    for n, pl, pr, pel, per, ex in splits:
+        n += ':'
+        args = n, pl, pr, pel, per, ex
+        if pel == '' and ex == '':
+            s = u'{0:<{l[0]}s} {1:<s}'.format(*args, **kwargs)
+        elif pel == '':
+            s = u'{0:<{l[0]}s} {1:>{l[1]}s}.{2:<{noerr}s} ×10^ {5:>{l[5]}s}'.format(*args, **kwargs)
         else:
-            ret.append('%s:\t%s\t+- %s\tx10$^%s$'%(n, ps, pes, es))
-    ret.extend(['%s:\t%r'%kv for kv in kw.iteritems()])
+            s = u'{0:<{l[0]}s} {1:>{l[1]}s}.{2:<{l[2]}s} ± {3:>{l[3]}s}.{4:<{l[4]}s} ×10^ {5:>{l[5]}s}'.format(*args, **kwargs)
+        ret.append(s)
     return ret
 
 def _handle_adjust(func, p0, adjust, noadjust):
@@ -417,7 +486,7 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=Fal
     plt.draw()
     if not skip:
         p, resids, pe, extras = fitcurve(func, x, y, p0, yerr=yerr, extra=extra, **kwarg)
-        res_str = printResult(func, p, pe)
+        res_str = printResult(func, p, pe, extra=extra)
         print string.join(res_str, '\n')
         #xx.set_ydata(func(xx, *p, **extra))
         plt.sca(ax1)
