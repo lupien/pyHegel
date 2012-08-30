@@ -1261,18 +1261,30 @@ def sleep(sec):
 # overrides pylab load (which is no longer implemented anyway)
 def load(names=None, newnames=None):
     """
-       Uses definitions in local_config to open devices by there
+       Uses definitions in local_config to open devices by their
        standard names. By default it produces a variable with that
        name in the global space. If newname is given, it is the name used
        for that new instrument.
        names and newnames can be a string or a list of strings
-       They can alse be a string with multiname names separated by spaces
+       They can also be a string with multiple names separated by spaces
         Therefore it can be called like this in ipython
           ,load instr1 newname1
           ;load instr1 instr2 instr3 ....
 
-       Called with no arguments to get a list of currently
-       configured devices
+       Call it with no arguments to get a list of currently
+       configured devices.
+       See the find_all_instruments command to see the instruments available
+       via Visa (GPIB or USB) (Can also use the external Visa explorer from
+       Agilent or National Instruments).
+
+       NOTE: You can always load an instrument manually. You just to initialize
+       the instrument class with the proper address. For example you can replace
+        ;load yo1
+       with
+        yo1 = instrument.agilent_multi_34410A(10)
+       The class names are showed when running load without arguments.
+       For GPIB address you can enter just the address as an integer or the
+       full visa name like those returned from find_all_instruments()
     """
     if names == None or (isinstance(names, basestring) and names == ''):
         for name, (instr, para) in sorted(local_config.conf.items()):

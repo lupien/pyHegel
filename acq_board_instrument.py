@@ -13,7 +13,6 @@ import threading
 import math
 import os
 import weakref
-import matplotlib.pyplot as plt
 import numpy as np
 import sys
 
