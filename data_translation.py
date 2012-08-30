@@ -6,50 +6,120 @@ Created on Tue Aug 28 11:08:58 2012
 @author: Christian Lupien
 """
 
-import clr
 import instrument
 import sys
 import numpy as np
-from System import Int32, IntPtr
-from System.Runtime.InteropServices import Marshal
 
-_datatranslation_dir = r'C:\Program Files (x86)\Data Translation\DotNet\OLClassLib\Framework 2.0 Assemblies (32-bit)'
-if _datatranslation_dir not in sys.path:
-    sys.path.append(_datatranslation_dir)
+try:
+    import clr
+    from System import Int32, IntPtr
+    from System.Runtime.InteropServices import Marshal
+    _datatranslation_dir = r'C:\Program Files (x86)\Data Translation\DotNet\OLClassLib\Framework 2.0 Assemblies (32-bit)'
+    if _datatranslation_dir not in sys.path:
+        sys.path.append(_datatranslation_dir)
+    import OpenLayers.Base as OlBase
+    from OpenLayers.Base import OlException
+except ImportError, exc:
+    print 'Unable to load data_translation Module. Make sure pythonnet and Data Translation Omni software are installed.'
+    class DataTranslation(instrument.BaseInstrument):
+        pass
+    raise
 
-import OpenLayers.Base as OlBase
-from OpenLayers.Base import OlException
-devmgr = OlBase.DeviceMgr.Get()
 _assembly_Version = OlBase.Utility.AssemblyVersion.ToString()
 
-card_present = devmgr.HardwareAvailable()
-card_list = list(devmgr.GetDeviceNames())
+def find_all_Ol():
+    """
+    This returns a list of all the connected Data Translation boxes.
+    (Ol stands for OpenLayer which is the protocol it uses.)
+    Every entry in the returned list is a tuple with the device
+    name followed by a dictionnary of information.
+    """
+    devmgr = OlBase.DeviceMgr.Get()
+    card_present = devmgr.HardwareAvailable()
+    ret = []
+    if not card_present:
+        return ret
+    card_list = list(devmgr.GetDeviceNames())
+    for c in card_list:
+        dev = devmgr.GetDevice(c)
+        hwinfo = dev.GetHardwareInfo()
+        # BoardId is year (1 or 2 digits), week (1 or 2 digist), test station (1 digit)
+        # sequence # (3 digits)
+        dev_info = dict(drv_name=dev.DriverName, drv_version=dev.DriverVersion,
+            name=dev.DeviceName, model=dev.BoardModelName,
+            version=hwinfo.DeviceId, serial=hwinfo.BoardId)
+        dev.Dispose()
+        ret.append((c, dev_info))
+    return ret
 
-if not card_present:
-    raise ValueError, 'No Data Translation Card present!!'
-dev = devmgr.GetDevice(card_list[0])
-hwinfo = dev.GetHardwareInfo()
-dev_info = dict(drv_name=dev.DriverName, drv_version=dev.DriverVersion,
-                name=dev.DeviceName, model=dev.BoardModelName,
-                version=hwinfo.DeviceId, serial=hwinfo.BoardId)
-num_in = dev.GetNumSubsystemElements(OlBase.SubsystemType.AnalogInput)
-num_out = dev.GetNumSubsystemElements(OlBase.SubsystemType.AnalogOutput)
+class Ol_Device(instrument.scpiDevice):
+    """
+    This device is for all OpenLayer object properties
+    """
+    def __init__(self, setstr=None, getstr=None, autoget=True, **kwarg):
+        if getstr == None and autoget and setstr != None:
+            if '{val}' not in setstr:
+                getstr = setstr
+                setstr = setstr+'={val}'
+            else:
+                getstr = setstr.replace('={val}', '')
+        super(Ol_Device, self).__init__(setstr=setstr, getstr=getstr, autoget=autoget, **kwarg)
 
-if num_in < 1:
-    raise ValueError, 'No input available'
+class Ol_ChoiceIndex(instrument.ChoiceIndex):
+    def __init__(self, OlDataType, normalize=False):
+        names = list(OlDataType.GetNames(OlDataType))
+        values = list(OlDataType.GetValues(OlDataType))
+        d = dict(zip(names, values))
+        super(Ol_ChoiceIndex, self).__init__(d, normalize=normalize)
+    def __getitem__(self, key_val):
+        """ For a key this returns the value. For value it returns the corresponding key.
+            It checks for keys First. This should be ok as long as keys and values
+            don't have overlap (integers vs strings)
+        """
+        if key_val in self.dict:
+            return super(Ol_ChoiceIndex, self).__getitem__(key_val)
+        else:
+            return self.keys[self.index(key_val)]
 
-ai = dev.AnalogInputSubsystem(0)
+class DataTranslation(instrument.BaseInstrument):
+    def __init__(self, dev_name=0):
+        """
+        To initialize a device, give it the device name as returned
+        by find_all_Ol(), or the integer to use as an index in that
+        list (defaults to 0).
+        """
+        devmgr = OlBase.DeviceMgr.Get()
+        all_Ol = find_all_Ol()
+        try:
+            name, info = all_Ol[dev_name]
+        except TypeError:
+            all_names = [n for n,i in all_Ol]
+            try:
+                name, info = all_Ol[all_names.index(dev_name)]
+            except ValueError:
+                raise IndexError, 'The device requested is not there. dev_name string not found'
+        except IndexError:
+            raise IndexError, 'The device requested is not there. dev_name too large (or no box detected).'
+        self._name = name
+        self.info = info
+        dev = devmgr.GetDevice(name)
+        self._dev = dev
+        self._num_in = dev.GetNumSubsystemElements(OlBase.SubsystemType.AnalogInput)
+        if self._num_in < 1:
+            raise ValueError, 'No input available for ', name
+        self._coupling_type = Ol_ChoiceIndex(OlBase.CouplingType)
+        self._cursrc_type = Ol_ChoiceIndex(OlBase.ExcitationCurrentSource)
+        self._dataflow_type = Ol_ChoiceIndex(OlBase.DataFlow)
+        self._io_type = Ol_ChoiceIndex(OlBase.IOType)
+        self._sync_type = Ol_ChoiceIndex(OlBase.SynchronizationModes)
+        self._trig_type = Ol_ChoiceIndex(OlBase.TriggerType)
+        self._buffer_state = Ol_ChoiceIndex(OlBase.OlBuffer.BufferState)
+        self._sub_state = Ol_ChoiceIndex(OlBase.SubsystemBase.States)
 
-if num_out < 1:
-    raise ValueError, 'No output available'
-# Note that DT9837C actually advertizes 2 output system
-# The second one might be used internally for trigger threshold
-# But changing it directly does not seem to have any effect.
-ao = dev.AnalogOutputSubsystem(0)
-# BoardId is year (1 or 2 digits), week (1 or 2 digist), test station (1 digit)
-# sequence # (3 digits)
-
-in_supports = dict(single=ai.SupportsSingleValue, continuous=ai.SupportsContinuous,
+        # We hard code the first element here. TODO check _num_in
+        ai = dev.AnalogInputSubsystem(0)
+        self._analog_in = ai
+        in_supports = dict(single=ai.SupportsSingleValue, continuous=ai.SupportsContinuous,
                    single_ended=ai.SupportsSingleEnded, differential=ai.SupportsDifferential,
                    dc_coupl=ai.SupportsDCCoupling, ac_coupl=ai.SupportsACCoupling,
                    current_src=ai.SupportsInternalExcitationCurrentSrc,
@@ -58,121 +128,233 @@ in_supports = dict(single=ai.SupportsSingleValue, continuous=ai.SupportsContinuo
                    sync=ai.SupportsSynchronization,
                    simultaneous_start=ai.SupportsSimultaneousStart, simultaneous_SH=ai.SupportsSimultaneousSampleHold,
                    buffering=ai.SupportsBuffering, in_process=ai.SupportsInProcessFlush)
-in_info = dict(max_freq=ai.Clock.MaxFrequency, min_freq=ai.Clock.MinFrequency,
+        self.in_supports = in_supports
+        in_info = dict(max_freq=ai.Clock.MaxFrequency, min_freq=ai.Clock.MinFrequency,
                max_single_ch=ai.MaxSingleEndedChannels, fifo=ai.FifoSize,
                Nchan=ai.NumberOfChannels, NGains=ai.NumberOfSupportedGains,
                gains=list(ai.SupportedGains), exc_currents=list(ai.SupportedExcitationCurrentValues),
                resolution=ai.Resolution, volt_range=[ai.VoltageRange.Low, ai.VoltageRange.High])
-#ai.Clock.Frequency = in_info['max_freq']
-ai.Clock.Frequency = 1000
-all_channels = [ai.SupportedChannels[i] for i in range(ai.SupportedChannels.Count)]
-c1 = all_channels[0]
+        self.in_info = in_info
+        self.in_trig_info = {'level': ai.Trigger.Level,
+                             'type': self._trig_type[ai.Trigger.TriggerType],
+                             'threshold_ch': ai.Trigger.ThresholdTriggerChannel}
+        self.in_ref_trig_info = {'level': ai.ReferenceTrigger.Level,
+                                 'type': self._trig_type[ai.ReferenceTrigger.TriggerType],
+                                 'threshold_ch': ai.ReferenceTrigger.ThresholdTriggerChannel,
+                                 'post_count':ai.ReferenceTrigger.PostTriggerScanCount}
+        all_channels = [ai.SupportedChannels[i] for i in range(ai.SupportedChannels.Count)]
+        self.all_channels = all_channels
+        self._update_all_channels_info()
+        # Note that DT9837C actually advertizes 2 output system
+        # The second one might be used internally for trigger threshold
+        # But changing it directly does not seem to have any effect.
+        self._num_out = dev.GetNumSubsystemElements(OlBase.SubsystemType.AnalogOutput)
+        if self._num_out < 1:
+            raise ValueError, 'No output available for ', name
+        # We hard code the first element here. TODO check _num_in
+        ao = dev.AnalogOutputSubsystem(0)
+        self._analog_out = ao
+        # TODO: Here I assume a single Channel and make it work in single mode
+        ao.DataFlow=self._dataflow_type['SingleValue']
+        ao.Config()
+        #Make sure ai is in continuous mode
+        ai.DataFlow=self._dataflow_type['Continuous']
+        self._inbuffer = None
+        # See also System.AssemblyLoadEventHandler which instantiates an delegate
+        ai.SynchronousBufferDone = True
+        #ai.BufferDoneEvent += self._delegate_handler
 
-class mapping(object):
-    def __init__(self, some_type):
-        self.names = list(some_type.GetNames(some_type))
-        self.values = list(some_type.GetValues(some_type))
-    def __getitem__(self, key_val):
-        if key_val in self.names:
-            return self.values[self.names.index(key_val)]
-        else:
-            return self.names[self.values.index(key_val)]
-coupling_type = mapping(OlBase.CouplingType)
-cursrc_type = mapping(OlBase.ExcitationCurrentSource)
-dataflow_type = mapping(OlBase.DataFlow)
-io_type = mapping(OlBase.IOType)
-sync_type = mapping(OlBase.SynchronizationModes)
-trig_type = mapping(OlBase.TriggerType)
+        # init the parent class
+        instrument.BaseInstrument.__init__(self)
 
-trig_info = {'level': ai.Trigger.Level, 'type': trig_type[ai.Trigger.TriggerType],
-             'threshold_ch': ai.Trigger.ThresholdTriggerChannel}
-ref_trig_info = {'level': ai.ReferenceTrigger.Level, 'type': trig_type[ai.ReferenceTrigger.TriggerType],
-             'threshold_ch': ai.ReferenceTrigger.ThresholdTriggerChannel,
-             'post_count':ai.ReferenceTrigger.PostTriggerScanCount}
-
-# These are changed when doing ai.Config() or starting an acq with ai.GetOneBuffer(c1, length, timeout_ms)
-#  timeout_ms can be -1 to disable it.
-#c1.ExcitationCurrentSource=cursrc_type['Internal']
-#c1.ExcitationCurrentSource=cursrc_type['Disabled']
-#c1.Coupling=coupling_type['AC']
-#c1.Coupling=coupling_type['DC']
-
-#ai.DataFlow=dataflow_type['SingleValue']
-#ai.DataFlow=dataflow_type['Continuous']
-
-all_channels_info = [{'coupling':coupling_type[c.Coupling],
+    def _update_all_channels_info(self):
+        self.all_channels_info = [{'coupling':self._coupling_type[c.Coupling],
                       'name': c.Name,
-                      'current_src':cursrc_type[c.ExcitationCurrentSource],
+                      'current_src':self._cursrc_type[c.ExcitationCurrentSource],
                       'num':c.PhysicalChannelNumber,
-                      'type':io_type[c.IOType]} for c in all_channels]
-
-ai.ChannelList.Clear()
-ai.ChannelList.Add(all_channels_info[0]['num'])
-#ai.ChannelList.Add(c1.PhysicalChannelNumber)
-#ai.ChannelList.Add(OlBase.ChannelListEntry(c1))
-
+                      'type':self._io_type[c.IOType]} for c in self.all_channels]
+    def __del__(self):
+        print 'Deleting DataTranslation', self
+        try:
+            self._analog_out.Dispose()
+        except AttributeError:
+            pass
+        try:
+            self._analog_in.Dispose()
+        except AttributeError:
+            pass
+        try:
+            self._dev.Dispose()
+        except AttributeError:
+            pass
+    def init(self,full = False):
+        if full:
+            self.output.set(0.)
+    def _output_setdev(self, val):
+        self._analog_out.SetSingleValueAsVolts(0, val)
+    def write(self, string):
+        exec('self.'+string)
+    def ask(self, string):
+        return eval('self.'+string)
+    def _async_trig(self):
+        self.run()
+    def _async_detect(self, max_time=.5): # 0.5 s max by default
 #Check current state: ai.IsRunning
 # Also ai.State
+        #return instrument.wait_on_event(self._run_finished, check_state=self, max_time=max_time)
+        return True
+    def wait_after_trig(self):
+        """
+        waits until the run is finished
+        """
+        #return instrument.wait_on_event(self._run_finished, check_state=self)
+        return True
+    def run_and_wait(self):
+        """
+        This performs a run and waits for it to finish.
+        See run for more details.
+        """
+        self._async_trig()
+        self.wait_after_trig()
+    def abort(self):
+        self._analog_in.Abort()
+    def _clean_channel_list(self):
+        clist = self.channel_list.getcache()
+        clist = list(set(clist)) # use set to remove duplicates
+        clist.sort() # order in place
+        self.channel_list.set(clist)
+        return clist
+    def _delegate_handler(source, args):
+        print 'My handler Called!', source, args
+    def run(self):
+        clist = self._clean_channel_list()
+        if len(clist) == 0:
+            raise ValueError, 'You need to have at least one channel selected (see channel_list)'
+        self._analog_in.ChannelList.Clear()
+        for c in clist:
+            #self._analog_in.ChannelList.Add(self.all_channels[c].PhysicalChannelNumber)
+            self._analog_in.ChannelList.Add(self.all_channels_info[c]['num'])
+            #self._analog_in.ChannelList.Add(OlBase.ChannelListEntry(self.all_channels[c])
+        self._analog_in.Config()
+        self._inbuffer = OlBase.OlBuffer(self.nb_samples.getcache(), self._analog_in)
+        self._analog_in.BufferQueue.QueueBuffer(self._inbuffer)
+        self._analog_in.Start()
 
-buffer_state = mapping(OlBase.OlBuffer.BufferState)
-sub_state = mapping(OlBase.SubsystemBase.States)
+    def _current_config(self, dev_obj=None, options={}):
+        clist = self._clean_channel_list()
+        self._update_all_channels_info()
+        extra = ['AssemblyVersion=%r'%_assembly_Version, 'boxname=%r'%self._name,
+                 'cardinfo=%r'%self.info, 'all_channel_info=%r'%clist]
+        base = self._conf_helper('nb_samples', 'in_clock', 'channel_list',
+                                 'in_trig_mode', 'in_trig_level', 'in_trig_threshold_ch',
+                                 'in_reftrig_mode', 'in_reftrig_level', 'in_reftrig_threshold_ch',
+                                 'in_reftrig_count', 'output', options)
+        return extra+base
+    def _fetch_getformat(self, **kwarg):
+        clist = self._clean_channel_list()
+        #unit = kwarg.get('unit', 'default')
+        #xaxis = kwarg.get('xaxis', True)
+        #ch = kwarg.get('ch', None)
+        multi = []
+        for c in clist:
+            multi.append(self.all_channels_info[c]['name'])
+        fmt = self.fetch._format
+        if self.nb_samples.getcache() == 1:
+            fmt.update(multi=multi, graph=range(len(clist)))
+        else:
+            fmt.update(multi=tuple(multi), graph=[])
+        #fmt.update(multi=multi, graph=[], xaxis=xaxis)
+        return instrument.BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_getdev(self):
+        clist = self._clean_channel_list()
+        if self._inbuffer == None:
+            return None
+        #This conversion is much faster than doing
+        # v=array(list(buf.GetDataAsVolts()))
+        buf = self._inbuffer
+        fullsize = buf.BufferSizeInSamples
+        validsize = buf.ValidSamples
+        v=np.ndarray(validsize, dtype=float)
+        Marshal.Copy(buf.GetDataAsVolts(), 0, IntPtr.op_Explicit(Int32(v.ctypes.data)), len(v))
+        num_channel = len(clist)
+        if num_channel != 1 and self.nb_samples.getcache() != 1:
+            v.shape = (-1, num_channel)
+            v = v.T
+        return v
+    def _create_devs(self):
+        self.nb_samples = instrument.MemoryDevice(1024, min=1, max=1024*1024*100)
+        self.in_clock = Ol_Device('_analog_in.Clock.Frequency', str_type = float, setget=True,
+                               min=self.in_info['min_freq'], max=self.in_info['max_freq'])
+        self.channel_list = instrument.MemoryDevice([0])
+        self.in_current_ch = instrument.MemoryDevice(0,min=0, max=self.in_info['Nchan'])
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.in_current_ch)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return Ol_Device(*arg, **kwarg)
+        # These are changed when doing ai.Config() or starting an acq with ai.GetOneBuffer(c1, length, timeout_ms)
+        #  timeout_ms can be -1 to disable it.
+        self.coupling = devChOption('all_channels[{ch}].Coupling', choices=self._coupling_type)
+        self.exc_current_src = devChOption('all_channels[{ch}].ExcitationCurrentSource', choices=self._cursrc_type)
+        #Trigger starts the acquisition
+        self.in_trig_mode = Ol_Device('_analog_in.Trigger.TriggerType', choices=self._trig_type)
+        self.in_trig_level =  Ol_Device('_analog_in.Trigger.Level',
+                                              str_type=float,
+                                              min=self.in_info['volt_range'][0], max=self.in_info['volt_range'][1])
+        self.in_trig_threshold_ch = Ol_Device('_analog_in.Trigger.ThresholdTriggerChannel',
+                                              str_type=int,
+                                              min=0, max=self.in_info['Nchan'])
+        # The reference trigger will stop acquisition after ScanCount
+        # It does not handle TTL
+        self.in_reftrig_mode = Ol_Device('_analog_in.ReferenceTrigger.TriggerType', choices=self._trig_type)
+        self.in_reftrig_level =  Ol_Device('_analog_in.ReferenceTrigger.Level',
+                                              str_type=float,
+                                              min=self.in_info['volt_range'][0], max=self.in_info['volt_range'][1])
+        self.in_reftrig_threshold_ch = Ol_Device('_analog_in.ReferenceTrigger.ThresholdTriggerChannel',
+                                              str_type=int,
+                                              min=0, max=self.in_info['Nchan'])
+        self.in_reftrig_count = Ol_Device('_analog_in.ReferenceTrigger.PostTriggerScanCount',
+                                              str_type=int, min=0)
+        self._devwrap('output', autoinit=False)
+        self._devwrap('fetch', autoinit=False)
 
-########
-ao.DataFlow=dataflow_type['SingleValue']
-ao.Config()
-ao.SetSingleValueAsVolts(0, 0.)
-#ao.SetSingleValueAsVolts(0, -.5)
-########
+        self.readval = instrument.ReadvalDev(self.fetch)
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+    def force_get(self):
+        # Since user cannot change change values except without using this program
+        # the cache are always up to date and this is not needed.
+        pass
+    def set_simple_acq(self, nb_samples=1024, channel_list=[0], clock=None):
+        """
+        nb_sample is the number of samples per channel to acquire
+        channel_list is either a single channel number (0 based)
+                     a list of channel numbers or None which means all
+                     available channels
+        clock can be 'min', 'max'(default) or any number in between.
+              if it is None, it will keep the current clock.
+        You can also set the trig variables (trig_level, trig_mode, trig_ref_src)
+        """
+        self.nb_samples.set(nb_samples)
+        if clock == 'max':
+            clock = self.in_clock.max
+            print 'Clock set to', clock, 'Hz'
+        elif clock == 'min':
+            clock = self.in_clock.min
+            print 'Clock set to', clock, 'Hz'
+        if clock != None:
+            self.in_clock.set(clock)
+        if channel_list == None:
+            channel_list = range(self.in_info['Nchan'])
+        if type(channel_list) != list:
+            channel_list = [channel_list]
+        self.channel_list.set(channel_list)
 
+
+# TODO: handle Gains
 # I don't think there is a way to set the Gain when doing GetOneBuffer
 #ai.ChannelList[0].Gain=10
-
-def myHandler(source, args):
-    print 'My handler Called!', source, args
-
-# See also System.AssemblyLoadEventHandler which instantiates an delegate
-ai.SynchronousBufferDone=True
-ai.BufferDoneEvent += myHandler
-
-buf=OlBase.OlBuffer(10000,ai)
-ai.BufferQueue.QueueBuffer(buf)
-#Trigger starts the acquisition
-#ai.Trigger.Level=-.5
-#ai.Trigger.TriggerType=trig_type['ThresholdPos']
-#ai.Trigger.TriggerType=trig_type['TTLNeg']
-#ai.Trigger.TriggerType=trig_type['Software']
-#ai.Trigger.ThresholdTriggerChannel=0
-# The reference trigger will stop acquisition after ScanCount
-# It does not handle TTL
-#ai.ReferenceTrigger.Level=-.5
-#ai.ReferenceTrigger.TriggerType=trig_type['ThresholdPos']
-#ai.ReferenceTrigger.TriggerType=trig_type['Software']
-#ai.ReferenceTrigger.ThresholdTriggerChannel=0
-#ai.ReferenceTrigger.PostTriggerScanCount=0
-#
-ai.Config()
-ai.Start()
-
-#ai.Stop()
-#ai.Abort()
-
-#This tonumpy is much faster than doing
-# v=array(list(buf.GetDataAsVolts()))
-def tonumpy(buf, num_channel=1):
-    fullsize = buf.BufferSizeInSamples
-    validsize = buf.ValidSamples
-    v=np.ndarray(validsize, dtype=float)
-    Marshal.Copy(buf.GetDataAsVolts(), 0, IntPtr.op_Explicit(Int32(v.ctypes.data)), len(v))
-    if num_channel != 1:
-        v.shape = (-1, num_channel)
-        v = v.T
-    return v
-
-#plot(array(list(buf.GetDataAsVolts())))
+# TODO: Handle x scales
 
 #Events: BufferDoneEvent, DriverRunTimeErrorEvent, QueueDoneEvent, QueueStoppedEvent
-
-# When finished with device:
-#ai.Dispose()
-#ao.Dispose()
-#dev.Dispose()
