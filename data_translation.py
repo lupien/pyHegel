@@ -8,6 +8,7 @@ Created on Tue Aug 28 11:08:58 2012
 
 import instrument
 import sys
+import time
 import numpy as np
 
 try:
@@ -144,7 +145,7 @@ class DataTranslation(instrument.BaseInstrument):
                                  'post_count':ai.ReferenceTrigger.PostTriggerScanCount}
         all_channels = [ai.SupportedChannels[i] for i in range(ai.SupportedChannels.Count)]
         self.all_channels = all_channels
-        self._update_all_channels_info()
+        self._update_all_channels_info(init=True)
         # Note that DT9837C actually advertizes 2 output system
         # The second one might be used internally for trigger threshold
         # But changing it directly does not seem to have any effect.
@@ -162,17 +163,24 @@ class DataTranslation(instrument.BaseInstrument):
         self._inbuffer = None
         # See also System.AssemblyLoadEventHandler which instantiates an delegate
         ai.SynchronousBufferDone = True
+        #TODO: figure out why this causes a crash
         #ai.BufferDoneEvent += self._delegate_handler
 
         # init the parent class
         instrument.BaseInstrument.__init__(self)
 
-    def _update_all_channels_info(self):
-        self.all_channels_info = [{'coupling':self._coupling_type[c.Coupling],
-                      'name': c.Name,
+    def _update_all_channels_info(self, init=False):
+        if init:
+            gain = 1.
+            self.all_channels_info = [{'coupling':self._coupling_type[c.Coupling],
+                      'name': c.Name, 'gain': gain,
                       'current_src':self._cursrc_type[c.ExcitationCurrentSource],
                       'num':c.PhysicalChannelNumber,
                       'type':self._io_type[c.IOType]} for c in self.all_channels]
+        else:
+            for info, ch in zip(self.all_channels_info, self.all_channels):
+                info['coupling'] = self._coupling_type[ch.Coupling]
+                info['current_src'] = self._cursrc_type[ch.ExcitationCurrentSource]
     def __del__(self):
         print 'Deleting DataTranslation', self
         try:
@@ -199,16 +207,17 @@ class DataTranslation(instrument.BaseInstrument):
     def _async_trig(self):
         self.run()
     def _async_detect(self, max_time=.5): # 0.5 s max by default
+        time.sleep(max_time)
+        return not self._analog_in.IsRunning
 #Check current state: ai.IsRunning
 # Also ai.State
         #return instrument.wait_on_event(self._run_finished, check_state=self, max_time=max_time)
         return True
     def wait_after_trig(self):
         """
-        waits until the run is finished
+        waits until the triggered event is finished
         """
-        #return instrument.wait_on_event(self._run_finished, check_state=self)
-        return True
+        return instrument.wait_on_event(self._async_detect)
     def run_and_wait(self):
         """
         This performs a run and waits for it to finish.
@@ -231,12 +240,20 @@ class DataTranslation(instrument.BaseInstrument):
         if len(clist) == 0:
             raise ValueError, 'You need to have at least one channel selected (see channel_list)'
         self._analog_in.ChannelList.Clear()
-        for c in clist:
+        for i,c in enumerate(clist):
             #self._analog_in.ChannelList.Add(self.all_channels[c].PhysicalChannelNumber)
             self._analog_in.ChannelList.Add(self.all_channels_info[c]['num'])
+            self._analog_in.ChannelList[i].Gain = self.all_channels_info[c]['gain']
             #self._analog_in.ChannelList.Add(OlBase.ChannelListEntry(self.all_channels[c])
         self._analog_in.Config()
-        self._inbuffer = OlBase.OlBuffer(self.nb_samples.getcache(), self._analog_in)
+        wanted_size = self.nb_samples.getcache() * len(clist)
+        if self._inbuffer != None:
+            if self._inbuffer.BufferSizeInSamples != wanted_size:
+                #print 'Erasing bnuffer'
+                self._inbuffer.Dispose()
+                self._inbuffer = None
+        if self._inbuffer == None:
+            self._inbuffer = OlBase.OlBuffer(wanted_size, self._analog_in)
         self._analog_in.BufferQueue.QueueBuffer(self._inbuffer)
         self._analog_in.Start()
 
@@ -297,6 +314,8 @@ class DataTranslation(instrument.BaseInstrument):
         #  timeout_ms can be -1 to disable it.
         self.coupling = devChOption('all_channels[{ch}].Coupling', choices=self._coupling_type)
         self.exc_current_src = devChOption('all_channels[{ch}].ExcitationCurrentSource', choices=self._cursrc_type)
+        # I don't think there is a way to set the Gain when doing GetOneBuffer
+        self.gain = devChOption('all_channels_info[{ch}]["gain"]', str_type=float, choices=self.in_info['gains'])
         #Trigger starts the acquisition
         self.in_trig_mode = Ol_Device('_analog_in.Trigger.TriggerType', choices=self._trig_type)
         self.in_trig_level =  Ol_Device('_analog_in.Trigger.Level',
@@ -317,7 +336,7 @@ class DataTranslation(instrument.BaseInstrument):
         self.in_reftrig_count = Ol_Device('_analog_in.ReferenceTrigger.PostTriggerScanCount',
                                               str_type=int, min=0)
         self._devwrap('output', autoinit=False)
-        self._devwrap('fetch', autoinit=False)
+        self._devwrap('fetch', autoinit=False, trig=True)
 
         self.readval = instrument.ReadvalDev(self.fetch)
         # This needs to be last to complete creation
@@ -352,9 +371,6 @@ class DataTranslation(instrument.BaseInstrument):
         self.channel_list.set(channel_list)
 
 
-# TODO: handle Gains
-# I don't think there is a way to set the Gain when doing GetOneBuffer
-#ai.ChannelList[0].Gain=10
 # TODO: Handle x scales
 
 #Events: BufferDoneEvent, DriverRunTimeErrorEvent, QueueDoneEvent, QueueStoppedEvent

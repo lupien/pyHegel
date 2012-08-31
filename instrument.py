@@ -206,12 +206,12 @@ class asyncThread(threading.Thread):
         return not self.is_alive()
 
 def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
-    # task_or_event_or_func either needs to a wait function with a parameter of
+    # task_or_event_or_func either needs to have a wait attribute with a parameter of
     # seconds. Or it should be a function accepting a parameter of time in s.
     # check_state will all to break the loop if check_state._error_state
     # becomes True
     start_time = time.time()
-    try: # should work for task (threading.Thread) and even (threading.Event)
+    try: # should work for task (threading.Thread) and event (threading.Event)
         docheck = task_or_event_or_func.wait
     except AttributeError: # just consider it a function
         docheck = task_or_event_or_func
