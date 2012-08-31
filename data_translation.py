@@ -207,12 +207,14 @@ class DataTranslation(instrument.BaseInstrument):
     def _async_trig(self):
         self.run()
     def _async_detect(self, max_time=.5): # 0.5 s max by default
-        time.sleep(max_time)
-        return not self._analog_in.IsRunning
-#Check current state: ai.IsRunning
-# Also ai.State
+        to = time.time()
+        is_finished = not self._analog_in.IsRunning
+        while time.time()-to < max_time or not is_finished:
+            time.sleep(.05)
+            is_finished = not self._analog_in.IsRunning
+        return is_finished
+        # Also ai.State
         #return instrument.wait_on_event(self._run_finished, check_state=self, max_time=max_time)
-        return True
     def wait_after_trig(self):
         """
         waits until the triggered event is finished
