@@ -21,10 +21,8 @@ try:
     import OpenLayers.Base as OlBase
     from OpenLayers.Base import OlException
 except ImportError, exc:
-    print 'Unable to load data_translation Module. Make sure pythonnet and Data Translation Omni software are installed.'
-    class DataTranslation(instrument.BaseInstrument):
-        pass
-    raise
+    exc.extra_info = 'Unable to load data_translation Module. Make sure pythonnet and Data Translation Omni software are installed.'
+    raise exc
 
 _assembly_Version = OlBase.Utility.AssemblyVersion.ToString()
 

@@ -1,6 +1,16 @@
 import instrument
 import acq_board_instrument
 
+try:
+    import data_translation
+except ImportError, exc:
+    class data_translation(object):
+        _exc = exc
+        @staticmethod
+        def DataTranslation(*argv):
+            print exc.extra_info
+
+
 conf = dict( yo1 = (instrument.yokogawa_gs200, (10,)),
              yo2 = (instrument.yokogawa_gs200, (13,)),
              yo3 = (instrument.yokogawa_gs200, (9,)),
@@ -32,5 +42,7 @@ conf = dict( yo1 = (instrument.yokogawa_gs200, (10,)),
              acq1 = (acq_board_instrument.Acq_Board_Instrument, ('127.0.0.1', 50000)),
              acq2 = (acq_board_instrument.Acq_Board_Instrument, ('127.0.0.1', 50001)),
              # MXG generator is gpib 19
-             mxg1 = (instrument.agilent_rf_MXG, ('USB0::0x0957::0x1F01::MY50140552',))
+             mxg1 = (instrument.agilent_rf_MXG, ('USB0::0x0957::0x1F01::MY50140552',)),
+             # Data Translation Box
+             dt1 = (data_translation.DataTranslation, ())
         )
