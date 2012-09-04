@@ -182,6 +182,10 @@ class DataTranslation(instrument.BaseInstrument):
     def __del__(self):
         print 'Deleting DataTranslation', self
         try:
+            self._inbuffer.Dispose()
+        except AttributeError:
+            pass
+        try:
             self._analog_out.Dispose()
         except AttributeError:
             pass
