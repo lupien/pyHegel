@@ -1501,7 +1501,7 @@ class yokogawa_gs200(visaInstrument):
         # clear event register, extended event register and error queue
         self.write('*cls')
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('function', 'range', 'level')
+        return self._conf_helper('function', 'range', 'level', 'output_en')
     def _create_devs(self):
         #self.level_2 = wrapDevice(self.levelsetdev, self.levelgetdev, self.levelcheck)
         self.function = scpiDevice(':source:function', choices=ChoiceStrings('VOLT', 'CURRent')) # use 'voltage' or 'current'
@@ -1510,6 +1510,7 @@ class yokogawa_gs200(visaInstrument):
         #self.level = scpiDevice(':source:level') # can be a voltage, current, MAX, MIN
         self.voltlim = scpiDevice(':source:protection:voltage', str_type=float, setget=True) #voltage, MIN or MAX
         self.currentlim = scpiDevice(':source:protection:current', str_type=float, setget=True) #current, MIN or MAX
+        self.output_en = scpiDevice('OUTPut', str_type=bool)
         self._devwrap('level', setget=True)
         self.alias = self.level
         # This needs to be last to complete creation
