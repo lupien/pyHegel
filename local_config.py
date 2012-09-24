@@ -44,5 +44,7 @@ conf = dict( yo1 = (instrument.yokogawa_gs200, (10,)),
              # MXG generator is gpib 19
              mxg1 = (instrument.agilent_rf_MXG, ('USB0::0x0957::0x1F01::MY50140552',)),
              # Data Translation Box
-             dt1 = (data_translation.DataTranslation, ())
+             dt1 = (data_translation.DataTranslation, ()),
+             # Agilent attenuator
+             att1 = (instrument.agilent_rf_Attenuator, ('USB0::0x0957::0x4C18::MY52200101',))
         )

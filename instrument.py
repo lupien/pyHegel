@@ -2129,6 +2129,36 @@ class agilent_multi_34410A(visaInstrumentAsync):
         # When wait_on_event timesout, it produces the VisaIOError (VI_ERROR_TMO) exception
         #        the error code is available as VisaIOErrorInstance.error_code
 
+class agilent_rf_Attenuator(visaInstrument):
+    """
+    This controls an Agilent Attenuation Control Unit
+    Use att_level_dB to get or change the attenuation level.
+    Use cal_att_level_dB to obtain the calibrated attenuation.
+    Note that the attenuation for 0dB is not included for the
+    other calibration levels.
+    """
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('att_level_dB', 'cal_att_level_dB', 'current_freq_Hz',
+                                 'relative_en', 'relative_ref_dB', options)
+    def _att_level_dB_getdev(self):
+        return int(self.ask('ATTenuation?'))
+    def _att_level_dB_setdev(self, val):
+        val = int(val)
+        self.write('ATTenuation %i'%val)
+        time.sleep(0.02)
+    def _create_devs(self):
+        self.relative_en = scpiDevice('RELative', str_type=bool)
+        self.relative_ref_dB = scpiDevice('REFerence', str_type=float)
+        # TODO implement RELative:LEVel  (only when relative is enabled)
+        self.current_freq_Hz = MemoryDevice(1e9, min=0, max=26.5e9)
+        self._devwrap('att_level_dB', min=0, max=101)
+        #self.att_level_dB = scpiDevice('ATTenuation', str_type=int, min=0, max=101)
+        self.alias = self.att_level_dB
+        self.cal_att_level_dB = scpiDevice(getstr='CORRection? {att},{freq}', str_type=float,
+                                           options=dict(att=self.att_level_dB, freq=self.current_freq_Hz),
+                                           options_apply=['freq'])
+        # This needs to be last to complete creation
+        super(agilent_rf_Attenuator, self)._create_devs()
 
 
 
