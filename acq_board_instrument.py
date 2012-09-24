@@ -181,7 +181,10 @@ class Listen_thread(threading.Thread):
                         block_length, total_byte = val.split(' ')
                         next_readlen = block_length = int(block_length)
                         total_byte = int(total_byte)
-                        acq.fetch._rcv_val = bytearray(total_byte)
+                        if acq.fetch._dump_file != None:
+                            acq.fetch._rcv_val = None
+                        else:
+                            acq.fetch._rcv_val = bytearray(total_byte)
                         break;
                 trames = old_stuff.split('\n', 1)
                 old_stuff = trames.pop()
