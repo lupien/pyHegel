@@ -242,11 +242,14 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
             graphsel.append(count)
             count += 1
     for x in extra_conf:
-        x.force_get()
-        hdr = x.getfullname()
-        f = x.getformat()
-        f['base_conf'] = instrument._get_conf_header(f)
-        f['base_hdr_name'] = hdr
+        if isinstance(x, basestring):
+            f = dict(base_hdr_name='comment', base_conf=x)
+        else:
+            x.force_get()
+            hdr = x.getfullname()
+            f = x.getformat()
+            f['base_conf'] = instrument._get_conf_header(f)
+            f['base_hdr_name'] = hdr
         formats.append(f)
     return hdrs, graphsel, formats
 
@@ -382,8 +385,11 @@ def _write_conf(f, formats, extra_base=None, **kwarg):
         hdr = fmt['base_hdr_name']
         if conf:
             f.write('#'+hdr+':=')
-            for c in conf:
-                f.write(' '+c+';')
+            if isinstance(conf, list):
+                for c in conf:
+                    f.write(' '+c+';')
+            else:
+                f.write(' '+conf)
             f.write('\n')
 
 # TODO: add a sweep up down.
@@ -510,9 +516,11 @@ class _Sweep(instrument.BaseInstrument):
                      This has the same syntax and overrides sweep.out.
                      See sweep.out documentation for more advanced uses
                      (devices with options).
-                extra_conf: list of devices to dump configuration headers at head
-                            of data file. It isdone automatically for sweep device and
-                            the out devices. This allows to add other instruments.
+                extra_conf: list (or a single element) of extra devices to dump configuration
+                            headers at head of data file. Instead of a device, it can also be
+                            a string that will be dumped as is in the header with a comment:= prefix.
+                            (The configuration for the sweep device and all the out
+                             devices is automatically inserted).
                 async: When True, enables async mode (waiting on devices is done in
                         parallel instead of consecutivelly.) This saves time.
                 reset: After the sweep is completed, the dev is returned to the
