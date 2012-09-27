@@ -2256,11 +2256,13 @@ class lakeshore_340(visaInstrument):
         base += self._conf_helper('current_loop', 'sp', 'pid', options)
         return base
     def _enabled_list_getdev(self):
+        old_ch = self.current_ch.getcache()
         ret = []
         for c in self.current_ch.choices:
             d = self.input_set.get(ch=c)
             if d['enabled']:
                 ret.append(c)
+        self.current_ch.set(old_ch)
         return ret
     def _fetch_helper(self, ch=None):
         if ch == None:
@@ -2269,7 +2271,6 @@ class lakeshore_340(visaInstrument):
             ch = [ch]
         return ch
     def _fetch_getformat(self, **kwarg):
-        old_ch = self.current_ch.getcache()
         ch = kwarg.get('ch', None)
         ch = self._fetch_helper(ch)
         multi = []
@@ -2279,7 +2280,6 @@ class lakeshore_340(visaInstrument):
             multi.extend([c+'_T', c+'_S'])
         fmt = self.fetch._format
         fmt.update(multi=multi, graph=graph)
-        self.current_ch.set(old_ch)
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_getdev(self, ch=None):
         old_ch = self.current_ch.getcache()
@@ -2375,11 +2375,13 @@ class lakeshore_370(visaInstrument):
         base += self._conf_helper('sp', 'pid', 'still_raw', options)
         return base
     def _enabled_list_getdev(self):
+        old_ch = self.current_ch.getcache()
         ret = []
         for c in self.current_ch.choices:
             d = self.input_set.get(ch=c)
             if d['enabled']:
                 ret.append(c)
+        self.current_ch.set(old_ch)
         return ret
     def _fetch_helper(self, ch=None):
         if ch == None:
@@ -2388,7 +2390,6 @@ class lakeshore_370(visaInstrument):
             ch = [ch]
         return ch
     def _fetch_getformat(self, **kwarg):
-        old_ch = self.current_ch.getcache()
         ch = kwarg.get('ch', None)
         ch = self._fetch_helper(ch)
         multi = []
@@ -2398,7 +2399,6 @@ class lakeshore_370(visaInstrument):
             multi.extend([str(c)+'_T', str(c)+'_S'])
         fmt = self.fetch._format
         fmt.update(multi=multi, graph=graph)
-        self.current_ch.set(old_ch)
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_getdev(self, ch=None):
         """
