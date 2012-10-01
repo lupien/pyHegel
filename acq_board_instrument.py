@@ -1743,6 +1743,27 @@ def calc_cumulants(data, scale=None, max_cum=5):
 
 from scipy.special import erfinv
 
+# To fix the spacing with a gaussian distribution:
+#  the pdf for a gaussian is scipy.stats.norm.pdf
+#  the cdf (Cumulative distribution function) is
+#   scipy.stats.norm.pdf (or Phi(z) = 1/2[1 + erf(z/sqrt(2))])
+#   for u=0, sigma=1
+#  we need the inverse of that, so use erfinv.
+
+# To fix the spacing with a sin wave (V = A sin(wt)):
+#  the pdf is (2/T)*1/|dV/dt| = 1/(pi sqrt(A^2-V^2))
+#  with T the period (w=2pi/T)
+#  The cdf is (1/2) + arcsin(x/A)/pi
+# we need the inverse of that so use:
+#   x/A = sin(pi(cdf-0.5)) = -cos(pi*cdf)
+#   hence x = -A*cos(pi*cdf)
+# For V = A*sin(wt) +B:
+#     x = B-A*cos(pi*cdf)
+# remember the cdf goes from 0 to 1.
+# And the above is only valid if there is a complete
+# number of cycles (fraction of a cycle, changes all the
+# cumulants).
+
 class HistoSmooth(object):
     """
     This class provides a way to fix the imperfect spacing
@@ -1750,7 +1771,12 @@ class HistoSmooth(object):
 
     To use, create an instance of the class with data
     that will be forced to a clean gaussian (keeping
-    the center and width the same).
+    the center and width the same). It can also be
+    a sine wave if the option sinewave=True is given.
+    Note that for a sine wave, you require an integer number
+    of cycles for the algorithm to work properly. Otherwise
+    you can use a large number of cycle so the extra part as a
+    small infulence.
     The object can also be (re)initialized with the find_corr_x
     method..
 
@@ -1759,7 +1785,7 @@ class HistoSmooth(object):
 
     Warning: The data is assumed to be in increasing number of bin.
     """
-    def __init__(self, data=None, cutoff=1000):
+    def __init__(self, data=None, cutoff=1000, sinewave=False):
         """
         data can have one or 2 dimensions. In the case
         of 2 dimensions only data[1] is used (henced
@@ -1770,12 +1796,15 @@ class HistoSmooth(object):
         data set, where the statistics are poor. All bins where
         the cummalative sum is less than cutoff will not be corrected
         (or 1-cumsum for the end of the data set).
+
+        sinewave=True forces the statistic to a pure sinewave
+                instead of the default gaussian distribution
         """
         self.corr_bincenter = None
         self.corr_binwidth = None
         if data != None:
-            self.find_corr_x(data, cutoff)
-    def find_corr_x(self, data,  cutoff=1000):
+            self.find_corr_x(data, cutoff, sinewave)
+    def find_corr_x(self, data,  cutoff=1000, sinewave=False):
         N = data.shape[-1]
         bins = np.arange(N, dtype=float)
         if data.ndim == 2:
@@ -1789,8 +1818,13 @@ class HistoSmooth(object):
         norm_cum_h = cum_h/sum_h
         tmp = self.calc_cum(h, corrected=False)
         xo = tmp[0]
-        sigma = np.sqrt(tmp[1])
-        bin_right = erfinv(2*norm_cum_h -1)*np.sqrt(2)*sigma + xo
+        if sinewave:
+            Arms = np.sqrt(tmp[1])
+            A = Arms*np.sqrt(2.)
+            bin_right = xo - A*np.cos(norm_cum_h*np.pi)
+        else:
+            sigma = np.sqrt(tmp[1])
+            bin_right = erfinv(2*norm_cum_h -1)*np.sqrt(2)*sigma + xo
         left_w = np.where(cum_h < cutoff)[0]
         right_w = np.where(cum_h > sum_h-cutoff)[0]
         Nl = len(left_w)
