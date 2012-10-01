@@ -32,6 +32,7 @@ conf = dict( yo1 = (instrument.yokogawa_gs200, (10,)),
              foo2 = (instrument.dummy, ()),
              # EXA is gpib 8
              exa1 = (instrument.agilent_EXA, ('USB::0x0957::0x0B0B::MY51170142',)),
+             exa2 = (instrument.agilent_EXA, ('USB::0x0957::0x0B0B::MY52220278',)),
              # PNA-L is gpib 16
              pna1 = (instrument.agilent_PNAL, ('USB0::0x0957::0x0118::MY49001395',)),
              ena1 = (instrument.agilent_ENA, ('USB0::0x0957::0x0D09::MY46213332',)),
