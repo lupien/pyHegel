@@ -1703,10 +1703,74 @@ You can start a server with:
 # Histogram correction algo
 ##############################################################
 
+def calc_cumulants(data, scale=None, max_cum=5):
+    """
+    This functions calculates the cumulants from a sample (like voltages
+    as a function of time).
+    Do not use this for histograms.
+    The calculations are done on the last dimension.
+    The result will have the same dimensions as data unless
+    scale is given. Then scale is assume be in final units/data units.
+    Be carefull, there is an intermediate step in double which can
+    produce memory errors for long data sets.
+    max_cum can be at most 5. If lower only the max_cum are calculated.
+    """
+    avg = data.mean(axis=-1)
+    data = data - avg # the result is in double
+    ret = []
+    if scale != None:
+        data *= scale
+        avg *= scale
+    cum1 = avg
+    ret.append(cum1)
+    d = data**2
+    cum2 = d.mean(axis=-1)
+    ret.append(cum2)
+    if max_cum >= 3:
+        d *= data
+        cum3 = d.mean(axis=-1)
+        ret.append(cum3)
+    if max_cum >= 4:
+        d *= data
+        cum4 = d.mean(axis=-1) - 3.*cum2**2
+        ret.append(cum4)
+    if max_cum >= 5:
+        d *= data
+        cum5 = d.mean(axis=-1) - 10.*cum2*cum3
+        ret.append(cum5)
+    return np.array(ret)
+
+
 from scipy.special import erfinv
 
 class HistoSmooth(object):
+    """
+    This class provides a way to fix the imperfect spacing
+    seen in histograms for the aquisition cards.
+
+    To use, create an instance of the class with data
+    that will be forced to a clean gaussian (keeping
+    the center and width the same).
+    The object can also be (re)initialized with the find_corr_x
+    method..
+
+    After that the class can be used to obtained the cumulants or
+    cleaned up histograms (see calc_cum, corr_hist).
+
+    Warning: The data is assumed to be in increasing number of bin.
+    """
     def __init__(self, data=None, cutoff=1000):
+        """
+        data can have one or 2 dimensions. In the case
+        of 2 dimensions only data[1] is used (henced
+        data the first column the x-axis and the second, the
+        histogram will be handled properly)
+
+        cutoff is used to skip some points on either side of the
+        data set, where the statistics are poor. All bins where
+        the cummalative sum is less than cutoff will not be corrected
+        (or 1-cumsum for the end of the data set).
+        """
         self.corr_bincenter = None
         self.corr_binwidth = None
         if data != None:
@@ -1742,6 +1806,15 @@ class HistoSmooth(object):
         self.corr_bincenter = bin_right - 0.5*bin_width
 
     def corr_hist(self, data):
+        """
+        This corrects the histogram by normalizing the histogram
+        with the corrected bin widths. Apply this on the data set used
+        for calibration should returned a perfect histogram.
+        data can be a pure histogram or a 2D array (x-axis, histogram).
+        The incomming x-axis is assumed to be uniformly spaced.
+        The returned array is always 2D (uses bins if x-axis was not known).
+        The returned x-axis represents the corrected bin centers.
+        """
         N = data.shape[-1]
         bins = np.arange(N, dtype=float)
         if data.ndim >= 2:
@@ -1764,7 +1837,8 @@ class HistoSmooth(object):
                   The last column will be the histogram (in between they are the
                   data set index like files...)
         xscale when given is the x-axis, then data is all histogram (..., histogram)
-
+        When corrected=False, the correction is not applied. The cumulants are
+             calculated directly on the raw histogram data.
         """
         N = data.shape[-1]
         bins = np.arange(N, dtype=float)
