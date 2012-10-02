@@ -291,7 +291,7 @@ You can start a server with:
         # status and flag
         self.board_type = None
         self.Get_Board_Type()
-        if not self.board_type in ['ADC8', 'ADC14']:
+        if not self.board_type in ['ADC8', 'ADC14', 'ADC16']:
             raise ValueError, 'Invalid board_type'
 
         # maximum value
@@ -315,7 +315,7 @@ You can start a server with:
             self._clock_internal_freq = 2000
             self._volt_range = 0.700
             self._bit_resolution = 2**8
-        else: # ADC14
+        elif self.board_type == 'ADC14':
             self._max_sampling = 400
             self._min_sampling = 20
             self._max_Msample = 2147479552 # (2**32-8192)/2
@@ -328,6 +328,19 @@ You can start a server with:
             self._clock_internal_freq = 400
             self._volt_range = 0.750
             self._bit_resolution = 2**14
+        else: # ADC16
+            self._max_sampling = 250
+            self._min_sampling = 40
+            self._max_Msample = 2147479552 # (2**32-8192)/2
+            self._min_hist_Msample = 4096
+            self._min_corr_Msample = 4096
+            self._min_acq_Msample = 16
+            self._max_acq_Msample = 4096
+            self._min_net_Msample = 16
+            self._max_net_Msample = 64
+            self._clock_internal_freq = 250
+            self._volt_range = 0.750
+            self._bit_resolution = 2**16
         self._min_usb_clock_freq = 200 # TODO check this, I think it should be 137.5 MHz
         self._max_nb_Msample_all = 4294967295 # TODO clean up min max nb_Msample
         self._max_nb_tau = 50
@@ -583,7 +596,7 @@ You can start a server with:
            Behavior according to modes:
                Acq:  ch as no effect here
                      By default the data is return as unsigned integers
-                      (char for 8bit, short for 14bit).
+                      (char for 8bit, short for 14bit, 16bit).
                      It can be in volts for unit='V'
                      When in 'Single' mode, it is a 1D vector of the selected
                      channel.
@@ -592,7 +605,8 @@ You can start a server with:
                Osc:  Same as for Acq
 
                Hist: by default returns a vector of uint64 of size
-                     256 (8bit) or 16384 (14bit). These bins contain the count
+                     256 (8bit), 16384 (14bit) or in 65536 (16bit).
+                     These bins contain the count
                      of events in that binary code from the ADC.
                      When unit='rate', the return vector is the count rate
                      in count/s as floats.
@@ -683,10 +697,10 @@ You can start a server with:
                 self.fetch._dump_file.close()
             if self.fetch._rcv_val == None:
                 return None
-            if self.board_type == 'ADC14':
-                ret = np.fromstring(self.fetch._rcv_val, np.ushort)
-            else:
+            if self.board_type == 'ADC8':
                 ret = np.fromstring(self.fetch._rcv_val, np.ubyte)
+            else:
+                ret = np.fromstring(self.fetch._rcv_val, np.ushort)
             if self.chan_mode.getcache() == 'Dual':
                 ret.shape=(-1,2)
                 ret = ret.T
@@ -774,10 +788,10 @@ You can start a server with:
             instrument.wait_on_event(self.fetch._event_flag, check_state=self)
             if self.fetch._rcv_val == None:
                 return None
-            if self.board_type == 'ADC14':
-                ret = np.fromstring(self.fetch._rcv_val, np.ushort)
-            else:
+            if self.board_type == 'ADC8':
                 ret = np.fromstring(self.fetch._rcv_val, np.ubyte)
+            else:
+                ret = np.fromstring(self.fetch._rcv_val, np.ushort)
             if self.chan_mode.getcache() == 'Dual':
                 ret.shape=(-1,2)
                 ret = ret.T
@@ -1071,6 +1085,8 @@ You can start a server with:
             self.net_signal_freq = acq_device('CONFIG:NET_SIGNAL_FREQ', str_type=float,  min=0, max=375000000)
         elif self.board_type == 'ADC14':
             self.net_signal_freq = acq_device('CONFIG:NET_SIGNAL_FREQ', str_type=float,  min=0, max=50000000)
+        elif self.board_type == 'ADC16':
+            self.net_signal_freq = acq_device('CONFIG:NET_SIGNAL_FREQ', str_type=float,  min=0, max=30000000)
         
         self.lock_in_square = acq_device('CONFIG:LOCK_IN_SQUARE', str_type=acq_bool())
         self.nb_harm = acq_device('CONFIG:NB_HARM',str_type=int, min=1, max=100)
@@ -1627,7 +1643,7 @@ You can start a server with:
                  raise ValueError, 'Warning nb_Msample must be inferior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
 
         # TODO clean up use of 256, 4096 ...
-        if self.op_mode.getcache() == 'Hist' and self.board_type == 'ADC14':
+        if self.op_mode.getcache() == 'Hist' and self.board_type in ['ADC14', 'ADC16']:
             quotien = float(self.nb_Msample.getcache())/256
             frac,entier = math.modf(quotien)
             if frac != 0.0:
@@ -1635,10 +1651,10 @@ You can start a server with:
                 if new_nb_Msample > self._max_Msample:
                     new_nb_Msample = self._max_Msample
                 self.nb_Msample.set(new_nb_Msample)
-                raise ValueError, 'Warning nb_Msample must be a multiple of 256 in Hist ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be a multiple of 256 in Hist ADC14-ADC16, value corrected to nearest possible value : ' + str(new_nb_Msample)
             decimation = self.decimation.getcache()
             if decimation != 1 and decimation % 2 ==1:
-                raise ValueError, 'Decimation can only be 1 or a multiple of 2 for Hist ADC14'
+                raise ValueError, 'Decimation can only be 1 or a multiple of 2 for Hist ADC14-ADC16'
 
         if self.op_mode.getcache() == 'Hist' and self.board_type == 'ADC8':
             decimation = self.decimation.getcache()
@@ -1646,7 +1662,7 @@ You can start a server with:
                 raise ValueError, 'Decimation can only be 1, 2 or a multiple of 4 for Hist ADC8'
         
         
-        if self.op_mode.getcache() == 'Corr' and self.board_type == 'ADC14':
+        if self.op_mode.getcache() == 'Corr' and self.board_type in ['ADC14', 'ADC16']:
             quotien = float(self.nb_Msample.getcache())/4096
             frac,entier = math.modf(quotien)
             if frac != 0.0:
@@ -1654,7 +1670,7 @@ You can start a server with:
                 if new_nb_Msample > self._max_Msample:
                     new_nb_Msample = self._max_Msample
                 self.nb_Msample.set(new_nb_Msample)
-                raise ValueError, 'Warning nb_Msample must be a multiple of 4096 in Corr ADC14, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be a multiple of 4096 in Corr ADC14-ADC16, value corrected to nearest possible value : ' + str(new_nb_Msample)
 
 
         if (self.op_mode.getcache() == 'Hist' or self.op_mode.getcache() == 'Corr') and self.board_type == 'ADC8':
