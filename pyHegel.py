@@ -721,7 +721,7 @@ def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0):
 
 #TODO add handling of title column and extracting headers
 _readfile_lastnames = []
-def readfile(filename, nojoin=False, getnames=False, csv='auto'):
+def readfile(filename, nojoin=False, getnames=False, csv='auto', dtype=None):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -741,7 +741,7 @@ def readfile(filename, nojoin=False, getnames=False, csv='auto'):
                                    in ... )
         *, ? and [ can be escaped with a \\
 
-    For a single file, the returned array as shape (n_columns, n_rows)
+    For a single file, the returned array has shape (n_columns, n_rows)
     so selecting a column in a data file is the first index dimension.
     For multiple files, the shape is (n_columns, n_files, n_rows)
      or (nfiles, n_rows) if the files contain only a single column
@@ -750,6 +750,12 @@ def readfile(filename, nojoin=False, getnames=False, csv='auto'):
     is used to detect wheter to use csv or not. When csv is used
     the column separator is ',' and all lines not containing only numerical
     are automatically skipped.
+
+    When dtype is given a valid type (like uint16), it means all the files will
+    be read in binary mode as containing that dtype.
+
+    If the file extension ends with .npy, it is read with np.load as a numpy
+    file.
 
     The list of files is saved in the global variable _readfile_lastnames.
     When the parameter getnames=True, the return value is a tuple
@@ -776,6 +782,12 @@ def readfile(filename, nojoin=False, getnames=False, csv='auto'):
         multi = False
     ret = []
     for fn in filelist:
+        if dtype != None:
+            ret.append(np.fromfile(fn, dtype=dtype))
+            continue
+        if fn.lower().endswith('.npy'):
+            ret.append(np.load(fn))
+            continue
         if csv=='auto':
             if fn.lower().endswith('.csv'):
                 docsv = True
