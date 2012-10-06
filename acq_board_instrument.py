@@ -1494,7 +1494,6 @@ You can start a server with:
         """
         Activates the oscilloscope mode.
         Get nb_sample (1024 by default).
-        WARNING: if the acquisition card can't find a trigger, it will hang.
 
         hori_offset:  delay in time_steps (integer) between trigger and data.
         trigger_level: Voltage used for trigger (default=0.0).
