@@ -676,7 +676,7 @@ You can start a server with:
             filename = instrument._replace_ext(filename, '.bin')
         filestr= self._fetch_filename_helper(filename)
         self.fetch._dump_file = None
-        if not self.result_available.getcache():
+        if not self.result_available.get():
             raise ValueError, 'Error result not available\n' 
 
         if xaxis == None:
@@ -1502,7 +1502,7 @@ You can start a server with:
                      or 2.
         trig_mode: Either 'Auto'  (default) or 'Normal'
                    In 'Normal' the cards might wait forever for a trigger.
-                   To stop it see stop methode.
+                   To stop it see stop method.
                    In 'Auto' if a trigger is not seen the first section of data is
                    returned.
         chan_mode: Either 'Single' (default) or 'Dual'.
