@@ -4019,3 +4019,49 @@ class ExecuteDevice(LogicalDevice):
             ret = subprocess.check_output(command, shell=True)
             ret = np.fromstring(ret, sep=' ')
         return ret
+
+class RThetaDevice(LogicalDevice):
+    """
+       This class provides a wrapper around two devices.
+       Given offsets for both of them, assuming they
+       have the same scale, and if we call their values x,y
+       then this devices returns R and theta(deg)
+       with R=sqrt(x**2+y**2), theta=angle(x,y)
+       It does not allow set to device
+       On reading it returns R, theta, raw x ,raw y
+       The xoffset, yoffset are used to correct raw_x and raw_y into x,y
+
+       The kwarg of get are applied to both basedevs
+       For set and check, the kw argument is a list of
+       dictionaries of kwarg for each device.
+       When initializing, the devices can be tuple (device, dict)
+       where dict will be the default kwarg to pass to the device.
+       These can be overriden by the kw argument.
+    """
+    def __init__(self, basedevs, xoffset=0., yoffset=0., doc='', **extrak):
+        self._xoffset = xoffset
+        self._yoffset = yoffset
+        super(type(self), self).__init__(basedevs=basedevs, doc=doc, **extrak)
+        self._format['multi'] = ['R', 'ThetaDeg', 'raw_x', 'raw_y']
+        self._format['graph'] = [0,1]
+        self._format['header'] = self._current_config
+    def _current_config(self, dev_obj=None, options={}):
+        head = ['R_Theta_Device:: %r, xoffset=%g, yoffset=%g'%(self._basedevs, self._xoffset, self._yoffset)]
+        return self._current_config_addbase(head, options=options.get('kw', None))
+    def _getdev(self, **kwarg):
+        kwarg = self._combine_kwarg(kwarg, base=self._basedevs_kwarg[0])
+        raw_x = self._basedevs[0].get(**kwarg)
+        raw_y = self._basedevs[1].get(**kwarg)
+        x = raw_x - self._xoffset
+        y = raw_y - self._yoffset
+        z = x+1j*y
+        R = np.abs(z)
+        theta = np.angle(z, deg=True)
+        return [R, theta, raw_x, raw_y]
+    def _setdev(self, val):
+        raise ValueError, "This is not allowed"
+    def check(self, val):
+        raise ValueError, "This is not allowed"
+    def force_get(self):
+        for dev in self._basedevs:
+            dev.force_get()
