@@ -1297,7 +1297,7 @@ def load(names=None, newnames=None):
        via Visa (GPIB or USB) (Can also use the external Visa explorer from
        Agilent or National Instruments).
 
-       NOTE: You can always load an instrument manually. You just to initialize
+       NOTE: You can always load an instrument manually. You just need to initialize
        the instrument class with the proper address. For example you can replace
         ;load yo1
        with
