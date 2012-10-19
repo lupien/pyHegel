@@ -1,11 +1,26 @@
 # -*- coding: utf-8 -*-
 # vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 
+import os
+
 try:
-  import visa
-  vpp43 = visa.vpp43
-except ImportError:
-  print 'Error importing visa. You will have reduced functionality.'
+    if os.name == 'nt':
+        import pyvisa.vpp43 as vpp43
+        try:
+            # First try the agilent Library.
+            # You can later check with: vpp43.visa_library()
+            vpp43.visa_library.load_library(r"c:\Windows\system32\agvisa32.dll")
+        except WindowsError:
+            print 'Unable to load Agilent visa library. Will try the default one (National Instruments?).'
+        try:
+            import visa
+        except WindowsError:
+            print 'Unable to load visa32.dll. You will have reduced functionality.'
+    else:
+        import visa
+        vpp43 = visa.vpp43
+except ImportError: # pyVisa not installed
+    print 'Error importing visa. You will have reduced functionality.'
 #can list instruments with : 	visa.get_instruments_list()
 #     or :                      visa.get_instruments_list(use_aliases=True)
 
