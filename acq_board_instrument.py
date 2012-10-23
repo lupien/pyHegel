@@ -163,9 +163,8 @@ class Listen_thread(threading.Thread):
                             if obj == acq.partial_status:
                                 partial_L, partial_v = obj._cache
                                 sys.stdout.write('\rPartial %3i/%-3i     '%(partial_v,partial_L))
-                            if obj == acq.result_available:
-                                # run is finished for any result_available status received
-                                # wether True or False
+                            if obj == acq.board_status and obj._cache != 'Running':
+                                # run is finished when board_status is either Idle or Transferring
                                 acq._run_finished.set()
                 else: # trame[0]=='#'
                     trame = trame[1:]
@@ -676,7 +675,7 @@ You can start a server with:
             filename = instrument._replace_ext(filename, '.bin')
         filestr= self._fetch_filename_helper(filename)
         self.fetch._dump_file = None
-        if not self.result_available.get():
+        if not self.result_available.getcache():
             raise ValueError, 'Error result not available\n' 
 
         if xaxis == None:
@@ -1619,6 +1618,8 @@ You can start a server with:
         If valid, it starts the acquisition/analysis.
         """
         # check if the configuration are ok
+        if self.op_mode.getcache() == 'Null':
+            raise ValueError, 'No acquisition mode selected yet!'
         
         #check if board is Idle
         if self.board_status.getcache() == 'Running':
