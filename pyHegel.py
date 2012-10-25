@@ -225,21 +225,25 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         f['base_hdr_name'] = hdr
         formats.append(f)
         multi = f['multi']
-        if f['file'] == True or multi == True or isinstance(multi, tuple):
-            hdrs.append(hdr)
-            if f['file'] == True and f['graph'] == True: # When using file, the device could return an interesting scalar.
-                graphsel.append(count)
-            count += 1
-        elif isinstance(multi, list):
+        graph = f['graph']
+        if graph == False:
+            graph = []
+        elif graph == True:
+            if isinstance(multi, list):
+                graph = range(len(multi))
+            else:
+                graph = [0]
+        elif not isinstance(graph, list):
+            graph = [graph]
+        graph_list = [ g+count for g in graph]
+        graphsel.extend(graph_list)
+        if f['file'] != True and isinstance(multi, list):
             hdr_list = [ hdr+'.'+h for h in multi]
             c = len(hdr_list)
             hdrs.extend(hdr_list)
-            graph_list = [ g+count for g in f['graph']]
-            graphsel.extend(graph_list)
             count += c
-        else: # file==False and multi==False
+        else:
             hdrs.append(hdr)
-            graphsel.append(count)
             count += 1
     for x in extra_conf:
         if isinstance(x, basestring):
@@ -345,7 +349,10 @@ def _checkTracePause(trace):
 #                                     This says so, gives the number of them and their names
 #                                     for headers and graphing
 #                ('head1', 'head2')   like multi=True (save to file) but provides headers
-#          graph=[1,2]                When using multi, this selects the values to graph
+#          graph=[1,2]                This selects the values to graph (mostly useful for multi)
+#                                     [] means not to show anything.
+#                                     It could also be a single value. To show a single element.
+#                                     True shows everything, False shows nothing (same as [])
 #          graph=True/False           When file is True, This says to graph the return value or not
 #                                       TODO implement this.
 #                                            also allow to select column to plot in multi files
@@ -427,9 +434,11 @@ class _Sweep(instrument.BaseInstrument):
            [dev1, (dev2, dict(dev2opt1=value1, dev2opt2=value2)), dev3]
       Additional parameter are:
           graph:  it allows the selection of which column of multi-column
-                  data to graph. It should be a list of column index.
+                  data to graph. It can be a list of column index.
                   Ex: graph=[0,2,3]
                   would display the first, third and fourth column of this device.
+                  It can also be a single index i (which will be the same as [i])
+                  It can also True (show all), False (show none, the same as [])
           bin:    To overwrite filesave format/extension can be
                   any extension like '.bin' or false to save as text.
                   with '.npy', it is saved in npy format

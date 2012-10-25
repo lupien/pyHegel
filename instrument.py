@@ -255,7 +255,7 @@ class BaseDevice(object):
          dev(val) which is the same as set(val)
     """
     def __init__(self, autoinit=True, doc='', setget=False,
-                  min=None, max=None, choices=None, multi=False, graph=[],
+                  min=None, max=None, choices=None, multi=False, graph=True,
                   trig=False, delay=False, redir_async=None):
         # instr and name updated by instrument's _create_devs
         # doc is inserted before the above doc
@@ -408,7 +408,7 @@ class BaseDevice(object):
            raise ValueError, self.perror('Failed check: '+err)
         #return state
     def getformat(self, filename=None, **kwarg): # we need to absorb any filename argument
-        # first handle options we don't want saved it 'options'
+        # first handle options we don't want saved in 'options'
         graph = kwarg.pop('graph', None)
         self._format['options'] = kwarg
         #now handle the other overides
