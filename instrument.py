@@ -1571,12 +1571,12 @@ class sr830_lia(visaInstrument):
         self._check_snapsel(sel)
         sel = map(str, sel)
         return _decode_float64(self.ask('snap? '+string.join(sel,sep=',')))
-    def _snap_getformat(self, sel=[1,2], filename=None):
+    def _snap_getformat(self, sel=[1,2], **kwarg):
         self._check_snapsel(sel)
         headers = [ self._snap_type[i] for i in sel]
         d = self.snap._format
         d.update(multi=headers, graph=range(len(sel)))
-        return BaseDevice.getformat(self.snap, sel=sel)
+        return BaseDevice.getformat(self.snap, sel=sel, **kwarg)
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
                                  'sync_filter', 'reserve_mode',
