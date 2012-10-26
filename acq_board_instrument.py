@@ -248,6 +248,8 @@ class Acq_Board_Instrument(instrument.visaInstrument):
     Instead of fetch you can use readval which is the same as
     run_and_wait followed by a fetch.
 
+    The 16 bit card sometimes need to be recalibrated. see force_cal method.
+
     In case of trouble, you might need to read the error values.
     see get_error for data. When all the error message are read, the error state
     is cleared.
@@ -1185,6 +1187,13 @@ You can start a server with:
         Ask the server to stop acquiring data
         """
         self.write('STOP')
+
+    def force_cal(self):
+        """
+        Ask the server to do the hardcal and offset/gain cal for 16bit cards.
+        The calibration is performed when the card is idle.
+        """
+        self.write('FORCECAL')
 
     def disconnect(self):
         """
