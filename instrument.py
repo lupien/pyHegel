@@ -10,6 +10,7 @@ try:
             # First try the agilent Library.
             # You can later check with: vpp43.visa_library()
             vpp43.visa_library.load_library(r"c:\Windows\system32\agvisa32.dll")
+            pass
         except WindowsError:
             print 'Unable to load Agilent visa library. Will try the default one (National Instruments?).'
         try:
@@ -1456,24 +1457,75 @@ class visaInstrumentAsync(visaInstrument):
         self.write('*cls')
         if full:
             self.write('*ese 1;*sre 32') # OPC flag
-            vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
-                               vpp43.VI_QUEUE)
+            is_gpib = vpp43.get_attribute(self.visa.vi, vpp43.VI_ATTR_INTF_TYPE) == vpp43.VI_INTF_GPIB
+            is_agilent = True # TODO find a way to figure this out
+            if is_gpib and is_agilent:
+                # Note that the agilent visa using a NI usb gpib adapter (at least)
+                # disables the autopoll settings of NI
+                # Hence a SRQ on the bus produces events for all devices on the bus.
+                # If those events are not read, the buffer eventually fills up.
+                # This is a problem when using more than one visaInstrumentAsync
+                # To avoid that problem, I use a handler in that case.
+                # The handler needs to clear
+                self._RQS_active = 0
+                # TODO remove a previous handler (make usre to only have one installed)
+                #      Also handle delete of device by disabling/removing handler
+                #      closing the visa.vi is enough.
+                vpp43.install_handler(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+                                      self._RQS_handler, self)
+                vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+                                   vpp43.VI_HNDLR)
+                # This is needed because pyvisa enables it by default
+                vpp43.disable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+                                   vpp43.VI_QUEUE)
+            else:
+                self._RQS_active = -1
+                vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+                                   vpp43.VI_QUEUE)
+    def _RQS_handler(self, vi, event_type, context, userHandle):
+        # When NI autopoll is off:
+        # Reading the status will clear the service request of this instrument
+        # if the SRQ line is still active, another call to the handler will occur
+        # after a short delay (30 ms I think) everytime a read_status_byte is done
+        # on the bus (and SRQ is still active).
+        status = self.read_status_byte()
+        # If multiple session talk to the same instrument
+        # only one of them will see the RQS flag. So to have a chance
+        # of more than one, look at other flag instead (which is not immediately
+        # reset)
+        # TODO, handle this better?
+        #if status&0x40:
+        if status&0x20:
+            self._RQS_active = status
+            print 'Got it', vi
+        return vpp43.VI_SUCCESS
     def _get_esr(self):
         return int(self.ask('*esr?'))
     def _async_detect(self, max_time=.5): # 0.5 s max by default
-        ev_type = context = None
-        try:
-            ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, int(max_time*1000))
-        except visa.VisaIOError, e:
-            if e.error_code != vpp43.VI_ERROR_TMO:
-                raise
-        if context != None:
-            # only reset event flag. We know the bit that is set already (OPC)
-            self._get_esr()
-            # only reset SRQ flag. We know the bit that is set already
-            self.read_status_byte()
-            vpp43.close(context)
-            return True
+        if self._RQS_active == -1:
+            ev_type = context = None
+            try:
+                ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, int(max_time*1000))
+            except visa.VisaIOError, e:
+                if e.error_code != vpp43.VI_ERROR_TMO:
+                    raise
+            if context != None:
+                # only reset event flag. We know the bit that is set already (OPC)
+                self._get_esr()
+                # only reset SRQ flag. We know the bit that is set already
+                self.read_status_byte()
+                vpp43.close(context)
+                return True
+        else:
+            if self._RQS_active != 0:
+                #we assume status only had but 0x20(event) and 0x40(RQS) set
+                #and event only has OPC set
+                # status has already been reset. Now reset event flag.
+                self._get_esr()
+                return True
+            else:
+                #TODO remove this sleep
+                time.sleep(max_time)
         return False
     def wait_after_trig(self):
         """
@@ -1492,14 +1544,22 @@ class visaInstrumentAsync(visaInstrument):
         # We detect the end of acquisition using *OPC and status byte.
         if self._get_esr() & 0x01:
             print 'Unread event byte!'
+        # A while loop is needed when National Instrument (NI) gpib autopoll is active
+        # This is the default when using the NI Visa.
         while self.read_status_byte() & 0x40:
             print 'Unread status byte!'
-        try:
-            while True:
-                foo = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 0)
-                print 'Unread event queue!'
-        except:
-            pass
+        if self._RQS_active != -1:
+            self._RQS_active = 0
+        else:
+            try:
+                while True:
+                    ev_type = context = None
+                    ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 0)
+                    if context != None:
+                        vpp43.close(context)
+                    print 'Unread event queue!'
+            except:
+                pass
         self._async_trigger_helper()
 
 class yokogawa_gs200(visaInstrument):
