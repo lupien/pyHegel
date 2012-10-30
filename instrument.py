@@ -1472,7 +1472,7 @@ class visaInstrumentAsync(visaInstrument):
                 #      Also handle delete of device by disabling/removing handler
                 #      closing the visa.vi is enough.
                 vpp43.install_handler(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
-                                      self._RQS_handler, self)
+                                      self._RQS_handler, 0)
                 vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
                                    vpp43.VI_HNDLR)
                 # This is needed because pyvisa enables it by default
