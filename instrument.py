@@ -3,6 +3,23 @@
 
 import os
 
+def _get_lib_properties(libraryHandle):
+    filename = win32api.GetModuleFileName(libraryHandle)
+    fixedInfo = win32api.GetFileVersionInfo(filename, '\\')
+    # Only pick the first lang, codepage combination
+    lang, codepage = win32api.GetFileVersionInfo(filename, r'\VarFileInfo\Translation')[0]
+    base = '\\StringFileInfo\\%04X%04X\\'%(lang, codepage)
+    company = win32api.GetFileVersionInfo(filename, base+'CompanyName')
+    product = win32api.GetFileVersionInfo(filename, base+'ProductName')
+    version = win32api.GetFileVersionInfo(filename, base+'ProductVersion')
+    fileversion = win32api.GetFileVersionInfo(filename, base+'FileVersion')
+    comments = win32api.GetFileVersionInfo(filename, base+'Comments')
+    descr = win32api.GetFileVersionInfo(filename, base+'FileDescription')
+    return dict(fixed=fixedInfo, lang=lang, codepage=codepage, company=company,
+                product=product, version=version, fileversion=fileversion,
+                comments=comments, descr=descr, filename=filename)
+
+_agilent_visa = False
 try:
     if os.name == 'nt':
         import pyvisa.vpp43 as vpp43
@@ -17,6 +34,10 @@ try:
             import visa
         except WindowsError:
             print 'Unable to load visa32.dll. You will have reduced functionality.'
+        import win32api
+        _visa_lib_properties = _get_lib_properties(vpp43.visa_library()._handle)
+        if 'agilent' in _visa_lib_properties['company'].lower():
+            _agilent_visa = True
     else:
         import visa
         vpp43 = visa.vpp43
@@ -1458,7 +1479,7 @@ class visaInstrumentAsync(visaInstrument):
         if full:
             self.write('*ese 1;*sre 32') # OPC flag
             is_gpib = vpp43.get_attribute(self.visa.vi, vpp43.VI_ATTR_INTF_TYPE) == vpp43.VI_INTF_GPIB
-            is_agilent = True # TODO find a way to figure this out
+            is_agilent = _agilent_visa
             if is_gpib and is_agilent:
                 # Note that the agilent visa using a NI usb gpib adapter (at least)
                 # disables the autopoll settings of NI
