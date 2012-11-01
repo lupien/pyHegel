@@ -44,7 +44,7 @@ class acq_filename(object):
 class acq_device(instrument.scpiDevice):
     def __init__(self, *arg, **kwarg):
         super(acq_device, self).__init__(*arg, **kwarg)
-        self._event_flag = threading.Event()
+        self._event_flag = instrument.FastEvent()
         self._event_flag.set()
         self._rcv_val = None
     def _getdev(self):
@@ -58,7 +58,7 @@ class acq_device(instrument.scpiDevice):
 class dummy_device(object):
     def __init__(self, getstr):
         self._rcv_val = None
-        self._event_flag = threading.Event()
+        self._event_flag = instrument.FastEvent()
         self._getdev_p = getstr
     def _getdev(self, quest_extra=''):
         self._event_flag.clear()
@@ -347,7 +347,7 @@ You can start a server with:
         self._max_nb_tau = 50
 
         self.visa_addr = self.board_type
-        self._run_finished = threading.Event() # starts in clear state
+        self._run_finished = instrument.FastEvent() # starts in clear state
 
         self._listen_thread = Listen_thread(self)
         self._listen_thread.start()     
@@ -391,19 +391,21 @@ You can start a server with:
     def set_timeout(self, seconds): # can be None
         self.s.settimeout(seconds)
     def __del__(self):
-        print 'deleting acq1'
+        #print 'deleting acq1'
         # TODO  find a proper way to shut down connection
         # self.shutdown() (stop thread then send shutdown...)
         if self._listen_thread:
             self._listen_thread.cancel()
             self._listen_thread.wait()
         self.s.close()
+        super(Acq_Board_Instrument, self).__del__()
 
     def _async_trig(self):
         #self._run_finished.clear() # now in run itself
         self.run()
     def _async_detect(self, max_time=.5): # 0.5 s max by default
-        return instrument.wait_on_event(self._run_finished, check_state=self, max_time=max_time)
+        return self._run_finished.wait(max_time)
+        #return instrument.wait_on_event(self._run_finished, check_state=self, max_time=max_time)
     def wait_after_trig(self):
         """
         waits until the run is finished
@@ -1139,7 +1141,7 @@ You can start a server with:
         self.net_phase_diff = acq_device(getstr = 'DATA:NET:PHASE_DIFF?',str_type = float, autoinit=False, trig=True)
 
         self._devwrap('fetch', autoinit=False, trig=True)
-        self.fetch._event_flag = threading.Event()
+        self.fetch._event_flag = instrument.FastEvent()
         self.fetch._rcv_val = None
         self.readval = instrument.ReadvalDev(self.fetch)
         self._devwrap('tau_vec', setget=True)

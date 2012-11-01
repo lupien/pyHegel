@@ -19,6 +19,26 @@ def _get_lib_properties(libraryHandle):
                 product=product, version=version, fileversion=fileversion,
                 comments=comments, descr=descr, filename=filename)
 
+# On windows 7 this allows a better time resolution
+# The default seems to be 10 ms. With this I can get 1 ms
+# To return the resolution back to the default,
+# either close this application or call with stop=True and
+# with the same period setting as the previous (stop=False) call.
+def _faster_timer(stop=False, period='min'):
+    import ctypes
+    lib = ctypes.windll.winmm
+    if period == 'min':
+        dat_struct = (ctypes.c_uint*2)()
+        lib.timeGetDevCaps(dat_struct, ctypes.sizeof(dat_struct))
+        period = dat_struct[0]
+        print 'Using minimal period of ', period, ' ms'
+    if stop:
+        ret = lib.timeEndPeriod(period)
+    else:
+        ret = lib.timeBeginPeriod(period)
+    if ret != 0:
+        print 'Error(%i) in setting period'%ret
+
 _agilent_visa = False
 try:
     if os.name == 'nt':
@@ -27,7 +47,6 @@ try:
             # First try the agilent Library.
             # You can later check with: vpp43.visa_library()
             vpp43.visa_library.load_library(r"c:\Windows\system32\agvisa32.dll")
-            pass
         except WindowsError:
             print 'Unable to load Agilent visa library. Will try the default one (National Instruments?).'
         try:
@@ -177,6 +196,53 @@ def _write_dev(val, filename, format=format, first=False):
             np.savetxt(f, val.T, fmt='%.18g', delimiter='\t')
     f.close()
 
+# Taken from python threading 2.7.2
+class FastEvent(threading._Event):
+    def __init__(self, verbose=None):
+        threading._Verbose.__init__(self, verbose)
+        self._Event__cond = FastCondition(threading.Lock())
+        self._Event__flag = False
+
+class FastCondition(threading._Condition):
+    def wait(self, timeout=None):
+        if not self._is_owned():
+            raise RuntimeError("cannot wait on un-acquired lock")
+        waiter = threading._allocate_lock()
+        waiter.acquire()
+        self._Condition__waiters.append(waiter)
+        saved_state = self._release_save()
+        try:    # restore state no matter what (e.g., KeyboardInterrupt)
+            if timeout is None:
+                waiter.acquire()
+                if __debug__:
+                    self._note("%s.wait(): got it", self)
+            else:
+                # Balancing act:  We can't afford a pure busy loop, so we
+                # have to sleep; but if we sleep the whole timeout time,
+                # we'll be unresponsive.
+                endtime = time.time() + timeout
+                delay = 0.01
+                while True:
+                    gotit = waiter.acquire(0)
+                    if gotit:
+                        break
+                    remaining = endtime - time.time()
+                    if remaining <= 0:
+                        break
+                    delay = min(delay, remaining)
+                    time.sleep(delay)
+                if not gotit:
+                    if __debug__:
+                        self._note("%s.wait(%s): timed out", self, timeout)
+                    try:
+                        self._Condition__waiters.remove(waiter)
+                    except ValueError:
+                        pass
+                else:
+                    if __debug__:
+                        self._note("%s.wait(%s): got it", self, timeout)
+        finally:
+            self._acquire_restore(saved_state)
 
 #To implement async get:
 #    need multi level get
@@ -214,6 +280,7 @@ class asyncThread(threading.Thread):
     def change_detect(self, new_detect):
         self._async_detect = new_detect
     def run(self):
+        #t0 = time.time()
         delay = self._async_delay
         if delay and not CHECKING:
             diff = 0.
@@ -228,14 +295,17 @@ class asyncThread(threading.Thread):
             return
         if self._async_trig and not CHECKING:
             self._async_trig()
+        #print 'Thread ready to detect ', time.time()-t0
         if self._async_detect != None:
             while not self._async_detect():
                if self._stop:
                    break
         if self._stop:
             return
+        #print 'Thread ready to read ', time.time()-t0
         for func, kwarg in self._operations:
             self.results.append(func(**kwarg))
+        #print 'Thread finished in ', time.time()-t0
     def cancel(self):
         self._stop = True
     def wait(self, timeout=None):
@@ -245,8 +315,16 @@ class asyncThread(threading.Thread):
 def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
     # task_or_event_or_func either needs to have a wait attribute with a parameter of
     # seconds. Or it should be a function accepting a parameter of time in s.
-    # check_state will all to break the loop if check_state._error_state
+    # check_state allows to break the loop if check_state._error_state
     # becomes True
+    # Note that Event.wait (actually threading.Condition.wait)
+    # tries to wait for 1ms then for 2ms more then 4, 8, 16, 32 and then in blocks
+    # of 50 ms. If the wait would be longer than what is left, the wait is just
+    # what is left. However, on windows 7 (at least), the wait ends up being
+    # rounded to: 1, 2, 4 and 8->10ms, 16->20ms, 32-> 40ms
+    # therefore, using Event.wait can produce times of 10, 20, 30, 40, 60, 100, 150
+    # 200 ms ...
+    # TODO could rewrite that Event.wait to be faster
     start_time = time.time()
     try: # should work for task (threading.Thread) and event (threading.Event)
         docheck = task_or_event_or_func.wait
@@ -596,7 +674,7 @@ class BaseInstrument(object):
                 self._async_task.start()
                 self._async_level = 1
         elif async == 2:  # Wait for task to finish
-            if self._async_level == 1: # First time through (no need to wait for sunsequent calls)
+            if self._async_level == 1: # First time through (no need to wait for subsequent calls)
                 wait_on_event(self._async_task)
                 self._async_level = -1
             self._async_counter = 0
@@ -604,6 +682,9 @@ class BaseInstrument(object):
             #return obj.getcache()
             ret = self._async_task.results[self._async_counter]
             self._async_counter += 1
+            if self._async_counter == len(self._async_task.results):
+                # delete task so that instrument can be deleted
+                del self._async_task
             return ret
     def find_global_name(self):
         return _find_global_name(self)
@@ -1384,6 +1465,10 @@ class visaInstrument(BaseInstrument):
             self.visa = visa.instrument(visa_addr)
         self.visa.timeout = 3 # in seconds
         BaseInstrument.__init__(self)
+    def __del__(self):
+        print 'Destroying '+repr(self)
+        # no need to call vpp43.close(self.visa.vi)
+        # because self.visa does that when it is deleted
     #######
     ## Could implement some locking here ....
     ## for read, write, ask
@@ -1473,42 +1558,55 @@ class visaInstrument(BaseInstrument):
         self.visa.trigger()
 
 class visaInstrumentAsync(visaInstrument):
+    def __init__(self, visa_addr):
+        super(visaInstrumentAsync, self).__init__(visa_addr)
+        is_gpib = vpp43.get_attribute(self.visa.vi, vpp43.VI_ATTR_INTF_TYPE) == vpp43.VI_INTF_GPIB
+        is_agilent = _agilent_visa
+        if is_gpib and is_agilent:
+            # Note that the agilent visa using a NI usb gpib adapter (at least)
+            # disables the autopoll settings of NI
+            # Hence a SRQ on the bus produces events for all devices on the bus.
+            # If those events are not read, the buffer eventually fills up.
+            # This is a problem when using more than one visaInstrumentAsync
+            # To avoid that problem, I use a handler in that case.
+            self._RQS_status = 0  #-1: no handler, 0 not ready, other is status byte
+            self._RQS_done = FastEvent()  #starts in clear state
+            self._proxy_handler = ProxyMethod(self._RQS_handler)
+            # _handler_userval is the ctype object representing the user value (0 here)
+            # It is needed for uninstall
+            self._handler_userval = vpp43.install_handler(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+                                  self._proxy_handler, 0)
+            vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+                               vpp43.VI_HNDLR)
+            # This is needed because pyvisa enables it by default
+            vpp43.disable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+                               vpp43.VI_QUEUE)
+        else:
+            # NI does not allow the use of VI_HANDLR for gpib
+            self._RQS_status = -1
+            vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+                               vpp43.VI_QUEUE)
+    def __del__(self):
+        if self._RQS_status != -1:
+            # only necessary to keep vpp43.handlers list in sync
+            # the actual handler is removed when the visa is deleted (vi closed)
+            vpp43.uninstall_handler(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+                                  self._proxy_handler, self._handler_userval)
+        super(visaInstrumentAsync, self).__del__()
     def init(self, full=False):
         # This clears the error state, and status/event flags?
         self.write('*cls')
         if full:
             self.write('*ese 1;*sre 32') # OPC flag
-            is_gpib = vpp43.get_attribute(self.visa.vi, vpp43.VI_ATTR_INTF_TYPE) == vpp43.VI_INTF_GPIB
-            is_agilent = _agilent_visa
-            if is_gpib and is_agilent:
-                # Note that the agilent visa using a NI usb gpib adapter (at least)
-                # disables the autopoll settings of NI
-                # Hence a SRQ on the bus produces events for all devices on the bus.
-                # If those events are not read, the buffer eventually fills up.
-                # This is a problem when using more than one visaInstrumentAsync
-                # To avoid that problem, I use a handler in that case.
-                # The handler needs to clear
-                self._RQS_active = 0
-                # TODO remove a previous handler (make usre to only have one installed)
-                #      Also handle delete of device by disabling/removing handler
-                #      closing the visa.vi is enough.
-                vpp43.install_handler(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
-                                      self._RQS_handler, 0)
-                vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
-                                   vpp43.VI_HNDLR)
-                # This is needed because pyvisa enables it by default
-                vpp43.disable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
-                                   vpp43.VI_QUEUE)
-            else:
-                self._RQS_active = -1
-                vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
-                                   vpp43.VI_QUEUE)
     def _RQS_handler(self, vi, event_type, context, userHandle):
         # When NI autopoll is off:
         # Reading the status will clear the service request of this instrument
         # if the SRQ line is still active, another call to the handler will occur
         # after a short delay (30 ms I think) everytime a read_status_byte is done
         # on the bus (and SRQ is still active).
+        # For agilent visa, the SRQ status is queried every 30ms. So the
+        # you we might have to wait that time after the hardware signal is active
+        # before this handler is called.
         status = self.read_status_byte()
         # If multiple session talk to the same instrument
         # only one of them will see the RQS flag. So to have a chance
@@ -1517,15 +1615,20 @@ class visaInstrumentAsync(visaInstrument):
         # TODO, handle this better?
         #if status&0x40:
         if status&0x20:
-            self._RQS_active = status
-            print 'Got it', vi
+            self._RQS_status = status
+            time.sleep(0.01) # give some time for other handlers to run
+            self._RQS_done.set()
+            #print 'Got it', vi
         return vpp43.VI_SUCCESS
     def _get_esr(self):
         return int(self.ask('*esr?'))
     def _async_detect(self, max_time=.5): # 0.5 s max by default
-        if self._RQS_active == -1:
+        if self._RQS_status == -1:
             ev_type = context = None
             try:
+                # On National Instrument (NI) visa this seems wait an extra 12 ms after the
+                # SRQ is turned on.
+                # Also the timeout actually used seems to be 16*ceil(max_time*1000/16) in ms.
                 ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, int(max_time*1000))
             except visa.VisaIOError, e:
                 if e.error_code != vpp43.VI_ERROR_TMO:
@@ -1538,15 +1641,12 @@ class visaInstrumentAsync(visaInstrument):
                 vpp43.close(context)
                 return True
         else:
-            if self._RQS_active != 0:
+            if self._RQS_done.wait(max_time):
                 #we assume status only had but 0x20(event) and 0x40(RQS) set
                 #and event only has OPC set
                 # status has already been reset. Now reset event flag.
                 self._get_esr()
                 return True
-            else:
-                #TODO remove this sleep
-                time.sleep(max_time)
         return False
     def wait_after_trig(self):
         """
@@ -1569,8 +1669,9 @@ class visaInstrumentAsync(visaInstrument):
         # This is the default when using the NI Visa.
         while self.read_status_byte() & 0x40:
             print 'Unread status byte!'
-        if self._RQS_active != -1:
-            self._RQS_active = 0
+        if self._RQS_status != -1:
+            self._RQS_status = 0
+            self._RQS_done.clear()
         else:
             try:
                 while True:
