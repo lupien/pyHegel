@@ -35,7 +35,9 @@ conf = dict( yo1 = (instrument.yokogawa_gs200, (10,)),
              exa2 = (instrument.agilent_EXA, ('USB::0x0957::0x0B0B::MY52220278',)),
              # PNA-L is gpib 16
              pna1 = (instrument.agilent_PNAL, ('USB0::0x0957::0x0118::MY49001395',)),
-             ena1 = (instrument.agilent_ENA, ('USB0::0x0957::0x0D09::MY46213332',)),
+             ena1 = (instrument.agilent_ENA, ('USB0::2391::4873::MY49203311::0',)),
+             #ENA E5071C we had as a temporary loan summer 2012
+             #ena1 = (instrument.agilent_ENA, ('USB0::0x0957::0x0D09::MY46213332',)),
              # scope is USB only
              s500 = (instrument.infiniiVision_3000, ('USB0::2391::6050::MY51135769::INSTR',)),
              s200 = (instrument.infiniiVision_3000, ('USB0::0x0957::0x1796::MY51135849',)),

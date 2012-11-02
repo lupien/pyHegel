@@ -504,8 +504,8 @@ class BaseDevice(object):
            if not maxtest:
                err='above MAX=%r'%self.max
            if not choicetest:
-               err='invalid value(%s): use one of %s'%(val, repr(self.choices))
-           raise ValueError, self.perror('Failed check: '+err)
+               err='invalid value({val!s}): use one of {choices!s}'
+           raise ValueError, self.perror('Failed check: '+err, val=val, choices=repr(self.choices))
         #return state
     def getformat(self, filename=None, **kwarg): # we need to absorb any filename argument
         # first handle options we don't want saved in 'options'
@@ -642,7 +642,7 @@ class BaseInstrument(object):
         return True
     def _async_trig(self):
         pass
-    def _get_async(self, async, obj, **kwarg):
+    def _get_async(self, async, obj, delay=False, trig=False, **kwarg):
         if async == -1: # we reset task
             if self._async_level > 1:
                 self._async_task.cancel()
@@ -658,13 +658,11 @@ class BaseInstrument(object):
                 self._async_list = []
                 self._async_task = asyncThread(self._async_list)
                 self._async_level = 0
-            delay = kwarg.pop('delay', False)
             if delay:
                 if self._async_delay_check and self.async_delay == 0.:
                     print self.perror('***** WARNING You should give a value for async_delay *****')
                 self._async_delay_check = False
                 self._async_task.change_delay(self.async_delay)
-            trig = kwarg.pop('trig', False)
             if trig:
                 self._async_task.change_detect(self._async_detect)
                 self._async_task.change_trig(self._async_trig)
@@ -3706,7 +3704,8 @@ class agilent_ENA(agilent_PNAL):
             name, param = self.select_trace.choices[self.select_trace.getcache()]
             traces = name+'='+param
         extra += ['selected_trace=%r'%traces]
-        base = self._conf_helper('current_channel',
+        if self._is_E5071C:
+            base = self._conf_helper('current_channel',
                                  'calib_en', 'freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
                                  'power_en', 'power_couple',
                                  'power_slope', 'power_slope_en',
@@ -3716,11 +3715,24 @@ class agilent_ENA(agilent_PNAL):
                                  'sweep_time', 'sweep_type',
                                  'bandwidth', 'cont_trigger',
                                  'average_count', 'average_en', options)
+        else:
+            base = self._conf_helper('current_channel',
+                                 'calib_en', 'freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
+                                 'power_en', 'power_couple',
+                                 'power_slope', 'power_slope_en',
+                                 'power_dbm_port1', 'power_dbm_port2',
+                                 'npoints',
+                                 'sweep_time', 'sweep_type',
+                                 'bandwidth', 'cont_trigger',
+                                 'average_count', 'average_en', options)
         return extra+base
     def _fetch_traces_helper(self, traces):
         count = self.select_trace_count.getcache()
         trace_orig = self.select_trace.getcache()
         all_tr = range(1,count+1)
+        # First create the necessary entries, so that select_trace works
+        self.select_trace.choices = {i:('%i'%i, 'empty') for i in all_tr}
+        # Now fill them properly (trace_meas, uses select_trace and needs to access them)
         self.select_trace.choices = {i:('%i'%i, self.trace_meas.get(trace=i)) for i in all_tr}
         self.select_trace.set(trace_orig)
         if isinstance(traces, (tuple, list)):
@@ -3735,6 +3747,8 @@ class agilent_ENA(agilent_PNAL):
         ch = self.current_channel.getcache()
         self.write('INITiate%i'%ch)
     def _create_devs(self):
+        idn = self.idn()
+        self._is_E5071C = 'E5071C' in idn.split(',')[1]
         self.create_measurement = None
         self.delete_measurement = None
         self.installed_options = scpiDevice(getstr='*OPT?', str_type=str)
@@ -3769,7 +3783,8 @@ class agilent_ENA(agilent_PNAL):
         self.freq_cw= devChOption('SENSe{ch}:FREQuency:CW', str_type=float, min=10e6, max=40e9)
         self.ext_ref = scpiDevice(getstr='SENSe:ROSCillator:SOURce?', str_type=str)
         self.npoints = devChOption('SENSe{ch}:SWEep:POINts', str_type=int, min=2, max=20001)
-        self.sweep_gen = devChOption('SENSe{ch}:SWEep:GENeration', choices=ChoiceStrings('STEPped', 'ANALog', 'FSTepped', 'FANalog'))
+        if self._is_E5071C:
+            self.sweep_gen = devChOption('SENSe{ch}:SWEep:GENeration', choices=ChoiceStrings('STEPped', 'ANALog', 'FSTepped', 'FANalog'))
         self.sweep_time = devChOption('SENSe{ch}:SWEep:TIME', str_type=float, min=0, max=86400.)
         self.sweep_type = devChOption('SENSe{ch}:SWEep:TYPE', choices=ChoiceStrings('LINear', 'LOGarithmic', 'POWer', 'SEGMent'))
         self.calc_x_axis = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:XAXIs?', str_type=_decode_float64, autoinit=False, doc='Get this x-axis for a particular trace.')
@@ -3811,8 +3826,9 @@ class agilent_ENA(agilent_PNAL):
         # for max min power, ask source:power? max and source:power? min
         self.power_dbm_port1 = devChOption(':SOURce{ch}:POWer:PORT1', str_type=float)
         self.power_dbm_port2 = devChOption(':SOURce{ch}:POWer:PORT2', str_type=float)
-        self.power_dbm_port3 = devChOption(':SOURce{ch}:POWer:PORT3', str_type=float)
-        self.power_dbm_port4 = devChOption(':SOURce{ch}:POWer:PORT4', str_type=float)
+        if self._is_E5071C:
+            self.power_dbm_port3 = devChOption(':SOURce{ch}:POWer:PORT3', str_type=float)
+            self.power_dbm_port4 = devChOption(':SOURce{ch}:POWer:PORT4', str_type=float)
         self.trig_source = scpiDevice(':TRIGger:SOURce',
                                       choices=ChoiceStrings('INTernal', 'EXTernal', 'MANual', 'BUS'))
         self._devwrap('fetch', autoinit=False, trig=True)
@@ -3925,7 +3941,7 @@ class LogicalDevice(BaseDevice):
         self.name = self.__class__.__name__ # this should not be used
     @property
     def _basedev(self):
-        # whe in async mode, _basdev needs to point to possibly redirected device
+        # when in async mode, _basdev needs to point to possibly redirected device
         basedev = self._basedev_internal
         basedev_redir = self._do_redir_async()
         alive = False
