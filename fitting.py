@@ -14,7 +14,6 @@ from scipy.optimize import leastsq
 import matplotlib.pylab as plt
 import collections
 import __builtin__
-import string
 
 def xcothx(x):
     """
@@ -487,7 +486,7 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=Fal
     if not skip:
         p, resids, pe, extras = fitcurve(func, x, y, p0, yerr=yerr, extra=extra, **kwarg)
         res_str = printResult(func, p, pe, extra=extra)
-        print string.join(res_str, '\n')
+        print '\n'.join(res_str)
         #xx.set_ydata(func(xx, *p, **extra))
         plt.sca(ax1)
         plt.cla()

@@ -33,7 +33,8 @@ from gc import collect as collect_garbage
 
 
 import traces
-import instrument
+import instruments
+import instruments_base
 import local_config
 import util
 
@@ -168,8 +169,15 @@ def reset_pyHegel():
          /reset_pyNoise
     """
     reload(traces)
-    reload(local_config.instrument)
-    reload(local_config.acq_board_instrument)
+    reload(instruments.instruments_base)
+    reload(instruments.instruments_agilent)
+    reload(instruments.instruments_others)
+    reload(instruments.instruments_logical)
+    reload(instruments.acq_board_instrument)
+    import types
+    if isinstance(instruments.data_translation, types.ModuleType):
+        reload(instruments.data_translation)
+    reload(local_config.instruments)
     reload(local_config)
     reload(util)
     try:
@@ -181,9 +189,9 @@ def reset_pyHegel():
 #  this globals will not be the same as the command line globals
 #  and default headers will be name_not_found
 
-instrument._globaldict = globals()
+instruments_base._globaldict = globals()
 
-class _Clock(instrument.BaseInstrument):
+class _Clock(instruments.BaseInstrument):
     def _time_getdev(self):
         """ Get UTC time since epoch in seconds """
         return time.time()
@@ -194,7 +202,7 @@ class _Clock(instrument.BaseInstrument):
         super(type(self),self)._create_devs()
 clock = _Clock()
 
-writevec = instrument._writevec
+writevec = instruments_base._writevec
 
 def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     hdrs = []
@@ -221,7 +229,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         hdr = dev.getfullname()
         f = dev.getformat(**kwarg)
         f['basename'] = _dev_filename(root, hdr, npts, reuse, append=f['append'])
-        f['base_conf'] = instrument._get_conf_header(f)
+        f['base_conf'] = instruments_base._get_conf_header(f)
         f['base_hdr_name'] = hdr
         formats.append(f)
         multi = f['multi']
@@ -252,7 +260,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
             x.force_get()
             hdr = x.getfullname()
             f = x.getformat()
-            f['base_conf'] = instrument._get_conf_header(f)
+            f['base_conf'] = instruments_base._get_conf_header(f)
             f['base_hdr_name'] = hdr
         formats.append(f)
     return hdrs, graphsel, formats
@@ -288,7 +296,7 @@ def _readall(devs, formats, i, async=None):
             dev = dev[0]
         filename = fmt['basename']
         if not fmt['append']:
-             filename = filename % i
+            filename = filename % i
         if fmt['file']:
             kwarg['filename']= filename
         if async != None:
@@ -304,10 +312,10 @@ def _readall(devs, formats, i, async=None):
                 ret.extend(val)
             else:
                 ret.append(i)
-                instrument._write_dev(val, filename, format=fmt, first= i==0)
+                instruments_base._write_dev(val, filename, format=fmt, first= i==0)
         else:
             ret.append(val)
-    ret = instrument._writevec_flatten_list(ret)
+    ret = instruments_base._writevec_flatten_list(ret)
     return ret
 
 def _readall_async(devs, formats, i):
@@ -403,25 +411,25 @@ def _write_conf(f, formats, extra_base=None, **kwarg):
 #       could save in 2 files but display on same trace
 #       Add a way to put a comment in the headers
 
-class _Sweep(instrument.BaseInstrument):
+class _Sweep(instruments.BaseInstrument):
     # This MemoryDevice will be shared among different instances
     # So there should only be one instance of this class
     #  Doing it this way allows the instr.dev = val syntax
-    before = instrument.MemoryDevice(doc="""
+    before = instruments.MemoryDevice(doc="""
       When this is a string (not None), it will be executed after the new values is
       set but BEFORE the out list is read.
       If you only want a delay, you can also change the beforewait device.
       The variables i and v represent the current cycle index and the current set value.
       The variable fwd is True unless in the second cycle of updown.
       """)
-    beforewait = instrument.MemoryDevice(0.02) # provide a default wait so figures are updated
-    after = instrument.MemoryDevice(doc="""
+    beforewait = instruments.MemoryDevice(0.02) # provide a default wait so figures are updated
+    after = instruments.MemoryDevice(doc="""
       When this is a string (not None), it will be executed AFTER the out list is read
       but before the next values is set.
       The variables i and v represent the current cycle index and the current set value.
       The variable fwd is True unless in the second cycle of updown.
       """)
-    out = instrument.MemoryDevice(doc="""
+    out = instruments.MemoryDevice(doc="""
       This is the list of device to read (get) for each iteration.
       It can be a single device (or an instrument if it has an alias)
       It can be a list of devices like [dev1, dev2, dev3]
@@ -443,9 +451,9 @@ class _Sweep(instrument.BaseInstrument):
                   any extension like '.bin' or false to save as text.
                   with '.npy', it is saved in npy format
     """)
-    path = instrument.MemoryDevice('')
-    graph = instrument.MemoryDevice(True)
-    updown = instrument.MemoryDevice(['Fwd', 'Rev'], doc="""
+    path = instruments.MemoryDevice('')
+    graph = instruments.MemoryDevice(True)
+    updown = instruments.MemoryDevice(['Fwd', 'Rev'], doc="""
        This parameter selects the mode used when doing updown sweeps.
        When given a list of 2 strings, these will be included in the filename
        (just before the extension by default). The 2 strings should be different.
@@ -454,7 +462,7 @@ class _Sweep(instrument.BaseInstrument):
        The parameter can also be None. In that case a single file is saved containing
        but the up and down sweep.
     """)
-    next_file_i = instrument.MemoryDevice(0,doc="""
+    next_file_i = instruments.MemoryDevice(0,doc="""
     This number is used, and incremented automatically when {next_i:02} is used (for 00 to 99).
      {next_i:03}  is used for 000 to 999, etc
     """)
@@ -551,24 +559,24 @@ class _Sweep(instrument.BaseInstrument):
             npts = len(span)
             dolinspace = False
         try:
-           dev.check(start)
-           dev.check(stop)
+            dev.check(start)
+            dev.check(stop)
         except ValueError:
-           print 'Wrong start or stop values (outside of valid range). Aborting!'
-           return
+            print 'Wrong start or stop values (outside of valid range). Aborting!'
+            return
         # now make start stop of list, first and last values
         if not dolinspace:
             start = span[0]
             stop = span[-1]
         npts = int(npts)
         if npts < 1:
-           raise ValueError, 'npts needs to be at least 1'
+            raise ValueError, 'npts needs to be at least 1'
         if dolinspace:
             if logspace:
                 span = np.logspace(np.log10(start), np.log10(stop), npts)
             else:
                 span = np.linspace(start, stop, npts)
-        if instrument.CHECKING:
+        if instruments_base.CHECKING:
             # For checking only take first and last values
             span = span[[0,-1]]
         devs = self.get_alldevs(out)
@@ -851,9 +859,9 @@ def spy(devs, interval=1):
     """
     # make sure devs is list like
     try:
-       dev = devs[0]
+        dev = devs[0]
     except TypeError:
-       devs = [devs]
+        devs = [devs]
     try:
         while True:
             v=[]
@@ -1212,7 +1220,7 @@ def ilist():
     for name, value in globals().iteritems():
         if name[0] == '_':
             continue
-        if isinstance(value, instrument.BaseInstrument):
+        if isinstance(value, instruments.BaseInstrument):
             print name
             lst += name
     #return lst
@@ -1230,13 +1238,13 @@ def dlist():
     for name, value in globals().iteritems():
         if name[0] == '_':
             continue
-        if isinstance(value, instrument.BaseDevice):
+        if isinstance(value, instruments.BaseDevice):
             print name
             lst += name
     #return lst
 
 def find_all_instruments():
-    return instrument.find_all_instruments()
+    return instruments.find_all_instruments()
 
 def checkmode(state=None):
     """
@@ -1244,8 +1252,8 @@ def checkmode(state=None):
        With a boolean, sets the check state
     """
     if state == None:
-        return instrument.CHECKING
-    instrument.CHECKING = state
+        return instruments_base.CHECKING
+    instruments_base.CHECKING = state
 
 def check(batchfile):
     """
@@ -1310,15 +1318,15 @@ def load(names=None, newnames=None):
        the instrument class with the proper address. For example you can replace
         ;load yo1
        with
-        yo1 = instrument.agilent_multi_34410A(10)
+        yo1 = instruments.agilent_multi_34410A(10)
        The class names are showed when running load without arguments.
        For GPIB address you can enter just the address as an integer or the
        full visa name like those returned from find_all_instruments()
     """
     if names == None or (isinstance(names, basestring) and names == ''):
         for name, (instr, para) in sorted(local_config.conf.items()):
-           instr = instr.__name__
-           print '{:>10s}: {:25s} {:s}'.format(name, instr, para)
+            instr = instr.__name__
+            print '{:>10s}: {:25s} {:s}'.format(name, instr, para)
         return
     if isinstance(names, basestring):
         # this always returns list
@@ -1354,7 +1362,7 @@ class _Hegel_Task(threading.Thread):
             self.func(*self.args, **self.kwargs)
             i += 1
             if self.count != None and i >= self.count:
-                break;
+                break
             elif self.interval != None:
                 #Unblock every 1s
                 start_time = time.time()
@@ -1396,5 +1404,5 @@ def kill(n):
 # handle locking of devices...
 
 #var: adds a variable to an instrument
-#      maybe the same as: instr.newvar = instrument.MemoryDevice()
+#      maybe the same as: instr.newvar = instruments.MemoryDevice()
 

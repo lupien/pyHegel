@@ -221,13 +221,13 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
     m=x.shape[-1]
     xx=x.reshape((-1,m))
     if x.ndim == Y.ndim: #multiple solutions
-       nfits = Y.shape[-1]
-       y=Y.reshape((-1, nfits))
-       multi = True
+        nfits = Y.shape[-1]
+        y=Y.reshape((-1, nfits))
+        multi = True
     else: #single solution
-       y=Y.ravel()
-       multi = False
-       nfits = 0
+        y=Y.ravel()
+        multi = False
+        nfits = 0
     errors = int(errors) # True ->1, False ->0
     if errors&1 == 0 : errors = 0 
     if not errors: covar=pe = []
@@ -236,20 +236,20 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
         else: errors &= ~4 #keep pe
     needloop=False
     if s!=None:
-       s=np.asarray(s)
-       ss=s.shape
-       if s.ndim == 0:
-           #scalar, only changes error calc (chi square)
-           s=s.reshape((1,1))
-       elif s.ndim == x.ndim-1: 
-           # Same errors for all y sets
-           s=s.ravel()[:,None]
-       elif s.ndim == Y.ndim: # and s.ndim == x.ndim
-           # different errors for every y sets
-           s=s.reshape((-1, nfits))
-           needloop = True
-       else:
-           raise ValueError, 'shape mismatch: s is not a valid shape'
+        s=np.asarray(s)
+        ss=s.shape
+        if s.ndim == 0:
+            #scalar, only changes error calc (chi square)
+            s=s.reshape((1,1))
+        elif s.ndim == x.ndim-1:
+            # Same errors for all y sets
+            s=s.ravel()[:,None]
+        elif s.ndim == Y.ndim: # and s.ndim == x.ndim
+            # different errors for every y sets
+            s=s.reshape((-1, nfits))
+            needloop = True
+        else:
+            raise ValueError, 'shape mismatch: s is not a valid shape'
     if adjust != None:
         pind = np.arange(m)
         adjust = pind[adjust] # in case adjust is a selector
@@ -272,9 +272,9 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
     else: mm = m
     ind=slice(None)
     if filter != None:
-       ind=np.flatnonzero(filter>0.5)
-       if len(ind) == 0:
-           ind = slice(None)
+        ind=np.flatnonzero(filter>0.5)
+        if len(ind) == 0:
+            ind = slice(None)
     if needloop:
         p=np.zeros((mm, nfits))
         if errors:
@@ -330,11 +330,11 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
     sigmaCorr = np.sqrt(chiNorm)
     if errors&4:
         if nfits>0 and pe.ndim==1:
-           pe=pe[:,None]
+            pe=pe[:,None]
         pe = pe *sigmaCorr
     if errors and not errors&8: # force same shape
         if nfits>0 and pe.ndim==1:
-           pe = pe[:,None] + np.zeros(nfits)
+            pe = pe[:,None] + np.zeros(nfits)
     extras = dict(chiNorm=chiNorm, sigmaCorr=sigmaCorr,rank=rank,sv=sv,covar=covar)
     return ((p,func), resids, pe, extras)
 
@@ -369,18 +369,18 @@ def rankdata(x, avg=True):
         falserow = np.zeros(nm)!= 0.
         same = np.r_['0,2,1', falserow, same, falserow]
         for i in xrange(nm):
-           ind = sind[0][:,i]
-           samei = same[:,i]
-           beg = samei[1:]>samei[:-1] # goes from False to True
-           end = samei[1:]<samei[:-1] # goes from True to False
-           begi = beg.nonzero()[0]
-           endi = end.nonzero()[0]
-           assert len(begi) == len(endi), 'begi end endi should be same length'
-           for b,e in zip(begi,endi):
-               sel = ind[b:e+1]
-               val = (b+e)/2.+1
-               print b,e,val
-               rank[sel,i] = val
+            ind = sind[0][:,i]
+            samei = same[:,i]
+            beg = samei[1:]>samei[:-1] # goes from False to True
+            end = samei[1:]<samei[:-1] # goes from True to False
+            begi = beg.nonzero()[0]
+            endi = end.nonzero()[0]
+            assert len(begi) == len(endi), 'begi end endi should be same length'
+            for b,e in zip(begi,endi):
+                sel = ind[b:e+1]
+                val = (b+e)/2.+1
+                print b,e,val
+                rank[sel,i] = val
     return rank.reshape(xshapeOrg)
 
 
@@ -513,22 +513,22 @@ def report(X,Y,pf,func=None, s=1., param=None, adjust=None, filter=None):
             s = s.reshape((-1,))
     ind=slice(None)
     if filter != None: 
-       # this needs to match with gen_polyfit
-       ind=np.flatnonzero(filter>0.5)
-       if len(ind) == 0:
-           ind = slice(None)
-       if filter.ndim == X.ndim:
-           X = X.ravel()[ind]
-       else:  # filter is smaller than X, like
-              # for twoDpoly where X is [2, ...]
-           X = X.reshape((-1,filter.size))[:,ind]
-           X = X.ravel()
-       Y = Y[ind, ...]
-       yfit = yfit[ind, ...]
-       if s.ndim > 0 and s.shape[0]>1:
-           s= s[ind, ...]
+        # this needs to match with gen_polyfit
+        ind=np.flatnonzero(filter>0.5)
+        if len(ind) == 0:
+            ind = slice(None)
+        if filter.ndim == X.ndim:
+            X = X.ravel()[ind]
+        else:  # filter is smaller than X, like
+               # for twoDpoly where X is [2, ...]
+            X = X.reshape((-1,filter.size))[:,ind]
+            X = X.ravel()
+        Y = Y[ind, ...]
+        yfit = yfit[ind, ...]
+        if s.ndim > 0 and s.shape[0]>1:
+            s= s[ind, ...]
     else:
-       X = X.ravel()
+        X = X.ravel()
     Nx = X.size
     N = Y.shape[0]
     # X is now 1D always, even when it should not.
@@ -567,8 +567,8 @@ def report(X,Y,pf,func=None, s=1., param=None, adjust=None, filter=None):
     rstar = np.sum(Yfd*Yad*w,axis=0)/np.sqrt(chisq*wSSya)
     ret['rstar'] = rstar
     if Nx != N:
-       ret['pearson'] = None
-       ret['spearman'] = None
+        ret['pearson'] = None
+        ret['spearman'] = None
     else:
         # pearson
         if nfits > 0: 

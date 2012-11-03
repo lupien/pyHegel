@@ -71,12 +71,12 @@ def wait(sec):
                 time.sleep(dif)
             return
         else:
-           QtGui.QApplication.instance().processEvents(
-               QtCore.QEventLoop.AllEvents, dif*1000)
-           dif = end - time.time()
-           if dif < 0:
-               return
-           time.sleep(min(.1, dif))
+            QtGui.QApplication.instance().processEvents(
+                      QtCore.QEventLoop.AllEvents, dif*1000)
+            dif = end - time.time()
+            if dif < 0:
+                return
+            time.sleep(min(.1, dif))
 
 FigureCanvas.keyvald.update({QtCore.Qt.Key_Left:'left',
         QtCore.Qt.Key_Right:'right',
@@ -254,8 +254,8 @@ class Trace(TraceBase):
 
     def setLim(self, minx, maxx=None):
         if isinstance(minx, (list, tuple, np.ndarray)):
-             maxx = np.max(minx)
-             minx = np.min(minx)
+            maxx = np.max(minx)
+            minx = np.min(minx)
         self.xmax = maxx
         self.xmin = minx
         self.axs[0].set_xlim(minx, maxx, auto=False)
@@ -267,10 +267,10 @@ class Trace(TraceBase):
             # convert from sec since epoch to matplotlib date format
             x = time2date(x)
         if self.xs == None:
-           self.xs = np.array([x])
+            self.xs = np.array([x])
         else:  self.xs = np.append(self.xs, x)
         if self.ys == None:
-           self.ys = np.array([ys])
+            self.ys = np.array([ys])
         else:  self.ys = np.append(self.ys, [ys], axis=0)
         self.update()
     def setPoints(self, x, y):
@@ -300,8 +300,8 @@ class Trace(TraceBase):
             self.draw()
     def update(self):
         if self.xs == None:
-           self.draw()
-           return
+            self.draw()
+            return
         if self.first_update:
             self.do_resize(draw=False)
             ndim = self.ys.shape[1]
@@ -332,21 +332,21 @@ class Trace(TraceBase):
             #self.ax.clear()
         x = self.xs
         for i,(y,ax) in enumerate(zip(self.ys.T, self.axs)):
-           style = '.-'
-           if self.first_update:
-              try:
-                 lbl = self.legend_strs[i]
-              except TypeError:
-                 lbl = 'data '+str(i)
-              if self.time_mode:
-                  plt = ax.plot_date(x, y, style, label=lbl)[0]
-              else:
-                  plt = ax.plot(x, y, style, label=lbl)[0]
-              line_color = ax.lines[0].get_color()
-              ax.set_ylabel(lbl, color=line_color)
-              self.crvs.append(plt)
-           else:
-              self.crvs[i].set_data(x, y)
+            style = '.-'
+            if self.first_update:
+                try:
+                    lbl = self.legend_strs[i]
+                except TypeError:
+                    lbl = 'data '+str(i)
+                if self.time_mode:
+                    plt = ax.plot_date(x, y, style, label=lbl)[0]
+                else:
+                    plt = ax.plot(x, y, style, label=lbl)[0]
+                line_color = ax.lines[0].get_color()
+                ax.set_ylabel(lbl, color=line_color)
+                self.crvs.append(plt)
+            else:
+                self.crvs[i].set_data(x, y)
         self.axs[0].legend(loc='upper left', bbox_to_anchor=(0, 1.10)).draggable()
         for ax in self.axs:
             ax.relim()

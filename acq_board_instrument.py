@@ -17,7 +17,9 @@ import numpy as np
 import sys
 
 # user made import
-import instrument
+from instruments_base import FastEvent, scpiDevice, wait_on_event,\
+                            visaInstrument, BaseInstrument, BaseDevice,\
+                            ReadvalDev, decode_uint32, _replace_ext
 
 class acq_bool(object):
     def __call__(self, input_str):
@@ -41,31 +43,32 @@ class acq_filename(object):
     def tostr(self, val):
         return '<'+val+'>'
 
-class acq_device(instrument.scpiDevice):
+class acq_device(scpiDevice):
     def __init__(self, *arg, **kwarg):
         super(acq_device, self).__init__(*arg, **kwarg)
-        self._event_flag = instrument.FastEvent()
+        self._event_flag = FastEvent()
         self._event_flag.set()
         self._rcv_val = None
     def _getdev(self):
         if self._getdev_p == None:
-           raise NotImplementedError, self.perror('This device does not handle _getdev')
+            raise NotImplementedError, self.perror('This device does not handle _getdev')
         self._event_flag.clear()
         self.instr.write(self._getdev_p)
-        instrument.wait_on_event(self._event_flag, check_state=self.instr)
+        wait_on_event(self._event_flag, check_state=self.instr)
         return self._fromstr(self._rcv_val)
 
 class dummy_device(object):
     def __init__(self, getstr):
         self._rcv_val = None
-        self._event_flag = instrument.FastEvent()
+        self._event_flag = FastEvent()
         self._getdev_p = getstr
+        self.instr = None # will be set by instrument.createdev
     def _getdev(self, quest_extra=''):
         self._event_flag.clear()
         if quest_extra:
             quest_extra=' '+quest_extra
         self.instr.write(self._getdev_p + quest_extra)
-        instrument.wait_on_event(self._event_flag, check_state=self.instr)
+        wait_on_event(self._event_flag, check_state=self.instr)
         return self._rcv_val
 
 # TODO: there is still a problem with acq.disconnect
@@ -184,7 +187,7 @@ class Listen_thread(threading.Thread):
                             acq.fetch._rcv_val = None
                         else:
                             acq.fetch._rcv_val = bytearray(total_byte)
-                        break;
+                        break
                 trames = old_stuff.split('\n', 1)
                 old_stuff = trames.pop()
         print 'Thread Ending....'
@@ -214,8 +217,12 @@ def spectrum_smooth(data, ss=2):
         res += dext[b:e]
     return np.sqrt(res)
 
+#######################################################
+##    Ultraview Acquisition Board Instrument
+#######################################################
+
 # TODO: Add CHECKING verification in init and instrument write/read.
-class Acq_Board_Instrument(instrument.visaInstrument):
+class Acq_Board_Instrument(visaInstrument):
     """
     This instrument controls the fast acquisition cards (Ulraview 8 and 14bit)
     To use, first make sure the data acquisition server is started
@@ -347,13 +354,13 @@ You can start a server with:
         self._max_nb_tau = 50
 
         self.visa_addr = self.board_type
-        self._run_finished = instrument.FastEvent() # starts in clear state
+        self._run_finished = FastEvent() # starts in clear state
 
         self._listen_thread = Listen_thread(self)
         self._listen_thread.start()     
         
         # init the parent class
-        instrument.BaseInstrument.__init__(self)
+        BaseInstrument.__init__(self)
 
     def idn(self):
         """
@@ -405,12 +412,12 @@ You can start a server with:
         self.run()
     def _async_detect(self, max_time=.5): # 0.5 s max by default
         return self._run_finished.wait(max_time)
-        #return instrument.wait_on_event(self._run_finished, check_state=self, max_time=max_time)
+        #return wait_on_event(self._run_finished, check_state=self, max_time=max_time)
     def wait_after_trig(self):
         """
         waits until the run is finished
         """
-        return instrument.wait_on_event(self._run_finished, check_state=self)
+        return wait_on_event(self._run_finished, check_state=self)
     def run_and_wait(self):
         """
         This performs a run and waits for it to finish.
@@ -443,20 +450,20 @@ You can start a server with:
                                      'osc_trig_mode', 'chan_mode','chan_nb', options)
         
         if self.op_mode.getcache() == 'Spec':
-             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
+            return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
                                       'chan_mode','chan_nb','fft_length', options)
                                      
         if self.op_mode.getcache() == 'Cust':
-             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
+            return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
                                       'chan_mode','chan_nb','cust_param1','cust_param2','cust_param3',
                                       'cust_param4', options)
                                      
 
     def dummy_devs_iter(self):
         for devname in dir(self):
-           obj = getattr(self, devname)
-           if isinstance(obj, dummy_device):
-               yield devname, obj
+            obj = getattr(self, devname)
+            if isinstance(obj, dummy_device):
+                yield devname, obj
 
     def init(self,full = False):
         if full == True:
@@ -550,7 +557,7 @@ You can start a server with:
             fmt.update(multi=headers, graph=graphs)
         if mode == 'Hist' or mode == 'Spec' or mode == 'Osc':
             fmt.update(xaxis=True) # This is the default, will be overriden if necessary in BaseDevice.getformat
-        return instrument.BaseDevice.getformat(self.fetch, **kwarg)
+        return BaseDevice.getformat(self.fetch, **kwarg)
 
     def _fetch_filename_helper(self, filename, extra=None, newext=None):
         filestr=''
@@ -676,7 +683,7 @@ You can start a server with:
         location = self.format_location()
         # All saving by server or by dump_file is binary so change ext
         if filename != None:
-            filename = instrument._replace_ext(filename, '.bin')
+            filename = _replace_ext(filename, '.bin')
         filestr= self._fetch_filename_helper(filename)
         self.fetch._dump_file = None
         if not self.result_available.getcache():
@@ -695,7 +702,7 @@ You can start a server with:
                 self.fetch._last_filename = filename
             s = 'DATA:ACQ:DATA?'+filestr
             self.write(s)
-            instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+            wait_on_event(self.fetch._event_flag, check_state=self)
             if self.fetch._dump_file != None:
                 self.fetch._dump_file.close()
             if self.fetch._rcv_val == None:
@@ -716,7 +723,7 @@ You can start a server with:
             self.fetch._event_flag.clear()
             s = 'DATA:HIST:DATA?'+filestr
             self.write(s)
-            instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+            wait_on_event(self.fetch._event_flag, check_state=self)
             if self.fetch._rcv_val == None:
                 return None
             ret = np.fromstring(self.fetch._rcv_val, np.uint64)
@@ -738,7 +745,7 @@ You can start a server with:
                 filestr = self._fetch_filename_helper(filename,'1')
                 s = 'DATA:NET:HARM_CH1?'+filestr
                 self.write(s)
-                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 ret.append(np.fromstring(self.fetch._rcv_val, np.complex128))
@@ -747,7 +754,7 @@ You can start a server with:
                 filestr = self._fetch_filename_helper(filename,'2')
                 s = 'DATA:NET:HARM_CH2?'+filestr
                 self.write(s)
-                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 ret.append(np.fromstring(self.fetch._rcv_val, np.complex128))
@@ -788,7 +795,7 @@ You can start a server with:
             self.fetch._event_flag.clear()
             s = 'DATA:OSC:DATA?'+filestr
             self.write(s)
-            instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+            wait_on_event(self.fetch._event_flag, check_state=self)
             if self.fetch._rcv_val == None:
                 return None
             if self.board_type == 'ADC8':
@@ -827,7 +834,7 @@ You can start a server with:
                 filestr = self._fetch_filename_helper(filename,'1')
                 s = 'DATA:SPEC:CH1?'+filestr
                 self.write(s)
-                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 d = spectrum_smooth(np.fromstring(self.fetch._rcv_val, np.float64), ss)
@@ -837,7 +844,7 @@ You can start a server with:
                 filestr = self._fetch_filename_helper(filename,'2')
                 s = 'DATA:SPEC:CH2?'+filestr
                 self.write(s)
-                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 d = spectrum_smooth(np.fromstring(self.fetch._rcv_val, np.float64), ss)
@@ -880,7 +887,7 @@ You can start a server with:
                 filestr = self._fetch_filename_helper(filename,'corr')
                 s = 'DATA:CORR:CORR_RESULT?'+filestr
                 self.write(s)
-                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
@@ -889,7 +896,7 @@ You can start a server with:
                 filestr = self._fetch_filename_helper(filename,'auto1')
                 s = 'DATA:CORR:AUTOCORR_CH1_RESULT?'+filestr
                 self.write(s)
-                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
@@ -898,7 +905,7 @@ You can start a server with:
                 filestr = self._fetch_filename_helper(filename,'auto2')
                 s = 'DATA:CORR:AUTOCORR_CH2_RESULT?'+filestr
                 self.write(s)
-                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
@@ -921,7 +928,7 @@ You can start a server with:
                 filestr = self._fetch_filename_helper(filename,'1')
                 s = 'DATA:CUST:RESULT_DATA1?'+filestr
                 self.write(s)
-                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
@@ -930,7 +937,7 @@ You can start a server with:
                 filestr = self._fetch_filename_helper(filename,'2')
                 s = 'DATA:CUST:RESULT_DATA2?'+filestr
                 self.write(s)
-                instrument.wait_on_event(self.fetch._event_flag, check_state=self)
+                wait_on_event(self.fetch._event_flag, check_state=self)
                 if self.fetch._rcv_val == None:
                     return None
                 ret.append(np.fromstring(self.fetch._rcv_val, np.float64))
@@ -1022,7 +1029,7 @@ You can start a server with:
         fmt = self.hist_cs._format
         headers = [ 'c%i'%i for i in c]
         fmt.update(multi=headers, graph=range(len(headers)))
-        return instrument.BaseDevice.getformat(self.hist_cs, c=c, **kwarg)
+        return BaseDevice.getformat(self.hist_cs, c=c, **kwarg)
     def _hist_cs_getdev(self, c=[1,2,3,4,5]):
         """
            hist_cs has optionnal parameter c=[1,2,3,4,5]
@@ -1105,7 +1112,7 @@ You can start a server with:
         self.cust_user_lib = acq_device('CONFIG:CUST_USER_LIB', str_type=acq_filename())
         self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?',str_type=int, doc='The serial number of the aquisition card.')
         self.board_status = acq_device(getstr='STATUS:STATE?',str_type=str, doc='The current status of the acquisition card. Can be Idle, Running, Transferring')
-        self.partial_status = acq_device(getstr='STATUS:PARTIAL?',str_type=instrument._decode_uint32)
+        self.partial_status = acq_device(getstr='STATUS:PARTIAL?',str_type=decode_uint32)
         self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?',str_type=acq_bool(), doc='Is True when results are available from the card (after run completes)')
         
         self.format_location = acq_device('CONFIG:FORMAT:LOCATION', str_type=str, choices=format_location_str, doc='Select between sending the data through the network socket (Remote), or letting the server save it (Local)')
@@ -1141,9 +1148,9 @@ You can start a server with:
         self.net_phase_diff = acq_device(getstr = 'DATA:NET:PHASE_DIFF?',str_type = float, autoinit=False, trig=True)
 
         self._devwrap('fetch', autoinit=False, trig=True)
-        self.fetch._event_flag = instrument.FastEvent()
+        self.fetch._event_flag = FastEvent()
         self.fetch._rcv_val = None
-        self.readval = instrument.ReadvalDev(self.fetch)
+        self.readval = ReadvalDev(self.fetch)
         self._devwrap('tau_vec', setget=True)
         self._tau_nb = dummy_device('CONFIG:NB_TAU?')
         self._tau_veci = dummy_device('CONFIG:TAU?')
@@ -1171,19 +1178,18 @@ You can start a server with:
         pass
 
     def Get_Board_Type(self):
-       res = self.ask('CONFIG:BOARD_TYPE?')
-       if res[0] != '@' or res[-1] != '\n':
-           raise ValueError, 'Wrong format for Get Board_Type'
-       res = res[1:-1]
-       base, val = res.split(' ', 1)
-       if base == 'CONFIG:BOARD_TYPE':
-           self.board_type = val
-       elif base == 'ERROR:CRITICAL':
-           raise ValueError, 'Critical Error:'+val
-       else:
-           raise ValueError, 'Unknow problem:'+base+' :: '+val
-           
-           
+        res = self.ask('CONFIG:BOARD_TYPE?')
+        if res[0] != '@' or res[-1] != '\n':
+            raise ValueError, 'Wrong format for Get Board_Type'
+        res = res[1:-1]
+        base, val = res.split(' ', 1)
+        if base == 'CONFIG:BOARD_TYPE':
+            self.board_type = val
+        elif base == 'ERROR:CRITICAL':
+            raise ValueError, 'Critical Error:'+val
+        else:
+            raise ValueError, 'Unknow problem:'+base+' :: '+val
+
     def stop(self):
         """
         Ask the server to stop acquiring data
@@ -1645,13 +1651,13 @@ You can start a server with:
         # check if nb_Msample fit the op_mode
         if self.op_mode.getcache() == 'Acq':
             if self.nb_Msample.getcache() < self._min_acq_Msample:
-                 new_nb_Msample = self._min_acq_Msample
-                 self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be superior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
+                new_nb_Msample = self._min_acq_Msample
+                self.nb_Msample.set(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be superior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
             if self.nb_Msample.getcache() > self._max_acq_Msample:
-                 new_nb_Msample = self._max_acq_Msample
-                 self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be inferior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
+                new_nb_Msample = self._max_acq_Msample
+                self.nb_Msample.set(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be inferior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
 
         # TODO clean up use of 256, 4096 ...
         if self.op_mode.getcache() == 'Hist' and self.board_type in ['ADC14', 'ADC16']:
@@ -1697,13 +1703,13 @@ You can start a server with:
         
         if self.op_mode.getcache() == 'Net':
             if self.nb_Msample.getcache() < self._min_net_Msample:
-                 new_nb_Msample = self._min_net_Msample
-                 self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be superior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
+                new_nb_Msample = self._min_net_Msample
+                self.nb_Msample.set(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be superior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
             if self.nb_Msample.getcache() > self._max_net_Msample:
-                 new_nb_Msample = self._max_net_Msample
-                 self.nb_Msample.set(new_nb_Msample)
-                 raise ValueError, 'Warning nb_Msample must be inferior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
+                new_nb_Msample = self._max_net_Msample
+                self.nb_Msample.set(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be inferior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
     
         #if in Osc mode check if the sample to send fit the horizontal offset
         if self.op_mode.getcache() == 'Osc':

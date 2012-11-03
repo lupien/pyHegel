@@ -6,7 +6,8 @@ Created on Tue Aug 28 11:08:58 2012
 @author: Christian Lupien
 """
 
-import instrument
+from instruments_base import BaseInstrument, scpiDevice, ChoiceIndex,\
+                            wait_on_event, BaseDevice, MemoryDevice, ReadvalDev
 import sys
 import time
 import numpy as np
@@ -51,7 +52,7 @@ def find_all_Ol():
         ret.append((c, dev_info))
     return ret
 
-class Ol_Device(instrument.scpiDevice):
+class Ol_Device(scpiDevice):
     """
     This device is for all OpenLayer object properties
     """
@@ -64,7 +65,7 @@ class Ol_Device(instrument.scpiDevice):
                 getstr = setstr.replace('={val}', '')
         super(Ol_Device, self).__init__(setstr=setstr, getstr=getstr, autoget=autoget, **kwarg)
 
-class Ol_ChoiceIndex(instrument.ChoiceIndex):
+class Ol_ChoiceIndex(ChoiceIndex):
     def __init__(self, OlDataType, normalize=False):
         names = list(OlDataType.GetNames(OlDataType))
         values = list(OlDataType.GetValues(OlDataType))
@@ -80,7 +81,12 @@ class Ol_ChoiceIndex(instrument.ChoiceIndex):
         else:
             return self.keys[self.index(key_val)]
 
-class DataTranslation(instrument.BaseInstrument):
+
+#######################################################
+##    DataTranslation instrument
+#######################################################
+
+class DataTranslation(BaseInstrument):
     def __init__(self, dev_name=0):
         """
         To initialize a device, give it the device name as returned
@@ -165,7 +171,7 @@ class DataTranslation(instrument.BaseInstrument):
         #ai.BufferDoneEvent += self._delegate_handler
 
         # init the parent class
-        instrument.BaseInstrument.__init__(self)
+        BaseInstrument.__init__(self)
 
     def _update_all_channels_info(self, init=False):
         if init:
@@ -221,7 +227,7 @@ class DataTranslation(instrument.BaseInstrument):
         """
         waits until the triggered event is finished
         """
-        return instrument.wait_on_event(self._async_detect)
+        return wait_on_event(self._async_detect)
     def run_and_wait(self):
         """
         This performs a run and waits for it to finish.
@@ -237,6 +243,7 @@ class DataTranslation(instrument.BaseInstrument):
         clist.sort() # order in place
         self.channel_list.set(clist)
         return clist
+    @staticmethod
     def _delegate_handler(source, args):
         print 'My handler Called!', source, args
     def run(self):
@@ -285,7 +292,7 @@ class DataTranslation(instrument.BaseInstrument):
         else:
             fmt.update(multi=tuple(multi), graph=[])
         #fmt.update(multi=multi, graph=[], xaxis=xaxis)
-        return instrument.BaseDevice.getformat(self.fetch, **kwarg)
+        return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_getdev(self):
         clist = self._clean_channel_list()
         if self._inbuffer == None:
@@ -303,11 +310,11 @@ class DataTranslation(instrument.BaseInstrument):
             v = v.T
         return v
     def _create_devs(self):
-        self.nb_samples = instrument.MemoryDevice(1024, min=1, max=1024*1024*100)
+        self.nb_samples = MemoryDevice(1024, min=1, max=1024*1024*100)
         self.in_clock = Ol_Device('_analog_in.Clock.Frequency', str_type = float, setget=True,
                                min=self.in_info['min_freq'], max=self.in_info['max_freq'])
-        self.channel_list = instrument.MemoryDevice([0])
-        self.in_current_ch = instrument.MemoryDevice(0,min=0, max=self.in_info['Nchan'])
+        self.channel_list = MemoryDevice([0])
+        self.in_current_ch = MemoryDevice(0,min=0, max=self.in_info['Nchan'])
         def devChOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(ch=self.in_current_ch)
@@ -342,7 +349,7 @@ class DataTranslation(instrument.BaseInstrument):
         self._devwrap('output', autoinit=False)
         self._devwrap('fetch', autoinit=False, trig=True)
 
-        self.readval = instrument.ReadvalDev(self.fetch)
+        self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
     def force_get(self):
