@@ -1,5 +1,6 @@
 *~
 *.pyc
+console_c.xml
 
 # eliminate latex output
 *.out
