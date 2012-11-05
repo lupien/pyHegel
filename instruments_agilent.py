@@ -1492,6 +1492,7 @@ class agilent_ENA(agilent_PNAL):
         self.cont_trigger.set(True)
     def _async_trigger_helper(self):
         self.trig_source.set('BUS')
+        self.average_triggering_en.set(True)
         self.initiate()
         self.write(':TRIGger:SINGle;*OPC')
         #self.trig_source.set('INTernal')
@@ -1598,6 +1599,7 @@ class agilent_ENA(agilent_PNAL):
         self.bandwidth = devChOption('SENSe{ch}:BANDwidth', str_type=float, setget=True) # can obtain min max
         self.average_count = devChOption('SENSe{ch}:AVERage:COUNt', str_type=int)
         self.average_en = devChOption('SENSe{ch}:AVERage', str_type=bool)
+        self.average_triggering_en = devChOption('TRIGger:AVERage', str_type=bool)
         self.freq_start = devChOption('SENSe{ch}:FREQuency:STARt', str_type=float, min=10e6, max=40e9)
         self.freq_stop = devChOption('SENSe{ch}:FREQuency:STOP', str_type=float, min=10e6, max=40e9)
         self.freq_cw= devChOption('SENSe{ch}:FREQuency:CW', str_type=float, min=10e6, max=40e9)
