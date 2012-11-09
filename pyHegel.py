@@ -111,6 +111,7 @@ def help_pyHegel():
         sleep (gui)
         wait
         load
+        load_all_usb
         task
         top
         kill
@@ -130,6 +131,7 @@ def help_pyHegel():
         load()
         load('yo1 dmm2')
         ;load yo2 dmm2 pna1
+        load_all_usb()
         iprint yo1
         get yo1
         get yo1.range
@@ -1243,8 +1245,18 @@ def dlist():
             lst += name
     #return lst
 
-def find_all_instruments():
-    return instruments.find_all_instruments()
+def find_all_instruments(use_aliases=True):
+    """
+        Find all VISA instruments that are connected.
+
+        By default it returns the aliases when available.
+        To return the non-aliased names set the use_aliases
+        parameter to False.
+
+        Note the the aliases are entered with Agilent Connection Expert
+        (or National Instruments Measurement and Automation Explorer (MAX))
+    """
+    return instruments.find_all_instruments(use_aliases)
 
 def checkmode(state=None):
     """
@@ -1343,6 +1355,40 @@ def load(names=None, newnames=None):
             newname = name
         i = instr(*param)
         exec 'global '+newname+';'+newname+'=i'
+
+def _normalize_usb(usb_resrc):
+    usb_resrc = usb_resrc.upper() # make sure it is all upercase
+    split = usb_resrc.split('::')
+    if split[-1] == 'INSTR':
+        del split[-1]
+    if len(split) != 5:
+        split.append('0')
+    usbn, manuf, model, serial, interfaceN = split
+    manuf = int(manuf, base=0)
+    model = int(model, base=0)
+    interfaceN = int(interfaceN, base=0)
+    return 'USB0::0x%04X::0x%04X::%s::%i'%(manuf, model, serial, interfaceN), manuf, model
+
+def load_all_usb():
+    """
+     This will load all USB instruments found with find_all_instruments
+     that exist in load
+    """
+    found_instr = find_all_instruments(False)
+    found_usb = [_normalize_usb(instr) for instr in found_instr if instr.startswith('USB')]
+    # pick only USB instruments in local_config
+    usb_instr = { _normalize_usb(para[0])[0]:name
+                    for name, (instr, para) in local_config.conf.iteritems()
+                    if len(para)>0 and isinstance(para[0], basestring) and para[0].startswith('USB')}
+    for usb, manuf, model in found_usb:
+        try:
+            name = usb_instr[usb]
+            load(name)
+            print '  Loaded: %6s   (%s)'%(name, usb)
+        except KeyError:
+            guess_manuf = local_config.usb_manuf.get(manuf, ('Unknown', dict()))
+            guess_model = guess_manuf[1].get(model, ('Unknown'))
+            print '  Unknown instrument: %s (guess manuf=%s, model=%s)'%(usb, guess_manuf[0], guess_model)
 
 class _Hegel_Task(threading.Thread):
     def __init__(self, func, args=(), kwargs={}, count=None,

@@ -95,8 +95,51 @@ class ProxyMethod(object):
     def __call__(self, *arg, **kwarg):
         return getattr(self.instance, self.func_name)(*arg, **kwarg)
 
-def find_all_instruments():
-    return visa.get_instruments_list()
+#######################################################
+##    find_all_instruments function (for VISA)
+#######################################################
+
+# Based on visa.get_instruments_list
+def find_all_instruments(use_aliases=True):
+    """Get a list of all connected devices.
+
+    Parameters:
+    use_aliases -- if True, return an alias name for the device if it has one.
+        Otherwise, always return the standard resource name like "GPIB::10".
+
+    Return value:
+    A list of strings with the names of all connected devices, ready for being
+    used to open each of them.
+
+    """
+    # Modifications from visa.get_instruments_list:
+    #    close the find_list
+    #    use upper because otherwise agilent IO 16.2.15823.0 can't find the alias
+    #    because it changes the case of serial number to lower.
+    # Phase I: Get all standard resource names (no aliases here)
+    resource_names = []
+    find_list, return_counter, instrument_description = \
+        vpp43.find_resources(visa.resource_manager.session, "?*::INSTR")
+    resource_names.append(instrument_description)
+    for i in xrange(return_counter - 1):
+        resource_names.append(vpp43.find_next(find_list))
+    vpp43.close(find_list)
+    # Phase two: If available and use_aliases is True, substitute the alias.
+    # Otherwise, truncate the "::INSTR".
+    result = []
+    for resource_name in resource_names:
+        resource_name = resource_name.upper()
+        try:
+            _, _, _, _, alias_if_exists = \
+             vpp43.parse_resource_extended(visa.resource_manager.session,
+                                           resource_name)
+        except AttributeError:
+            alias_if_exists = None
+        if alias_if_exists and use_aliases:
+            result.append(alias_if_exists)
+        else:
+            result.append(resource_name[:-7])
+    return result
 
 def _repr_or_string(val):
     if isinstance(val, basestring):

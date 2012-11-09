@@ -12,6 +12,7 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              dmm1 = (instruments.agilent_multi_34410A, (11,)),
              dmm2 = (instruments.agilent_multi_34410A, (22,)),
              dmm3 = (instruments.agilent_multi_34410A, (6,)),
+             dmm5 = (instruments.agilent_multi_34410A, ('USB0::0x0957::0x0607::MY47021100',)),
              sr1 = (instruments.sr830_lia, (3,)),
              sr2 = (instruments.sr830_lia, (8,)),
              tc1 = (instruments.lakeshore_322, (12,)),
@@ -47,3 +48,14 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              # Agilent attenuator
              att1 = (instruments.agilent_rf_Attenuator, ('USB0::0x0957::0x4C18::MY52200101',))
         )
+
+usb_manuf = { 0x0957 : ('Agilent', { 0x0607 : 'multimeter',
+                                     0x1309 : 'ENA',
+                                     0x0B0B : 'EXA',
+                                     0x0118 : 'PNA-L',
+                                     0x17A2 : 'infiniiVision_500',
+                                     0x1796 : 'infiniiVision_200',
+                                     0x1F01 : 'MXG',
+                                     0x4C18 : 'RF_attenuator' }),
+              0x0B21 : ('Yokogawa',  {0x0039 : 'GS200' })
+            }
