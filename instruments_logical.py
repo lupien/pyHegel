@@ -32,6 +32,9 @@ class _LogicalInstrument(BaseInstrument):
         # override the BaseInstrument._create_devs
         # we don't want it here
         pass
+    def __del__(self):
+        # skip BaseInstrument print statement
+        pass
 
 
 #######################################################
@@ -112,7 +115,13 @@ class LogicalDevice(BaseDevice):
         if not fmt['header'] and hasattr(self, '_current_config'):
             conf = ProxyMethod(self._current_config)
             fmt['header'] = conf
+        # Remove the reference to self. This allows del to work
+        # Not a problem since our _current_config method already
+        # knows self.
+        fmt['obj'] = None
         self.name = self.__class__.__name__ # this should not be used
+    def __del__(self):
+        print 'Deleting logical device:', self
     def _autoget_normalize(self, autoget):
         if autoget == 'all':
             if self._basedevs:
@@ -178,7 +187,7 @@ class LogicalDevice(BaseDevice):
     def get(self, *arg, **kwarg):
         # when not doing async, get all basedevs
         # when doing async, the basedevs are obtained automatically
-        task = self.instr._async_task
+        task = getattr(self.instr, '_async_task', None)
         if not (task and task.is_alive()):
             gl, kwarg = self._get_auto_list(kwarg)
             for dev, base_kwarg in gl:
