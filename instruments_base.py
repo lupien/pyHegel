@@ -506,8 +506,13 @@ class BaseDevice(object):
         return obj
     def getasync(self, async, **kwarg):
         obj = self._do_redir_async()
-        return obj.instr._get_async(async, obj,
+        ret = obj.instr._get_async(async, obj,
                            trig=obj._trig, delay=obj._delay, **kwarg)
+        # now make sure obj._cache and self._cache are the same
+        if async == 3 and self != obj:
+            self.setcache(ret)
+            self._last_filename = obj._last_filename
+        return ret
     def setcache(self, val):
         self._cache = val
     def __call__(self, val=None):
@@ -685,7 +690,9 @@ class BaseInstrument(object):
         self._last_force = time.time()
         if not CHECKING:
             self.init(full=True)
-    def _async_detect(self):
+    def __del__(self):
+        print 'Destroying '+repr(self)
+    def _async_detect(self, max_time=.5):
         return True
     def _async_trig(self):
         pass
@@ -1567,9 +1574,10 @@ class visaInstrument(BaseInstrument):
         self.visa.timeout = 3 # in seconds
         BaseInstrument.__init__(self)
     def __del__(self):
-        print 'Destroying '+repr(self)
+        #print 'Destroying '+repr(self)
         # no need to call vpp43.close(self.visa.vi)
         # because self.visa does that when it is deleted
+        super(visaInstrument, self).__del__()
     #######
     ## Could implement some locking here ....
     ## for read, write, ask
