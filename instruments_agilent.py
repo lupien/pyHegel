@@ -1380,7 +1380,7 @@ class agilent_PNAL(visaInstrumentAsync):
         # The instrument complains that MEASurement12 is too long (for 2 digit trace)
         # so use just MEAS instead
         # I think it must be a limit of 12 characters for every scpi element (between :)
-        self.traceN_name = scpiDevice(getstr=':SYSTem:MEA{trace}:NAME?', str_type=quoted_string(),
+        self.traceN_name = scpiDevice(getstr=':SYSTem:MEAS{trace}:NAME?', str_type=quoted_string(),
                                       options = traceN_options, options_lim = traceN_options_lim)
         self.traceN_window = scpiDevice(getstr=':SYSTem:MEAS{trace}:WINDow?', str_type=int,
                                       options = traceN_options, options_lim = traceN_options_lim)
