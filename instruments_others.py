@@ -98,7 +98,8 @@ class sr830_lia(visaInstrument):
         d.update(multi=headers, graph=range(len(sel)))
         return BaseDevice.getformat(self.snap, sel=sel, **kwarg)
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
+        base = ['async_delay=%r'%self.async_delay]
+        return base+self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
                                  'sync_filter', 'reserve_mode',
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf', options)
     def _create_devs(self):
