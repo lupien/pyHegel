@@ -404,7 +404,7 @@ class BaseDevice(object):
         # autoinit can be False, True or a number.
         # The number affects the default implementation of force_get:
         # Bigger numbers are initialized first. 0 is not initialized, True is 1
-        # setget makes us get the value after setting in
+        # setget makes us get the value after setting it
         #  this is usefull for instruments that could change the value
         #  under us.
         self.instr = None

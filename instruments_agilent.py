@@ -1069,6 +1069,10 @@ class agilent_PNAL(visaInstrumentAsync):
     A lot of other commands require a selected trace (per channel)
     The active one can be selected with the trace option or select_trace, select_traceN
     If unspecified, the last one is used.
+
+    If a trace is REMOVED from the instrument, you should perform a get of
+    the channel_list device to update pyHegel knowledge of the available
+    traces (needed when trying to fetch all traces).
     """
     def init(self, full=False):
         self.write(':format REAL,64')
@@ -1373,12 +1377,15 @@ class agilent_PNAL(visaInstrumentAsync):
         self.marker_y = devMkrEnOption('CALC{ch}:MARKer{mkr}:Y', str_type=decode_float64, multi=['val1', 'val2'], graph=[0,1], trig=True)
         traceN_options = dict(trace=1)
         traceN_options_lim = dict(trace=(1,None))
-        self.traceN_name = scpiDevice(getstr=':SYSTem:MEASurement{trace}:NAME?', str_type=quoted_string(),
+        # The instrument complains that MEASurement12 is too long (for 2 digit trace)
+        # so use just MEAS instead
+        # I think it must be a limit of 12 characters for every scpi element (between :)
+        self.traceN_name = scpiDevice(getstr=':SYSTem:MEA{trace}:NAME?', str_type=quoted_string(),
                                       options = traceN_options, options_lim = traceN_options_lim)
-        self.traceN_window = scpiDevice(getstr=':SYSTem:MEASurement{trace}:WINDow?', str_type=int,
+        self.traceN_window = scpiDevice(getstr=':SYSTem:MEAS{trace}:WINDow?', str_type=int,
                                       options = traceN_options, options_lim = traceN_options_lim)
         # windowTrace restarts at 1 for each window
-        self.traceN_windowTrace = scpiDevice(getstr=':SYSTem:MEASurement{trace}:TRACe?', str_type=int,
+        self.traceN_windowTrace = scpiDevice(getstr=':SYSTem:MEAS{trace}:TRACe?', str_type=int,
                                       options = traceN_options, options_lim = traceN_options_lim)
         self.power_en = scpiDevice('OUTPut', str_type=bool)
         self.power_couple = devChOption(':SOURce{ch}:POWer:COUPle', str_type=bool)

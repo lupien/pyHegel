@@ -34,6 +34,7 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              # PNA-L is gpib 16
              pna1 = (instruments.agilent_PNAL, ('USB0::0x0957::0x0118::MY49001395',)),
              ena1 = (instruments.agilent_ENA, ('USB0::2391::4873::MY49203311::0',)),
+             pnax = (instruments.agilent_PNAL, ('USB0::0x0957::0x0118::MY52041560',)),
              #ENA E5071C we had as a temporary loan summer 2012
              #ena1 = (instrument.agilent_ENA, ('USB0::0x0957::0x0D09::MY46213332',)),
              # scope is USB only
@@ -56,7 +57,7 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
 usb_manuf = { 0x0957 : ('Agilent', { 0x0607 : 'multimeter',
                                      0x1309 : 'ENA',
                                      0x0B0B : 'EXA',
-                                     0x0118 : 'PNA-L',
+                                     0x0118 : 'PNA',
                                      0x17A2 : 'infiniiVision_500',
                                      0x1796 : 'infiniiVision_200',
                                      0x1F01 : 'MXG',
