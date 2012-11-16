@@ -69,8 +69,10 @@ try:
     else:
         import visa
         vpp43 = visa.vpp43
-except ImportError: # pyVisa not installed
+except (WindowsError, ImportError) as e: # pyVisa not installed
     print 'Error importing visa. You will have reduced functionality.'
+    # give a dummy visa to handle imports
+    visa = None
 #can list instruments with : 	visa.get_instruments_list()
 #     or :                      visa.get_instruments_list(use_aliases=True)
 
