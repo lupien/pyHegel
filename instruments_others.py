@@ -3,6 +3,7 @@
 
 import numpy as np
 import random
+import time
 from scipy.optimize import brentq as brentq_rootsolver
 
 import traces
@@ -457,11 +458,28 @@ class lakeshore_370(visaInstrument):
        fetch allows to read all channels
     """
     def init(self, full=False):
+        self._last_command_time = None
         if full and isinstance(self.visa, visa.SerialInstrument):
             self.visa.parity = True
             self.visa.data_bits = 7
             self.visa.term_chars = '\r\n'
+            self._last_command_time = time.time()
         super(lakeshore_370, self).init(full=full)
+    def write(self, val):
+        last = self._last_command_time
+        if last != None:
+            # we need to wait at least 50ms after last write or read
+            delta = (last+.050) - time.time()
+            if delta > 0:
+                time.sleep(delta)
+        super(lakeshore_370, self).write(val)
+        if last != None:
+            self._last_command_time = time.time()
+    def read(self):
+        ret = super(lakeshore_370, self).read()
+        if self._last_command_time != None:
+            self._last_command_time = time.time()
+        return ret
     def _current_config(self, dev_obj=None, options={}):
         if dev_obj == self.fetch:
             old_ch = self.current_ch.getcache()
