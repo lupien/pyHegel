@@ -236,9 +236,12 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         formats.append(f)
         multi = f['multi']
         graph = f['graph']
-        if graph == False:
+        # be careful about type, because True == 1 and False == 0 are both
+        # True in python
+        #if isinstance(graph, bool) and graph == False:
+        if graph is False:
             graph = []
-        elif graph == True:
+        elif graph is True:
             if isinstance(multi, list):
                 graph = range(len(multi))
             else:
