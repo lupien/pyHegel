@@ -11,7 +11,8 @@ import traces
 from instruments_base import BaseInstrument, visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice,\
                             ChoiceBase, dict_str,\
-                            ChoiceStrings, ChoiceIndex, make_choice_list,\
+                            ChoiceStrings, ChoiceIndex,\
+                            make_choice_list, make_choice_dict,\
                             decode_float64, visa
 
 #######################################################
@@ -487,14 +488,20 @@ class lakeshore_370(visaInstrument):
             ch = self._fetch_helper(ch)
             ch_list = []
             in_set = []
+            in_filter = []
+            in_meas = []
             for c in ch:
                 ch_list.append(c)
                 in_set.append(self.input_set.get(ch=c))
+                in_filter.append(self.input_filter.get())
+                in_meas.append(self.input_meas.get())
             self.current_ch.set(old_ch)
-            base = ['current_ch=%r'%ch_list, 'input_set=%r'%in_set]
+            base = ['current_ch=%r'%ch_list, 'input_set=%r'%in_set,
+                    'input_filter=%r'%in_filter, 'input_meas=%r'%in_meas]
         else:
-            base = self._conf_helper('current_ch', 'input_set')
-        base += self._conf_helper('sp', 'pid', 'still_raw', options)
+            base = self._conf_helper('current_ch', 'input_set', 'input_filter', 'input_meas')
+        base += self._conf_helper('sp', 'pid', 'still_raw', 'heater_range',
+                                  'control_mode', 'control_setup', options)
         return base
     def _enabled_list_getdev(self):
         old_ch = self.current_ch.getcache()
@@ -541,6 +548,7 @@ class lakeshore_370(visaInstrument):
         self.current_ch.set(old_ch)
         return ret
     def _create_devs(self):
+        # TODO allow direct setting of P or I or D
         ch_opt_sel = range(1, 17)
         self.current_ch = MemoryDevice(1, choices=ch_opt_sel)
         def devChOption(*arg, **kwarg):
@@ -554,9 +562,20 @@ class lakeshore_370(visaInstrument):
         self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=CS OVL, 2(1)=VCM OVL, 4(2)=VMIX OVL, 8(3)=VDIF OVL
                                #16(4)=R. OVER, 32(5)=R. UNDER, 64(6)=T. OVER, 128(7)=T. UNDER
                                # 000 = valid
-        self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}', str_type=dict_str(['enabled', 'dwell', 'pause', 'curvno', 'tempco'],[bool, int, int, int]))
+        # TODO put the dict_str suboption in the documentation.
+        tempco = ChoiceIndex({1:'negative', 2:'positive'})
+        self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}',
+                                     str_type=dict_str(['enabled', 'dwell', 'pause', 'curvno', 'tempco'],
+                                                       [bool, int, int, int, tempco]))
         self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
                                       str_type=dict_str(['filter_en', 'settle_time', 'window'], [bool, int, int]))
+        res_ranges = ChoiceIndex(make_choice_list([2, 6.32], -3, 7), offset=1, normalize=True)
+        # TODO handle the exc_range which is eiter cur_ranges or volt_ranges
+        cur_ranges = ChoiceIndex(make_choice_list([1, 3.16], -12, -2), offset=1, normalize=True)
+        volt_ranges = ChoiceIndex(make_choice_list([2, 6.32], -6, -1), offset=1, normalize=True)
+        self.input_meas = devChOption('RDGRNG {ch},{val}', 'RDGRNG? {ch}',
+                                     str_type=dict_str(['exc_mode', 'exc_range', 'range', 'autorange_en', 'excitation_disabled'],
+                                                       [ChoiceIndex(['voltage', 'current']), int, res_ranges, bool, bool]))
         self.scan = scpiDevice('SCAN', str_type=dict_str(['ch', 'autoscan_en'], [int, bool]))
         #self.current_loop = MemoryDevice(1, choices=[1, 2])
         #def devLoopOption(*arg, **kwarg):
@@ -567,11 +586,26 @@ class lakeshore_370(visaInstrument):
         #    return scpiDevice(*arg, **kwarg)
         self.pid = scpiDevice('PID', str_type=dict_str(['P', 'I', 'D'], float))
         self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in % or in W
+        cmodes = ChoiceIndex({1:'pid', 2:'zone', 3:'open_loop', 4:'off'})
+        self.control_mode = scpiDevice('CMODE', choices=cmodes)
+        # heater range of 0 means off
+        htrrng_dict = {0:0., 1:31.6e-6, 2:100e-6, 3:316e-6,
+                       4:1.e-3, 5:3.16e-3, 6:10e-3, 7:31.6e-3, 8:100e-3}
+        htrrng = ChoiceIndex(htrrng_dict)
+        self.heater_range = scpiDevice('HTRRNG', choices=htrrng)
+        csetup_htrrng_dict = htrrng_dict.copy()
+        del csetup_htrrng_dict[0]
+        csetup_htrrng = ChoiceIndex(csetup_htrrng_dict)
+        csetup = dict_str(['channel','filter_en', 'units', 'delay', 'output_display',
+                           'heater_limit', 'heater_Ohms'],
+                          [int, bool, ChoiceIndex({1:'kelvin', 2:'ohm'}), int,
+                           ChoiceIndex({1:'current', 2:'power'}), csetup_htrrng, float])
+        self.control_setup = scpiDevice('CSET', str_type=csetup)
         self.sp = scpiDevice('SETP', str_type=float)
         self.still_raw = scpiDevice('STILL', str_type=float)
-        self.alias = self.t
         self._devwrap('enabled_list')
         self._devwrap('fetch', autoinit=False)
+        self.alias = self.fetch
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
