@@ -12,7 +12,7 @@ from instruments_base import BaseInstrument, visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice,\
                             ChoiceBase, dict_str,\
                             ChoiceStrings, ChoiceIndex,\
-                            make_choice_list, make_choice_dict,\
+                            make_choice_list,\
                             decode_float64, visa
 
 #######################################################
