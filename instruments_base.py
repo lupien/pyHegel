@@ -1189,6 +1189,16 @@ def _decode_block_base(s):
             raise IndexError, 'Extra data in for decoding. Got %i ("%s ..."), expected %i'%(lb, block[nb:nb+10], nb)
     return block
 
+def _encode_block_base(s):
+    """
+    This inserts the scpi block header before the string start.
+    see _decode_block_header for the description of the header
+    """
+    N = len(s)
+    N_as_string = str(N)
+    header = '#%i'%len(N_as_string) + N_as_string
+    return header+s
+
 def _decode_block(s, t=np.float64, sep=None):
     """
         sep can be None for binaray encoding or ',' for ascii csv encoding
@@ -1199,6 +1209,17 @@ def _decode_block(s, t=np.float64, sep=None):
     if sep == None:
         return np.fromstring(block, t)
     return np.fromstring(block, t, sep=sep)
+
+def _encode_block(v, sep=None)
+    """
+    Encodes the iterable v (array, list ...)
+    into either a scpi binary block (including header) when sep=None (default)
+    or into a sep separated string. Often sep is ',' for scpi
+    """
+    if sep != None:
+        return ','.join(map(repr, v))
+    s = v.tostring()
+    return _encode_block_base(s)
 
 def _decode_block_auto(s, t=np.float64):
     if s[0] == '#':
