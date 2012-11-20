@@ -1183,9 +1183,9 @@ def _decode_block_base(s):
             raise IndexError, 'Missing data for decoding. Got %i, expected %i'%(lb, nb)
         elif lb > nb :
             if lb-nb == 1 and (s[-1] in '\r\n'):
-                return block
+                return block[:-1]
             elif lb-nb == 2 and s[-2:] == '\r\n':
-                return block
+                return block[:-2]
             raise IndexError, 'Extra data in for decoding. Got %i ("%s ..."), expected %i'%(lb, block[nb:nb+10], nb)
     return block
 
