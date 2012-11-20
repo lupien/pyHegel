@@ -938,7 +938,7 @@ def _fromstr_helper(valstr, t):
 #######################################################
 
 class scpiDevice(BaseDevice):
-    def __init__(self,setstr=None, getstr=None,  autoinit=True, autoget=True, str_type=None,
+    def __init__(self,setstr=None, getstr=None, raw=False, autoinit=True, autoget=True, str_type=None,
                  choices=None, doc='', options={}, options_lim={}, options_apply=[], **kwarg):
         """
            str_type can be float, int, None
@@ -947,6 +947,7 @@ class scpiDevice(BaseDevice):
            If only getstr is not given and autoget is true and
            a getstr is created by appending '?' to setstr.
            If autoget is false and there is no getstr, autoinit is set to False.
+           raw when True will use read_raw instead of the default raw (in get)
 
            options is a list of optional parameters for get and set.
                   It is a dictionnary, where the keys are the option name
@@ -998,6 +999,7 @@ class scpiDevice(BaseDevice):
         self._options_lim = options_lim
         self._options_apply = options_apply
         self.type = str_type
+        self._raw = raw
         self._option_cache = {}
     def _get_docstring(self, added=''):
         # we don't include options starting with _
@@ -1120,7 +1122,7 @@ class scpiDevice(BaseDevice):
             raise
         command = self._getdev_p
         command = command.format(**options)
-        ret = self.instr.ask(command)
+        ret = self.instr.ask(command, self._raw)
         return self._fromstr(ret)
     def check(self, val, **kwarg):
         #TODO handle checking of kwarg
@@ -1180,6 +1182,10 @@ def _decode_block_base(s):
         if lb < nb :
             raise IndexError, 'Missing data for decoding. Got %i, expected %i'%(lb, nb)
         elif lb > nb :
+            if lb-nb == 1 and (s[-1] in '\r\n'):
+                return block
+            elif lb-nb == 2 and s[-2:] == '\r\n':
+                return block
             raise IndexError, 'Extra data in for decoding. Got %i ("%s ..."), expected %i'%(lb, block[nb:nb+10], nb)
     return block
 
@@ -1240,13 +1246,19 @@ class quoted_string(object):
         return quote_char+unquoted_str+quote_char
 
 class quoted_list(quoted_string):
-    def __init__(self, sep=',', **kwarg):
+    def __init__(self, sep=',', element_type=None, **kwarg):
         super(quoted_list,self).__init__(**kwarg)
         self._sep = sep
+        self._element_type = element_type
     def __call__(self, quoted_l):
         unquoted = super(quoted_list,self).__call__(quoted_l)
-        return unquoted.split(self._sep)
+        lst = unquoted.split(self._sep)
+        if self._element_type != None:
+            lst = [_fromstr_helper(elem, self._element_type) for elem in lst]
+        return lst
     def tostr(self, unquoted_l):
+        if self._element_type != None:
+           unquoted_l = [_tostr_helper(elem, self._element_type) for elem in unquoted_l]
         unquoted = self._sep.join(unquoted_l)
         return super(quoted_list,self).tostr(unquoted)
 
@@ -1639,7 +1651,16 @@ class visaInstrument(BaseInstrument):
         return self.visa.read()
     def write(self, val):
         self.visa.write(val)
-    def ask(self, question):
+    def ask(self, question, raw=False):
+        """
+        Does write then read.
+        With raw=True, replaces read with a read_raw.
+        This is needed when dealing with binary date. The
+        base read strips newlines from the end always.
+        """
+        if raw:
+            self.visa.write(question)
+            return self.visa.read_raw()
         return self.visa.ask(question)
     def idn(self):
         return self.ask('*idn?')

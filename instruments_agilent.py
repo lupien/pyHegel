@@ -543,10 +543,10 @@ class infiniiVision_3000(visaInstrument):
         self.current_channel.set(orig_ch)
         return ret
     def _create_devs(self):
-        self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', str_type=_decode_block_base, autoinit=False, doc="Use like this: get(s500.snap_png, filename='testname.png')\nThe .png extensions is optional. It will be added if necessary.")
+        self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', raw=True, str_type=_decode_block_base, autoinit=False, doc="Use like this: get(s500.snap_png, filename='testname.png')\nThe .png extensions is optional. It will be added if necessary.")
         self.snap_png._format['bin']='.png'
         self.inksaver = scpiDevice(':HARDcopy:INKSaver', str_type=bool, doc='This control whether the graticule colors are inverted or not.') # ON, OFF 1 or 0
-        self.data = scpiDevice(getstr=':waveform:DATA?', str_type=decode_uint16_bin, autoinit=False) # returns block of data (always header# for asci byte and word)
+        self.data = scpiDevice(getstr=':waveform:DATA?', raw=True, str_type=decode_uint16_bin, autoinit=False) # returns block of data (always header# for asci byte and word)
           # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
           #  type (Normal, peak, average, HRes), #points, #avg, xincr, xorg, xref, yincr, yorg, yref
           #  xconv = xorg+x*xincr, yconv= (y-yref)*yincr + yorg
@@ -985,7 +985,7 @@ class agilent_EXA(visaInstrumentAsync):
             return scpiDevice(*arg, **kwarg)
         # trace 0 is special, The others are 1-6 and return x,y pairs
         # trace 0:  margin/limit fail, F, F, F, N dB points result, current avg count, npoints sweep, F, F, F , Mkr1xy, Mkr2xy, .., Mkr12xy
-        self.fetch_base = devTraceOption(getstr=':FETCh:{measurement}{trace}?',
+        self.fetch_base = devTraceOption(getstr=':FETCh:{measurement}{trace}?', raw=True,
                                          str_type=decode_float64_2col, autoinit=False, trig=True, options=dict(measurement=self.meas_mode))
         self.fetch0_base = scpiDevice(getstr=':FETCh:{measurement}0?', str_type=str, autoinit=False, trig=True, options=dict(measurement=self.meas_mode))
         self.trace_type = devTraceOption(':TRACe{trace}:TYPE', choices=ChoiceStrings('WRITe', 'AVERage', 'MAXHold', 'MINHold'))
@@ -993,7 +993,7 @@ class agilent_EXA(visaInstrumentAsync):
         self.trace_displaying = devTraceOption(':TRACe{trace}:DISPlay', str_type=bool)
         self.trace_detector = devTraceOption(':DETector:TRACe{trace}', choices=ChoiceStrings('AVERage', 'NEGative', 'NORMal', 'POSitive', 'SAMPle', 'QPEak', 'EAVerage', 'RAVerage'))
         self.trace_detector_auto = devTraceOption(':DETector:TRACe{trace}:AUTO', str_type=bool)
-        self.get_trace = devTraceOption(getstr=':TRACe? TRACE{trace}', str_type=decode_float64, autoinit=False, trig=True)
+        self.get_trace = devTraceOption(getstr=':TRACe? TRACE{trace}', raw=True, str_type=decode_float64, autoinit=False, trig=True)
         # TODO implement trace math, ADC dither, swept IF gain FFT IF gain
         # marker dependent
         self.current_mkr = MemoryDevice(1, min=1, max=12)
@@ -1020,7 +1020,7 @@ class agilent_EXA(visaInstrumentAsync):
         #following http://www.mathworks.com/matlabcentral/fileexchange/30791-taking-a-screenshot-of-an-agilent-signal-analyzer-over-a-tcpip-connection
         #note that because of *OPC?, the returned string is 1;#....
         self.snap_png = scpiDevice(getstr=r':MMEMory:STORe:SCReen "C:\TEMP\SCREEN.PNG";*OPC?;:MMEMory:DATA? "C:\TEMP\SCREEN.PNG"',
-                                   str_type=lambda x:_decode_block_base(x[2:]), autoinit=False)
+                                   raw=True, str_type=lambda x:_decode_block_base(x[2:]), autoinit=False)
         self.snap_png._format['bin']='.png'
 
         self._devwrap('noise_eq_bw', autoinit=.5) # This should be initialized after the devices it depends on (if it uses getcache)
@@ -1051,6 +1051,7 @@ class agilent_PNAL(visaInstrumentAsync):
         delete_measurement
         restart_averaging
         phase_unwrap, phase_wrap, phase_flatten
+        get_file
     Other useful devices:
         channel_list
         current_channel
@@ -1079,10 +1080,37 @@ class agilent_PNAL(visaInstrumentAsync):
         self.write(':format:border swap')
         super(agilent_PNAL, self).init(full=full)
     def _async_trig(self):
-        # Not that this waits for one scan but not for the end of averaging
-        # TODO handle sweep averaging
+        # we don't use the STATus:OPERation:AVERaging1? status
+        # because for n averages they turn on after the n-1 average.
+        # Also it is a complex job to figure out which traces to keep track of
+        # Here we will assume that _async_trigger_helper ('INITiate;*OPC')
+        # starts all the channels (global triggering). It also does a single
+        # iteration of an average.
+        # We will just count the correct number of repeats to do.
+        ch_orig = self.current_channel.getcache()
+        ch_list = self.active_channels_list.getcache()
+        reps = 1
+        for ch in ch_list:
+            if self.average_en.get(ch=ch):
+                self.restart_averaging(ch) # so instrument displays shows the restart
+                count = self.average_count.get()
+                reps = max(reps, count)
+        self.current_channel.set(ch_orig)
+        self._trig_reps_total = reps
+        self._trig_reps_current = 0
         self.cont_trigger.set(False)
         super(agilent_PNAL, self)._async_trig()
+    def _async_detect(self, max_time=.5): # 0.5 s max by default
+        ret = super(agilent_PNAL, self)._async_detect(max_time)
+        if not ret:
+            # This cycle is not finished
+            return ret
+        # cycle is finished
+        self._trig_reps_current += 1
+        if self._trig_reps_current < self._trig_reps_total:
+            self._async_trigger_helper()
+            return False
+        return True
     def abort(self):
         self.write('ABORt')
     def create_measurement(self, name, param, ch=None):
@@ -1125,6 +1153,16 @@ class agilent_PNAL(visaInstrumentAsync):
         ch=self.current_channel.getcache()
         command = 'SENSe{ch}:AVERage:CLEar'.format(ch=ch)
         self.write(command)
+    def get_file(self, remote_file, local_file):
+        """
+            Obtain the file remote_file from the analyzer and save it
+            on this computer as local_file
+        """
+        s = self.ask('MMEMory:TRANsfer? "%s"'%remote_file, raw=True)
+        s = _decode_block_base(s)
+        f = open(local_file, 'wb')
+        f.write(s)
+        f.close()
     def _fetch_getformat(self, **kwarg):
         unit = kwarg.get('unit', 'default')
         xaxis = kwarg.get('xaxis', True)
@@ -1288,6 +1326,7 @@ class agilent_PNAL(visaInstrumentAsync):
                 4=YIG cal failed
                 5=Ramp cal failed""")
         self.current_channel = MemoryDevice(1, min=1, max=200)
+        self.active_channels_list = scpiDevice(getstr='SYSTem:CHANnels:CATalog?', str_type=quoted_list(element_type=int))
         def devChOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(ch=self.current_channel)
@@ -1295,8 +1334,21 @@ class agilent_PNAL(visaInstrumentAsync):
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
         self.channel_list = devChOption(getstr='CALCulate{ch}:PARameter:CATalog:EXTended?', str_type=quoted_dict(), doc='Note that some , are replaced by _')
+        traceN_options = dict(trace=1)
+        traceN_options_lim = dict(trace=(1,None))
+        # The instrument complains that MEASurement12 is too long (for 2 digit trace)
+        # so use just MEAS instead
+        # I think it must be a limit of 12 characters for every scpi element (between :)
+        self.traceN_name = scpiDevice(getstr=':SYSTem:MEAS{trace}:NAME?', str_type=quoted_string(),
+                                      options = traceN_options, options_lim = traceN_options_lim)
+        self.traceN_window = scpiDevice(getstr=':SYSTem:MEAS{trace}:WINDow?', str_type=int,
+                                      options = traceN_options, options_lim = traceN_options_lim)
+        # windowTrace restarts at 1 for each window
+        self.traceN_windowTrace = scpiDevice(getstr=':SYSTem:MEAS{trace}:TRACe?', str_type=int,
+                                      options = traceN_options, options_lim = traceN_options_lim)
+        traceN_name_func = self.traceN_name
         select_trace_choices = ChoiceDevSwitch(self.channel_list,
-                                               lambda t: self.traceN_name.get(trace=t),
+                                               lambda t: traceN_name_func.get(trace=t),
                                                sub_type=quoted_string())
         self.select_trace = devChOption('CALCulate{ch}:PARameter:SELect', autoinit=8,
                                         choices=select_trace_choices, doc="""
@@ -1320,7 +1372,7 @@ class agilent_PNAL(visaInstrumentAsync):
         self.edelay_length_medium = devCalcOption('CALC{ch}:CORR:EDEL:MEDium', choices=ChoiceStrings('COAX', 'WAVEguide'))
         self.edelay_time = devCalcOption('CALC{ch}:CORR:EDEL', str_type=float, min=-10, max=10, doc='Set delay in seconds')
         self.calib_en = devCalcOption('CALC{ch}:CORR', str_type=bool)
-        self.snap_png = scpiDevice(getstr='HCOPy:SDUMp:DATA:FORMat PNG;:HCOPy:SDUMp:DATA?', str_type=_decode_block_base, autoinit=False)
+        self.snap_png = scpiDevice(getstr='HCOPy:SDUMp:DATA:FORMat PNG;:HCOPy:SDUMp:DATA?', raw=True, str_type=_decode_block_base, autoinit=False)
         self.snap_png._format['bin']='.png'
         self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
         self.bandwidth = devChOption('SENSe{ch}:BANDwidth', str_type=float, setget=True) # can obtain min max
@@ -1339,14 +1391,14 @@ class agilent_PNAL(visaInstrumentAsync):
         self.sweep_fast_en =devChOption('SENSe{ch}:SWEep:SPEed', choices=ChoiceStrings('FAST', 'NORMal'), doc='FAST increases the speed of sweep by almost a factor of 2 at a small cost in data quality')
         self.sweep_time = devChOption('SENSe{ch}:SWEep:TIME', str_type=float, min=0, max=86400.)
         self.sweep_type = devChOption('SENSe{ch}:SWEep:TYPE', choices=ChoiceStrings('LINear', 'LOGarithmic', 'POWer', 'CW', 'SEGMent', 'PHASe'))
-        self.x_axis = devChOption(getstr='SENSe{ch}:X?', str_type=decode_float64, autoinit=False, doc='This gets the default x-axis for the channel (some channels can have multiple x-axis')
-        self.calc_x_axis = devCalcOption(getstr='CALC{ch}:X?', str_type=decode_float64, autoinit=False, doc='Get this x-axis for a particular trace.')
-        self.calc_fdata = devCalcOption(getstr='CALC{ch}:DATA? FDATA', str_type=decode_float64, autoinit=False, trig=True)
+        self.x_axis = devChOption(getstr='SENSe{ch}:X?', raw=True, str_type=decode_float64, autoinit=False, doc='This gets the default x-axis for the channel (some channels can have multiple x-axis')
+        self.calc_x_axis = devCalcOption(getstr='CALC{ch}:X?', raw=True, str_type=decode_float64, autoinit=False, doc='Get this x-axis for a particular trace.')
+        self.calc_fdata = devCalcOption(getstr='CALC{ch}:DATA? FDATA', raw=True, str_type=decode_float64, autoinit=False, trig=True)
         # the f vs s. s is complex data, includes error terms but not equation editor (Except for math?)
         #   the f adds equation editor, trace math, {gating, phase corr (elect delay, offset, port extension), mag offset}, formating and smoothing
-        self.calc_sdata = devCalcOption(getstr='CALC{ch}:DATA? SDATA', str_type=decode_complex128, autoinit=False, trig=True)
-        self.calc_fmem = devCalcOption(getstr='CALC{ch}:DATA? FMEM', str_type=decode_float64, autoinit=False)
-        self.calc_smem = devCalcOption(getstr='CALC{ch}:DATA? SMEM', str_type=decode_complex128, autoinit=False)
+        self.calc_sdata = devCalcOption(getstr='CALC{ch}:DATA? SDATA', raw=True, str_type=decode_complex128, autoinit=False, trig=True)
+        self.calc_fmem = devCalcOption(getstr='CALC{ch}:DATA? FMEM', raw=True, str_type=decode_float64, autoinit=False)
+        self.calc_smem = devCalcOption(getstr='CALC{ch}:DATA? SMEM', raw=True, str_type=decode_complex128, autoinit=False)
         self.current_mkr = MemoryDevice(1, min=1, max=10)
         def devMkrOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
@@ -1375,18 +1427,6 @@ class agilent_PNAL(visaInstrumentAsync):
         self.marker_discrete_en = devMkrEnOption('CALC{ch}:MARKer{mkr}:DISCrete', str_type=bool)
         self.marker_x = devMkrEnOption('CALC{ch}:MARKer{mkr}:X', str_type=float, trig=True)
         self.marker_y = devMkrEnOption('CALC{ch}:MARKer{mkr}:Y', str_type=decode_float64, multi=['val1', 'val2'], graph=[0,1], trig=True)
-        traceN_options = dict(trace=1)
-        traceN_options_lim = dict(trace=(1,None))
-        # The instrument complains that MEASurement12 is too long (for 2 digit trace)
-        # so use just MEAS instead
-        # I think it must be a limit of 12 characters for every scpi element (between :)
-        self.traceN_name = scpiDevice(getstr=':SYSTem:MEAS{trace}:NAME?', str_type=quoted_string(),
-                                      options = traceN_options, options_lim = traceN_options_lim)
-        self.traceN_window = scpiDevice(getstr=':SYSTem:MEAS{trace}:WINDow?', str_type=int,
-                                      options = traceN_options, options_lim = traceN_options_lim)
-        # windowTrace restarts at 1 for each window
-        self.traceN_windowTrace = scpiDevice(getstr=':SYSTem:MEAS{trace}:TRACe?', str_type=int,
-                                      options = traceN_options, options_lim = traceN_options_lim)
         self.power_en = scpiDevice('OUTPut', str_type=bool)
         self.power_couple = devChOption(':SOURce{ch}:POWer:COUPle', str_type=bool)
         self.power_slope = devChOption(':SOURce{ch}:POWer:SLOPe', str_type=float, min=-2, max=2)
@@ -1616,13 +1656,13 @@ class agilent_ENA(agilent_PNAL):
             self.sweep_gen = devChOption('SENSe{ch}:SWEep:GENeration', choices=ChoiceStrings('STEPped', 'ANALog', 'FSTepped', 'FANalog'))
         self.sweep_time = devChOption('SENSe{ch}:SWEep:TIME', str_type=float, min=0, max=86400.)
         self.sweep_type = devChOption('SENSe{ch}:SWEep:TYPE', choices=ChoiceStrings('LINear', 'LOGarithmic', 'POWer', 'SEGMent'))
-        self.calc_x_axis = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:XAXIs?', str_type=decode_float64, autoinit=False, doc='Get this x-axis for a particular trace.')
-        self.calc_fdata = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:FDATa?', str_type=decode_float64, autoinit=False, trig=True)
+        self.calc_x_axis = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:XAXIs?', raw=True, str_type=decode_float64, autoinit=False, doc='Get this x-axis for a particular trace.')
+        self.calc_fdata = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:FDATa?', raw=True, str_type=decode_float64, autoinit=False, trig=True)
         # the f vs s. s is complex data, includes error terms but not equation editor (Except for math?)
         #   the f adds equation editor, trace math, {gating, phase corr (elect delay, offset, port extension), mag offset}, formating and smoothing
-        self.calc_sdata = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:SDATa?', str_type=decode_complex128, autoinit=False, trig=True)
-        self.calc_fmem = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:FMEMory?', str_type=decode_float64, autoinit=False)
-        self.calc_smem = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:SMEMory?', str_type=decode_complex128, autoinit=False)
+        self.calc_sdata = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:SDATa?', raw=True, str_type=decode_complex128, autoinit=False, trig=True)
+        self.calc_fmem = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:FMEMory?', raw=True, str_type=decode_float64, autoinit=False)
+        self.calc_smem = devCalcOption(getstr='CALC{ch}:TRACe{trace}:DATA:SMEMory?', raw=True, str_type=decode_complex128, autoinit=False)
         self.current_mkr = MemoryDevice(1, min=1, max=10)
         def devMkrOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
