@@ -206,6 +206,20 @@ clock = _Clock()
 
 writevec = instruments_base._writevec
 
+def _get_dev_kw(dev, **extra_kw):
+    """
+    Takes dev as a device or as a tuple of (dev, dict)
+    where dict contains options that can be overriden by extra_kw
+    returns a tuple of dev, options_dict
+    """
+    if isinstance(dev, tuple):
+        base_kw = dev[1].copy()
+        base_kw.update(extra_kw)
+        extra_kw = base_kw
+        dev = dev[0]
+    return dev, extra_kw
+
+
 def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     hdrs = []
     graphsel = []
@@ -221,10 +235,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         extra_conf.append(setdev)
     reuse_dict = {}
     for dev in getdevs:
-        kwarg = {}
-        if isinstance(dev, tuple):
-            kwarg = dev[1]
-            dev = dev[0]
+        dev, kwarg = _get_dev_kw(dev)
         reuse = reuse_dict.get(dev,0)
         reuse_dict[dev] = reuse + 1
         dev.force_get()
@@ -295,10 +306,7 @@ def _readall(devs, formats, i, async=None):
         return []
     ret = []
     for dev, fmt in zip(devs, formats):
-        kwarg={}
-        if isinstance(dev, tuple):
-            kwarg = dev[1]
-            dev = dev[0]
+        dev, kwarg = _get_dev_kw(dev)
         filename = fmt['basename']
         if not fmt['append']:
             filename = filename % i
@@ -863,6 +871,7 @@ def set(dev, value, **kwarg):
     """
        Change the value of device dev.
     """
+    dev, kwarg = _get_dev_kw(dev, **kwarg)
     dev.set(value, **kwarg)
 
 def move(dev, value, rate):
@@ -884,16 +893,14 @@ def spy(devs, interval=1):
        dev is read every interval seconds and displayed on screen
        CTRL-C to stop
     """
-    # make sure devs is list like
-    try:
-        dev = devs[0]
-    except TypeError:
+    if not isinstance(devs, list):
         devs = [devs]
     try:
         while True:
             v=[]
             for dev in devs:
-                v.append(dev.get())
+                dev, kwarg = _get_dev_kw(dev)
+                v.append(dev.get(**kwarg))
             print >>sys.stderr, v
             wait(interval)
     except KeyboardInterrupt:
@@ -1052,11 +1059,11 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     if f:
         f.close()
 
-def trace(dev, interval=1, title=''):
+def trace(devs, interval=1, title=''):
     """
-       same as record(dev, interval, npoints=1000, filename='trace.dat')
+       same as record(devs, interval, npoints=1000, filename='trace.dat')
     """
-    record(dev, interval, npoints=1000, filename='trace.dat', title=title)
+    record(devs, interval, npoints=1000, filename='trace.dat', title=title)
 
 def scope(dev, interval=.1, title='', **kwarg):
     """
@@ -1067,6 +1074,7 @@ def scope(dev, interval=.1, title='', **kwarg):
        example:
            scope(acq1.readval, unit='V') # with acq1 in scope mode
     """
+    dev, kwarg = _get_dev_kw(dev, **kwarg)
     t = traces.Trace()
     t.setWindowTitle('Scope: '+title)
     fmt = dev.getformat(**kwarg)
@@ -1178,7 +1186,7 @@ def _process_filename(filename, now=None, next_i=None, start_i=0, search=True, *
 
 
 ### get overides get the mathplotlib
-def get(dev, filename=None, **extrap):
+def get(dev, filename=None, **kwarg):
     """
        Get a value from device
        When giving it a filename, data will be saved to it
@@ -1191,14 +1199,17 @@ def get(dev, filename=None, **extrap):
        The path for saving is sweep.path if it is defined otherwise it saves
        in the current directory.
        extrap are all other keyword arguments and depende on the device.
+
+       Note that dev can also be a tuple like in sweep.out
     """
+    dev, kwarg = _get_dev_kw(dev, **kwarg)
     if filename != None:
         dev.force_get()
         filename = os.path.join(sweep.path.get(), filename)
         filename, unique_i = _process_filename(filename)
-        extrap.update(filename=filename)
+        kwarg.update(filename=filename)
     try:
-        return dev.get(**extrap)
+        return dev.get(**kwarg)
     except KeyboardInterrupt:
         print 'CTRL-C pressed!!!!!!' 
 
@@ -1216,15 +1227,16 @@ def getasync(devs, filename=None, **kwarg):
         raise ValueError, 'getasync does not currently handle the filename option'
     if not isinstance(devs, list):
         devs = [devs]
-    for dev in devs:
-        dev.getasync(async=0, **kwarg)
-    for dev in devs:
-        dev.getasync(async=1, **kwarg)
-    for dev in devs:
-        dev.getasync(async=2, **kwarg)
+    devs_kw = [_get_dev_kw(dev, **kwarg) for dev in devs]
+    for dev, kw in devs_kw:
+        dev.getasync(async=0, **kw)
+    for dev, kw in devs_kw:
+        dev.getasync(async=1, **kw)
+    for dev, kw in devs_kw:
+        dev.getasync(async=2, **kw)
     ret = []
-    for dev in devs:
-        ret.append(dev.getasync(async=3, **kwarg))
+    for dev, kw in devs_kw:
+        ret.append(dev.getasync(async=3, **kw))
     return ret
 
 def make_dir(directory, setsweep=True):
