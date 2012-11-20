@@ -1210,7 +1210,7 @@ def _decode_block(s, t=np.float64, sep=None):
         return np.fromstring(block, t)
     return np.fromstring(block, t, sep=sep)
 
-def _encode_block(v, sep=None)
+def _encode_block(v, sep=None):
     """
     Encodes the iterable v (array, list ...)
     into either a scpi binary block (including header) when sep=None (default)
@@ -1227,6 +1227,16 @@ def _decode_block_auto(s, t=np.float64):
     else:
         sep = ','
     return _decode_block(s, t, sep=sep)
+
+class Block_Codec(object):
+    def __init__(self, dtype=np.float64, sep=None):
+        self._dtype = dtype
+        self._sep = sep
+    def __call__(self, input_str):
+        return _decode_block_auto(input_str, self._dtype, self._sep)
+    def tostr(self, array):
+        return _encode_block(array, self._sep)
+
 
 decode_float64 = functools.partial(_decode_block_auto, t=np.float64)
 decode_float32 = functools.partial(_decode_block_auto, t=np.float32)
