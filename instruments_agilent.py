@@ -199,6 +199,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
      zero
     Useful method:
      set_long_avg  To average for even longer than 1s (controls aperture and sample_count)
+     show_long_avg To see the current averaging settings.
 
     Do NOT use the mode parameter of devices (like fetch) when creating
     files (sweep, trace, ...) because the headers in the file might be incorrect.
@@ -253,7 +254,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
         """
         # update mode first, so aperture applies to correctly
         self.mode.get()
-        line_period = 1/self.line_freq.getcache()
+        line_period = 1./self.line_freq.getcache()
         if time > 1.:
             width = 10*line_period
             count = round(time/width)
@@ -265,6 +266,25 @@ class agilent_multi_34410A(visaInstrumentAsync):
                 width = line_period*round(width/line_period)
         self.aperture.set(width)
         self.sample_count.set(count)
+    def show_long_avg(self):
+        # update mode first, so aperture applies to correctly
+        self.mode.get()
+        count = self.sample_count.get()
+        aper_en = self.aperture_en.get()
+        if aper_en:
+            width = self.aperture.get()
+            width_str = 'aperture=%g'%width
+        else:
+            line_period = 1./self.line_freq.getcache()
+            nplc = self.nplc.get()
+            width = nplc * line_period
+            width_str = 'nplc=%g'%nplc
+        count_str = ''
+        if count > 1:
+            count_str = ', sample_count=%i'%count
+        width = width*count
+        print 'The full avg time is %f s (%s%s)'%(width, width_str, count_str)
+        return width
     def _create_devs(self):
         # This needs to be last to complete creation
         ch = ChoiceStrings(
