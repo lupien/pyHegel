@@ -1558,39 +1558,111 @@ def make_choice_list(list_values, start_exponent, end_exponent):
 class dict_str(object):
     def __init__(self, field_names, fmts=int, sep=','):
         """
-        fmts can be a single value or a list of converters
+        fmts can be a single converter or a list of converters
         the same length as field_names
+        A converter is either a type or a (type, lims) tuple
+        where lims can be a tuple (min, max) with either one being None
+        or a list/object of choices.
+        Not that if you use a ChoiceBase object, you only need to specify
+        it as the type. It is automatically used as a choice also.
         """
         self.field_names = field_names
         if not isinstance(fmts, (list, np.ndarray)):
             fmts = [fmts]*len(field_names)
-        self.fmts = fmts
+        fmts_type = []
+        fmts_lims = []
+        for f in fmts:
+            if not isinstance(f, tuple):
+                if isinstance(f, ChoiceBase):
+                    f = (f,f)
+                else:
+                    f = (f, None)
+            fmts_type.append(f[0])
+            fmts_lims.append(f[1])
+        self.fmts_type = fmts_type
+        self.fmts_lims = fmts_lims
         self.sep = sep
     def __call__(self, fromstr):
         v_base = fromstr.split(self.sep)
         if len(v_base) != len(self.field_names):
             raise ValueError, 'Invalid number of parameters in class dict_str'
         v_conv = []
-        for val, fmt in zip(v_base, self.fmts):
+        for val, fmt in zip(v_base, self.fmts_type):
             v_conv.append(_fromstr_helper(val, fmt))
         return dict(zip(self.field_names, v_conv))
     def tostr(self, fromdict=None, **kwarg):
         if fromdict == None:
             fromdict = kwarg
         fromdict = fromdict.copy() # don't change incomning argument
-        ret = ''
-        start = True
-        for k, fmt in zip(self.field_names, self.fmts):
+        ret = []
+        for k, fmt in zip(self.field_names, self.fmts_type):
             v = fromdict.pop(k, None)
-            if not start:
-                ret += ','
-            else:
-                start = False
             if v != None:
-                ret += _tostr_helper(v, fmt)
+                ret.append(_tostr_helper(v, fmt))
         if fromdict != {}:
-            raise KeyError, 'The following keys in the dictionnary are incorrec: %r'%fromdict.keys()
+            raise KeyError, 'The following keys in the dictionnary are incorrect: %r'%fromdict.keys()
+        ret = ','.join(ret)
         return ret
+
+class Dict_SubDevice(BaseDevice):
+    """
+    Use this to gain access to a single element of a device returning a dictionary
+    from dict_str.
+    """
+    def __init__(self, subdevice, key, force_default=False, **kwarg):
+        """
+        This device and the subdevice need to be part of the same instrument
+        (otherwise async will not work properly)
+        The subdice needs to return a dictionary (use dict_str).
+        Here we will only modify the value of key in dictionary.
+        force_default, set the default value of force used in check/set.
+        """
+        self._subdevice = subdevice
+        self._sub_key = key
+        self._force_default = force_default
+        subtype = self._subdevice.type
+        if key not in subtype.field_names:
+            raise IndexError, 'The key is not present in the subdevice'
+        lims = subtype.fmts_lims[subtype.field_names.index(key)]
+        min = max = choices = None
+        if lims == None:
+            pass
+        elif isinstance(lims, tuple):
+            min, max = lims
+        else:
+            choices = lims
+        setget = subdevice._setget
+        autoinit = subdevice._autoinit
+        trig = subdevice._trig
+        delay = subdevice._delay
+        # TODO find a way to point to the proper subdevice in doc string
+        doc = """This device set/get the '%s' dictionnary element of device.
+                 It uses the same options as that subdevice:
+              """%(key)
+        super(Dict_SubDevice, self).__init__(min=min, max=max, choices=choices, doc=doc,
+                setget=setget, autoinit=autoinit, trig=trig, delay=delay, **kwarg)
+        self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
+        self._getdev_p = True # needed to enable BaseDevice get in Checking mode
+
+    def _getdev(self, **kwarg):
+        vals = self._subdevice.get(**kwarg)
+        return vals[self._sub_key]
+    def _setdev(self, val, force=None, **kwarg):
+        """
+        force when True, it make sure to obtain the
+         subdevice value with get.
+              when False, it uses getcache.
+        The default is in self._force_default
+        """
+        if force == None:
+            force = self._force_default
+        if force:
+            vals = self._subdevice.get(**kwarg)
+        else:
+            vals = self._subdevice.getcache()
+        vals = vals.copy()
+        vals[self._sub_key] = val
+        self._subdevice.set(vals)
 
 
 #######################################################

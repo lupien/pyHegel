@@ -9,7 +9,7 @@ from scipy.optimize import brentq as brentq_rootsolver
 import traces
 
 from instruments_base import BaseInstrument, visaInstrument,\
-                            BaseDevice, scpiDevice, MemoryDevice,\
+                            BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice,\
                             ChoiceBase, dict_str,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list,\
@@ -548,7 +548,6 @@ class lakeshore_370(visaInstrument):
         self.current_ch.set(old_ch)
         return ret
     def _create_devs(self):
-        # TODO allow direct setting of P or I or D
         ch_opt_sel = range(1, 17)
         self.current_ch = MemoryDevice(1, choices=ch_opt_sel)
         def devChOption(*arg, **kwarg):
@@ -562,13 +561,15 @@ class lakeshore_370(visaInstrument):
         self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=CS OVL, 2(1)=VCM OVL, 4(2)=VMIX OVL, 8(3)=VDIF OVL
                                #16(4)=R. OVER, 32(5)=R. UNDER, 64(6)=T. OVER, 128(7)=T. UNDER
                                # 000 = valid
-        # TODO put the dict_str suboption in the documentation.
+        # TODO put the dict_str suboption/ranges in the documentation.
+        #  and handle checking of validity of suboptions.
         tempco = ChoiceIndex({1:'negative', 2:'positive'})
         self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}',
                                      str_type=dict_str(['enabled', 'dwell', 'pause', 'curvno', 'tempco'],
-                                                       [bool, int, int, int, tempco]))
+                                                       [bool, (int, (1, 200)), (int, (3, 200)), (int, (0, 20)), tempco]))
         self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
-                                      str_type=dict_str(['filter_en', 'settle_time', 'window'], [bool, int, int]))
+                                      str_type=dict_str(['filter_en', 'settle_time', 'window'], [bool, (int, (1, 200)), (int, (1, 80))]))
+        self.input_filter_window = Dict_SubDevice(self.input_filter, 'window', force_default=False)
         res_ranges = ChoiceIndex(make_choice_list([2, 6.32], -3, 7), offset=1, normalize=True)
         # TODO handle the exc_range which is eiter cur_ranges or volt_ranges
         cur_ranges = ChoiceIndex(make_choice_list([1, 3.16], -12, -2), offset=1, normalize=True)
@@ -584,7 +585,11 @@ class lakeshore_370(visaInstrument):
         #    app = kwarg.pop('options_apply', ['loop'])
         #    kwarg.update(options=options, options_apply=app)
         #    return scpiDevice(*arg, **kwarg)
-        self.pid = scpiDevice('PID', str_type=dict_str(['P', 'I', 'D'], float))
+        #self.pid = scpiDevice('PID', str_type=dict_str(['P', 'I', 'D'], float))
+        self.pid = scpiDevice('PID', str_type=dict_str(['P', 'I', 'D'], [(float, (0.001, 1000)), (float,(0, 10000)), (float, (0, 2500))]))
+        self.pid_P = Dict_SubDevice(self.pid, 'P', force_default=False)
+        self.pid_I = Dict_SubDevice(self.pid, 'I', force_default=False)
+        self.pid_D = Dict_SubDevice(self.pid, 'D', force_default=False)
         self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in % or in W
         cmodes = ChoiceIndex({1:'pid', 2:'zone', 3:'open_loop', 4:'off'})
         self.control_mode = scpiDevice('CMODE', choices=cmodes)
@@ -598,8 +603,8 @@ class lakeshore_370(visaInstrument):
         csetup_htrrng = ChoiceIndex(csetup_htrrng_dict)
         csetup = dict_str(['channel','filter_en', 'units', 'delay', 'output_display',
                            'heater_limit', 'heater_Ohms'],
-                          [int, bool, ChoiceIndex({1:'kelvin', 2:'ohm'}), int,
-                           ChoiceIndex({1:'current', 2:'power'}), csetup_htrrng, float])
+                          [(int, (1, 16)), bool, ChoiceIndex({1:'kelvin', 2:'ohm'}), (int, (1, 255)),
+                           ChoiceIndex({1:'current', 2:'power'}), csetup_htrrng, (float, (1, 1e5))])
         self.control_setup = scpiDevice('CSET', str_type=csetup)
         self.sp = scpiDevice('SETP', str_type=float)
         self.still_raw = scpiDevice('STILL', str_type=float)
