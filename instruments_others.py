@@ -569,7 +569,6 @@ class lakeshore_370(visaInstrument):
                                                        [bool, (int, (1, 200)), (int, (3, 200)), (int, (0, 20)), tempco]))
         self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
                                       str_type=dict_str(['filter_en', 'settle_time', 'window'], [bool, (int, (1, 200)), (int, (1, 80))]))
-        self.input_filter_window = Dict_SubDevice(self.input_filter, 'window', force_default=False)
         res_ranges = ChoiceIndex(make_choice_list([2, 6.32], -3, 7), offset=1, normalize=True)
         # TODO handle the exc_range which is eiter cur_ranges or volt_ranges
         cur_ranges = ChoiceIndex(make_choice_list([1, 3.16], -12, -2), offset=1, normalize=True)
@@ -606,6 +605,7 @@ class lakeshore_370(visaInstrument):
                           [(int, (1, 16)), bool, ChoiceIndex({1:'kelvin', 2:'ohm'}), (int, (1, 255)),
                            ChoiceIndex({1:'current', 2:'power'}), csetup_htrrng, (float, (1, 1e5))])
         self.control_setup = scpiDevice('CSET', str_type=csetup)
+        self.control_setup_heater_limit = Dict_SubDevice(self.control_setup, 'heater_limit', force_default=False)
         self.sp = scpiDevice('SETP', str_type=float)
         self.still_raw = scpiDevice('STILL', str_type=float)
         self._devwrap('enabled_list')
