@@ -69,8 +69,10 @@ try:
     else:
         import visa
         vpp43 = visa.vpp43
-except ImportError: # pyVisa not installed
+except (WindowsError, ImportError) as e: # pyVisa not installed
     print 'Error importing visa. You will have reduced functionality.'
+    # give a dummy visa to handle imports
+    visa = None
 #can list instruments with : 	visa.get_instruments_list()
 #     or :                      visa.get_instruments_list(use_aliases=True)
 
@@ -404,7 +406,7 @@ class BaseDevice(object):
         # autoinit can be False, True or a number.
         # The number affects the default implementation of force_get:
         # Bigger numbers are initialized first. 0 is not initialized, True is 1
-        # setget makes us get the value after setting in
+        # setget makes us get the value after setting it
         #  this is usefull for instruments that could change the value
         #  under us.
         self.instr = None
@@ -506,8 +508,13 @@ class BaseDevice(object):
         return obj
     def getasync(self, async, **kwarg):
         obj = self._do_redir_async()
-        return obj.instr._get_async(async, obj,
+        ret = obj.instr._get_async(async, obj,
                            trig=obj._trig, delay=obj._delay, **kwarg)
+        # now make sure obj._cache and self._cache are the same
+        if async == 3 and self != obj:
+            self.setcache(ret)
+            self._last_filename = obj._last_filename
+        return ret
     def setcache(self, val):
         self._cache = val
     def __call__(self, val=None):
@@ -685,7 +692,9 @@ class BaseInstrument(object):
         self._last_force = time.time()
         if not CHECKING:
             self.init(full=True)
-    def _async_detect(self):
+    def __del__(self):
+        print 'Destroying '+repr(self)
+    def _async_detect(self, max_time=.5):
         return True
     def _async_trig(self):
         pass
@@ -929,7 +938,7 @@ def _fromstr_helper(valstr, t):
 #######################################################
 
 class scpiDevice(BaseDevice):
-    def __init__(self,setstr=None, getstr=None,  autoinit=True, autoget=True, str_type=None,
+    def __init__(self,setstr=None, getstr=None, raw=False, autoinit=True, autoget=True, str_type=None,
                  choices=None, doc='', options={}, options_lim={}, options_apply=[], **kwarg):
         """
            str_type can be float, int, None
@@ -938,6 +947,7 @@ class scpiDevice(BaseDevice):
            If only getstr is not given and autoget is true and
            a getstr is created by appending '?' to setstr.
            If autoget is false and there is no getstr, autoinit is set to False.
+           raw when True will use read_raw instead of the default raw (in get)
 
            options is a list of optional parameters for get and set.
                   It is a dictionnary, where the keys are the option name
@@ -989,6 +999,7 @@ class scpiDevice(BaseDevice):
         self._options_lim = options_lim
         self._options_apply = options_apply
         self.type = str_type
+        self._raw = raw
         self._option_cache = {}
     def _get_docstring(self, added=''):
         # we don't include options starting with _
@@ -1111,7 +1122,7 @@ class scpiDevice(BaseDevice):
             raise
         command = self._getdev_p
         command = command.format(**options)
-        ret = self.instr.ask(command)
+        ret = self.instr.ask(command, self._raw)
         return self._fromstr(ret)
     def check(self, val, **kwarg):
         #TODO handle checking of kwarg
@@ -1171,8 +1182,22 @@ def _decode_block_base(s):
         if lb < nb :
             raise IndexError, 'Missing data for decoding. Got %i, expected %i'%(lb, nb)
         elif lb > nb :
+            if lb-nb == 1 and (s[-1] in '\r\n'):
+                return block[:-1]
+            elif lb-nb == 2 and s[-2:] == '\r\n':
+                return block[:-2]
             raise IndexError, 'Extra data in for decoding. Got %i ("%s ..."), expected %i'%(lb, block[nb:nb+10], nb)
     return block
+
+def _encode_block_base(s):
+    """
+    This inserts the scpi block header before the string start.
+    see _decode_block_header for the description of the header
+    """
+    N = len(s)
+    N_as_string = str(N)
+    header = '#%i'%len(N_as_string) + N_as_string
+    return header+s
 
 def _decode_block(s, t=np.float64, sep=None):
     """
@@ -1185,12 +1210,33 @@ def _decode_block(s, t=np.float64, sep=None):
         return np.fromstring(block, t)
     return np.fromstring(block, t, sep=sep)
 
+def _encode_block(v, sep=None):
+    """
+    Encodes the iterable v (array, list ...)
+    into either a scpi binary block (including header) when sep=None (default)
+    or into a sep separated string. Often sep is ',' for scpi
+    """
+    if sep != None:
+        return ','.join(map(repr, v))
+    s = v.tostring()
+    return _encode_block_base(s)
+
 def _decode_block_auto(s, t=np.float64):
     if s[0] == '#':
         sep = None
     else:
         sep = ','
     return _decode_block(s, t, sep=sep)
+
+class Block_Codec(object):
+    def __init__(self, dtype=np.float64, sep=None):
+        self._dtype = dtype
+        self._sep = sep
+    def __call__(self, input_str):
+        return _decode_block_auto(input_str, self._dtype, self._sep)
+    def tostr(self, array):
+        return _encode_block(array, self._sep)
+
 
 decode_float64 = functools.partial(_decode_block_auto, t=np.float64)
 decode_float32 = functools.partial(_decode_block_auto, t=np.float32)
@@ -1231,13 +1277,19 @@ class quoted_string(object):
         return quote_char+unquoted_str+quote_char
 
 class quoted_list(quoted_string):
-    def __init__(self, sep=',', **kwarg):
+    def __init__(self, sep=',', element_type=None, **kwarg):
         super(quoted_list,self).__init__(**kwarg)
         self._sep = sep
+        self._element_type = element_type
     def __call__(self, quoted_l):
         unquoted = super(quoted_list,self).__call__(quoted_l)
-        return unquoted.split(self._sep)
+        lst = unquoted.split(self._sep)
+        if self._element_type != None:
+            lst = [_fromstr_helper(elem, self._element_type) for elem in lst]
+        return lst
     def tostr(self, unquoted_l):
+        if self._element_type != None:
+           unquoted_l = [_tostr_helper(elem, self._element_type) for elem in unquoted_l]
         unquoted = self._sep.join(unquoted_l)
         return super(quoted_list,self).tostr(unquoted)
 
@@ -1506,39 +1558,111 @@ def make_choice_list(list_values, start_exponent, end_exponent):
 class dict_str(object):
     def __init__(self, field_names, fmts=int, sep=','):
         """
-        fmts can be a single value or a list of converters
+        fmts can be a single converter or a list of converters
         the same length as field_names
+        A converter is either a type or a (type, lims) tuple
+        where lims can be a tuple (min, max) with either one being None
+        or a list/object of choices.
+        Not that if you use a ChoiceBase object, you only need to specify
+        it as the type. It is automatically used as a choice also.
         """
         self.field_names = field_names
         if not isinstance(fmts, (list, np.ndarray)):
             fmts = [fmts]*len(field_names)
-        self.fmts = fmts
+        fmts_type = []
+        fmts_lims = []
+        for f in fmts:
+            if not isinstance(f, tuple):
+                if isinstance(f, ChoiceBase):
+                    f = (f,f)
+                else:
+                    f = (f, None)
+            fmts_type.append(f[0])
+            fmts_lims.append(f[1])
+        self.fmts_type = fmts_type
+        self.fmts_lims = fmts_lims
         self.sep = sep
     def __call__(self, fromstr):
         v_base = fromstr.split(self.sep)
         if len(v_base) != len(self.field_names):
             raise ValueError, 'Invalid number of parameters in class dict_str'
         v_conv = []
-        for val, fmt in zip(v_base, self.fmts):
+        for val, fmt in zip(v_base, self.fmts_type):
             v_conv.append(_fromstr_helper(val, fmt))
         return dict(zip(self.field_names, v_conv))
     def tostr(self, fromdict=None, **kwarg):
         if fromdict == None:
             fromdict = kwarg
         fromdict = fromdict.copy() # don't change incomning argument
-        ret = ''
-        start = True
-        for k, fmt in zip(self.field_names, self.fmts):
+        ret = []
+        for k, fmt in zip(self.field_names, self.fmts_type):
             v = fromdict.pop(k, None)
-            if not start:
-                ret += ','
-            else:
-                start = False
             if v != None:
-                ret += _tostr_helper(v, fmt)
+                ret.append(_tostr_helper(v, fmt))
         if fromdict != {}:
-            raise KeyError, 'The following keys in the dictionnary are incorrec: %r'%fromdict.keys()
+            raise KeyError, 'The following keys in the dictionnary are incorrect: %r'%fromdict.keys()
+        ret = ','.join(ret)
         return ret
+
+class Dict_SubDevice(BaseDevice):
+    """
+    Use this to gain access to a single element of a device returning a dictionary
+    from dict_str.
+    """
+    def __init__(self, subdevice, key, force_default=False, **kwarg):
+        """
+        This device and the subdevice need to be part of the same instrument
+        (otherwise async will not work properly)
+        The subdice needs to return a dictionary (use dict_str).
+        Here we will only modify the value of key in dictionary.
+        force_default, set the default value of force used in check/set.
+        """
+        self._subdevice = subdevice
+        self._sub_key = key
+        self._force_default = force_default
+        subtype = self._subdevice.type
+        if key not in subtype.field_names:
+            raise IndexError, 'The key is not present in the subdevice'
+        lims = subtype.fmts_lims[subtype.field_names.index(key)]
+        min = max = choices = None
+        if lims == None:
+            pass
+        elif isinstance(lims, tuple):
+            min, max = lims
+        else:
+            choices = lims
+        setget = subdevice._setget
+        autoinit = subdevice._autoinit
+        trig = subdevice._trig
+        delay = subdevice._delay
+        # TODO find a way to point to the proper subdevice in doc string
+        doc = """This device set/get the '%s' dictionnary element of device.
+                 It uses the same options as that subdevice:
+              """%(key)
+        super(Dict_SubDevice, self).__init__(min=min, max=max, choices=choices, doc=doc,
+                setget=setget, autoinit=autoinit, trig=trig, delay=delay, **kwarg)
+        self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
+        self._getdev_p = True # needed to enable BaseDevice get in Checking mode
+
+    def _getdev(self, **kwarg):
+        vals = self._subdevice.get(**kwarg)
+        return vals[self._sub_key]
+    def _setdev(self, val, force=None, **kwarg):
+        """
+        force when True, it make sure to obtain the
+         subdevice value with get.
+              when False, it uses getcache.
+        The default is in self._force_default
+        """
+        if force == None:
+            force = self._force_default
+        if force:
+            vals = self._subdevice.get(**kwarg)
+        else:
+            vals = self._subdevice.getcache()
+        vals = vals.copy()
+        vals[self._sub_key] = val
+        self._subdevice.set(vals)
 
 
 #######################################################
@@ -1567,9 +1691,10 @@ class visaInstrument(BaseInstrument):
         self.visa.timeout = 3 # in seconds
         BaseInstrument.__init__(self)
     def __del__(self):
-        print 'Destroying '+repr(self)
+        #print 'Destroying '+repr(self)
         # no need to call vpp43.close(self.visa.vi)
         # because self.visa does that when it is deleted
+        super(visaInstrument, self).__del__()
     #######
     ## Could implement some locking here ....
     ## for read, write, ask
@@ -1629,7 +1754,16 @@ class visaInstrument(BaseInstrument):
         return self.visa.read()
     def write(self, val):
         self.visa.write(val)
-    def ask(self, question):
+    def ask(self, question, raw=False):
+        """
+        Does write then read.
+        With raw=True, replaces read with a read_raw.
+        This is needed when dealing with binary date. The
+        base read strips newlines from the end always.
+        """
+        if raw:
+            self.visa.write(question)
+            return self.visa.read_raw()
         return self.visa.ask(question)
     def idn(self):
         return self.ask('*idn?')

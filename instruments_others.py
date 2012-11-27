@@ -3,14 +3,16 @@
 
 import numpy as np
 import random
+import time
 from scipy.optimize import brentq as brentq_rootsolver
 
 import traces
 
 from instruments_base import BaseInstrument, visaInstrument,\
-                            BaseDevice, scpiDevice, MemoryDevice,\
+                            BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice,\
                             ChoiceBase, dict_str,\
-                            ChoiceStrings, ChoiceIndex, make_choice_list,\
+                            ChoiceStrings, ChoiceIndex,\
+                            make_choice_list,\
                             decode_float64, visa
 
 #######################################################
@@ -98,7 +100,8 @@ class sr830_lia(visaInstrument):
         d.update(multi=headers, graph=range(len(sel)))
         return BaseDevice.getformat(self.snap, sel=sel, **kwarg)
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
+        base = ['async_delay=%r'%self.async_delay]
+        return base+self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
                                  'sync_filter', 'reserve_mode',
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf', options)
     def _create_devs(self):
@@ -456,11 +459,28 @@ class lakeshore_370(visaInstrument):
        fetch allows to read all channels
     """
     def init(self, full=False):
+        self._last_command_time = None
         if full and isinstance(self.visa, visa.SerialInstrument):
             self.visa.parity = True
             self.visa.data_bits = 7
             self.visa.term_chars = '\r\n'
+            self._last_command_time = time.time()
         super(lakeshore_370, self).init(full=full)
+    def write(self, val):
+        last = self._last_command_time
+        if last != None:
+            # we need to wait at least 50ms after last write or read
+            delta = (last+.050) - time.time()
+            if delta > 0:
+                time.sleep(delta)
+        super(lakeshore_370, self).write(val)
+        if last != None:
+            self._last_command_time = time.time()
+    def read(self):
+        ret = super(lakeshore_370, self).read()
+        if self._last_command_time != None:
+            self._last_command_time = time.time()
+        return ret
     def _current_config(self, dev_obj=None, options={}):
         if dev_obj == self.fetch:
             old_ch = self.current_ch.getcache()
@@ -468,14 +488,20 @@ class lakeshore_370(visaInstrument):
             ch = self._fetch_helper(ch)
             ch_list = []
             in_set = []
+            in_filter = []
+            in_meas = []
             for c in ch:
                 ch_list.append(c)
                 in_set.append(self.input_set.get(ch=c))
+                in_filter.append(self.input_filter.get())
+                in_meas.append(self.input_meas.get())
             self.current_ch.set(old_ch)
-            base = ['current_ch=%r'%ch_list, 'input_set=%r'%in_set]
+            base = ['current_ch=%r'%ch_list, 'input_set=%r'%in_set,
+                    'input_filter=%r'%in_filter, 'input_meas=%r'%in_meas]
         else:
-            base = self._conf_helper('current_ch', 'input_set')
-        base += self._conf_helper('sp', 'pid', 'still_raw', options)
+            base = self._conf_helper('current_ch', 'input_set', 'input_filter', 'input_meas')
+        base += self._conf_helper('sp', 'pid', 'still_raw', 'heater_range',
+                                  'control_mode', 'control_setup', options)
         return base
     def _enabled_list_getdev(self):
         old_ch = self.current_ch.getcache()
@@ -535,9 +561,21 @@ class lakeshore_370(visaInstrument):
         self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=CS OVL, 2(1)=VCM OVL, 4(2)=VMIX OVL, 8(3)=VDIF OVL
                                #16(4)=R. OVER, 32(5)=R. UNDER, 64(6)=T. OVER, 128(7)=T. UNDER
                                # 000 = valid
-        self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}', str_type=dict_str(['enabled', 'dwell', 'pause', 'curvno', 'tempco'],[bool, int, int, int]))
+        # TODO put the dict_str suboption/ranges in the documentation.
+        #  and handle checking of validity of suboptions.
+        tempco = ChoiceIndex({1:'negative', 2:'positive'})
+        self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}',
+                                     str_type=dict_str(['enabled', 'dwell', 'pause', 'curvno', 'tempco'],
+                                                       [bool, (int, (1, 200)), (int, (3, 200)), (int, (0, 20)), tempco]))
         self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
-                                      str_type=dict_str(['filter_en', 'settle_time', 'window'], [bool, int, int]))
+                                      str_type=dict_str(['filter_en', 'settle_time', 'window'], [bool, (int, (1, 200)), (int, (1, 80))]))
+        res_ranges = ChoiceIndex(make_choice_list([2, 6.32], -3, 7), offset=1, normalize=True)
+        # TODO handle the exc_range which is eiter cur_ranges or volt_ranges
+        cur_ranges = ChoiceIndex(make_choice_list([1, 3.16], -12, -2), offset=1, normalize=True)
+        volt_ranges = ChoiceIndex(make_choice_list([2, 6.32], -6, -1), offset=1, normalize=True)
+        self.input_meas = devChOption('RDGRNG {ch},{val}', 'RDGRNG? {ch}',
+                                     str_type=dict_str(['exc_mode', 'exc_range', 'range', 'autorange_en', 'excitation_disabled'],
+                                                       [ChoiceIndex(['voltage', 'current']), int, res_ranges, bool, bool]))
         self.scan = scpiDevice('SCAN', str_type=dict_str(['ch', 'autoscan_en'], [int, bool]))
         #self.current_loop = MemoryDevice(1, choices=[1, 2])
         #def devLoopOption(*arg, **kwarg):
@@ -546,13 +584,33 @@ class lakeshore_370(visaInstrument):
         #    app = kwarg.pop('options_apply', ['loop'])
         #    kwarg.update(options=options, options_apply=app)
         #    return scpiDevice(*arg, **kwarg)
-        self.pid = scpiDevice('PID', str_type=dict_str(['P', 'I', 'D'], float))
+        #self.pid = scpiDevice('PID', str_type=dict_str(['P', 'I', 'D'], float))
+        self.pid = scpiDevice('PID', str_type=dict_str(['P', 'I', 'D'], [(float, (0.001, 1000)), (float,(0, 10000)), (float, (0, 2500))]))
+        self.pid_P = Dict_SubDevice(self.pid, 'P', force_default=False)
+        self.pid_I = Dict_SubDevice(self.pid, 'I', force_default=False)
+        self.pid_D = Dict_SubDevice(self.pid, 'D', force_default=False)
         self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in % or in W
+        cmodes = ChoiceIndex({1:'pid', 2:'zone', 3:'open_loop', 4:'off'})
+        self.control_mode = scpiDevice('CMODE', choices=cmodes)
+        # heater range of 0 means off
+        htrrng_dict = {0:0., 1:31.6e-6, 2:100e-6, 3:316e-6,
+                       4:1.e-3, 5:3.16e-3, 6:10e-3, 7:31.6e-3, 8:100e-3}
+        htrrng = ChoiceIndex(htrrng_dict)
+        self.heater_range = scpiDevice('HTRRNG', choices=htrrng)
+        csetup_htrrng_dict = htrrng_dict.copy()
+        del csetup_htrrng_dict[0]
+        csetup_htrrng = ChoiceIndex(csetup_htrrng_dict)
+        csetup = dict_str(['channel','filter_en', 'units', 'delay', 'output_display',
+                           'heater_limit', 'heater_Ohms'],
+                          [(int, (1, 16)), bool, ChoiceIndex({1:'kelvin', 2:'ohm'}), (int, (1, 255)),
+                           ChoiceIndex({1:'current', 2:'power'}), csetup_htrrng, (float, (1, 1e5))])
+        self.control_setup = scpiDevice('CSET', str_type=csetup)
+        self.control_setup_heater_limit = Dict_SubDevice(self.control_setup, 'heater_limit', force_default=False)
         self.sp = scpiDevice('SETP', str_type=float)
         self.still_raw = scpiDevice('STILL', str_type=float)
-        self.alias = self.t
         self._devwrap('enabled_list')
         self._devwrap('fetch', autoinit=False)
+        self.alias = self.fetch
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 

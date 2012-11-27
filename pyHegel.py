@@ -206,6 +206,20 @@ clock = _Clock()
 
 writevec = instruments_base._writevec
 
+def _get_dev_kw(dev, **extra_kw):
+    """
+    Takes dev as a device or as a tuple of (dev, dict)
+    where dict contains options that can be overriden by extra_kw
+    returns a tuple of dev, options_dict
+    """
+    if isinstance(dev, tuple):
+        base_kw = dev[1].copy()
+        base_kw.update(extra_kw)
+        extra_kw = base_kw
+        dev = dev[0]
+    return dev, extra_kw
+
+
 def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     hdrs = []
     graphsel = []
@@ -221,10 +235,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         extra_conf.append(setdev)
     reuse_dict = {}
     for dev in getdevs:
-        kwarg = {}
-        if isinstance(dev, tuple):
-            kwarg = dev[1]
-            dev = dev[0]
+        dev, kwarg = _get_dev_kw(dev)
         reuse = reuse_dict.get(dev,0)
         reuse_dict[dev] = reuse + 1
         dev.force_get()
@@ -236,9 +247,12 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         formats.append(f)
         multi = f['multi']
         graph = f['graph']
-        if graph == False:
+        # be careful about type, because True == 1 and False == 0 are both
+        # True in python
+        #if isinstance(graph, bool) and graph == False:
+        if graph is False:
             graph = []
-        elif graph == True:
+        elif graph is True:
             if isinstance(multi, list):
                 graph = range(len(multi))
             else:
@@ -292,10 +306,7 @@ def _readall(devs, formats, i, async=None):
         return []
     ret = []
     for dev, fmt in zip(devs, formats):
-        kwarg={}
-        if isinstance(dev, tuple):
-            kwarg = dev[1]
-            dev = dev[0]
+        dev, kwarg = _get_dev_kw(dev)
         filename = fmt['basename']
         if not fmt['append']:
             filename = filename % i
@@ -424,12 +435,31 @@ class _Sweep(instruments.BaseInstrument):
       The variables i and v represent the current cycle index and the current set value.
       The variable fwd is True unless in the second cycle of updown.
       """)
-    beforewait = instruments.MemoryDevice(0.02) # provide a default wait so figures are updated
+    beforewait = instruments.MemoryDevice(0.02, doc="""
+      Wait after the new value is set but before the out list is read.
+      It occurs immediately after the commands in the before device are executed.
+      It defaults to 0.02s which is enough for the GUI to update.
+      If you set it to 0 it will be a little faster but the GUI (traces) could
+      freeze.
+
+      You can always read a value with get. Or to prevent actually talking to
+      the device (and respond faster) you can obtain the cache value with
+      dev.getcache()
+      """) # provide a default wait so figures are updated
     after = instruments.MemoryDevice(doc="""
       When this is a string (not None), it will be executed AFTER the out list is read
       but before the next values is set.
       The variables i and v represent the current cycle index and the current set value.
       The variable fwd is True unless in the second cycle of updown.
+      The variable vars contain all the values read in out. It is a flat list
+      that contains all the data to be saved on a row of the main file.
+      Note that v and vals[0] can be different for devices that use setget
+      (those that perform a get after a set, because the instrument could be
+      changing/rounding the value). v is the asked for value.
+
+      You can always read a value with get. Or to prevent actually talking to
+      the device (and respond faster) you can obtain the cache value with
+      dev.getcache()
       """)
     out = instruments.MemoryDevice(doc="""
       This is the list of device to read (get) for each iteration.
@@ -472,7 +502,7 @@ class _Sweep(instruments.BaseInstrument):
         b = self.before.get()
         if b:
             exec b
-    def execafter(self, i , v, fwd):
+    def execafter(self, i , v, fwd, vals):
         b = self.after.get()
         if b:
             exec b
@@ -527,7 +557,9 @@ class _Sweep(instruments.BaseInstrument):
                         {next_i:02}, {next_i:03} is replaced by sweep.next_file_i
                            with the correct number of digit.
                            When used, sweep.next_file_i is auto incremented
-                           to the next value.
+                           to the next value
+                      The filename, when relative (does not start with / or \)
+                      is always combined with the path device.
                 rate: unused
                 close_after: automatically closes the figure after the sweep when True
                 title: string used for window title
@@ -551,6 +583,7 @@ class _Sweep(instruments.BaseInstrument):
                 updown: When True, the sweep will be done twice, the second being in reverse.
                         The way the data is saved depends on the updown device.
                         If it is -1, only do the reverse sweep. Filename is not changed by default.
+            SEE ALSO the sweep devices: before, after, beforewait, graph.
         """
         dolinspace = True
         if isinstance(start, (list, np.ndarray)):
@@ -675,7 +708,7 @@ class _Sweep(instruments.BaseInstrument):
                         vals = _readall_async(devs, cformats, i)
                     else:
                         vals = _readall(devs, cformats, i)
-                    self.execafter(i, v, cfwd)
+                    self.execafter(i, v, cfwd, [iv]+vals+[tme])
                     if cf:
                         writevec(cf, [iv]+vals+[tme])
                     if graph:
@@ -838,6 +871,7 @@ def set(dev, value, **kwarg):
     """
        Change the value of device dev.
     """
+    dev, kwarg = _get_dev_kw(dev, **kwarg)
     dev.set(value, **kwarg)
 
 def move(dev, value, rate):
@@ -859,16 +893,14 @@ def spy(devs, interval=1):
        dev is read every interval seconds and displayed on screen
        CTRL-C to stop
     """
-    # make sure devs is list like
-    try:
-        dev = devs[0]
-    except TypeError:
+    if not isinstance(devs, list):
         devs = [devs]
     try:
         while True:
             v=[]
             for dev in devs:
-                v.append(dev.get())
+                dev, kwarg = _get_dev_kw(dev)
+                v.append(dev.get(**kwarg))
             print >>sys.stderr, v
             wait(interval)
     except KeyboardInterrupt:
@@ -945,10 +977,12 @@ class _Snap(object):
 
 snap = _Snap()
 
+def _record_execafter(command, i, vals):
+    exec command
 
 
 _record_trace_num = 0
-def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_conf=None, async=False):
+def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_conf=None, async=False, after=None):
     """
        record to filename (if not None) the values from devs
          uses sweep.path
@@ -956,6 +990,17 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
        interval is in seconds
        npoints is max number of points. If None, it will only stop
         on CTRL-C...
+       filename, title, extra_conf and async behave the same way as for sweep.
+       However filename will not handle the {start}, {stop}, {npts}, {updown} options.
+
+       after is a string to be executed after every iteration.
+       The variables i represent the current cycle index.
+       The variable vars contain all the values read. It is a flat list
+       that contains all the data to be saved on a row of the main file.
+
+       In after, you can always read a value with get. Or to prevent actually talking to
+       the device (and respond faster) you can obtain the cache value with
+       dev.getcache()
     """
     global _record_trace_num
     # make sure devs is list like
@@ -995,6 +1040,8 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
                 vals = _readall_async(devs, formats, i)
             else:
                 vals = _readall(devs, formats, i)
+            if after != None:
+                _record_execafter(after, i, [tme]+vals)
             t.addPoint(tme, gsel(vals))
             if f:
                 writevec(f, [tme]+vals)
@@ -1012,11 +1059,11 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     if f:
         f.close()
 
-def trace(dev, interval=1, title=''):
+def trace(devs, interval=1, title=''):
     """
-       same as record(dev, interval, npoints=1000, filename='trace.dat')
+       same as record(devs, interval, npoints=1000, filename='trace.dat')
     """
-    record(dev, interval, npoints=1000, filename='trace.dat', title=title)
+    record(devs, interval, npoints=1000, filename='trace.dat', title=title)
 
 def scope(dev, interval=.1, title='', **kwarg):
     """
@@ -1027,6 +1074,7 @@ def scope(dev, interval=.1, title='', **kwarg):
        example:
            scope(acq1.readval, unit='V') # with acq1 in scope mode
     """
+    dev, kwarg = _get_dev_kw(dev, **kwarg)
     t = traces.Trace()
     t.setWindowTitle('Scope: '+title)
     fmt = dev.getformat(**kwarg)
@@ -1138,7 +1186,7 @@ def _process_filename(filename, now=None, next_i=None, start_i=0, search=True, *
 
 
 ### get overides get the mathplotlib
-def get(dev, filename=None, **extrap):
+def get(dev, filename=None, **kwarg):
     """
        Get a value from device
        When giving it a filename, data will be saved to it
@@ -1151,14 +1199,17 @@ def get(dev, filename=None, **extrap):
        The path for saving is sweep.path if it is defined otherwise it saves
        in the current directory.
        extrap are all other keyword arguments and depende on the device.
+
+       Note that dev can also be a tuple like in sweep.out
     """
+    dev, kwarg = _get_dev_kw(dev, **kwarg)
     if filename != None:
         dev.force_get()
         filename = os.path.join(sweep.path.get(), filename)
         filename, unique_i = _process_filename(filename)
-        extrap.update(filename=filename)
+        kwarg.update(filename=filename)
     try:
-        return dev.get(**extrap)
+        return dev.get(**kwarg)
     except KeyboardInterrupt:
         print 'CTRL-C pressed!!!!!!' 
 
@@ -1176,15 +1227,16 @@ def getasync(devs, filename=None, **kwarg):
         raise ValueError, 'getasync does not currently handle the filename option'
     if not isinstance(devs, list):
         devs = [devs]
-    for dev in devs:
-        dev.getasync(async=0, **kwarg)
-    for dev in devs:
-        dev.getasync(async=1, **kwarg)
-    for dev in devs:
-        dev.getasync(async=2, **kwarg)
+    devs_kw = [_get_dev_kw(dev, **kwarg) for dev in devs]
+    for dev, kw in devs_kw:
+        dev.getasync(async=0, **kw)
+    for dev, kw in devs_kw:
+        dev.getasync(async=1, **kw)
+    for dev, kw in devs_kw:
+        dev.getasync(async=2, **kw)
     ret = []
-    for dev in devs:
-        ret.append(dev.getasync(async=3, **kwarg))
+    for dev, kw in devs_kw:
+        ret.append(dev.getasync(async=3, **kw))
     return ret
 
 def make_dir(directory, setsweep=True):
