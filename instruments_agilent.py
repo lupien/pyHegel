@@ -7,7 +7,7 @@ import time
 
 from instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
-                            dict_str, _repr_or_string,\
+                            ChoiceMultiple, _repr_or_string,\
                             quoted_string, quoted_list, quoted_dict,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDevSwitch,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
@@ -572,7 +572,7 @@ class infiniiVision_3000(visaInstrument):
           #  xconv = xorg+x*xincr, yconv= (y-yref)*yincr + yorg
         self.points = scpiDevice(':WAVeform:POINts', str_type=int) # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
         self.points_mode = scpiDevice(':WAVeform:POINts:MODE', choices=ChoiceStrings('NORMal', 'MAXimum', 'RAW'))
-        self.preamble = scpiDevice(getstr=':waveform:PREamble?', str_type=dict_str(['format', 'type', 'points', 'count', 'xinc', 'xorig', 'xref', 'yinc', 'yorig', 'yref'],[int, int, int, int, float, float, int, float, float, int]))
+        self.preamble = scpiDevice(getstr=':waveform:PREamble?', choices=ChoiceMultiple(['format', 'type', 'points', 'count', 'xinc', 'xorig', 'xref', 'yinc', 'yorig', 'yref'],[int, int, int, int, float, float, int, float, float, int]))
         self.waveform_count = scpiDevice(getstr=':WAVeform:COUNt?', str_type=int)
         self.acq_type = scpiDevice(':ACQuire:TYPE', choices=ChoiceStrings('NORMal', 'AVERage', 'HRESolution', 'PEAK'))
         self.acq_mode= scpiDevice(':ACQuire:MODE', choices=ChoiceStrings('RTIM', 'SEGM'))

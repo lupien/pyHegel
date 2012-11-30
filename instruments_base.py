@@ -379,6 +379,30 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
         QtGui.QApplication.instance().processEvents(
              QtCore.QEventLoop.AllEvents, 20) # 20 ms max
 
+def _general_check(val, min=None, max=None, choices=None ,lims=None):
+   # self is use for perror
+    if lims != None:
+        if isinstance(lims, tuple):
+            min, max = lims
+        else:
+            choices = lims
+    mintest = maxtest = choicetest = True
+    if min != None:
+        mintest = val >= min
+    if max != None:
+        maxtest = val <= max
+    if choices:
+        choicetest = val in choices
+    state = mintest and maxtest and choicetest
+    if state == False:
+        if not mintest:
+            err='{val!s} is below MIN=%r'%min
+        if not maxtest:
+            err='{val!s} is above MAX=%r'%max
+        if not choicetest:
+            err='invalid value({val!s}): use one of {choices!s}'
+        raise ValueError('Failed check: '+err, dict(val=val, choices=repr(choices)))
+
 
 #######################################################
 ##    Base device
@@ -539,23 +563,10 @@ class BaseDevice(object):
     def check(self, val):
         if self._setdev_p == None:
             raise NotImplementedError, self.perror('This device does not handle check')
-        mintest = maxtest = choicetest = True
-        if self.min != None:
-            mintest = val >= self.min
-        if self.max != None:
-            maxtest = val <= self.max
-        if self.choices:
-            choicetest = val in self.choices
-        state = mintest and maxtest and choicetest
-        if state == False:
-            if not mintest:
-                err='below MIN=%r'%self.min
-            if not maxtest:
-                err='above MAX=%r'%self.max
-            if not choicetest:
-                err='invalid value({val!s}): use one of {choices!s}'
-            raise ValueError, self.perror('Failed check: '+err, val=val, choices=repr(self.choices))
-        #return state
+        try:
+            _general_check(val, self.min, self.max, self.choices)
+        except ValueError as e:
+            raise ValueError(self.perror(e.args[0],**e.args[1]))
     def getformat(self, filename=None, **kwarg): # we need to absorb any filename argument
         # first handle options we don't want saved in 'options'
         graph = kwarg.pop('graph', None)
@@ -1555,9 +1566,13 @@ def make_choice_list(list_values, start_exponent, end_exponent):
     powers = np.logspace(start_exponent, end_exponent, end_exponent-start_exponent+1)
     return (powers[:,None] * np.array(list_values)).flatten()
 
-class dict_str(object):
+class ChoiceMultiple(ChoiceBase):
     def __init__(self, field_names, fmts=int, sep=','):
         """
+        This handles scpi commands that return a list of options like
+         1,2,On,1.34
+        We convert it into a dictionary to name and acces the individual
+        parameters.
         fmts can be a single converter or a list of converters
         the same length as field_names
         A converter is either a type or a (type, lims) tuple
@@ -1603,6 +1618,23 @@ class dict_str(object):
             raise KeyError, 'The following keys in the dictionnary are incorrect: %r'%fromdict.keys()
         ret = ','.join(ret)
         return ret
+    def __contains__(self, x): # performs x in y; with y=Choice(). Used for check
+        for k, fmt, lims in zip(self.field_names, self.fmts_type, self.fmts_lims):
+            try:
+                _general_check(x[k], lims=lims)
+            except ValueError as e:
+                raise ValueError('for key %s: '%k + e.args[0], e.args[1])
+        return True
+    def __repr__(self):
+        r = ''
+        first = True
+        for k, lims in zip(self.field_names, self.fmts_lims):
+            if not first:
+                r += '\n'
+            first = False
+            r += 'key %s has limits %r'%(k, lims)
+        return r
+
 
 class Dict_SubDevice(BaseDevice):
     """

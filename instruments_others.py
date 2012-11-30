@@ -10,7 +10,7 @@ import traces
 
 from instruments_base import BaseInstrument, visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice,\
-                            ChoiceBase, dict_str,\
+                            ChoiceBase, ChoiceMultiple,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list,\
                             decode_float64, visa
@@ -393,7 +393,7 @@ class lakeshore_340(visaInstrument):
         return ret
     def _create_devs(self):
         rev_str = self.ask('rev?')
-        conv = dict_str(['master_rev_date', 'master_rev_num', 'master_serial_num', 'sw1', 'input_rev_date',
+        conv = ChoiceMultiple(['master_rev_date', 'master_rev_num', 'master_serial_num', 'sw1', 'input_rev_date',
                          'input_rev_num', 'option_id', 'option_rev_date', 'option_rev_num'], fmts=str)
         rev_dic = conv(rev_str)
         ch_Base = ChoiceStrings('A', 'B')
@@ -414,12 +414,12 @@ class lakeshore_340(visaInstrument):
         self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=invalid, 16(4)=temp underrange,
                                #32(5)=temp overrange, 64(6)=sensor under (<0), 128(7)=sensor overrange
                                # 000 = valid
-        self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}', str_type=dict_str(['enabled', 'compens'],[bool, int]))
+        self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}', choices=ChoiceMultiple(['enabled', 'compens'],[bool, int]))
         self.input_crv = devChOption('INCRV {ch},{val}', 'INCRV? {ch}', str_type=int)
         self.input_type = devChOption('INTYPE {ch},{val}', 'INTYPE? {ch}',
-                                      str_type=dict_str(['type', 'units', 'coeff', 'exc', 'range']))
+                                      choices=ChoiceMultiple(['type', 'units', 'coeff', 'exc', 'range']))
         self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
-                                      str_type=dict_str(['filter_en', 'n_points', 'window'], [bool, int, int]))
+                                      choices=ChoiceMultiple(['filter_en', 'n_points', 'window'], [bool, int, int]))
         self.current_loop = MemoryDevice(1, choices=[1, 2])
         def devLoopOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
@@ -428,7 +428,7 @@ class lakeshore_340(visaInstrument):
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
         self.pid = devLoopOption('PID {loop},{val}', 'PID? {loop}',
-                                 str_type=dict_str(['P', 'I', 'D'], float))
+                                 choices=ChoiceMultiple(['P', 'I', 'D'], float))
         self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in %
         self.sp = devLoopOption(setstr='SETP {loop},{val}', getstr='SETP? {loop}', str_type=float)
         self.alias = self.t
@@ -561,22 +561,24 @@ class lakeshore_370(visaInstrument):
         self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=CS OVL, 2(1)=VCM OVL, 4(2)=VMIX OVL, 8(3)=VDIF OVL
                                #16(4)=R. OVER, 32(5)=R. UNDER, 64(6)=T. OVER, 128(7)=T. UNDER
                                # 000 = valid
-        # TODO put the dict_str suboption/ranges in the documentation.
-        #  and handle checking of validity of suboptions.
         tempco = ChoiceIndex({1:'negative', 2:'positive'})
         self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}',
-                                     str_type=dict_str(['enabled', 'dwell', 'pause', 'curvno', 'tempco'],
+                                     choices=ChoiceMultiple(['enabled', 'dwell', 'pause', 'curvno', 'tempco'],
                                                        [bool, (int, (1, 200)), (int, (3, 200)), (int, (0, 20)), tempco]))
         self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
-                                      str_type=dict_str(['filter_en', 'settle_time', 'window'], [bool, (int, (1, 200)), (int, (1, 80))]))
+                                      choices=ChoiceMultiple(['filter_en', 'settle_time', 'window'], [bool, (int, (1, 200)), (int, (1, 80))]))
         res_ranges = ChoiceIndex(make_choice_list([2, 6.32], -3, 7), offset=1, normalize=True)
         # TODO handle the exc_range which is eiter cur_ranges or volt_ranges
         cur_ranges = ChoiceIndex(make_choice_list([1, 3.16], -12, -2), offset=1, normalize=True)
         volt_ranges = ChoiceIndex(make_choice_list([2, 6.32], -6, -1), offset=1, normalize=True)
         self.input_meas = devChOption('RDGRNG {ch},{val}', 'RDGRNG? {ch}',
-                                     str_type=dict_str(['exc_mode', 'exc_range', 'range', 'autorange_en', 'excitation_disabled'],
+                                     choices=ChoiceMultiple(['exc_mode', 'exc_range', 'range', 'autorange_en', 'excitation_disabled'],
                                                        [ChoiceIndex(['voltage', 'current']), int, res_ranges, bool, bool]))
-        self.scan = scpiDevice('SCAN', str_type=dict_str(['ch', 'autoscan_en'], [int, bool]))
+        # scan returns the channel currently being read
+        #  it is the channel that flashes, not necessarily the one after scan on the
+        #  display (they differ when temperature control is enabled, the instrument goes back
+        #  to the control channel after all readings. This command follows that.)
+        self.scan = scpiDevice('SCAN', choices=ChoiceMultiple(['ch', 'autoscan_en'], [int, bool]))
         #self.current_loop = MemoryDevice(1, choices=[1, 2])
         #def devLoopOption(*arg, **kwarg):
         #    options = kwarg.pop('options', {}).copy()
@@ -584,8 +586,8 @@ class lakeshore_370(visaInstrument):
         #    app = kwarg.pop('options_apply', ['loop'])
         #    kwarg.update(options=options, options_apply=app)
         #    return scpiDevice(*arg, **kwarg)
-        #self.pid = scpiDevice('PID', str_type=dict_str(['P', 'I', 'D'], float))
-        self.pid = scpiDevice('PID', str_type=dict_str(['P', 'I', 'D'], [(float, (0.001, 1000)), (float,(0, 10000)), (float, (0, 2500))]))
+        #self.pid = scpiDevice('PID', choices=ChoiceMultiple(['P', 'I', 'D'], float))
+        self.pid = scpiDevice('PID', choices=ChoiceMultiple(['P', 'I', 'D'], [(float, (0.001, 1000)), (float,(0, 10000)), (float, (0, 2500))]))
         self.pid_P = Dict_SubDevice(self.pid, 'P', force_default=False)
         self.pid_I = Dict_SubDevice(self.pid, 'I', force_default=False)
         self.pid_D = Dict_SubDevice(self.pid, 'D', force_default=False)
@@ -600,11 +602,11 @@ class lakeshore_370(visaInstrument):
         csetup_htrrng_dict = htrrng_dict.copy()
         del csetup_htrrng_dict[0]
         csetup_htrrng = ChoiceIndex(csetup_htrrng_dict)
-        csetup = dict_str(['channel','filter_en', 'units', 'delay', 'output_display',
+        csetup = ChoiceMultiple(['channel','filter_en', 'units', 'delay', 'output_display',
                            'heater_limit', 'heater_Ohms'],
                           [(int, (1, 16)), bool, ChoiceIndex({1:'kelvin', 2:'ohm'}), (int, (1, 255)),
                            ChoiceIndex({1:'current', 2:'power'}), csetup_htrrng, (float, (1, 1e5))])
-        self.control_setup = scpiDevice('CSET', str_type=csetup)
+        self.control_setup = scpiDevice('CSET', choices=csetup)
         self.control_setup_heater_limit = Dict_SubDevice(self.control_setup, 'heater_limit', force_default=False)
         self.sp = scpiDevice('SETP', str_type=float)
         self.still_raw = scpiDevice('STILL', str_type=float)
