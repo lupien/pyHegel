@@ -10,7 +10,7 @@ import traces
 
 from instruments_base import BaseInstrument, visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice,\
-                            ChoiceBase, ChoiceMultiple,\
+                            ChoiceBase, ChoiceMultiple, ChoiceMultipleDep,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list,\
                             decode_float64, visa
@@ -568,12 +568,12 @@ class lakeshore_370(visaInstrument):
         self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
                                       choices=ChoiceMultiple(['filter_en', 'settle_time', 'window'], [bool, (int, (1, 200)), (int, (1, 80))]))
         res_ranges = ChoiceIndex(make_choice_list([2, 6.32], -3, 7), offset=1, normalize=True)
-        # TODO handle the exc_range which is eiter cur_ranges or volt_ranges
         cur_ranges = ChoiceIndex(make_choice_list([1, 3.16], -12, -2), offset=1, normalize=True)
         volt_ranges = ChoiceIndex(make_choice_list([2, 6.32], -6, -1), offset=1, normalize=True)
+        curvolt_ranges = ChoiceMultipleDep('exc_mode', {'voltage':volt_ranges, 'current':cur_ranges})
         self.input_meas = devChOption('RDGRNG {ch},{val}', 'RDGRNG? {ch}',
                                      choices=ChoiceMultiple(['exc_mode', 'exc_range', 'range', 'autorange_en', 'excitation_disabled'],
-                                                       [ChoiceIndex(['voltage', 'current']), int, res_ranges, bool, bool]))
+                                                       [ChoiceIndex(['voltage', 'current']), curvolt_ranges, res_ranges, bool, bool]))
         # scan returns the channel currently being read
         #  it is the channel that flashes, not necessarily the one after scan on the
         #  display (they differ when temperature control is enabled, the instrument goes back

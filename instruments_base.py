@@ -1602,10 +1602,16 @@ class ChoiceMultiple(ChoiceBase):
         if len(v_base) != len(self.field_names):
             raise ValueError, 'Invalid number of parameters in class dict_str'
         v_conv = []
-        for val, fmt in zip(v_base, self.fmts_type):
+        names = []
+        for k, val, fmt in zip(self.field_names, v_base, self.fmts_type):
+            if isinstance(fmt, ChoiceMultipleDep):
+                fmt.set_current_vals(dict(zip(names, v_conv)))
             v_conv.append(_fromstr_helper(val, fmt))
+            names.append(k)
         return dict(zip(self.field_names, v_conv))
     def tostr(self, fromdict=None, **kwarg):
+        # we assume check (__contains__) was called so we don't need to
+        # do fmt.set_current_vals again
         if fromdict == None:
             fromdict = kwarg
         fromdict = fromdict.copy() # don't change incomning argument
@@ -1621,6 +1627,8 @@ class ChoiceMultiple(ChoiceBase):
     def __contains__(self, x): # performs x in y; with y=Choice(). Used for check
         for k, fmt, lims in zip(self.field_names, self.fmts_type, self.fmts_lims):
             try:
+                if isinstance(fmt, ChoiceMultipleDep):
+                    fmt.set_current_vals(x)
                 _general_check(x[k], lims=lims)
             except ValueError as e:
                 raise ValueError('for key %s: '%k + e.args[0], e.args[1])
@@ -1634,6 +1642,43 @@ class ChoiceMultiple(ChoiceBase):
             first = False
             r += 'key %s has limits %r'%(k, lims)
         return r
+
+class ChoiceMultipleDep(ChoiceBase):
+    """ This class is a wrapper around a dictionnary of lists
+        or other choices (similar to ChoiceDevDep).
+        The correct list selected from the dictionnary keys, according
+        to the value from the multiple dict key.
+        The keys can be values or and object that handles 'in' testing.
+        A default choice can be given with a key of None
+        Note that the dependent option currently requires the key to come before.
+        i.e. if the base is {'a':1, 'B':2} then 'B' can depend on 'a' but not
+        the reverse (the problem is with ChoiceMultiple __contains__, __call__
+        and tostr)
+    """
+    def __init__(self, key, choices):
+        self.choices = choices
+        self.key = key
+        self.all_vals = {key:None}
+    def set_current_vals(self, all_vals):
+        self.all_vals = all_vals
+    def _get_choice(self):
+        val = self.all_vals[self.key]
+        for k, v in self.choices.iteritems():
+            if isinstance(k, (tuple, ChoiceBase)) and val in k:
+                return v
+            elif val == k:
+                return v
+        return self.choices.get(None, [])
+    # call and tostr will only be used if str_typ is set to this class.
+    #  This can be done if all the choices are instance of ChoiceBase
+    def __call__(self, input_str):
+        return self._get_choice()(input_str)
+    def tostr(self, input_choice):
+        return self._get_choice().tostr(input_choice)
+    def __contains__(self, x):
+        return x in self._get_choice()
+    def __repr__(self):
+        return repr(self.choices)
 
 
 class Dict_SubDevice(BaseDevice):
