@@ -1244,7 +1244,7 @@ class Block_Codec(object):
         self._dtype = dtype
         self._sep = sep
     def __call__(self, input_str):
-        return _decode_block_auto(input_str, self._dtype, self._sep)
+        return _decode_block(input_str, self._dtype, self._sep)
     def tostr(self, array):
         return _encode_block(array, self._sep)
 
