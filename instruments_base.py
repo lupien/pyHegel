@@ -1246,6 +1246,8 @@ class Block_Codec(object):
     def __call__(self, input_str):
         return _decode_block(input_str, self._dtype, self._sep)
     def tostr(self, array):
+        if array.dtype != self._dtype:
+            array = array.astype(self._dtype)
         return _encode_block(array, self._sep)
 
 
