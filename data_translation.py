@@ -210,7 +210,8 @@ class DataTranslation(BaseInstrument):
         self._analog_out.SetSingleValueAsVolts(0, val)
     def write(self, string):
         exec('self.'+string)
-    def ask(self, string):
+    def ask(self, string, raw=False):
+        # raw is not used here but is needed by scpiDevice methods
         return eval('self.'+string)
     def _async_trig(self):
         self.run()
