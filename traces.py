@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+    # -*- coding: utf-8 -*-
 # vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 #
 # python-matplotlib-0.99.1.2-4.fc13.i686 QT backend is missing many
@@ -94,6 +94,11 @@ def close_last_trace():
     get_last_trace().window.close()
 
 def time2date(x):
+    """
+    This is the same as epoch2num.
+    It converts time in sec since epoch to matplotlib date format.
+    Can do the recerse with num2epoch
+    """
     return x/(24.*3600)+pylab.epoch2num(0)
 
 def get_timezone_shift(x=None):
@@ -108,6 +113,47 @@ def get_timezone_shift(x=None):
     else:
         tz = time.timezone
     return tz
+
+def str_epoch2num(s):
+    """
+    input is either a string or and time in seconds since epoch
+    output is the date format of matplotlib
+    """
+    if isinstance(s, basestring):
+        return pylab.datestr2num(s)
+    else:
+        return pylab.epoch2num(s)
+
+def num2str(n, tz=False):
+    """
+    converts from matplotlib date format to a string
+    With tz=True also shows the timezone
+    """
+    # could also use .isoformat
+    if tz:
+        return pylab.num2date(n).strftime('%Y-%m-%d %H:%M:%S.%f %Z')
+    else:
+        return pylab.num2date(n).strftime('%Y-%m-%d %H:%M:%S.%f')
+
+def xlim_time(xmin=None, xmax=None, epoch=False):
+    """
+    same as xlim, except xmin, xmax
+    are in epoch time or a string on input
+    and are str as output
+    unless epoch=True then the return is seconds since epoch
+    """
+    if isinstance(xmin, tuple):
+        xmin, xmax = xmin
+    if xmin != None:
+        xmin = str_epoch2num(xmin)
+    if xmax != None:
+        xmax = str_epoch2num(xmax)
+    xmin, xmax = pylab.xlim(xmin, xmax)
+    if epoch:
+        return pylab.num2epoch(xmin), pylab.num2epoch(xmax)
+    else:
+        return num2str(xmin), num2str(xmax)
+
 
 def time_stripdate(x, first=None):
     """
