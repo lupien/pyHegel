@@ -6,6 +6,7 @@
 
 import time
 import functools
+import sys
 
 from PyQt4 import QtCore, QtGui
 import numpy as np
@@ -773,3 +774,17 @@ def sleep(sec):
         sleeper.close()
         raise
 
+
+class Quit_Button(QtGui.QPushButton):
+    """
+        Starts a Button that will exit the application with clicked.
+        Use:
+            qb = Quit_Button('This is the quit message')
+    """
+    def __init__(self, text, noshow=False):
+        super(Quit_Button, self).__init__(text)
+        self.connect(self, QtCore.SIGNAL('clicked()'), self.endit)
+        if not noshow:
+            self.show()
+    def endit(v=None):
+        sys.exit()
