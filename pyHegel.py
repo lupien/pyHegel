@@ -32,12 +32,6 @@ import operator
 from gc import collect as collect_garbage
 
 
-import traces
-import instruments
-import instruments_base
-import local_config
-import util
-
 def _update_sys_path():
     # This will handle calling of the script in the following ways:
     #  python -i ./some/partial/path/pyHegel.py
@@ -48,12 +42,16 @@ def _update_sys_path():
     #     run -i ./some/partial/path/pyHegel
     # But will not handle calling it this way
     #  execfile('./some/partial/path/pyHegel.py') # we assume that if execfile is used, that path is already set.
+    #       actually if the variable _execfile_name exists, we use that
     #  from pyHegel import *   # for this to work, the path is already set
     if __name__ != '__main__':
         # importing pyHegel or execfile from a module
         return
     # Initialize assuming the python filename is the last argument.
-    partial_path = sys.argv[-1] # for execfile this is left over from calling environment (can be empty)
+    try:
+        partial_path = _execfile_name
+    except NameError:
+        partial_path = sys.argv[-1] # for execfile this is left over from calling environment (can be empty)
     # Now check to see if it is another argument.
     for a in sys.argv:
         if 'pyHegel.py' in a.lower():
@@ -83,6 +81,13 @@ try:
         pass # already updated path.
 except:
     _sys_path_modified = _update_sys_path()
+
+
+import traces
+import instruments
+import instruments_base
+import local_config
+import util
 
 
 def help_pyHegel():
