@@ -10,6 +10,7 @@ import functools
 from PyQt4 import QtCore, QtGui
 import numpy as np
 from matplotlib import pylab, rcParams
+import dateutil
 
 # same as in fullmpcanvas.py
 # follows new_figure_manager
@@ -114,13 +115,21 @@ def get_timezone_shift(x=None):
         tz = time.timezone
     return tz
 
+_TZOFFSETS = {'EST': -5*3600, 'DST':-4*3600}
 def str_epoch2num(s):
     """
     input is either a string or and time in seconds since epoch
     output is the date format of matplotlib
+    Without a timezone in the input string, the local timezone is used.
+    To enter a timezone you can use UTC, GMT,Z or something like
+    -0500. It also knows about EST and DST.
     """
     if isinstance(s, basestring):
-        return pylab.datestr2num(s)
+        # we replace pylab.datestr2num to better handle local timezone
+        dt = dateutil.parser.parse(s, tzinfos=_TZOFFSETS)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=dateutil.tz.tzlocal())
+        return pylab.date2num(dt)
     else:
         return pylab.epoch2num(s)
 
@@ -141,6 +150,7 @@ def xlim_time(xmin=None, xmax=None, epoch=False):
     are in epoch time or a string on input
     and are str as output
     unless epoch=True then the return is seconds since epoch
+    For the format accepted see str_epoch2num
     """
     if isinstance(xmin, tuple):
         xmin, xmax = xmin
