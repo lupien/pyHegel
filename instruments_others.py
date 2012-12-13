@@ -74,7 +74,7 @@ class sr830_lia(visaInstrument):
     when using 24dB/oct, 100ms filter.
 
     You can use find_n_time and find_fraction to set the time.
-    For example: set sr1,sr1.find_n_time(.99,sec=True)
+    For example: sr1.async_delay = sr1.find_n_time(.99,sec=True)
 
     To read more than one channel at a time use snap
     Otherwise you can use x, y, t, theta and snap
