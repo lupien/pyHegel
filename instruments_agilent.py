@@ -1667,9 +1667,9 @@ class agilent_ENA(agilent_PNAL):
         self.average_count = devChOption('SENSe{ch}:AVERage:COUNt', str_type=int)
         self.average_en = devChOption('SENSe{ch}:AVERage', str_type=bool)
         self.average_triggering_en = devChOption('TRIGger:AVERage', str_type=bool)
-        self.freq_start = devChOption('SENSe{ch}:FREQuency:STARt', str_type=float, min=10e6, max=40e9)
-        self.freq_stop = devChOption('SENSe{ch}:FREQuency:STOP', str_type=float, min=10e6, max=40e9)
-        self.freq_cw= devChOption('SENSe{ch}:FREQuency:CW', str_type=float, min=10e6, max=40e9)
+        self.freq_start = devChOption('SENSe{ch}:FREQuency:STARt', str_type=float, min=5, max=3e9)
+        self.freq_stop = devChOption('SENSe{ch}:FREQuency:STOP', str_type=float, min=5, max=3e9)
+        self.freq_cw= devChOption('SENSe{ch}:FREQuency:CW', str_type=float, min=5, max=3e9)
         self.ext_ref = scpiDevice(getstr='SENSe:ROSCillator:SOURce?', str_type=str)
         self.npoints = devChOption('SENSe{ch}:SWEep:POINts', str_type=int, min=2, max=20001)
         if self._is_E5071C:
