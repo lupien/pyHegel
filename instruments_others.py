@@ -99,10 +99,19 @@ class sr830_lia(visaInstrument):
         d = self.snap._format
         d.update(multi=headers, graph=range(len(sel)))
         return BaseDevice.getformat(self.snap, sel=sel, **kwarg)
+    def auto_offset(self, ch='x'):
+        """
+           commands the auto offset for channel ch
+           which can be 'x', 'y' or 'r'
+        """
+        choices=ChoiceIndex(['x', 'y', 'r'], offset=1)
+        ch_i = choices.tostr(ch)
+        self.write('aoff '+ch_i)
     def _current_config(self, dev_obj=None, options={}):
         base = ['async_delay=%r'%self.async_delay]
         return base+self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
                                  'sync_filter', 'reserve_mode',
+                                 'offset_expand_x', 'offset_expand_y', 'offset_expand_r',
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf', options)
     def _create_devs(self):
         self.freq = scpiDevice('freq', str_type=float, setget=True, min=0.001, max=102e3)
@@ -120,6 +129,10 @@ class sr830_lia(visaInstrument):
         self.x = scpiDevice(getstr='outp? 1', str_type=float, delay=True)
         self.y = scpiDevice(getstr='outp? 2', str_type=float, delay=True)
         self.r = scpiDevice(getstr='outp? 3', str_type=float, delay=True)
+        off_exp = ChoiceMultiple(['offset_pct', 'expand_factor'], [float, ChoiceIndex([1, 10 ,100])])
+        self.offset_expand_x = scpiDevice('oexp 1,{val}', 'oexp? 1', choices=off_exp, setget=True)
+        self.offset_expand_y = scpiDevice('oexp 2,{val}', 'oexp? 2', choices=off_exp, setget=True)
+        self.offset_expand_r = scpiDevice('oexp 3,{val}', 'oexp? 3', choices=off_exp, setget=True)
         self.theta = scpiDevice(getstr='outp? 4', str_type=float, delay=True)
         input_conf = ChoiceIndex(['A', 'A-B', 'I1', 'I100'])
         self.input_conf = scpiDevice('isrc', choices=input_conf, doc='For currents I1 refers to 1 MOhm, I100 refers to 100 MOhm\n')
