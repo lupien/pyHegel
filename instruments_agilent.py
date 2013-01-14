@@ -1557,6 +1557,11 @@ class agilent_ENA(agilent_PNAL):
     def reset_trig(self):
         self.trig_source.set('INTernal')
         self.cont_trigger.set(True)
+    def _async_trig(self):
+        self.cont_trigger.set(False)
+        super(agilent_PNAL, self)._async_trig()
+    def _async_detect(self, max_time=.5): # 0.5 s max by default
+        return super(agilent_PNAL, self)._async_detect(max_time)
     def _async_trigger_helper(self):
         self.trig_source.set('BUS')
         self.average_triggering_en.set(True)
