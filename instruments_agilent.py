@@ -46,6 +46,84 @@ class agilent_rf_33522A(visaInstrument):
 
 
 #######################################################
+##    Agilent EPM power meter
+#######################################################
+
+class agilent_PowerMeter(visaInstrumentAsync):
+    """
+    This instrument is for Agilent N1913A EPM seris power meter with a N8487A
+    average power sensor.
+
+    Get data with readval (force read of new data) or fetch (gets possibly old data)
+    Note that only the upper display upper line is read.
+    """
+    # The instrument has 4 display position (top upper, top lower, ...)
+    #  1=upper window upper meas, 2=lower upper, 3=upper lower, 4=lower lower
+    # They are not necessarily active on the display but they are all used for
+    # average calculation and can all be used for reading data.
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('range', 'range_auto_en', 'unit',
+                                 'gain_en', 'hold_mode', 'relative_en', 'average_en',
+                                 'average_cnt', 'average_cnt_auto', 'average_step_detection',
+                                 'cset1_en', 'cset2_en', 'trig_src',
+                                 'sensor_calib_date', 'sensor_type', 'sensor_serialno',
+                                 'linear_corr_type', 'meas_rate',
+                                 'gain_corr_dB', 'gain_corr_en',
+                                 'duty_cycle_percent', 'duty_cycle_en',
+                                 'freq', 'freq_offset', 'freq_offset_unit',
+                                 options)
+    def _async_trig(self):
+        self.trig_delay_en.set(True)
+        self.cont_trigger.set(False)
+    def set_relative(self):
+        self.write('CALCulate1:RELative:AUTO ONCE')
+    def _create_devs(self):
+        # voltage unit depends on front panel/remote selection (sourc1:voltage:unit) vpp, vrms, dbm
+        self.range = scpiDevice('SENSe:POWer:AC:RANGe', str_type=int, min=0, max=1)
+        self.config = scpiDevice('CONFigure1')
+        #self.resolution = scpiDevice('CONFig1 DEF,{val}', str_type=int, min=1, max=4)
+        self.resolution = scpiDevice('DISPlay:WINDow1:NUMeric1:RESolution', str_type=int, min=1, max=4)
+        self.range_auto_en = scpiDevice('SENSe:POWer:AC:RANGe:AUTO', str_type=bool)
+        self.unit = scpiDevice('UNIT:POWer', choices=ChoiceStrings('DBM', 'W'))
+        self.gain_dB = scpiDevice('CALCulate1:GAIN', str_type=float, min=-100, max=100)
+        self.gain_en = scpiDevice('CALCulate1:GAIN:STATe', str_type=bool)
+        self.hold_mode = scpiDevice('CALCulate1:HOLD:STAT', choices=ChoiceStrings('OFF', 'MIN', 'MAX'))
+        self.relative_en = scpiDevice('CALCulate1:RELative:STATe', str_type=bool)
+        #SENSE subsystem
+        self.average_cnt = scpiDevice('AVERage:COUNt', str_type=int, min=1, max=1024)
+        self.average_cnt_auto = scpiDevice('AVERage:COUNt:AUTO', str_type=bool)
+        self.average_step_detection = scpiDevice('AVERage:SDETect', str_type=bool)
+        self.average_en = scpiDevice('AVERage', str_type=bool)
+        #self.gain_factor_pct = scpiDevice('CORRection:CFACtor', str_type=float, min=1., max=150.)
+        self.cset1_en = scpiDevice('CORRection:CSET1:STATe', str_type=bool)
+        self.cset2_en = scpiDevice('CORRection:CSET2:STATe', str_type=bool)
+        self.freq = scpiDevice('FREQuency', str_type=float, min=1e3, max=1e12)
+        self.freq_offset = scpiDevice(getstr='CORRection:FDOFfset?', str_type=float)
+        self.freq_offset_unit = scpiDevice('CORRection:FDOFfset:UNIT', choices=ChoiceStrings('PCT', 'DB'))
+        self.duty_cycle_percent = scpiDevice('CORRection:DCYCle', str_type=float, min=.001, max=99.999)
+        self.duty_cycle_en = scpiDevice('CORRection:DCYCle:STATe', str_type=bool)
+        self.gain_corr_dB = scpiDevice('CORRection:GAIN2', str_type=float, min=-100, max=100)
+        self.gain_corr_en = scpiDevice('CORRection:GAIN2:STATe', str_type=bool)
+        self.meas_rate = scpiDevice('MRATe', choices=ChoiceStrings('NORMal', 'DOUBle', 'FAST'))
+        self.linear_corr_type = scpiDevice('V2P', choices=ChoiceStrings('ATYPe', 'DTYPe'))
+        self.sensor_calib_date = scpiDevice(getstr='SERVice:SENSor:CDATe?')
+        self.sensor_calib_place = scpiDevice(getstr='SERVice:SENSor:CPLace?')
+        self.sensor_type = scpiDevice(getstr='SERVice:SENSor:TYPE?')
+        self.sensor_serialno = scpiDevice(getstr='SERVice:SENSor:SNUMber?')
+        self.raw_reading = scpiDevice(getstr='SERVice:SENSor:RADC?', autoinit=False, trig=True)
+        #TRIGGER block
+        self.trig_src = scpiDevice('TRIGger:SOURce', choices=ChoiceStrings('BUS', 'EXTernal', 'HOLD', 'IMMediate'))
+        self.trig_delay_en = scpiDevice('TRIGger:DELay:AUTO', str_type=bool)
+        self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
+        #READ, FETCH
+        self.fetch = scpiDevice(getstr='FETCh?',str_type=float, autoinit=False, trig=True) #You need to read some data first.
+        self.readval = ReadvalDev(self.fetch)
+        self.alias = self.readval
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+
+
+#######################################################
 ##    Agilent PSG generator
 #######################################################
 

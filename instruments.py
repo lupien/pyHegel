@@ -32,7 +32,7 @@ from instruments_logical import LogicalDevice, ScalingDevice, FunctionDevice,\
                                 LimitDevice, CopyDevice, ExecuteDevice,\
                                 RThetaDevice
 
-from instruments_agilent import agilent_rf_33522A,\
+from instruments_agilent import agilent_rf_33522A, agilent_PowerMeter,\
                                 agilent_rf_PSG, agilent_rf_MXG,\
                                 agilent_multi_34410A, agilent_rf_Attenuator,\
                                 infiniiVision_3000, agilent_EXA,\
