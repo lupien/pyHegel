@@ -75,6 +75,7 @@ class agilent_PowerMeter(visaInstrumentAsync):
     def _async_trig(self):
         self.trig_delay_en.set(True)
         self.cont_trigger.set(False)
+        super(agilent_PowerMeter, self)._async_trig()
     def set_relative(self):
         self.write('CALCulate1:RELative:AUTO ONCE')
     def _create_devs(self):
