@@ -56,6 +56,20 @@ class agilent_PowerMeter(visaInstrumentAsync):
 
     Get data with readval (force read of new data) or fetch (gets possibly old data)
     Note that only the upper display upper line is read.
+
+    gain_ch_{dB,en} applies a correction to the channel data.
+    gain_{dB,en} applies a correction to the display (measurement menu)
+                 (goes with relative menu)
+    cset1_en is for manual sensor calibration (cannot be turn on for our sensor
+             because it already provides a calibration, see th CF percent value on the
+             display that depends on frequency. It is 100% at 50 MHz)
+    cset2_en is a second manual calibration (called FDO table in channel/offsets)
+             to compensate for the circuit used. It also depends on the frequency.
+             You can read this correction value with freq_offset
+
+    WARNING: currently only works for GPIB (usb and lan don't work)
+             and the relative value cannot be read.
+             (firmware A1.01.07)
     """
     # The instrument has 4 display position (top upper, top lower, ...)
     #  1=upper window upper meas, 2=lower upper, 3=upper lower, 4=lower lower
@@ -68,7 +82,7 @@ class agilent_PowerMeter(visaInstrumentAsync):
                                  'cset1_en', 'cset2_en', 'trig_src',
                                  'sensor_calib_date', 'sensor_type', 'sensor_serialno',
                                  'linear_corr_type', 'meas_rate',
-                                 'gain_corr_dB', 'gain_corr_en',
+                                 'gain_ch_dB', 'gain_ch_en',
                                  'duty_cycle_percent', 'duty_cycle_en',
                                  'freq', 'freq_offset', 'freq_offset_unit',
                                  options)
@@ -103,8 +117,8 @@ class agilent_PowerMeter(visaInstrumentAsync):
         self.freq_offset_unit = scpiDevice('CORRection:FDOFfset:UNIT', choices=ChoiceStrings('PCT', 'DB'))
         self.duty_cycle_percent = scpiDevice('CORRection:DCYCle', str_type=float, min=.001, max=99.999)
         self.duty_cycle_en = scpiDevice('CORRection:DCYCle:STATe', str_type=bool)
-        self.gain_corr_dB = scpiDevice('CORRection:GAIN2', str_type=float, min=-100, max=100)
-        self.gain_corr_en = scpiDevice('CORRection:GAIN2:STATe', str_type=bool)
+        self.gain_ch_dB = scpiDevice('CORRection:GAIN2', str_type=float, min=-100, max=100)
+        self.gain_ch_en = scpiDevice('CORRection:GAIN2:STATe', str_type=bool)
         self.meas_rate = scpiDevice('MRATe', choices=ChoiceStrings('NORMal', 'DOUBle', 'FAST'))
         self.linear_corr_type = scpiDevice('V2P', choices=ChoiceStrings('ATYPe', 'DTYPe'))
         self.sensor_calib_date = scpiDevice(getstr='SERVice:SENSor:CDATe?')
