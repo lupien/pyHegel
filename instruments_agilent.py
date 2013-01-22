@@ -1633,6 +1633,8 @@ class agilent_ENA(agilent_PNAL):
         marker_x, marker_y
         cont_trigger
         trig_source
+    method:
+        load_segment
 
     Note that almost all devices/commands require a channel.
     It can be specified with the ch option or will use the last specified
@@ -1732,6 +1734,18 @@ class agilent_ENA(agilent_PNAL):
         """ Enables the current channel for triggering purposes """
         ch = self.current_channel.getcache()
         self.write('INITiate%i'%ch)
+    def load_segment(self, filename):
+        """ To load from the instrument disk a file describing the
+            segments to use.
+            Make sure to select the table shape (start/stop or center/span,
+            power or no power, etc...) to be the same as the content of the file
+            before loading, otherwise the load will fail or be wrong.
+            Ex:
+                ena1.load_segment('d:/Segments/SEGM100MHz.csv')
+            You can use either forward or backslash (but be careful with
+            backslash, might need r'd:\\test.csv' or double them 'd:\\\\test.csv')
+        """
+        self.write('MMEMory:LOAD:SEGMent "%s"'%filename)
     def _create_devs(self):
         idn = self.idn()
         self._is_E5071C = 'E5071C' in idn.split(',')[1]
