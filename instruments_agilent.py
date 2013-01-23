@@ -1836,3 +1836,140 @@ class agilent_ENA(agilent_PNAL):
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(agilent_PNAL, self)._create_devs()
+
+
+#######################################################
+##    Agilent M8190A Arbitrary Waveform Generator
+#######################################################
+
+class agilent_AWG(visaInstrument):
+    """
+    This is to control the M8190A Arbitrary Waveform Generator.
+    It has 2 independent channels that can be coupled (for start/stop)
+    and each channel can be with 12 bit @ 12 GS/s max of 2 GS or 14 bit @ 8 GS/s
+    max of 1.5 GS.
+    For the binary files:
+     DAC values are signed. The data is in the most significant bits,
+      so bits 15-2 in 14 bit mode and 15-4 in 12 bit mode (then bits 3 and 2 are
+      don't care). Bit 1 is the sequence marker, bit 0 is the sample marker.
+     Data needs to be in blocks (or vectors). Only the sequence marker of the first
+     sample in a vector is used.
+     The vector length is 48 samples in 14 bits mode and 64 in 12 bits mode.
+     The minimum length is 5 vectors (240 samples in 14 bits, 320 for 12 bits)
+
+    The voltage amplitude can be set with either volt_amplitude, volt_offset
+    or volt_high, volt_low (volt_ampl is peak to peak amplitude)
+    There is one sampling frequency for both channels.
+    Many options depend on the channel.
+    """
+    def init(self, full=False):
+        self.write(':format:border swap')
+    def _current_config(self, dev_obj=None, options={}):
+        orig_ch = self.current_channel.getcache()
+        ch_list = ['current_channel', 'freq_source', 'cont_trigger', 'gate_mode_en', 'output_en',
+                                'delay_coarse', 'delay_fine', 'volt_ampl', 'volt_offset',
+                                'sample_marker_volt_ampl', 'sample_marker_volt_offset',
+                                'sync_marker_volt_ampl', 'sync_marker_volt_offset',
+                                'dac_format', 'differential_offset', 'speed_mode',
+                                'advance_mode', 'repeat_count', 'marker_en']
+        self.current_channel.set(1)
+        ch1 = self._conf_helper(*ch_list)
+        self.current_channel.set(2)
+        ch2 = self._conf_helper(*ch_list)
+        self.current_channel.set(orig_ch)
+        return ch1+ch2+self._conf_helper('coupled_en', 'freq_sampling', 'freq_ext',
+                                         'ref_source', 'ref_freq', options)
+    def _create_devs(self):
+        self.current_channel = MemoryDevice(1, min=1, max=2)
+        self.coupled_en = scpiDevice(':INSTrument:COUPle:STATe', str_type=bool)
+        self.freq_sampling = scpiDevice(':FREQuency:RASTer', str_type=float)
+        self.freq_ext = scpiDevice(':FREQuency:RASTer:EXTernal', str_type=float)
+        self.ref_source = scpiDevice(':ROSCillator:SOURce', choices=ChoiceStrings('AXI', 'EXTernal'))
+        self.ref_freq = scpiDevice(':ROSCillator:FREQuency', str_type=float)
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_channel)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.freq_source = devChOption(':FREQuency:RASTer:SOURce{var}', choices=ChoiceStrings('INTernal', 'EXTernal'))
+        self.cont_trigger = devChOption(':INITiate:CONTinous{ch}', str_type=bool)
+        self.gate_mode_en = devChOption(':INITiate:GATE{ch}', str_type=bool, doc='When cont_trigger is False, selects between gate or trigger mode of triggering')
+        #self.arming_mode = devChOption(':INITiate:CONTinous{ch}:ENABle', choices=ChoiceStrings('SELF', 'ARMed'))
+        self.output_en = devChOption(':OUTPut{var}', str_type=bool)
+        self.delay_coarse = devChOption(':ARM:CDELay{var}', str_type=float, min=0, max=10e-9)
+        self.delay_fine = devChOption(':ARM:CDELay{var}', str_type=float, min=0, max=150e-12, doc='max delay is 60e-12 between 2.5 and 6.25 GS/s and 30e-12 above 6.25 GS/s')
+        self.volt_ampl = devChOption(':VOLTage{var}', str_type=float, min=.35, max=0.7)
+        self.volt_offset = devChOption(':VOLTage{var}:OFFSet', str_type=float, min=-.02, max=0.02)
+        self.volt_high = devChOption(':VOLTage{var}:HIGH', str_type=float, min=.155, max=.37)
+        self.volt_low = devChOption(':VOLTage{var}:LOW', str_type=float, min=-0.37, max=0.155)
+        self.sample_marker_volt_ampl = devChOption(':MARKer{var}:SAMPle:VOLTage:AMPLitude', str_type=float, min=0., max=2.25)
+        self.sample_marker_volt_offset = devChOption(':MARKer{var}:SAMPle:VOLTage:OFFSet', str_type=float, min=-0.5, max=1.75)
+        self.sample_marker_volt_high = devChOption(':MARKer{var}:SAMPle:VOLTage:HIGH', str_type=float, min=0.5, max=1.75)
+        self.sample_marker_volt_low = devChOption(':MARKer{var}:SAMPle:VOLTage:LOW', str_type=float, min=-0.5, max=1.75)
+        self.sync_marker_volt_ampl = devChOption(':MARKer{var}:SYNC:VOLTage:AMPLitude', str_type=float, min=0., max=2.25)
+        self.sync_marker_volt_offset = devChOption(':MARKer{var}:SYNC:VOLTage:OFFSet', str_type=float, min=-0.5, max=1.75)
+        self.sync_marker_volt_high = devChOption(':MARKer{var}:SYNC:VOLTage:HIGH', str_type=float, min=0.5, max=1.75)
+        self.sync_marker_volt_low = devChOption(':MARKer{var}:SYNC:VOLTage:LOW', str_type=float, min=-0.5, max=1.75)
+        self.dac_format = devChOption(':DAC:FORMat', choices=ChoiceStrings('RZ', 'DNRZ', 'NRZ', 'DOUBlet'), doc=
+            """ RZ:      Return to zero (DAC A, DAC B=0) (first half of time step, second half)
+                NRZ:     Non return to zero (DAC A, DAC A)
+                DNRZ:    double NRZ (DAC A, DAC B=A)
+                Doublet: (DAC A, DAC B=-A)
+            """)
+        self.differential_offset = devChOption(':OUTPut{var}:DIOFfset', str_type=int, doc='An integer to fix DAC offset between direct and its complement output.')
+        #self.func_mode = devChOption(':FUNCtion{var}:MODE', choices=ChoiceStrings('ARBitrary', 'STSequence', 'STSCenario'))
+        self.advance_mode = devChOption(':TRACE{var}:ADVance', choices=ChoiceStrings('AUTO', 'CONDitional', 'REPeat', 'SINGle'))
+        self.repeat_count = devChOption(':TRACE{var}:COUNt', str_type=int)
+        self.marker_en = devChOption(':TRACE{var}:MARKer', str_type=bool)
+        self.speed_mode = devChOption(':TRACe{var}:DWIDth', choices=ChoiceStrings('WSPeed', 'WPRecision'), doc=
+            """ wspeed:     speed mode, 12 bits, 12 GS/s max
+                wprecision: precision mode, 14 bits, 8 GS/s max
+            """) # SKIP all the interpolation modes (INTX3, X12 ...) because needs option DUC
+        # TODO implement loading of data using the TRACE{ch}:DEFine 1, length, init_val
+        #   and TRACE{ch}:DATA 1,offset (scpi has limit of 999999999 bytes 0.999 GB)
+        self.segment_list = devChOption(getstr=':TRACE{var}:CATalog?', doc='Returns a list of segment id, length')
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+    def run(self, enable=True, ch=None):
+        """
+        When channels are coupled, both are affected.
+        """
+        if ch!=None:
+            self.current_channel.set(ch)
+        ch = self.current_channel.getcache()
+        if enable:
+            self.write(':INITiate:IMMediate%i'%ch)
+        else:
+            self.write(':ABORt%i'%ch)
+    def set_length(self, sample_length, ch=None, init_val=None):
+        """
+        init_val is the DAC value to use for initialization. No initialization by default.
+        """
+        if ch!=None:
+            self.current_channel.set(ch)
+        if init_val != None:
+            extra=',{init}'
+        self.write((':TRACe{ch}:DEFine 1,{L}'+extra).format(ch=ch, L=sample_length, init=init_val))
+    def load_file(self, filename, ch=None, fill=False):
+        """
+        filename needs to be a file in the correct binary format.
+        fill when True will pad the data with 0 to the correct length
+             when an integer, will pad the data with that DAC value,
+             when false, will copy (repeat) the data multiple times to obtain
+             the correct length.
+             Note that with padding enabled, the segment length stays the same
+             lenght as defined (so it can be shorted than the file; the data is truncated)
+             With fill disabled (False): the segment length is adjusted
+        The vector length is 48 samples in 14 bits mode and 64 in 12 bits mode.
+        The minimum length is 5 vectors (240 samples in 14 bits, 320 for 12 bits)
+        """
+        if fill==False:
+            padding='ALENgth'
+        elif fill==True:
+            padding='FILL'
+        else:
+            padding='FILL,%i'%fill
+        if ch!=None:
+            self.current_channel.set(ch)
+        self.write(':TRACe{ch}:IQIMPort 1,"{f}",BIN,BOTH,{p}'.format(ch=ch, f=filename, p=padding))
