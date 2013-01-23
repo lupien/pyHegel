@@ -36,7 +36,7 @@ from instruments_agilent import agilent_rf_33522A, agilent_PowerMeter,\
                                 agilent_rf_PSG, agilent_rf_MXG,\
                                 agilent_multi_34410A, agilent_rf_Attenuator,\
                                 infiniiVision_3000, agilent_EXA,\
-                                agilent_PNAL, agilent_ENA
+                                agilent_PNAL, agilent_ENA, agilent_AWG
 
 from acq_board_instrument import Acq_Board_Instrument, HistoSmooth, calc_cumulants
 

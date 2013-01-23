@@ -1871,7 +1871,7 @@ class agilent_AWG(visaInstrument):
                                 'sample_marker_volt_ampl', 'sample_marker_volt_offset',
                                 'sync_marker_volt_ampl', 'sync_marker_volt_offset',
                                 'dac_format', 'differential_offset', 'speed_mode',
-                                'advance_mode', 'repeat_count', 'marker_en']
+                                'advance_mode', 'repeat_count', 'marker_en', 'segment_list']
         self.current_channel.set(1)
         ch1 = self._conf_helper(*ch_list)
         self.current_channel.set(2)
@@ -1892,43 +1892,43 @@ class agilent_AWG(visaInstrument):
             app = kwarg.pop('options_apply', ['ch'])
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
-        self.freq_source = devChOption(':FREQuency:RASTer:SOURce{var}', choices=ChoiceStrings('INTernal', 'EXTernal'))
-        self.cont_trigger = devChOption(':INITiate:CONTinous{ch}', str_type=bool)
+        self.freq_source = devChOption(':FREQuency:RASTer:SOURce{ch}', choices=ChoiceStrings('INTernal', 'EXTernal'))
+        self.cont_trigger = devChOption(':INITiate:CONTinuous{ch}', str_type=bool)
         self.gate_mode_en = devChOption(':INITiate:GATE{ch}', str_type=bool, doc='When cont_trigger is False, selects between gate or trigger mode of triggering')
-        #self.arming_mode = devChOption(':INITiate:CONTinous{ch}:ENABle', choices=ChoiceStrings('SELF', 'ARMed'))
-        self.output_en = devChOption(':OUTPut{var}', str_type=bool)
-        self.delay_coarse = devChOption(':ARM:CDELay{var}', str_type=float, min=0, max=10e-9)
-        self.delay_fine = devChOption(':ARM:CDELay{var}', str_type=float, min=0, max=150e-12, doc='max delay is 60e-12 between 2.5 and 6.25 GS/s and 30e-12 above 6.25 GS/s')
-        self.volt_ampl = devChOption(':VOLTage{var}', str_type=float, min=.35, max=0.7)
-        self.volt_offset = devChOption(':VOLTage{var}:OFFSet', str_type=float, min=-.02, max=0.02)
-        self.volt_high = devChOption(':VOLTage{var}:HIGH', str_type=float, min=.155, max=.37)
-        self.volt_low = devChOption(':VOLTage{var}:LOW', str_type=float, min=-0.37, max=0.155)
-        self.sample_marker_volt_ampl = devChOption(':MARKer{var}:SAMPle:VOLTage:AMPLitude', str_type=float, min=0., max=2.25)
-        self.sample_marker_volt_offset = devChOption(':MARKer{var}:SAMPle:VOLTage:OFFSet', str_type=float, min=-0.5, max=1.75)
-        self.sample_marker_volt_high = devChOption(':MARKer{var}:SAMPle:VOLTage:HIGH', str_type=float, min=0.5, max=1.75)
-        self.sample_marker_volt_low = devChOption(':MARKer{var}:SAMPle:VOLTage:LOW', str_type=float, min=-0.5, max=1.75)
-        self.sync_marker_volt_ampl = devChOption(':MARKer{var}:SYNC:VOLTage:AMPLitude', str_type=float, min=0., max=2.25)
-        self.sync_marker_volt_offset = devChOption(':MARKer{var}:SYNC:VOLTage:OFFSet', str_type=float, min=-0.5, max=1.75)
-        self.sync_marker_volt_high = devChOption(':MARKer{var}:SYNC:VOLTage:HIGH', str_type=float, min=0.5, max=1.75)
-        self.sync_marker_volt_low = devChOption(':MARKer{var}:SYNC:VOLTage:LOW', str_type=float, min=-0.5, max=1.75)
+        #self.arming_mode = devChOption(':INITiate:CONTinuous{ch}:ENABle', choices=ChoiceStrings('SELF', 'ARMed'))
+        self.output_en = devChOption(':OUTPut{ch}', str_type=bool)
+        self.delay_coarse = devChOption(':ARM:CDELay{ch}', str_type=float, min=0, max=10e-9)
+        self.delay_fine = devChOption(':ARM:DELay{ch}', str_type=float, min=0, max=150e-12, doc='max delay is 60e-12 between 2.5 and 6.25 GS/s and 30e-12 above 6.25 GS/s')
+        self.volt_ampl = devChOption(':VOLTage{ch}', str_type=float, min=.35, max=0.7)
+        self.volt_offset = devChOption(':VOLTage{ch}:OFFSet', str_type=float, min=-.02, max=0.02)
+        self.volt_high = devChOption(':VOLTage{ch}:HIGH', str_type=float, min=.155, max=.37)
+        self.volt_low = devChOption(':VOLTage{ch}:LOW', str_type=float, min=-0.37, max=0.155)
+        self.sample_marker_volt_ampl = devChOption(':MARKer{ch}:SAMPle:VOLTage:AMPLitude', str_type=float, min=0., max=2.25)
+        self.sample_marker_volt_offset = devChOption(':MARKer{ch}:SAMPle:VOLTage:OFFSet', str_type=float, min=-0.5, max=1.75)
+        self.sample_marker_volt_high = devChOption(':MARKer{ch}:SAMPle:VOLTage:HIGH', str_type=float, min=0.5, max=1.75)
+        self.sample_marker_volt_low = devChOption(':MARKer{ch}:SAMPle:VOLTage:LOW', str_type=float, min=-0.5, max=1.75)
+        self.sync_marker_volt_ampl = devChOption(':MARKer{ch}:SYNC:VOLTage:AMPLitude', str_type=float, min=0., max=2.25)
+        self.sync_marker_volt_offset = devChOption(':MARKer{ch}:SYNC:VOLTage:OFFSet', str_type=float, min=-0.5, max=1.75)
+        self.sync_marker_volt_high = devChOption(':MARKer{ch}:SYNC:VOLTage:HIGH', str_type=float, min=0.5, max=1.75)
+        self.sync_marker_volt_low = devChOption(':MARKer{ch}:SYNC:VOLTage:LOW', str_type=float, min=-0.5, max=1.75)
         self.dac_format = devChOption(':DAC:FORMat', choices=ChoiceStrings('RZ', 'DNRZ', 'NRZ', 'DOUBlet'), doc=
             """ RZ:      Return to zero (DAC A, DAC B=0) (first half of time step, second half)
                 NRZ:     Non return to zero (DAC A, DAC A)
                 DNRZ:    double NRZ (DAC A, DAC B=A)
                 Doublet: (DAC A, DAC B=-A)
             """)
-        self.differential_offset = devChOption(':OUTPut{var}:DIOFfset', str_type=int, doc='An integer to fix DAC offset between direct and its complement output.')
-        #self.func_mode = devChOption(':FUNCtion{var}:MODE', choices=ChoiceStrings('ARBitrary', 'STSequence', 'STSCenario'))
-        self.advance_mode = devChOption(':TRACE{var}:ADVance', choices=ChoiceStrings('AUTO', 'CONDitional', 'REPeat', 'SINGle'))
-        self.repeat_count = devChOption(':TRACE{var}:COUNt', str_type=int)
-        self.marker_en = devChOption(':TRACE{var}:MARKer', str_type=bool)
-        self.speed_mode = devChOption(':TRACe{var}:DWIDth', choices=ChoiceStrings('WSPeed', 'WPRecision'), doc=
+        self.differential_offset = devChOption(':OUTPut{ch}:DIOFfset', str_type=int, doc='An integer to fix DAC offset between direct and its complement output.')
+        #self.func_mode = devChOption(':FUNCtion{ch}:MODE', choices=ChoiceStrings('ARBitrary', 'STSequence', 'STSCenario'))
+        self.advance_mode = devChOption(':TRACE{ch}:ADVance', choices=ChoiceStrings('AUTO', 'CONDitional', 'REPeat', 'SINGle'))
+        self.repeat_count = devChOption(':TRACE{ch}:COUNt', str_type=int)
+        self.marker_en = devChOption(':TRACE{ch}:MARKer', str_type=bool)
+        self.speed_mode = devChOption(':TRACe{ch}:DWIDth', choices=ChoiceStrings('WSPeed', 'WPRecision'), doc=
             """ wspeed:     speed mode, 12 bits, 12 GS/s max
                 wprecision: precision mode, 14 bits, 8 GS/s max
             """) # SKIP all the interpolation modes (INTX3, X12 ...) because needs option DUC
         # TODO implement loading of data using the TRACE{ch}:DEFine 1, length, init_val
         #   and TRACE{ch}:DATA 1,offset (scpi has limit of 999999999 bytes 0.999 GB)
-        self.segment_list = devChOption(getstr=':TRACE{var}:CATalog?', doc='Returns a list of segment id, length')
+        self.segment_list = devChOption(getstr=':TRACE{ch}:CATalog?', doc='Returns a list of segment id, length')
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
     def run(self, enable=True, ch=None):
@@ -1946,11 +1946,14 @@ class agilent_AWG(visaInstrument):
         """
         init_val is the DAC value to use for initialization. No initialization by default.
         """
+        # TODO should check the lenght is valid
         if ch!=None:
             self.current_channel.set(ch)
+        ch = self.current_channel.getcache()
+        extra=''
         if init_val != None:
             extra=',{init}'
-        self.write((':TRACe{ch}:DEFine 1,{L}'+extra).format(ch=ch, L=sample_length, init=init_val))
+        self.write((':TRACe:DELete:ALL;:TRACe{ch}:DEFine 1,{L}'+extra).format(ch=ch, L=sample_length, init=init_val))
     def load_file(self, filename, ch=None, fill=False):
         """
         filename needs to be a file in the correct binary format.
@@ -1972,4 +1975,5 @@ class agilent_AWG(visaInstrument):
             padding='FILL,%i'%fill
         if ch!=None:
             self.current_channel.set(ch)
-        self.write(':TRACe{ch}:IQIMPort 1,"{f}",BIN,BOTH,{p}'.format(ch=ch, f=filename, p=padding))
+        ch = self.current_channel.getcache()
+        self.write(':TRACe{ch}:IQIMPort 1,"{f}",BIN,BOTH,ON,{p}'.format(ch=ch, f=filename, p=padding))
