@@ -1842,7 +1842,7 @@ class agilent_ENA(agilent_PNAL):
 ##    Agilent M8190A Arbitrary Waveform Generator
 #######################################################
 
-class agilent_AWG(visaInstrument):
+class agilent_AWG(visaInstrumentAsync):
     """
     This is to control the M8190A Arbitrary Waveform Generator.
     It has 2 independent channels that can be coupled (for start/stop)
@@ -1855,6 +1855,7 @@ class agilent_AWG(visaInstrument):
      Data needs to be in blocks (or vectors). Only the sequence marker of the first
      sample in a vector is used.
      The vector length is 48 samples in 14 bits mode and 64 in 12 bits mode.
+     The smallest common multiple of 48 and 64 is 192.
      The minimum length is 5 vectors (240 samples in 14 bits, 320 for 12 bits)
 
     The voltage amplitude can be set with either volt_amplitude, volt_offset
@@ -1864,6 +1865,10 @@ class agilent_AWG(visaInstrument):
     """
     def init(self, full=False):
         self.write(':format:border swap')
+        # initialize async stuff
+        super(agilent_AWG, self).init(full=full)
+    def _async_trigger_helper(self):
+        self.write('*OPC')
     def _current_config(self, dev_obj=None, options={}):
         orig_ch = self.current_channel.getcache()
         ch_list = ['current_channel', 'freq_source', 'cont_trigger', 'gate_mode_en', 'output_en',
@@ -1894,7 +1899,13 @@ class agilent_AWG(visaInstrument):
             return scpiDevice(*arg, **kwarg)
         self.freq_source = devChOption(':FREQuency:RASTer:SOURce{ch}', choices=ChoiceStrings('INTernal', 'EXTernal'))
         self.cont_trigger = devChOption(':INITiate:CONTinuous{ch}', str_type=bool)
-        self.gate_mode_en = devChOption(':INITiate:GATE{ch}', str_type=bool, doc='When cont_trigger is False, selects between gate or trigger mode of triggering')
+        self.gate_mode_en = devChOption(':INITiate:GATE{ch}', str_type=bool, doc=
+            """
+            When cont_trigger is False, selects between gate or trigger mode of triggering.
+            Under gating mode, the segment repeating is started after the rising edge
+            of the gating signal. When the falling edge is detected, repeat_count
+            segments are produced and then stops.
+            """)
         #self.arming_mode = devChOption(':INITiate:CONTinuous{ch}:ENABle', choices=ChoiceStrings('SELF', 'ARMed'))
         self.output_en = devChOption(':OUTPut{ch}', str_type=bool)
         self.delay_coarse = devChOption(':ARM:CDELay{ch}', str_type=float, min=0, max=10e-9)
@@ -1919,18 +1930,40 @@ class agilent_AWG(visaInstrument):
             """)
         self.differential_offset = devChOption(':OUTPut{ch}:DIOFfset', str_type=int, doc='An integer to fix DAC offset between direct and its complement output.')
         #self.func_mode = devChOption(':FUNCtion{ch}:MODE', choices=ChoiceStrings('ARBitrary', 'STSequence', 'STSCenario'))
-        self.advance_mode = devChOption(':TRACE{ch}:ADVance', choices=ChoiceStrings('AUTO', 'CONDitional', 'REPeat', 'SINGle'))
+        self.advance_mode = devChOption(':TRACE{ch}:ADVance', choices=ChoiceStrings('AUTO', 'CONDitional', 'REPeat', 'SINGle'), doc=
+            """
+            This setting only works for cont_trigger False and gate_mode_en False
+            AUTO:   Every trig event produces repeat_count segments
+            REPEAT: A trig event produces repeat_count segments.
+                    Then need the advance event to enable next trig.
+            SINGLE: A trig event produces the first segment.
+                    Then N-1 advance event to produce the N-1 repeats of the segment.
+                    (for N=repeat_count)
+            COND:   A trig event starts a continous repeat of the segment.
+            """)
         self.repeat_count = devChOption(':TRACE{ch}:COUNt', str_type=int)
         self.marker_en = devChOption(':TRACE{ch}:MARKer', str_type=bool)
-        self.speed_mode = devChOption(':TRACe{ch}:DWIDth', choices=ChoiceStrings('WSPeed', 'WPRecision'), doc=
-            """ wspeed:     speed mode, 12 bits, 12 GS/s max
+        speed_choices = ChoiceStrings('WSPeed', 'WPRecision')
+        self.speed_mode = devChOption(':TRACe{ch}:DWIDth', choices=speed_choices, doc=
+            """
+                wspeed:     speed mode, 12 bits, 12 GS/s max
                 wprecision: precision mode, 14 bits, 8 GS/s max
+                See also: speed_mode_both
             """) # SKIP all the interpolation modes (INTX3, X12 ...) because needs option DUC
+        self.speed_mode_both = scpiDevice(':TRACe1:DWIDth {val};:TRACe2:DWIDth {val}', ':TRACe1:DWIDth?', choices=speed_choices, doc=
+            """
+                Same as speed_mode except it changes both channel at the same time.
+                This is needed when both channel use the internal sample clock.
+                Using get returns the result for channel 1.
+            """)
         # TODO implement loading of data using the TRACE{ch}:DEFine 1, length, init_val
         #   and TRACE{ch}:DATA 1,offset (scpi has limit of 999999999 bytes 0.999 GB)
+        # read with TRACE{ch}:DATA? 1,offset,length  (returns ascii, length needs to be multiple of 48 or 64)
+        #   Getting trace data this way seems very slow.
         self.segment_list = devChOption(getstr=':TRACE{ch}:CATalog?', doc='Returns a list of segment id, length')
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+
     def run(self, enable=True, ch=None):
         """
         When channels are coupled, both are affected.
@@ -1939,9 +1972,9 @@ class agilent_AWG(visaInstrument):
             self.current_channel.set(ch)
         ch = self.current_channel.getcache()
         if enable:
-            self.write(':INITiate:IMMediate%i'%ch)
+            self.ask(':INITiate:IMMediate%i;*OPC?'%ch)
         else:
-            self.write(':ABORt%i'%ch)
+            self.ask(':ABORt%i;*OPC?'%ch)
     def set_length(self, sample_length, ch=None, init_val=None):
         """
         init_val is the DAC value to use for initialization. No initialization by default.
@@ -1953,12 +1986,13 @@ class agilent_AWG(visaInstrument):
         extra=''
         if init_val != None:
             extra=',{init}'
-        self.write((':TRACe:DELete:ALL;:TRACe{ch}:DEFine 1,{L}'+extra).format(ch=ch, L=sample_length, init=init_val))
+        self.write((':TRACe{ch}:DELete:ALL;:TRACe{ch}:DEFine 1,{L}'+extra).format(ch=ch, L=sample_length, init=init_val))
     def load_file(self, filename, ch=None, fill=False):
         """
         filename needs to be a file in the correct binary format.
         fill when True will pad the data with 0 to the correct length
-             when an integer, will pad the data with that DAC value,
+             when an integer (not 0), will pad the data with that DAC value,
+               (there seems to be a bug here: every sample with value fill is followed by a 0)
              when false, will copy (repeat) the data multiple times to obtain
              the correct length.
              Note that with padding enabled, the segment length stays the same
@@ -1966,6 +2000,9 @@ class agilent_AWG(visaInstrument):
              With fill disabled (False): the segment length is adjusted
         The vector length is 48 samples in 14 bits mode and 64 in 12 bits mode.
         The minimum length is 5 vectors (240 samples in 14 bits, 320 for 12 bits)
+        This command will wait for the transfer to finish before returning.
+        If the output is running when calling load_file, it will be temporarilly
+        stopped during loading.
         """
         if fill==False:
             padding='ALENgth'
@@ -1976,4 +2013,7 @@ class agilent_AWG(visaInstrument):
         if ch!=None:
             self.current_channel.set(ch)
         ch = self.current_channel.getcache()
+        self._async_trig_cleanup()
         self.write(':TRACe{ch}:IQIMPort 1,"{f}",BIN,BOTH,ON,{p}'.format(ch=ch, f=filename, p=padding))
+        self._async_trigger_helper()
+        self.wait_after_trig()

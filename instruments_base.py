@@ -1980,7 +1980,7 @@ class visaInstrumentAsync(visaInstrument):
         self.wait_after_trig()
     def _async_trigger_helper(self):
         self.write('INITiate;*OPC') # this assume trig_src is immediate for agilent multi
-    def _async_trig(self):
+    def _async_trig_cleanup(self):
         # We detect the end of acquisition using *OPC and status byte.
         if self._get_esr() & 0x01:
             print 'Unread event byte!'
@@ -2001,4 +2001,6 @@ class visaInstrumentAsync(visaInstrument):
                     print 'Unread event queue!'
             except:
                 pass
+    def _async_trig(self):
+        self._async_trig_cleanup()
         self._async_trigger_helper()
