@@ -1701,7 +1701,7 @@ class agilent_ENA(agilent_PNAL):
                                  'power_dbm_port3', 'power_dbm_port4',
                                  'npoints', 'sweep_gen',
                                  'sweep_time', 'sweep_type',
-                                 'bandwidth', 'cont_trigger',
+                                 'bandwidth', 'bandwidth_auto_en', 'bandwidth_auto_limit', 'cont_trigger',
                                  'average_count', 'average_en', options)
         else:
             base = self._conf_helper('current_channel',
@@ -1711,7 +1711,7 @@ class agilent_ENA(agilent_PNAL):
                                  'power_dbm_port1', 'power_dbm_port2',
                                  'npoints',
                                  'sweep_time', 'sweep_type',
-                                 'bandwidth', 'cont_trigger',
+                                 'bandwidth', 'bandwidth_auto_en', 'bandwidth_auto_limit', 'cont_trigger',
                                  'average_count', 'average_en', options)
         return extra+base
     def _fetch_traces_helper(self, traces):
@@ -1776,6 +1776,8 @@ class agilent_ENA(agilent_PNAL):
         self.calib_en = devChOption('SENSe{ch}:CORRection:STATe', str_type=bool)
         self.cont_trigger = devChOption('INITiate{ch}:CONTinuous', str_type=bool)
         self.bandwidth = devChOption('SENSe{ch}:BANDwidth', str_type=float, setget=True) # can obtain min max
+        self.bandwidth_auto_en = devChOption('SENSe{ch}:BWAuto', str_type=bool)
+        self.bandwidth_auto_limit = devChOption('SENSe{ch}:BWAuto:LIMit', str_type=float, setget=True)
         self.average_count = devChOption('SENSe{ch}:AVERage:COUNt', str_type=int)
         self.average_en = devChOption('SENSe{ch}:AVERage', str_type=bool)
         self.average_triggering_en = devChOption('TRIGger:AVERage', str_type=bool)
