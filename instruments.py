@@ -24,7 +24,7 @@ from instruments_base import visaInstrument, visaInstrumentAsync, BaseDevice,\
                             BaseInstrument, MemoryDevice, scpiDevice, find_all_instruments
 
 from instruments_others import yokogawa_gs200,\
-                                sr830_lia, sr384_rf,\
+                                sr830_lia, sr384_rf, sr780_analyzer,\
                                 lakeshore_322, lakeshore_340, lakeshore_370,\
                                 dummy
 

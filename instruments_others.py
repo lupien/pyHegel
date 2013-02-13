@@ -306,6 +306,248 @@ class sr384_rf(visaInstrument):
 
 
 #######################################################
+##    Stanford Research SR780 2 channel network analyzer
+#######################################################
+
+class sr780_analyzer(visaInstrument):
+    """
+    This controls a 2 channel network analyzer
+    It currently only handles the FFT measurement group (not octave or swept sine).
+    Markers are not handled. Only sine sources are handled.
+
+    Changing a setup should be done:
+        meas_grp, meas, meas_view, unit, disp_scale, disp_ref
+    """
+    #TODO, implement run_and_wait
+    #TODO fix _currrent_config
+    #TODO include xaxis in fetch when needed
+    def init(self, full=False):
+        # This empties the instrument buffers
+        self._clear()
+        if full:
+            self.visa.term_chars='\n'
+            # The above turned on detection of termchar on read. This is not good for
+            # raw reads so turn it off.
+            visa.vpp43.set_attribute(self.visa.vi, visa.VI_ATTR_TERMCHAR_EN, visa.VI_FALSE)
+    def start(self):
+        """
+        Same as pressing Start/Reset
+        """
+        self.write('STRT')
+    def _fetch_getdev(self, disp=None):
+        """
+        Optional parameter:
+            disp: To select which display to read.
+        For faster transfer, make the view and unit the same type (both linear or both log)
+        """
+        # There is REFY? d,j to obtain pint j (0..length-1) in ref curve of display d
+        #  DSPN? d to obtain lenght of data set
+        if disp != None:
+            self.current_display.set(disp)
+        disp = self.current_display.getcache()
+        disp = self.current_display._tostr(disp)
+        # DSPY returns ascii but is slower than DSPB (binary)
+        # TODO implement handling of nyquist and nichols plot which return 2 values per datapoint.
+        # TODO handle waterfalls: dswb
+        data = self.ask('DSPB? %s'%disp, raw=True)
+        ret = np.fromstring(data, np.float32)
+        return ret
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
+                                 'sync_filter', 'reserve_mode',
+                                 'offset_expand_x', 'offset_expand_y', 'offset_expand_r',
+                                 'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf', options)
+    def _create_devs(self):
+        display_sel = ChoiceIndex(['A', 'B']) # also both=2
+        self.current_display = MemoryDevice('A', choices=display_sel)
+        self.current_channel = MemoryDevice(1, choices=[1, 2])
+        self.freq_baseline = scpiDevice('FBAS 2,{val}', 'FBAS? 0', choices=ChoiceIndex([100e3, 102.4e3]))
+        self.dBm_ref = scpiDevice('DBMR 2,{val}', 'DBMR? 2', str_type=float, min=0)
+        self.source_en = scpiDevice('SRCO', str_type=bool)
+        self.source_type = scpiDevice('STYP', choices=ChoiceIndex(['Sine', 'Chirp', 'Noise', 'Arbitrary']))
+        self.source_freq1 = scpiDevice('S1FR', str_type=float)
+        self.source_ampl1_V = scpiDevice('S1AM', str_type=float)
+        self.source_offset_V = scpiDevice('SOFF', str_type=float)
+        self.source_freq2 = scpiDevice('S2FR', str_type=float)
+        self.source_ampl2_V = scpiDevice('S2AM', str_type=float)
+        self.input_source = scpiDevice('ISRC', choices=ChoiceIndex(['Analog', 'Capture']))
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_channel)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.input_mode = devChOption('I{ch}MD', choices=ChoiceIndex(['Analog', 'Capture']))
+        self.input_grounding = devChOption('I{ch}GD', choices=ChoiceIndex(['Float', 'Ground']))
+        self.input_coupling = devChOption('I{ch}GD', choices=ChoiceIndex(['DC', 'AC', 'ICP']))
+        self.input_range_dBV = devChOption('I{ch}RG', str_type=int, choices=range(-50, 36, 2))
+        self.input_autorange_en = devChOption('A{ch}RG', str_type=bool)
+        self.input_autorange_mode = devChOption('I{ch}AR', choices=ChoiceIndex(['Normal', 'Tracking']))
+        self.input_antialiasing_en = devChOption('I{ch}AF', str_type=bool)
+        self.input_aweight_en = devChOption('I{ch}AW', str_type=bool)
+        self.input_auto_offset_en = scpiDevice('IAOM', str_type=bool)
+        self.input_eng_unit_en = devChOption('EU{ch}M', str_type=bool)
+        self.input_eng_label = devChOption('EU{ch}L', str_type=ChoiceIndex(['m/s2', 'm/s', 'm', 'in/s2', 'in/s', 'in', 'mil', 'g', 'kg', 'lbs', 'N', 'dyne', 'Pas', 'bar', 'USER']))
+        self.input_eng_unit_scale = devChOption('EU{ch}V', str_type=float, doc='number of eng.unit/Volt')
+        self.input_eng_unit_user = devChOption('EU{ch}U', str_type=str)
+        def devDispOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(disp=self.current_display)
+            app = kwarg.pop('options_apply', ['disp'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.freq_span = devDispOption('FSPN {disp},{val}', 'FSPN? {disp}', str_type=float, setget=True)
+        self.freq_start = devDispOption('FSTR {disp},{val}', 'FSTR? {disp}', str_type=float, setget=True, min=0, max=102.4e3)
+        self.freq_stop = devDispOption('FEND {disp},{val}', 'FEND? {disp}', str_type=float, setget=True, min=0, max=102.4e3)
+        self.freq_center = devDispOption('FCTR {disp},{val}', 'FCTR? {disp}', str_type=float, setget=True, min=0, max=102.4e3)
+        resol_sel = ChoiceIndex([100, 200, 400, 800])
+        self.freq_resolution = devDispOption('FLIN {disp},{val}', 'FLIN? {disp}', choices=resol_sel)
+        mgrp_sel = ChoiceIndex(['FFT', 'Octave', 'Swept Sine'])
+        self.meas_group = devDispOption('MGRP {disp},{val}', 'MGRP? {disp}', choices=mgrp_sel)
+        meas_sel = ChoiceIndex(['FFT1', 'FFT2', 'Time1', 'Time2', 'WindowedTime1', 'WindowedTime2',
+                                'Orbit', 'Coherence', 'CrossSpectrum', '<F2/F1>', '<F2>/<F1>',
+                                'AutoCorr1', 'AutoCorr2', 'CaptureBuffer1', 'CaptureBuffer2',
+                                'FFTuser1', 'FFTuser2', 'FFTuser3', 'FFTuser4', 'FFTuser5',
+                                'Octave1', 'Octave2', 'OctaveCapBuff1', 'OctaveCapBuff2',
+                                'OctaveUser1', 'OctaveUser2', 'OctaveUser3', 'OctaveUser4', 'OctaveUser5',
+                                'SweptSpectrum1', 'SweptSpectrum2', 'SweptCross', 'SweptTransferFunction',
+                                'SweptUser1', 'SweptUser2', 'SweptUser3', 'SweptUser4', 'SweptUser5'])
+        self.meas = devDispOption('MEAS {disp},{val}', 'MEAS? {disp}', choices=meas_sel)
+        view_sel = ChoiceIndex(['LogMag', 'LinMag', 'MagSquared', 'Real', 'Imag', 'Phase', 'UnWrapPhase', 'Nyquist', 'Nichols'])
+        self.meas_view = devDispOption('VIEW {disp},{val}', 'VIEW? {disp}', choices=view_sel)
+        unit_sel = ChoiceIndex(['Vpk', 'Vrms', 'Vpk2', 'Vrms2', 'dBVpk', 'dBVrms', 'dBm', 'dBspl', 'deg', 'rad', 'Units', 'dB'])
+        self.meas_unit = devDispOption('UNIT {disp},{val}', 'UNIT? {disp}', choices=unit_sel)
+        self.disp_live_en = devDispOption('DISP {disp},{val}', 'DISP? {disp}', str_type=bool)
+        self.disp_log_xscale = devDispOption('XAXS {disp},{val}', 'XAXS? {disp}', str_type=bool)
+        self.disp_PSD_en = devDispOption('PSDU {disp},{val}', 'PSDU? {disp}', str_type=bool, doc='Wether PSD (power spectral density) is enabled.')
+        self.disp_transducer_unit_mode = devDispOption('TDRC {disp},{val}', 'TDRC? {disp}', choices=ChoiceIndex(['acceleration', 'velocity', 'displacement']))
+        self.average_en = devDispOption('FAVG {disp},{val}', 'FAVG? {disp}', str_type=bool)
+        self.average_mode = devDispOption('FAVM {disp},{val}', 'FAVM? {disp}', choices=ChoiceIndex(['vector', 'RMS', 'PeakHold']))
+        self.average_type = devDispOption('FAVT {disp},{val}', 'FAVT? {disp}', choices=ChoiceIndex(['linear', 'exponential', 'FixedLength', 'continuous']))
+        self.average_count_requested = devDispOption('FAVN {disp},{val}', 'FAVN? {disp}', str_type=int, min=2, max=32767)
+        self.average_count = devDispOption(getstr='NAVG? {disp}', str_type=int)
+        self.average_increment_pct = devDispOption('FOVL {disp},{val}', 'FOVL? {disp}', str_type=float, min=0, max=300)
+        self.average_overload_reject_en = scpiDevice('FREJ 2,{val}', 'FREJ? 0', str_type=bool)
+        self.average_preview_type = devDispOption('PAVO {disp},{val}', 'PAVO? {disp}', choices=ChoiceIndex(['off', 'manual', 'timed']))
+        self.window_type = devDispOption('FWIN {disp},{val}', 'FWIN? {disp}', choices=ChoiceIndex(['uniform', 'hanning', 'flattop', 'BMH', 'kaiser', 'force', 'exponential', 'user', '-T/2..T/2', '0..T/2', '-T/4..T/4',]))
+        self._devwrap('fetch', autoinit=False)
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+    def get_xscale(self):
+        # only works for fft
+        start = self.freq_start.getcache()
+        stop = self.freq_stop.getcache()
+        npoints = self.freq_resolution.getcache() + 1 # could also use DSPN? d
+        return np.linspace(start, stop, npoints)
+
+    # To dump plot or bitmap:
+    #    plot(vector, gpib-host, postscript): POUT 1;PDST 3;PCIC 0;PLTP 1;PLOT
+    #    print(bitmap-all, gpib-host, GIF):       POUT 0;PDST 3;PCIC 0;PRTP 4;PSCR 3;PRNT
+    #  pout is only to change assignement of the hardware print key
+    #   Then need to read the raw result: self.visa.read_raw.
+    # serial poll status word: 0=INSTrument, 1=DISPlay, 2=INPuT, 3=ERRor, 4=output buffer empty
+    #                          5=standard status word, 6=SRQ, 7=IFC (no command execution in progress)
+    # The instrument has 5 Traces that can be used for memory.
+    def get_instrument_status(self):
+        """
+         returns a byte of bit flags
+          bit 0 (1):   A measurement has been triggered
+          bit 1 (2):   Disk operation complete
+          bit 2 (4):   Hardcopy output complete
+          bit 3 (8):   unused
+          bit 4 (16):  Capture buffer filled
+          bit 5 (32):  Measurement has been paused
+          bit 6 (64):  Measurement has been started
+          bit 7 (128): Single shot capture playback has finished
+          bit 8 (256): Measurement stopped to wait for average preview
+          bit 9-15: unused
+        """
+        # can access bits with inst? 1
+        # can enable in status register with INSE
+        return int(self.ask('INST?'))
+    def get_display_status(self):
+        """
+         returns a byte of bit flags
+          bit 0 (1):    displayA has new data
+          bit 1 (2):    displayA linear average complete
+          bit 2 (4):    displayA new settled data available
+          bit 3 (8):    displayA failed a limit test
+          bit 4 (16):   displayA swept sine has failed
+          bit 5 (32):   displayA 1-shot waterfall has finished
+          bit 6-7:      unused
+          bit 8 (256):  displayB has new data
+          bit 9 (512):  displayB linear average complete
+          bit 10 (1024):displayB new settled data available
+          bit 11 (2048):displayB failed a limit test
+          bit 12 (4096):displayB swept sine has failed
+          bit 13 (8192):displayB 1-shot waterfall has finished
+          bit 14-15:    unused
+         except for waterfall always test for new data (bit 0/8) for
+         the correct display first.
+        """
+        # can access bits with inst? 1
+        # can enable in status register with DSPE
+        return int(self.ask('DSPS?'))
+    def get_input_status(self):
+        """
+         returns a byte of bit flags
+          bit 0 (1):    input1 has fallend below half of full scale
+          bit 1 (2):    input1 has exceeded half of full scale
+          bit 2 (4):    input1 has exceeded full scale
+          bit 3 (8):    input1 has exceeded 35 dBV, range switched to 34 dBV
+          bit 4 (16):   input1 has autoranged
+          bit 5-7:      unused
+          bit 8 (256):  input2 has fallend below half of full scale
+          bit 9 (512):  input2 has exceeded half of full scale
+          bit 10 (1024):input2 has exceeded full scale
+          bit 11 (2048):input2 has exceeded 35 dBV, range switched to 34 dBV
+          bit 12 (4096):input2 has autoranged
+          bit 13-15:    unused
+        """
+        # can access bits with inst? 1
+        # can enable in status register with INPE
+        # also see INPC? 0 (ch1) or INPC? 1 (ch2)
+        # which returns instanteneous a value 0-3 where:
+        #   0=input under half full scale
+        #   1=input over half full scale
+        #   2=input overloaded
+        #   3=input is HighV
+        return int(self.ask('INPS?'))
+    def get_error(self):
+        """
+         returns two byte of bit flags
+         first:
+          bit 0-1:     unused
+          bit 2 (4):   Too many responses are pending
+          bit 3 (8):   too many commands received
+          bit 4 (16):  command cannot execute successfully
+          bit 5 (32):  command syntax error
+          bit 6 (64):  key press or knob rotated
+          bit 7 (128): power is turned on
+          bit 8-15:    unused
+         second:
+          bit 0 (1):   An output error as occured (print, plot, dump)
+          bit 1 (2):   disk errro
+          bit 2 (4):   math error
+          bit 3 (8):   RAM memory test fails
+          bit 4 (16):  ROM memory test fails
+          bit 5 (32):  Video memory test fails
+          bit 6 (64):  Help memory test fails
+          bit 7 (128): DSP data memory fails
+          bit 8 (256): DSP program memory fails
+          bit 9 (512): DSP DRAM memory fails
+          bit 10 (1024): DSP calibration memory fails
+          bit 11 (2048): Ch1 calibration memory fails
+          bit 12 (4096): Ch2 calibration memory fails
+          bit 13-15: unused
+        """
+        # can access bits with errs? 1
+        # can enable in status register with ERRE
+        # enable *ese with *ese
+        return int(self.ask('*esr?')),int(self.ask('ERRS?'))
+
+
+#######################################################
 ##    Lakeshore 322 Temperature controller
 #######################################################
 
