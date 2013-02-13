@@ -917,10 +917,22 @@ class MemoryDevice(BaseDevice):
         self._cache = initval
         self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
         self._getdev_p = True # needed to enable BaseDevice get in Checking mode
+        if self.choices != None and isinstance(self.choices, ChoiceBase):
+            self.type = self.choices
+        else:
+            self.type = type(initval)
     def _getdev(self):
         return self._cache
     def _setdev(self, val):
         self._cache = val
+    def _tostr(self, val):
+        # This function converts from val to a str for the command
+        t = self.type
+        return _tostr_helper(val, t)
+    def _fromstr(self, valstr):
+        # This function converts from the query result to a value
+        t = self.type
+        return _fromstr_helper(valstr, t)
 
 def _tostr_helper(val, t):
     # This function converts from val to a str for the command
@@ -1113,7 +1125,10 @@ class scpiDevice(BaseDevice):
                     raise InvalidAutoArgument, ck
         # everything checks out so use those kwarg
         options.update(kwarg)
-        self._option_cache = options
+        self._option_cache = options.copy()
+        for k in options.iterkeys():
+            val = options[k]
+            options[k] = self._options[k]._tostr(val)
         return options
     def _setdev(self, val, **kwarg):
         if self._setdev_p == None:
