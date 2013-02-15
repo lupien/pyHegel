@@ -622,10 +622,10 @@ class infiniiVision_3000(visaInstrument):
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_getdev(self, ch=None, xaxis=True):
         """
-            ch=None, xaxis=True
-            ch: a single value or a list of values for the channels to capture
-                a value of None selects all the active ones.(1-4)
-            xaxis: Set to True (default) to return the timebase as the first column
+           Options available: ch, xaxis
+            -ch:    a single value or a list of values for the channels to capture
+                    a value of None selects all the active ones.(1-4)
+            -xaxis: Set to True (default) to return the timebase as the first column
         """
         ch = self._fetch_ch_helper(ch)
         if ch==None:
@@ -945,11 +945,12 @@ class agilent_EXA(visaInstrumentAsync):
         return v
     def _fetch_getdev(self, traces=None, updating=True, unit='default', xaxis=True):
         """
-           traces can be a single value or a list of values.
-                    The values are integer representing the trace number (1-6)
-           updating is used when traces is None. When True (default) only updating traces
-                    are fetched. Otherwise all visible traces are fetched.
-           unit can be default (whatever the instrument gives) or
+         Available options: traces, updating, unit, xaxis
+           -traces:  can be a single value or a list of values.
+                     The values are integer representing the trace number (1-6)
+           -updating: is used when traces is None. When True (default) only updating traces
+                      are fetched. Otherwise all visible traces are fetched.
+           -unit: can be default (whatever the instrument gives) or
                        dBm    for dBm
                        W      for Watt
                        V      for Volt
@@ -961,7 +962,7 @@ class agilent_EXA(visaInstrumentAsync):
                  It can be a single value or a vector the same length as traces
                  See noise_eq_bw device for information about the
                  bandwidth used for _Hz unit conversion.
-           xaxis  when True(default), the first column of data is the xaxis
+            -xaxis:  when True(default), the first column of data is the xaxis
 
            This version of fetch uses get_trace instead of fetch_base so it never
            block. It assumes all the data have the same x-scale (should be the
@@ -1323,13 +1324,14 @@ class agilent_PNAL(visaInstrumentAsync):
         return traces
     def _fetch_getdev(self, ch=None, traces=None, unit='default', mem=False, xaxis=True):
         """
-           traces can be a single value or a list of values.
-                    The values are strings representing the trace or the trace number
-           unit can be default (real, imag)
-                       db_deg (db, deg) , where phase is unwrapped
-                       cmplx  (complexe number), Note that this cannot be written to file
-           mem when True, selects the memory trace instead of the active one.
-           xaxis  when True(default), the first column of data is the xaxis
+           options available: traces, unit, mem and xaxis
+            -traces: can be a single value or a list of values.
+                     The values are strings representing the trace or the trace number
+            -unit:   can be 'default' (real, imag)
+                       'db_deg' (db, deg) , where phase is unwrapped
+                       'cmplx'  (complexe number), Note that this cannot be written to file
+            -mem:    when True, selects the memory trace instead of the active one.
+            -xaxis:  when True(default), the first column of data is the xaxis
         """
         if ch != None:
             self.current_channel.set(ch)
