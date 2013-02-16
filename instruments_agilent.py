@@ -66,15 +66,21 @@ class agilent_PowerMeter(visaInstrumentAsync):
     cset2_en is a second manual calibration (called FDO table in channel/offsets)
              to compensate for the circuit used. It also depends on the frequency.
              You can read this correction value with freq_offset
-
-    WARNING: currently only works for GPIB (usb and lan don't work)
-             and the relative value cannot be read.
-             (firmware A1.01.07)
     """
+    # As of (firmware A1.01.07) the relative value cannot be read.
     # The instrument has 4 display position (top upper, top lower, ...)
     #  1=upper window upper meas, 2=lower upper, 3=upper lower, 4=lower lower
     # They are not necessarily active on the display but they are all used for
     # average calculation and can all be used for reading data.
+    def __init__(self, visa_addr):
+        # The SRQ for this intrument only works on gpib
+        # for lan or usb we need to revert to polling
+        super(agilent_PowerMeter, self).__init__(visa_addr, poll='not_gpib')
+    def read_status_byte(self):
+        if self._async_polling:
+            return int(self.ask('*STB?'))
+        else:
+            return super(agilent_PowerMeter, self).read_status_byte()
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('range', 'range_auto_en', 'unit',
                                  'gain_en', 'hold_mode', 'relative_en', 'average_en',
@@ -951,14 +957,14 @@ class agilent_EXA(visaInstrumentAsync):
            -updating: is used when traces is None. When True (default) only updating traces
                       are fetched. Otherwise all visible traces are fetched.
            -unit: can be default (whatever the instrument gives) or
-                       dBm    for dBm
-                       W      for Watt
-                       V      for Volt
-                       V2     for Volt**2
-                       dBm_Hz for noise density
-                       W_Hz   for W/Hz
-                       V_Hz   for V/sqrt(Hz)
-                       V2_Hz  for V**2/Hz
+                       'dBm'    for dBm
+                       'W'      for Watt
+                       'V'      for Volt
+                       'V2'     for Volt**2
+                       'dBm_Hz' for noise density
+                       'W_Hz'   for W/Hz
+                       'V_Hz'   for V/sqrt(Hz)
+                       'V2_Hz'  for V**2/Hz
                  It can be a single value or a vector the same length as traces
                  See noise_eq_bw device for information about the
                  bandwidth used for _Hz unit conversion.

@@ -1892,11 +1892,21 @@ class visaInstrument(BaseInstrument):
 #######################################################
 
 class visaInstrumentAsync(visaInstrument):
-    def __init__(self, visa_addr):
+    def __init__(self, visa_addr, poll=False):
+        # poll can nbe True (for always polling) 'not_gpib' for polling for lan and usb but
+        # use the regular technique for gpib
+        # the _async_sre_flag should match an entry somewhere (like in init)
+        self._async_sre_flag = 0x20 #=32 which is standard event status byte (contains OPC)
+        self._async_last_status = 0
+        self._async_last_esr = 0
         super(visaInstrumentAsync, self).__init__(visa_addr)
         is_gpib = vpp43.get_attribute(self.visa.vi, vpp43.VI_ATTR_INTF_TYPE) == vpp43.VI_INTF_GPIB
         is_agilent = _agilent_visa
-        if is_gpib and is_agilent:
+        self._async_polling = False
+        if poll == True or (poll == 'not_gpib' and not is_gpib):
+            self._async_polling = True
+            self._RQS_status = -1
+        elif is_gpib and is_agilent:
             # Note that the agilent visa using a NI usb gpib adapter (at least)
             # disables the autopoll settings of NI
             # Hence a SRQ on the bus produces events for all devices on the bus.
@@ -1948,8 +1958,9 @@ class visaInstrumentAsync(visaInstrument):
         # reset)
         # TODO, handle this better?
         #if status&0x40:
-        if status&0x20:
+        if status & self._async_sre_flag:
             self._RQS_status = status
+            self._async_last_status = status
             time.sleep(0.01) # give some time for other handlers to run
             self._RQS_done.set()
             #print 'Got it', vi
@@ -1957,7 +1968,16 @@ class visaInstrumentAsync(visaInstrument):
     def _get_esr(self):
         return int(self.ask('*esr?'))
     def _async_detect(self, max_time=.5): # 0.5 s max by default
-        if self._RQS_status == -1:
+        if self._async_polling:
+            to = time.time()
+            while time.time()-to < max_time:
+                status = self.read_status_byte()
+                if status & 0x40:
+                    self._async_last_status = status
+                    self._async_last_esr = self._get_esr()
+                    return True
+                time.sleep(.05)
+        elif self._RQS_status == -1:
             ev_type = context = None
             try:
                 # On National Instrument (NI) visa this seems wait an extra 12 ms after the
@@ -1969,17 +1989,17 @@ class visaInstrumentAsync(visaInstrument):
                     raise
             if context != None:
                 # only reset event flag. We know the bit that is set already (OPC)
-                self._get_esr()
+                self._async_last_esr = self._get_esr()
                 # only reset SRQ flag. We know the bit that is set already
-                self.read_status_byte()
+                self._async_last_status = self.read_status_byte()
                 vpp43.close(context)
                 return True
         else:
             if self._RQS_done.wait(max_time):
-                #we assume status only had but 0x20(event) and 0x40(RQS) set
+                #we assume status only had bit 0x20(event) and 0x40(RQS) set
                 #and event only has OPC set
                 # status has already been reset. Now reset event flag.
-                self._get_esr()
+                self._async_last_esr = self._get_esr()
                 return True
         return False
     def wait_after_trig(self):
@@ -2001,9 +2021,11 @@ class visaInstrumentAsync(visaInstrument):
             print 'Unread event byte!'
         # A while loop is needed when National Instrument (NI) gpib autopoll is active
         # This is the default when using the NI Visa.
-        while self.read_status_byte() & 0x40:
+        while self.read_status_byte() & 0x40: # This is SRQ bit
             print 'Unread status byte!'
-        if self._RQS_status != -1:
+        if self._async_polling:
+            pass
+        elif self._RQS_status != -1:
             self._RQS_status = 0
             self._RQS_done.clear()
         else:
@@ -2016,6 +2038,8 @@ class visaInstrumentAsync(visaInstrument):
                     print 'Unread event queue!'
             except:
                 pass
+        self._async_last_status = 0
+        self._async_last_esr = 0
     def _async_trig(self):
         self._async_trig_cleanup()
         self._async_trigger_helper()
