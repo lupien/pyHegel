@@ -456,11 +456,16 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
     return p_all, chi2, pe_all, extras
 
 
-def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=False, **kwarg):
+def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=False,
+                  xpts=1000, **kwarg):
     """
     This does the same as fitcurve (see its documentation)
     but also plots the data, the fit on the top panel and
     the difference between the fit and the data on the bottom panel.
+    xpts selects the number of points to use for the xscale (from min to max)
+         or it can be a tuple (min, max, npts)
+         or it can also be a vector of points to use directly
+         or it can be 'reuse' to reuse the x data.
 
     fig selects which figure to use. By default it uses the currently active one.
     skip when True, prevents the fitting. This is useful when trying out initial
@@ -477,7 +482,14 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=Fal
     ax2.set_position([.125, .05, .85, .2])
     plt.sca(ax1)
     plt.errorbar(x, y, yerr=yerr, fmt='.', label='data')
-    xx= np.linspace(x.min(), x.max(), 1000)
+    if xpts == 'reuse':
+        xx = x
+    elif isinstance(xpts, (list, np.ndarray)):
+        xx = xpts
+    elif isinstance(xpts, tuple):
+        xx = np.linspace(xpts[0],xpts[1], xpts[2])
+    else:
+        xx = np.linspace(x.min(), x.max(), xpts)
     pl = plt.plot(xx, func(xx, *p0, **extra), 'r-')[0]
     plt.sca(ax2)
     plt.cla()
