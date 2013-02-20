@@ -315,7 +315,7 @@ class sr780_analyzer(visaInstrumentAsync):
     It currently only handles the FFT measurement group (not octave or swept sine).
     Markers are not handled. Only sine sources are handled.
     Useful devices:
-        fetch
+        fetch, readval
         dump
         current_display
         current_channel
@@ -360,17 +360,15 @@ class sr780_analyzer(visaInstrumentAsync):
         if async == 0: #setup
             if self._async_level == -1: # first time through
                 self._async_detect_setup(reset=True)
-            self.write('PAUS') # make sure we are not scanning anymore.
-            self._cum_display_status = 0
             # Assuming we only get called by fetch/readval
             disp = kwarg.get('disp', None)
             self._async_detect_setup(disp=disp)
-            print 'tocheck %0x'%self._async_tocheck
         return super(sr780_analyzer, self)._get_async(async,  obj, delay=delay, trig=trig, **kwarg)
     def _async_detect_setup(self, disp=None, reset=False):
         if reset:
             self._async_tocheck = 0
             self._async_use_delay = False
+            self._cum_display_status = 0
             return
         disp_org = self.current_display.getcache()
         if disp==None:
@@ -399,6 +397,7 @@ class sr780_analyzer(visaInstrumentAsync):
             #  run_and_wait is called before current_disp is changed)
             self._async_detect_setup('A')
             self._async_detect_setup('B')
+        self.write('PAUS') # make sure we are not scanning anymore.
         self.get_display_status() # reset the display status flags
         self.write('DSPE %i'%self._async_tocheck)
         self.write('STRT')
@@ -417,13 +416,14 @@ class sr780_analyzer(visaInstrumentAsync):
             # Did not receive SRQ
             return ret
         # Received SRQ, check if we are done
-        self._cum_display_status |= self.get_display_status()
+        disp_st = self.get_display_status()
+        self._cum_display_status |= disp_st
         if self._async_use_delay:
             if time.time()-self._async_trig_time < self.async_delay:
-                print 'wait delay %0x %f'%(self._cum_display_status, time.time()-self._async_trig_time)
+                #print 'wait delay %0x %f'%(self._cum_display_status, time.time()-self._async_trig_time)
                 return False
         tocheck = self._async_tocheck
-        print 'tocheck %0x %0x'%(tocheck, self._cum_display_status)
+        #print 'tocheck %0x %0x %0x'%(tocheck, self._cum_display_status, disp_st)
         if self._cum_display_status&tocheck == tocheck:
             self.write('DSPE 0')
             self._async_detect_setup(reset=True)
@@ -445,7 +445,7 @@ class sr780_analyzer(visaInstrumentAsync):
          -xaxis: when True(default), the first column of data is the xaxis
         For faster transfer, make the view and unit the same type (both linear or both log)
         It is STRONGLY recommended to use linear averaging.
-        For exponential averaging you need to specify a wait time wity async_delay
+        For exponential averaging you need to specify a wait time with async_delay
          i.e. srnet.async_delay=3  # for 2 seconds
         """
         # The instrument has 5 Traces that can be used for memory.

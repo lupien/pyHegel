@@ -2002,6 +2002,7 @@ class visaInstrumentAsync(visaInstrument):
                 #and event only has OPC set
                 # status has already been reset. Now reset event flag.
                 self._async_last_esr = self._get_esr()
+                self._RQS_done.clear() # so that we can detect the next SRQ if needed without  _doing async_trig (_async_trig_cleanup)
                 return True
         return False
     def wait_after_trig(self):
