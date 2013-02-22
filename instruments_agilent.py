@@ -393,10 +393,13 @@ class agilent_multi_34410A(visaInstrumentAsync):
         def devOption(lims, *arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options_lim = kwarg.pop('options_lim', {}).copy()
+            options_conv = kwarg.pop('options_conv', {}).copy()
             options.update(mode=self.mode)
             options_lim.update(mode=lims)
+            options_conv.update(mode=lambda val, quoted_val: val)
             kwarg.update(options=options)
             kwarg.update(options_lim=options_lim)
+            kwarg.update(options_conv=options_conv)
             return scpiDevice(*arg, **kwarg)
         # _decode_float64_avg is needed because count points are returned
         # fetch? and read? return sample_count*trig_count data values (comma sep)

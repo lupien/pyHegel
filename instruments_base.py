@@ -962,7 +962,7 @@ def _fromstr_helper(valstr, t):
 
 class scpiDevice(BaseDevice):
     def __init__(self,setstr=None, getstr=None, raw=False, autoinit=True, autoget=True, str_type=None,
-                 choices=None, doc='', options={}, options_lim={}, options_apply=[], **kwarg):
+                 choices=None, doc='', options={}, options_lim={}, options_apply=[], options_conv={}, **kwarg):
         """
            str_type can be float, int, None
            If choices is a subclass of ChoiceBase, then str_Type will be
@@ -982,11 +982,13 @@ class scpiDevice(BaseDevice):
                   For the setstr string you can use {val} to specify the position of the
                   value, otherwise ' {val}' is automatically appended. Note that if specify
                   {val} in the setstr, autoget is disabled.
-           options_lim is the range of values: It can be
+           options_lim is dict of the range of values: It can be
                       -None (the default) which means no limit
                       -a tuple of (min, max)
                                either one can be None to be unset
                       -a list of choices (the object needs to handle __contains__)
+           options_conv is a dict of functions to convert the value to a useful format.
+                      the functions receives 2 parameters (val, _tostr(val))
            options_apply is a list of options that need to be set. In that order when defined.
            By default, autoinit=True is transformed to 10 (higher priority)
            unless options contains another device, then it is set to 1.
@@ -1021,6 +1023,7 @@ class scpiDevice(BaseDevice):
         self._options = options
         self._options_lim = options_lim
         self._options_apply = options_apply
+        self._options_conv = options_conv
         self.type = str_type
         self._raw = raw
         self._option_cache = {}
@@ -1128,7 +1131,12 @@ class scpiDevice(BaseDevice):
         self._option_cache = options.copy()
         for k in options.iterkeys():
             val = options[k]
-            options[k] = self._options[k]._tostr(val)
+            tostr_val = self._options[k]._tostr(val)
+            try:
+                conv = self._options_conv[k]
+                options[k] = conv(val, tostr_val)
+            except KeyError:
+                options[k] = tostr_val
         return options
     def _setdev(self, val, **kwarg):
         if self._setdev_p == None:
