@@ -8,8 +8,8 @@ from scipy.optimize import brentq as brentq_rootsolver
 
 import traces
 
-from instruments_base import BaseInstrument, visaInstrument,\
-                            BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice,\
+from instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync,\
+                            BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list,\
@@ -309,37 +309,146 @@ class sr384_rf(visaInstrument):
 ##    Stanford Research SR780 2 channel network analyzer
 #######################################################
 
-class sr780_analyzer(visaInstrument):
+class sr780_analyzer(visaInstrumentAsync):
     """
     This controls a 2 channel network analyzer
     It currently only handles the FFT measurement group (not octave or swept sine).
     Markers are not handled. Only sine sources are handled.
+    Useful devices:
+        fetch, readval
+        dump
+        current_display
+        current_channel
+        freq_start, freq_stop, freq_center, freq_span
+        window_type
+        average_en
+        average_type
+        average_mode
+        average_count_requested
+    Useful attribute:
+        async_delay (needed for exponential average, not for linear)
+    Useful methods:
+        start
+        get_xscale
 
-    Changing a setup should be done:
-        meas_grp, meas, meas_view, unit, disp_scale, disp_ref
+    Changing a setup should be done in the following order
+        meas_grp
+        meas
+        meas_view
+        unit
     """
-    #TODO, implement run_and_wait
-    #TODO fix _currrent_config
-    #TODO include xaxis in fetch when needed
     def init(self, full=False):
         # This empties the instrument buffers
         self._clear()
+        # This clears the error state, and status/event flags?
+        self.write('*cls')
         if full:
+            self._async_sre_flag = 2
+            self.write('DSPE 0;*sre 2') # Display flags
+            self._cum_display_status = 0
+            self._async_detect_setup(reset=True)
+            #self._async_tocheck = 0
+            #self._async_use_delay = False
+            self._async_trig_time = 0
+            self._async_delay_check = True
             self.visa.term_chars='\n'
             # The above turned on detection of termchar on read. This is not good for
             # raw reads so turn it off.
             visa.vpp43.set_attribute(self.visa.vi, visa.VI_ATTR_TERMCHAR_EN, visa.VI_FALSE)
+            self.write('OUTX 0') # Force interface to be on GPIB, in case it is not anymore (problem with dump function)
+    def _get_async(self, async, obj, delay=False, trig=False, **kwarg):
+        if async == 0: #setup
+            if self._async_level == -1: # first time through
+                self._async_detect_setup(reset=True)
+            # Assuming we only get called by fetch/readval
+            disp = kwarg.get('disp', None)
+            self._async_detect_setup(disp=disp)
+        return super(sr780_analyzer, self)._get_async(async,  obj, delay=delay, trig=trig, **kwarg)
+    def _async_detect_setup(self, disp=None, reset=False):
+        if reset:
+            self._async_tocheck = 0
+            self._async_use_delay = False
+            self._cum_display_status = 0
+            return
+        disp_org = self.current_display.getcache()
+        if disp==None:
+            disp = disp_org
+        self.current_display.set(disp)
+        # 0x2=A-linear avg, 0x4=A-settled, 0x200=B-linear, 0x400=B-settled
+        if self.average_en.get(disp=disp):
+            if self.average_type.get() in ['linear', 'FixedLength']:
+                tocheck = 0x2
+            else:
+                if self._async_delay_check and self.async_delay == 0.:
+                    print self.perror('***** WARNING You should give a value for async_delay *****')
+                    self._async_delay_check = False
+                self._async_use_delay = True
+                tocheck = 0x4
+        else:
+            tocheck = 0x4
+        if disp == 'B':
+            tocheck <<= 8
+        self._async_tocheck |= tocheck
+        self.current_display.set(disp_org)
+    def _async_trigger_helper(self):
+        if self._async_use_delay==False and self._async_tocheck==0:
+            # Need to setup for both channels since we don't know which one
+            # is needed (for exemple: get srnet.readval,disp='B' while current_disp is 'A',
+            #  run_and_wait is called before current_disp is changed)
+            self._async_detect_setup('A')
+            self._async_detect_setup('B')
+        self.write('PAUS') # make sure we are not scanning anymore.
+        self.get_display_status() # reset the display status flags
+        self.write('DSPE %i'%self._async_tocheck)
+        self.write('STRT')
+        self._async_trig_time = time.time()
+    def _get_esr(self):
+        # This disables the get_esr in the async routines.
+        return 0
     def start(self):
         """
-        Same as pressing Start/Reset
+        Same as pressing Start/Reset button.
         """
-        self.write('STRT')
-    def _fetch_getdev(self, disp=None):
+        self._async_trigger_helper()
+    def _async_detect(self, max_time=.5): # 0.5 s max by default
+        ret = super(sr780_analyzer, self)._async_detect(max_time)
+        if not ret:
+            # Did not receive SRQ
+            return ret
+        # Received SRQ, check if we are done
+        disp_st = self.get_display_status()
+        self._cum_display_status |= disp_st
+        if self._async_use_delay:
+            if time.time()-self._async_trig_time < self.async_delay:
+                #print 'wait delay %0x %f'%(self._cum_display_status, time.time()-self._async_trig_time)
+                return False
+        tocheck = self._async_tocheck
+        #print 'tocheck %0x %0x %0x'%(tocheck, self._cum_display_status, disp_st)
+        if self._cum_display_status&tocheck == tocheck:
+            self.write('DSPE 0')
+            self._async_detect_setup(reset=True)
+            return True # We are done!
+        return False
+    def _fetch_getformat(self, **kwarg):
+        xaxis = kwarg.get('xaxis', True)
+        if xaxis:
+            multi = ('freq', 'data')
+        else:
+            multi = True
+        fmt = self.fetch._format
+        fmt.update(multi=multi, graph=[], xaxis=xaxis)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_getdev(self, disp=None, xaxis=True):
         """
-        Optional parameter:
-            disp: To select which display to read.
+        Optional parameter: disp and xaxis
+         -disp:  To select which display to read.
+         -xaxis: when True(default), the first column of data is the xaxis
         For faster transfer, make the view and unit the same type (both linear or both log)
+        It is STRONGLY recommended to use linear averaging.
+        For exponential averaging you need to specify a wait time with async_delay
+         i.e. srnet.async_delay=3  # for 2 seconds
         """
+        # The instrument has 5 Traces that can be used for memory.
         # There is REFY? d,j to obtain pint j (0..length-1) in ref curve of display d
         #  DSPN? d to obtain lenght of data set
         if disp != None:
@@ -351,12 +460,37 @@ class sr780_analyzer(visaInstrument):
         # TODO handle waterfalls: dswb
         data = self.ask('DSPB? %s'%disp, raw=True)
         ret = np.fromstring(data, np.float32)
+        if xaxis:
+            ret = ret = np.asarray([self.get_xscale(), ret])
         return ret
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
-                                 'sync_filter', 'reserve_mode',
-                                 'offset_expand_x', 'offset_expand_y', 'offset_expand_r',
-                                 'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf', options)
+        if options.has_key('disp'):
+            self.current_display.set(options['disp'])
+        want_ch = 1
+        meas = self.meas.getcache()
+        # This does not handle Coherence, CrossSpectrum F2/F1 ...
+        if meas[-1] == '2' and meas[-4:-1] != 'ser':
+            want_ch = 2
+        orig_ch = self.current_channel.getcache()
+        if want_ch != orig_ch:
+            self.current_channel.set(want_ch)
+        conf = self._conf_helper('current_display', 'current_channel',
+                                 'input_source', 'input_mode', 'input_grounding', 'input_coupling',
+                                 'input_range_dBV', 'input_autorange_en', 'input_autorange_mode', 'input_antialiasing_en',
+                                 'input_aweight_en', 'input_auto_offset_en', 'input_eng_unit_en', 'input_eng_label',
+                                 'input_eng_unit_scale', 'input_eng_unit_user',
+                                 'freq_start', 'freq_stop', 'freq_resolution', 'freq_baseline', 'window_type',
+                                 'meas_group', 'meas', 'meas_view',
+                                 'meas_unit', 'dBm_ref', 'disp_PSD_en', 'disp_transducer_unit_mode',
+                                 'disp_live_en',
+                                 'average_en', 'average_mode', 'average_type', 'average_count_requested',
+                                 'average_increment_pct', 'average_overload_reject_en', 'average_preview_type',
+                                 'source_en', 'source_type', 'source_freq1', 'source_ampl1_V',
+                                 'source_offset_V', 'source_freq2', 'source_ampl2_V',
+                                 options)
+        if want_ch != orig_ch:
+            self.current_channel.set(orig_ch)
+        return conf
     def _create_devs(self):
         display_sel = ChoiceIndex(['A', 'B']) # also both=2
         self.current_display = MemoryDevice('A', choices=display_sel)
@@ -430,7 +564,9 @@ class sr780_analyzer(visaInstrument):
         self.average_overload_reject_en = scpiDevice('FREJ 2,{val}', 'FREJ? 0', str_type=bool)
         self.average_preview_type = devDispOption('PAVO {disp},{val}', 'PAVO? {disp}', choices=ChoiceIndex(['off', 'manual', 'timed']))
         self.window_type = devDispOption('FWIN {disp},{val}', 'FWIN? {disp}', choices=ChoiceIndex(['uniform', 'hanning', 'flattop', 'BMH', 'kaiser', 'force', 'exponential', 'user', '-T/2..T/2', '0..T/2', '-T/4..T/4',]))
-        self._devwrap('fetch', autoinit=False)
+        self._devwrap('fetch', autoinit=False, trig=True)
+        self.readval = ReadvalDev(self.fetch)
+        self._devwrap('dump', autoinit=False)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
     def get_xscale(self):
@@ -439,15 +575,52 @@ class sr780_analyzer(visaInstrument):
         stop = self.freq_stop.getcache()
         npoints = self.freq_resolution.getcache() + 1 # could also use DSPN? d
         return np.linspace(start, stop, npoints)
-
-    # To dump plot or bitmap:
-    #    plot(vector, gpib-host, postscript): POUT 1;PDST 3;PCIC 0;PLTP 1;PLOT
-    #    print(bitmap-all, gpib-host, GIF):       POUT 0;PDST 3;PCIC 0;PRTP 4;PSCR 3;PRNT
-    #  pout is only to change assignement of the hardware print key
-    #   Then need to read the raw result: self.visa.read_raw.
+    def _dump_getformat(self, ps=True, **kwarg):
+        fmt = self.dump._format
+        if ps:
+            binfmt = '.ps'
+        else:
+            binfmt = '.gif'
+        fmt.update(bin=binfmt)
+        return BaseDevice.getformat(self.dump, **kwarg)
+    def _dump_getdev(self, ps=True, area='all'):
+        """
+        options are ps, area
+         -ps: when true returns a postscript object, otherwirse returns a GIF file
+         -area: used for GIF files, one of 'graph', 'menu', 'status' or 'all'
+        """
+        # Reading data is tricky because the instrument does not send
+        # EOI on its last byte so we either need to detect the ending comment
+        # of the postscript or wait for the first timeout to occur for
+        # the bitmap.
+        # Also when the remote output is set to GPIB we do no receive the last byte.
+        # So we need to switch the output to RS232 first.
+        area_sel = dict(graph=0, menu=1, status=2, all=3)
+        # POUT sets hardware print key to bitmap or vector
+        # PDST 3 selects GPIB
+        # PCIC 0 selects host controller
+        # PLTP selects postscript
+        # PRTP selects GIF
+        r=''
+        old_to = self.set_timeout
+        self.set_timeout=.5 # useful for bitmap mode since we need to wait for timeout
+        self.write('OUTX 1') # Go to RS232 interface
+        if ps:
+            self.write('POUT 1;PDST 3;PCIC 0;PLTP 1;PLOT')
+            while r[-11:] != '%%Trailer\r\n':
+                r += visa.vpp43.read(self.visa.vi, 1)
+        else:
+            self.write('POUT 0;PDST 3;PCIC 0;PRTP 4;PSCR %d;PRNT'%area_sel[area])
+            try:
+                while True:
+                    r += visa.vpp43.read(self.visa.vi, 1)
+            except visa.VisaIOError:
+                pass
+        self.write('OUTX 0') # return to gpib interface
+        self.set_timeout = old_to
+        return r
     # serial poll status word: 0=INSTrument, 1=DISPlay, 2=INPuT, 3=ERRor, 4=output buffer empty
     #                          5=standard status word, 6=SRQ, 7=IFC (no command execution in progress)
-    # The instrument has 5 Traces that can be used for memory.
     def get_instrument_status(self):
         """
          returns a byte of bit flags

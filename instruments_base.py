@@ -1906,6 +1906,7 @@ class visaInstrumentAsync(visaInstrument):
         # the _async_sre_flag should match an entry somewhere (like in init)
         self._async_sre_flag = 0x20 #=32 which is standard event status byte (contains OPC)
         self._async_last_status = 0
+        self._async_last_status_time = 0
         self._async_last_esr = 0
         super(visaInstrumentAsync, self).__init__(visa_addr)
         is_gpib = vpp43.get_attribute(self.visa.vi, vpp43.VI_ATTR_INTF_TYPE) == vpp43.VI_INTF_GPIB
@@ -1969,6 +1970,7 @@ class visaInstrumentAsync(visaInstrument):
         if status & self._async_sre_flag:
             self._RQS_status = status
             self._async_last_status = status
+            self._async_last_status_time = time.time()
             time.sleep(0.01) # give some time for other handlers to run
             self._RQS_done.set()
             #print 'Got it', vi
@@ -2008,6 +2010,7 @@ class visaInstrumentAsync(visaInstrument):
                 #and event only has OPC set
                 # status has already been reset. Now reset event flag.
                 self._async_last_esr = self._get_esr()
+                self._RQS_done.clear() # so that we can detect the next SRQ if needed without  _doing async_trig (_async_trig_cleanup)
                 return True
         return False
     def wait_after_trig(self):
