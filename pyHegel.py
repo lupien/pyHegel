@@ -1479,22 +1479,54 @@ class _Hegel_Task(threading.Thread):
         self.stopit = True
 
 def task(*arg, **kwarg):
+    """
+       This starts a pyHegel task.
+       task(func, args=(), kwargs={}, count=None, interval=None, **extra)
+       where the function func(*args, **kwargs) will be called count time
+       (infinitely if the default of None used), separated by interval seconds
+       (which defaults to 0).
+       The interval sleep can be stopped every 1s.
+       extra are keyword arguments to pass to the threading.Thread init function.
+    """
     _Hegel_Task(*arg, **kwarg)
 
-def top():
+def top(all=False):
+    """ lists the pyHegel tasks. The first number is the one you
+        can use to kill the task.
+        If all is True, then all python threading threads are listed
+        (not only the pyHegel ones)
+    """
     # All threads count: threading.active_count()
     for t in threading.enumerate():
-        if isinstance(t, _Hegel_Task):
+        if all==True or isinstance(t, _Hegel_Task):
             print '%5i %s'%(t.ident, t)
 
-def kill(n):
-    # stop thread with number given by top
-    for t in threading.enumerate():
-        if isinstance(t, _Hegel_Task) and t.ident==n:
-            print 'Stopping task and waiting'
-            t.stop()
-            t.join()
-            print 'Stopped task'
+def kill(n, force=False):
+    """ Stops thread number n and wait for it to end.
+        Only works for pyHegel tasks.
+        You can stop wainting by pressing CTRL-C
+        when force=True, it sends a KeyboardInterrupt exception to
+          the other thread which should stop most python code
+          (but will not stop blocking system function like sleep or
+          file system read)
+    """
+    try:
+        for t in threading.enumerate():
+            if isinstance(t, _Hegel_Task) and t.ident==n:
+                if force:
+                    from ctypes import c_long, py_object, pythonapi
+                    pythonapi.PyThreadState_SetAsyncExc(c_long(n), py_object(KeyboardInterrupt))
+                    print 'Interrupting task and waiting'
+                else:
+                    t.stop()
+                    print 'Stopping task and waiting'
+                # we use a the context manager because join uses sleep.
+                with instruments_base._sleep_signal_context_manager():
+                    while t.is_alive():
+                        t.join(0.5)
+                print 'Stopped task'
+    except KeyboardInterrupt:
+        print 'Breaking out of kill. Task could still finish...'
 
 
 #alias: replaced by assignement instr1=instr2, dev=instr.devx
