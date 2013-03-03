@@ -5,11 +5,61 @@ import numpy as np
 import string
 import functools
 import os
+import signal
 import time
 import threading
 import weakref
 from collections import OrderedDict  # this is a subclass of dict
 from PyQt4 import QtGui, QtCore
+
+
+def _sleep_signal_handler(signum, stack_frame):
+    # replaces ipython 0.10 use of ctypes.pythonapi.PyThreadState_SetAsyncExc
+    raise KeyboardInterrupt
+
+class _sleep_signal_context_manager():
+    # This temporarily changes the context handler for SIGINT
+    # This is needed for time.sleep under ipython 0.10 (python xy 2.7.2.0)
+    # because the ipython handler screws up CTRL-C handling and is
+    # reapplied for each ipython new input line
+    def __init__(self, absorb_ctrlc=False):
+        self.old_sig = None
+        self.ctrlc_occured = False
+        self.absorb_ctrlc = absorb_ctrlc
+    def __enter__(self):
+        try:
+            #old_sig = signal.signal(signal.SIGINT, _sleep_signal_handler)
+            old_sig = signal.signal(signal.SIGINT, signal.default_int_handler)
+        except ValueError, e: # occurs when not in main thread
+            #print 'Not installing handler because in secondary thread', e
+            old_sig = None
+        self.old_sig = old_sig
+        return self # will be used for target in : with xxx as target
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        # exc_type, exc_value, exc_traceback are None if no exception occured
+        if exc_type == KeyboardInterrupt:
+            self.ctrlc_occured = True
+        if self.old_sig != None:
+            signal.signal(signal.SIGINT, self.old_sig)
+        if self.ctrlc_occured and self.absorb_ctrlc:
+            return True # this will suppress the exception
+
+
+def sleep(sec, absorb_ctrlc=False):
+    """
+    Same as time.sleep (wait for sec seconds)
+    Will be stopped by CTRL-C
+    But this version always produces KeyboardInterrupt when interrupt
+    which is not the case of time.sleep with ipython 0.10 (python xy 2.7.2.0)
+    When absorb_ctrlc=True, it does not raise the KeyboardInterrupt,
+     but instead returns 'break' instead of None
+    """
+    with _sleep_signal_context_manager(absorb_ctrlc) as context:
+        time.sleep(sec)
+    if context.ctrlc_occured:
+        # can only be here if absorb_ctrlc was True
+        # otherwise the exception was raised
+        return 'break'
 
 
 def _get_lib_properties(libraryHandle):
