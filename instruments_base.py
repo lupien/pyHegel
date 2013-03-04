@@ -118,9 +118,13 @@ try:
         if 'agilent' in _visa_lib_properties['company'].lower():
             _agilent_visa = True
     else:
-        import visa
-        vpp43 = visa.vpp43
-except ImportError as e: # pyVisa not installed
+        try:
+            import visa
+            vpp43 = visa.vpp43
+        except OSError as exc:
+            print '\nError loading visa library:', exc
+            raise ImportError
+except ImportError as exc: # pyVisa not installed
     print 'Error importing visa. You will have reduced functionality.'
     # give a dummy visa to handle imports
     visa = None
