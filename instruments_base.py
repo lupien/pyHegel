@@ -111,7 +111,8 @@ try:
         try:
             import visa
         except WindowsError:
-            print 'Unable to load visa32.dll. You will have reduced functionality.'
+            print 'Unable to load visa32.dll.'
+            raise ImportError
         import win32api
         _visa_lib_properties = _get_lib_properties(vpp43.visa_library()._handle)
         if 'agilent' in _visa_lib_properties['company'].lower():
@@ -119,7 +120,7 @@ try:
     else:
         import visa
         vpp43 = visa.vpp43
-except (WindowsError, ImportError) as e: # pyVisa not installed
+except ImportError as e: # pyVisa not installed
     print 'Error importing visa. You will have reduced functionality.'
     # give a dummy visa to handle imports
     visa = None
