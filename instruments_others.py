@@ -1094,7 +1094,7 @@ class colby_pdl_100a(visaInstrument):
         if test:
             self.ask('*tst?')
         else:
-            self.write('*cal')
+            self.ask('*cal?')
         self.delay_ps.setcache(0.)
     def cal(self):
         self.write('*rst')
