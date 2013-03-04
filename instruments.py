@@ -26,7 +26,7 @@ from instruments_base import visaInstrument, visaInstrumentAsync, BaseDevice,\
 from instruments_others import yokogawa_gs200,\
                                 sr830_lia, sr384_rf, sr780_analyzer,\
                                 lakeshore_322, lakeshore_340, lakeshore_370,\
-                                dummy
+                                colby_pdl_100a, dummy
 
 from instruments_logical import LogicalDevice, ScalingDevice, FunctionDevice,\
                                 LimitDevice, CopyDevice, ExecuteDevice,\

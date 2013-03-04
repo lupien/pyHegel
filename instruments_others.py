@@ -1046,6 +1046,77 @@ class lakeshore_370(visaInstrument):
 
 
 #######################################################
+##    Colby Instruments Programmable delay line PDL-100A-20NS
+#######################################################
+
+class colby_pdl_100a(visaInstrument):
+    """
+    Colby Instruments delay box: PDL-100A-20NS
+    Useful devices:
+        delay_ps (default alias): enter delay value in ps
+    It can take up to 1.5s to change the delay.
+    Make sure visa timeout is not made too short (initialized to 3s).
+
+    Useful methods:
+        get_error
+        reset
+    """
+    _errors_dict = {0: 'No Error', 1: 'Invalid Command', 2: 'Invalid Argument',
+                    3: 'Unit did not pass calibration',
+                    4: 'Delay setting requested beyond range of device',
+                    5: 'Delay not set', 99: 'Buffer overflow'}
+    def init(self, full=False):
+        # This clears the error state, and status/event flags?
+        self.write('*cls')
+        if full:
+            self.set_timeout = 3
+            #self.visa.term_chars='\n'
+    def _current_config(self, dev_obj=None, options={}):
+        #return self._conf_helper('delay_ps', 'mode', 'rate', 'accel', options)
+        return self._conf_helper('delay_ps', 'mode', options)
+    def _delay_ps_setdev(self, val):
+        # TODO could use async instead of using *OPC and visa timeout
+        # OPC is to wait for completion, could require up to 1.5s
+        self.ask('DEL %f PS;*OPC?'%val)
+    def reset(self):
+        """
+        Returns to power on state (goes to 0 ps)
+        """
+        self.write('*rst')
+        self.delay_ps.setcache(0.)
+    def caltest(self, test=False):
+        """
+        Does either a calibration (only trombone) or an internal self-test
+        (longer: trombone and relays)
+        The state of the delay after calibration (because of relays) is not
+        known.
+        """
+        if test:
+            self.ask('*tst?')
+        else:
+            self.write('*cal')
+        self.delay_ps.setcache(0.)
+    def cal(self):
+        self.write('*rst')
+    def _delay_ps_getdev(self):
+        return float(self.ask('DEL?'))*1e12
+    def _create_devs(self):
+        # other commands REL? relay query which returns bit flag, total delay ns
+        #                REL n ON or REL n OFF to turn relay n (1..5) on or off.
+        self.mode = scpiDevice('MODE', choices=ChoiceStrings('SER', 'PAR', '312.5PS', '625PS'))
+        #self.rate = scpiDevice('RATE', str_type=int, min=100, max=550)
+        #self.accel = scpiDevice('XDD', str_type=int, min=500, max=2000)
+        self._devwrap('delay_ps', min=0, max=20e3, setget=True)
+        self.alias = self.delay_ps
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+    def get_error(self):
+        val = int(self.ask('ERR?'))
+        err_str = self._errors_dict[val]
+        return val, err_str
+
+
+#######################################################
 ##    Dummy instrument
 #######################################################
 

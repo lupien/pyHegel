@@ -68,7 +68,9 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              # Power meters
              epm1 = (instruments.agilent_PowerMeter, ('USB0::0x0957::0x5418::MY52290056',)),
              # Arbitratry waveform generator
-             awg1 = (instruments.agilent_AWG, ('awg1',))
+             awg1 = (instruments.agilent_AWG, ('awg1',)),
+             # delay box
+             delay1 = (instruments.colby_pdl_100a, (5,))
         )
 
 usb_manuf = { 0x0957 : ('Agilent', { 0x0607 : 'multimeter',
