@@ -456,7 +456,7 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
     return p_all, chi2, pe_all, extras
 
 
-def fitplot(func, x, y, p0, yerr=None, extra={}, errors=True, fig=None, skip=False,
+def fitplot(func, x, y, p0, yerr=None, extra={}, fig=None, skip=False,
                   xpts=1000, **kwarg):
     """
     This does the same as fitcurve (see its documentation)
