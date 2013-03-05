@@ -1186,7 +1186,11 @@ class scpiDevice(BaseDevice):
         self._option_cache = options.copy()
         for k in options.iterkeys():
             val = options[k]
-            tostr_val = self._options[k]._tostr(val)
+            option_dev  = self._options[k]
+            if isinstance(option_dev, BaseDevice):
+                tostr_val = option_dev._tostr(val)
+            else:
+                tostr_val = repr(val)
             try:
                 conv = self._options_conv[k]
                 options[k] = conv(val, tostr_val)
