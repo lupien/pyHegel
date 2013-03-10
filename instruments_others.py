@@ -13,7 +13,7 @@ from instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list,\
-                            decode_float64, visa
+                            decode_float64, visa, sleep
 
 #######################################################
 ##    Yokogawa source
@@ -900,7 +900,7 @@ class lakeshore_370(visaInstrument):
             # we need to wait at least 50ms after last write or read
             delta = (last+.050) - time.time()
             if delta > 0:
-                time.sleep(delta)
+                sleep(delta)
         super(lakeshore_370, self).write(val)
         if last != None:
             self._last_command_time = time.time()

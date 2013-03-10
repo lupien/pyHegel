@@ -12,7 +12,7 @@ from instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDevSwitch,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
                             decode_uint16_bin, _decode_block_base, decode_float64_2col,\
-                            decode_complex128
+                            decode_complex128, sleep
 
 #######################################################
 ##    Agilent RF 33522A generator
@@ -555,7 +555,7 @@ class agilent_rf_Attenuator(visaInstrument):
     def _att_level_dB_setdev(self, val):
         val = int(val)
         self.write('ATTenuation %i'%val)
-        time.sleep(0.02)
+        sleep(0.02)
     def _create_devs(self):
         self.relative_en = scpiDevice('RELative', str_type=bool)
         self.relative_ref_dB = scpiDevice('REFerence', str_type=float)

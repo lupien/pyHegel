@@ -20,6 +20,8 @@ import sys
 from instruments_base import FastEvent, scpiDevice, wait_on_event,\
                             visaInstrument, BaseInstrument, BaseDevice,\
                             ReadvalDev, decode_uint32, _replace_ext
+from kbint_util import _sleep_signal_context_manager
+
 
 class acq_bool(object):
     def __call__(self, input_str):
@@ -195,7 +197,9 @@ class Listen_thread(threading.Thread):
     def cancel(self):
         self._stop = True
     def wait(self, timeout=None):
-        self.join(timeout)
+        # we use a the context manager because join uses sleep.
+        with _sleep_signal_context_manager():
+            self.join(timeout)
         return not self.is_alive()
 
 def spectrum_smooth(data, ss=2):

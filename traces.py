@@ -13,6 +13,9 @@ import numpy as np
 from matplotlib import pylab, rcParams
 import dateutil
 
+import kbint_util
+_sleep = kbint_util.sleep
+
 # same as in fullmpcanvas.py
 # follows new_figure_manager
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
@@ -64,21 +67,26 @@ Mouse:
 
 
 def wait(sec):
+    """
+    Time to wait in seconds.
+    It can be stopped with CTRL-C, and it should update the GUI while waiting.
+    """
     start = time.time()
     end = start + sec
     while time.time() < end:
         dif = end - time.time()
         if dif < .01:
             if dif >0.:
-                time.sleep(dif)
+                _sleep(dif)
             return
         else:
-            QtGui.QApplication.instance().processEvents(
+            with kbint_util._delayed_signal_context_manager():
+                QtGui.QApplication.instance().processEvents(
                       QtCore.QEventLoop.AllEvents, dif*1000)
             dif = end - time.time()
             if dif < 0:
                 return
-            time.sleep(min(.1, dif))
+            _sleep(min(.1, dif))
 
 FigureCanvas.keyvald.update({QtCore.Qt.Key_Left:'left',
         QtCore.Qt.Key_Right:'right',
@@ -767,9 +775,10 @@ def sleep(sec):
     sleeper.start_sleep(sec/60.)
     try:
         while not sleeper.finished:
-            QtGui.QApplication.instance().processEvents(
+            with kbint_util._delayed_signal_context_manager():
+                QtGui.QApplication.instance().processEvents(
                    QtCore.QEventLoop.AllEvents)
-            time.sleep(.1)
+            _sleep(.1)
     except KeyboardInterrupt:
         sleeper.close()
         raise

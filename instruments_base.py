@@ -11,55 +11,7 @@ import threading
 import weakref
 from collections import OrderedDict  # this is a subclass of dict
 from PyQt4 import QtGui, QtCore
-
-
-def _sleep_signal_handler(signum, stack_frame):
-    # replaces ipython 0.10 use of ctypes.pythonapi.PyThreadState_SetAsyncExc
-    raise KeyboardInterrupt
-
-class _sleep_signal_context_manager():
-    # This temporarily changes the context handler for SIGINT
-    # This is needed for time.sleep under ipython 0.10 (python xy 2.7.2.0)
-    # because the ipython handler screws up CTRL-C handling and is
-    # reapplied for each ipython new input line
-    def __init__(self, absorb_ctrlc=False):
-        self.old_sig = None
-        self.ctrlc_occured = False
-        self.absorb_ctrlc = absorb_ctrlc
-    def __enter__(self):
-        try:
-            #old_sig = signal.signal(signal.SIGINT, _sleep_signal_handler)
-            old_sig = signal.signal(signal.SIGINT, signal.default_int_handler)
-        except ValueError, e: # occurs when not in main thread
-            #print 'Not installing handler because in secondary thread', e
-            old_sig = None
-        self.old_sig = old_sig
-        return self # will be used for target in : with xxx as target
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        # exc_type, exc_value, exc_traceback are None if no exception occured
-        if exc_type == KeyboardInterrupt:
-            self.ctrlc_occured = True
-        if self.old_sig != None:
-            signal.signal(signal.SIGINT, self.old_sig)
-        if self.ctrlc_occured and self.absorb_ctrlc:
-            return True # this will suppress the exception
-
-
-def sleep(sec, absorb_ctrlc=False):
-    """
-    Same as time.sleep (wait for sec seconds)
-    Will be stopped by CTRL-C
-    But this version always produces KeyboardInterrupt when interrupt
-    which is not the case of time.sleep with ipython 0.10 (python xy 2.7.2.0)
-    When absorb_ctrlc=True, it does not raise the KeyboardInterrupt,
-     but instead returns 'break' instead of None
-    """
-    with _sleep_signal_context_manager(absorb_ctrlc) as context:
-        time.sleep(sec)
-    if context.ctrlc_occured:
-        # can only be here if absorb_ctrlc was True
-        # otherwise the exception was raised
-        return 'break'
+from kbint_util import sleep, _sleep_signal_context_manager, _delayed_signal_context_manager
 
 
 def _get_lib_properties(libraryHandle):
@@ -324,7 +276,7 @@ class FastCondition(threading._Condition):
                     if remaining <= 0:
                         break
                     delay = min(delay, remaining)
-                    time.sleep(delay)
+                    sleep(delay)
                 if not gotit:
                     if __debug__:
                         self._note("%s.wait(%s): timed out", self, timeout)
@@ -381,6 +333,8 @@ class asyncThread(threading.Thread):
             start_time = time.time()
             while diff < delay:
                 left = delay - diff
+                 # it is okay to use time.sleep instead of sleep here
+                 # because it is never running in main thread
                 time.sleep(min(left, 0.1))
                 if self._stop:
                     break
@@ -403,8 +357,15 @@ class asyncThread(threading.Thread):
     def cancel(self):
         self._stop = True
     def wait(self, timeout=None):
-        self.join(timeout)
+        # we use a the context manager because join uses sleep.
+        with _sleep_signal_context_manager():
+            self.join(timeout)
         return not self.is_alive()
+
+
+# For proper KeyboardInterrupt handling, the docheck function should
+# be internally protected with _sleep_signal_context_manager
+# This is the case for FastEvent and any function using sleep instead of time.sleep
 
 def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
     # task_or_event_or_func either needs to have a wait attribute with a parameter of
@@ -431,8 +392,9 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
             return False
         if check_state != None and check_state._error_state:
             break
-        QtGui.QApplication.instance().processEvents(
-             QtCore.QEventLoop.AllEvents, 20) # 20 ms max
+        with _delayed_signal_context_manager():
+            QtGui.QApplication.instance().processEvents(
+                 QtCore.QEventLoop.AllEvents, 20) # 20 ms max
 
 def _general_check(val, min=None, max=None, choices=None ,lims=None):
    # self is use for perror
@@ -2030,7 +1992,7 @@ class visaInstrumentAsync(visaInstrument):
             self._RQS_status = status
             self._async_last_status = status
             self._async_last_status_time = time.time()
-            time.sleep(0.01) # give some time for other handlers to run
+            sleep(0.01) # give some time for other handlers to run
             self._RQS_done.set()
             #print 'Got it', vi
         return vpp43.VI_SUCCESS
@@ -2045,7 +2007,7 @@ class visaInstrumentAsync(visaInstrument):
                     self._async_last_status = status
                     self._async_last_esr = self._get_esr()
                     return True
-                time.sleep(.05)
+                sleep(.05)
         elif self._RQS_status == -1:
             ev_type = context = None
             try:

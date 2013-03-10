@@ -21,7 +21,8 @@ except ImportError, exc:
             print exc.extra_info
 
 from instruments_base import visaInstrument, visaInstrumentAsync, BaseDevice,\
-                            BaseInstrument, MemoryDevice, scpiDevice, find_all_instruments
+                            BaseInstrument, MemoryDevice, scpiDevice, find_all_instruments,\
+                            sleep
 
 from instruments_others import yokogawa_gs200,\
                                 sr830_lia, sr384_rf, sr780_analyzer,\

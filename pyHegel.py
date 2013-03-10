@@ -82,7 +82,6 @@ try:
 except:
     _sys_path_modified = _update_sys_path()
 
-
 import traces
 import instruments
 import instruments_base
@@ -120,6 +119,7 @@ def help_pyHegel():
         task
         top
         kill
+        quiet_KeyboardInterrupt
         All the commands in util (savefig, merge_pdf, ...)
     Available instruments:
         sweep
@@ -175,6 +175,7 @@ def reset_pyHegel():
        can be called in ipython command line like:
          /reset_pyNoise
     """
+    reload(traces.kbint_utils)
     reload(traces)
     reload(instruments.instruments_base)
     reload(instruments.instruments_agilent)
@@ -350,6 +351,22 @@ def _readall_async(devs, formats, i):
 def _checkTracePause(trace):
     while trace.pause_enabled:
         wait(.1)
+
+def _quiet_KeyboardInterrupt_Handler(self, exc_type, exc_value, traceback, tb_offset=None):
+    print '\n ----- KeyboardInterrupt:', exc_value
+
+def quiet_KeyboardInterrupt(quiet=True):
+    try:
+        ip = get_ipython()
+    except NameError:
+        ip = _ip
+    if quiet:
+        ip.set_custom_exc((KeyboardInterrupt,), _quiet_KeyboardInterrupt_Handler)
+    else:
+        ip.set_custom_exc((), None)
+
+quiet_KeyboardInterrupt(True)
+
 
 #
 #    out can be: dev1
@@ -675,25 +692,23 @@ class _Sweep(instruments.BaseInstrument):
             t.set_xlabel(hdrs[0])
             if logspace:
                 t.set_xlogscale()
-        if filename != None:
-            # Make it unbuffered, windows does not handle line buffer correctly
-            f = open(fullpath, 'w', 0)
-            _write_conf(f, formats, extra_base='sweep_options', async=async, reset=reset, start=start, stop=stop, updown=updown)
-            writevec(f, hdrs+['time'], pre_str='#')
-            if fullpathrev != None:
-                frev = open(fullpathrev, 'w', 0)
-                _write_conf(frev, formatsrev, extra_base='sweep_options', async=async, reset=reset, start=start, stop=stop, updown=updown)
-                writevec(frev, hdrs+['time'], pre_str='#')
-            else:
-                frev = f
-        else:
+        try:
             f = None
             frev = None
-        #TODO get CTRL-C to work properly
-        ###############################
-        # Start of loop
-        ###############################
-        try:
+            if filename != None:
+                # Make it unbuffered, windows does not handle line buffer correctly
+                f = open(fullpath, 'w', 0)
+                _write_conf(f, formats, extra_base='sweep_options', async=async, reset=reset, start=start, stop=stop, updown=updown)
+                writevec(f, hdrs+['time'], pre_str='#')
+                if fullpathrev != None:
+                    frev = open(fullpathrev, 'w', 0)
+                    _write_conf(frev, formatsrev, extra_base='sweep_options', async=async, reset=reset, start=start, stop=stop, updown=updown)
+                    writevec(frev, hdrs+['time'], pre_str='#')
+                else:
+                    frev = f
+            ###############################
+            # Start of loop
+            ###############################
             cycle_list = [(fwd, f, formats)]
             ioffset = 0
             if updown == True:
@@ -727,12 +742,15 @@ class _Sweep(instruments.BaseInstrument):
                     if t.abort_enabled:
                         break
         except KeyboardInterrupt:
-            print 'Interrupted sweep'
-            pass
-        if f:
-            f.close()
-        if fullpathrev != None:
-            frev.close()
+            (exc_type, exc_value, exc_traceback) = sys.exc_info()
+            raise KeyboardInterrupt('Interrupted sweep'), None, exc_traceback
+        finally:
+            if f:
+                f.close()
+            if fullpathrev != None and frev:
+                frev.close()
+        if graph and t.abort_enabled:
+            raise KeyboardInterrupt('Aborted sweep')
         if graph and close_after:
             t.window.close()
         if reset: # return to first value
@@ -910,7 +928,6 @@ def spy(devs, interval=1):
             wait(interval)
     except KeyboardInterrupt:
         print 'Interrupting spy'
-        pass
 
 class _Snap(object):
     def __init__(self):
@@ -1030,14 +1047,13 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
         graphsel=[0]
     gsel = _itemgetter(*graphsel)
     t.setlegend(gsel(hdrs))
-    if filename != None:
-        # Make it unbuffered, windows does not handle line buffer correctly
-        f = open(fullpath, 'w', 0)
-        _write_conf(f, formats, extra_base='record options', async=async, interval=interval)
-        writevec(f, ['time']+hdrs, pre_str='#')
-    else:
-        f = None
     try:
+        f = None
+        if filename != None:
+            # Make it unbuffered, windows does not handle line buffer correctly
+            f = open(fullpath, 'w', 0)
+            _write_conf(f, formats, extra_base='record options', async=async, interval=interval)
+            writevec(f, ['time']+hdrs, pre_str='#')
         i=0
         while npoints == None or i < npoints:
             tme = clock.get()
@@ -1057,12 +1073,14 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
             if t.abort_enabled:
                 break
     except KeyboardInterrupt:
-        # TODO proper file closing in case of error.
-        #      on windows sometimes the file stays locked.
-        print 'Interrupting record'
-        pass
-    if f:
-        f.close()
+        (exc_type, exc_value, exc_traceback) = sys.exc_info()
+        raise KeyboardInterrupt('Interrupted record'), None, exc_traceback
+    finally:
+        if f:
+            f.close()
+    if t.abort_enabled:
+        raise KeyboardInterrupt('Aborted record')
+
 
 def trace(devs, interval=1, title=''):
     """
@@ -1213,10 +1231,7 @@ def get(dev, filename=None, **kwarg):
         filename = os.path.join(sweep.path.get(), filename)
         filename, unique_i = _process_filename(filename)
         kwarg.update(filename=filename)
-    try:
-        return dev.get(**kwarg)
-    except KeyboardInterrupt:
-        print 'CTRL-C pressed!!!!!!' 
+    return dev.get(**kwarg)
 
 def setget(dev, val=None, **kwarg):
     """
@@ -1357,7 +1372,7 @@ def batch(batchfile):
 
 def sleep(sec):
     """
-       wait seconds... Can be paused.
+       wait seconds... It has a GUI that allows the wait to be paused.
        After resuming, the wait continues (i.e. total
           wait will be pause+sec)
        See also wait

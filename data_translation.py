@@ -7,7 +7,8 @@ Created on Tue Aug 28 11:08:58 2012
 """
 
 from instruments_base import BaseInstrument, scpiDevice, ChoiceIndex,\
-                            wait_on_event, BaseDevice, MemoryDevice, ReadvalDev
+                            wait_on_event, BaseDevice, MemoryDevice, ReadvalDev,\
+                            sleep
 import sys
 import time
 import numpy as np
@@ -219,7 +220,7 @@ class DataTranslation(BaseInstrument):
         to = time.time()
         is_finished = not self._analog_in.IsRunning
         while time.time()-to < max_time or not is_finished:
-            time.sleep(.05)
+            sleep(.05)
             is_finished = not self._analog_in.IsRunning
         return is_finished
         # Also ai.State
