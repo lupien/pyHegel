@@ -1884,10 +1884,13 @@ class visaInstrument(BaseInstrument):
         This is needed when dealing with binary date. The
         base read strips newlines from the end always.
         """
-        if raw:
-            self.visa.write(question)
-            return self.visa.read_raw()
-        return self.visa.ask(question)
+        # we prevent CTRL-C from breaking between write and read using context manager
+        with _delayed_signal_context_manager():
+            if raw:
+                self.visa.write(question)
+                ret = self.visa.read_raw()
+            ret = self.visa.ask(question)
+        return ret
     def idn(self):
         return self.ask('*idn?')
     def factory_reset(self):
