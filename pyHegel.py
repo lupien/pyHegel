@@ -175,7 +175,7 @@ def reset_pyHegel():
        can be called in ipython command line like:
          /reset_pyNoise
     """
-    reload(traces.kbint_utils)
+    reload(traces.kbint_util)
     reload(traces)
     reload(instruments.instruments_base)
     reload(instruments.instruments_agilent)
