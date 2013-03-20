@@ -379,7 +379,7 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
     # rounded to: 1, 2, 4 and 8->10ms, 16->20ms, 32-> 40ms
     # therefore, using Event.wait can produce times of 10, 20, 30, 40, 60, 100, 150
     # 200 ms ...
-    # TODO could rewrite that Event.wait to be faster
+    # Can use FastEvent.wait instead of Event.wait to be faster
     start_time = time.time()
     try: # should work for task (threading.Thread) and event (threading.Event)
         docheck = task_or_event_or_func.wait
@@ -393,8 +393,9 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
         if check_state != None and check_state._error_state:
             break
         with _delayed_signal_context_manager():
-            QtGui.QApplication.instance().processEvents(
-                 QtCore.QEventLoop.AllEvents, 20) # 20 ms max
+            # processEvents is for the current Thread.
+            # if a thread does not have and event loop, this does nothing (not an error)
+            QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 20) # 20 ms max
 
 def _general_check(val, min=None, max=None, choices=None ,lims=None):
    # self is use for perror

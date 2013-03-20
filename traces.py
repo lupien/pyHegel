@@ -81,8 +81,7 @@ def wait(sec):
             return
         else:
             with kbint_util._delayed_signal_context_manager():
-                QtGui.QApplication.instance().processEvents(
-                      QtCore.QEventLoop.AllEvents, dif*1000)
+                QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, dif*1000)
             dif = end - time.time()
             if dif < 0:
                 return
@@ -776,8 +775,7 @@ def sleep(sec):
     try:
         while not sleeper.finished:
             with kbint_util._delayed_signal_context_manager():
-                QtGui.QApplication.instance().processEvents(
-                   QtCore.QEventLoop.AllEvents)
+                QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents)
             _sleep(.1)
     except KeyboardInterrupt:
         sleeper.close()

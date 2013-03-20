@@ -199,11 +199,9 @@ if __name__ == "__main__":
             while time.time()-to < 1: # the timer should start after 1ms
                 if with_context:
                     with _delayed_signal_context_manager(raiseit=raiseit):
-                        QtGui.QApplication.instance().processEvents(
-                            QtCore.QEventLoop.AllEvents, 20) # 20 ms max
+                        QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 20) # 20 ms max
                 else:
-                    QtGui.QApplication.instance().processEvents(
-                        QtCore.QEventLoop.AllEvents, 20) # 20 ms max
+                    QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 20) # 20 ms max
         except KeyboardInterrupt:
             print 'The interrupt reached the python main thread'
         else:
