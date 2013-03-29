@@ -936,6 +936,9 @@ class _Snap(object):
         self.async = False
         self.cycle = 0
         self.formats = None
+        self._locking_instrument = instruments_base.Lock_Instruments()
+        self._locking_extra = instruments_base.Lock_Extra()
+    @instruments_base.locked_calling
     def __call__(self, out=None, filename=None, async=None, append=True):
         """
         This command dumps a bunch of values to a file.
@@ -947,6 +950,15 @@ class _Snap(object):
         Async unset (None) will use the last one async mode (which starts at False)
         With append=True and opening an already existing file, the data is appended
         otherwise the file is truncated
+
+        If needed you can create more than one snap object. They will remember different
+        defaults:
+            snap1 = _Snap()
+            snap2 = _Snap()
+            snap1(dev1, 'file1.txt')
+            snap2([dev2, dev3], 'file2.txt')
+            snap1()
+            snap2()
         """
         new_out = False
         new_file = False

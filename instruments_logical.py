@@ -8,7 +8,7 @@ from scipy.optimize import brentq as brentq_rootsolver
 import weakref
 
 from instruments_base import BaseDevice, BaseInstrument, ProxyMethod,\
-                        _find_global_name, _get_conf_header
+                        _find_global_name, _get_conf_header, locked_calling_dev
 
 def _asDevice(dev):
     if isinstance(dev, BaseInstrument):
@@ -46,7 +46,7 @@ class LogicalDevice(BaseDevice):
        Base device for logical devices.
        Devices can be a device (instrument which will use the alias device)
        or a tuple (device, dict), where dict is the default parameters to pass to get/set/check.
-       Need to define instr attribute for getasync and get_xscale (scope)
+       Need to define instr attribute for getasync, locking and get_xscale (scope)
         also _basedev for default implementation of force_get
              (can be None)
        Need to overwrite force_get method, _current_config
@@ -66,7 +66,6 @@ class LogicalDevice(BaseDevice):
         #   in the latter _basedev = _basedevs[0]
         # can also leave both blank
         # autoinit defaults to the one from _basedev
-        # self.instr set to self._basedev.inst if available
         basedev_orig = basedev
         basedevs_orig = basedevs
         basedev_kwarg={}
@@ -109,8 +108,6 @@ class LogicalDevice(BaseDevice):
             kwarg['setget'] = setget
         super(LogicalDevice, self).__init__(doc=doc, trig=True, **kwarg)
         self.instr = _LogicalInstrument(self)
-        #if self._basedev:
-        #    self.instr = basedev.instr
         fmt = self._format
         if not fmt['header'] and hasattr(self, '_current_config'):
             conf = ProxyMethod(self._current_config)
@@ -179,11 +176,13 @@ class LogicalDevice(BaseDevice):
                     base_kwarg.update(subkw)
                     kwargs.append(base_kwarg)
         return zip(devs, kwargs), kwarg_clean
+    @locked_calling_dev
     def force_get(self):
         gl, kwarg = self._get_auto_list(autoget='all')
         for dev, kwarg in gl:
             dev.force_get()
         super(LogicalDevice, self).force_get()
+    @locked_calling_dev
     def get(self, *arg, **kwarg):
         # when not doing async, get all basedevs
         # when doing async, the basedevs are obtained automatically

@@ -13,7 +13,7 @@ from instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list,\
-                            decode_float64, visa, sleep
+                            decode_float64, visa, sleep, locked_calling
 
 #######################################################
 ##    Yokogawa source
@@ -357,13 +357,14 @@ class sr780_analyzer(visaInstrumentAsync):
             visa.vpp43.set_attribute(self.visa.vi, visa.VI_ATTR_TERMCHAR_EN, visa.VI_FALSE)
             self.write('OUTX 0') # Force interface to be on GPIB, in case it is not anymore (problem with dump function)
     def _get_async(self, async, obj, delay=False, trig=False, **kwarg):
+        ret = super(sr780_analyzer, self)._get_async(async,  obj, delay=delay, trig=trig, **kwarg)
         if async == 0: #setup
-            if self._async_level == -1: # first time through
-                self._async_detect_setup(reset=True)
+            if self._async_list_init == []: # first time through
+                self._async_list_init.append((self._async_detect_setup, dict(reset=True)))
             # Assuming we only get called by fetch/readval
             disp = kwarg.get('disp', None)
-            self._async_detect_setup(disp=disp)
-        return super(sr780_analyzer, self)._get_async(async,  obj, delay=delay, trig=trig, **kwarg)
+            self._async_list_init.append((self._async_detect_setup, dict(disp=disp)))
+        return ret
     def _async_detect_setup(self, disp=None, reset=False):
         if reset:
             self._async_tocheck = 0
@@ -405,6 +406,7 @@ class sr780_analyzer(visaInstrumentAsync):
     def _get_esr(self):
         # This disables the get_esr in the async routines.
         return 0
+    @locked_calling
     def start(self):
         """
         Same as pressing Start/Reset button.
@@ -569,6 +571,7 @@ class sr780_analyzer(visaInstrumentAsync):
         self._devwrap('dump', autoinit=False)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+    @locked_calling
     def get_xscale(self):
         # only works for fft
         start = self.freq_start.getcache()
@@ -686,6 +689,7 @@ class sr780_analyzer(visaInstrumentAsync):
         #   2=input overloaded
         #   3=input is HighV
         return int(self.ask('INPS?'))
+    @locked_calling
     def get_error(self):
         """
          returns two byte of bit flags
@@ -894,6 +898,7 @@ class lakeshore_370(visaInstrument):
             self.visa.term_chars = '\r\n'
             self._last_command_time = time.time()
         super(lakeshore_370, self).init(full=full)
+    @locked_calling
     def write(self, val):
         last = self._last_command_time
         if last != None:
@@ -904,6 +909,7 @@ class lakeshore_370(visaInstrument):
         super(lakeshore_370, self).write(val)
         if last != None:
             self._last_command_time = time.time()
+    @locked_calling
     def read(self):
         ret = super(lakeshore_370, self).read()
         if self._last_command_time != None:

@@ -19,7 +19,7 @@ import sys
 # user made import
 from instruments_base import FastEvent, scpiDevice, wait_on_event,\
                             visaInstrument, BaseInstrument, BaseDevice,\
-                            ReadvalDev, decode_uint32, _replace_ext
+                            ReadvalDev, decode_uint32, _replace_ext, locked_calling
 from kbint_util import _sleep_signal_context_manager
 
 
@@ -417,11 +417,13 @@ You can start a server with:
     def _async_detect(self, max_time=.5): # 0.5 s max by default
         return self._run_finished.wait(max_time)
         #return wait_on_event(self._run_finished, check_state=self, max_time=max_time)
+    @locked_calling
     def wait_after_trig(self):
         """
         waits until the run is finished
         """
         return wait_on_event(self._run_finished, check_state=self)
+    @locked_calling
     def run_and_wait(self):
         """
         This performs a run and waits for it to finish.
@@ -1163,15 +1165,18 @@ You can start a server with:
         super(type(self),self)._create_devs()
         
     #class methode     
+    @locked_calling
     def write(self, val):
         self._check_error()
         val = '@' + val + '\n'
         self.s.send(val)
 
     # only use read, ask before starting listen thread.
+    @locked_calling
     def read(self):
         return self.s.recv(128)
 
+    @locked_calling
     def ask(self, quest):
         self.write(quest)
         return self.read()
@@ -1223,6 +1228,7 @@ You can start a server with:
         """
         self.write('SHUTDOWN')
 
+    @locked_calling
     def get_xscale(self):
         """
            returns a vector of values for use use as xscale
@@ -1284,6 +1290,7 @@ You can start a server with:
         else:
             raise ValueError, 'Invalid clock_source'
 
+    @locked_calling
     def set_clock_source(self, sampling_rate=None, clock_source=None):
         """
         Use this at least once per loaded instrument to set
@@ -1322,6 +1329,7 @@ You can start a server with:
         self.trigger_await.set(False)
         self.trigger_create.set(False)
 
+    @locked_calling
     def set_simple_acq(self,nb_Msample='min', chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         """
         Activates the simple acquisition mode which simply captures nb_Msample
@@ -1341,7 +1349,8 @@ You can start a server with:
         self.chan_mode.set(chan_mode)
         self.chan_nb.set(chan_nb)
         self._set_mode_defaults()
-            
+
+    @locked_calling
     def set_histogram(self, nb_Msample='min', chan_nb=1, sampling_rate=None, clock_source=None, decimation=1):
         """
         Activates the histogram mode.
@@ -1372,7 +1381,8 @@ You can start a server with:
         self.chan_mode.set('Single')
         self.chan_nb.set(chan_nb)
         self._set_mode_defaults()
-    
+
+    @locked_calling
     def set_correlation(self, nb_Msample='min', sampling_rate=None, clock_source=None):
         """
         Activates the cross correlation mode. This reads both ch1 and ch2
@@ -1399,6 +1409,7 @@ You can start a server with:
         self.autocorr_mode.set(False)
         self.corr_mode.set(True)
     
+    @locked_calling
     def set_autocorrelation(self, nb_Msample='min', autocorr_single_chan=True,
                             autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
         """
@@ -1429,11 +1440,12 @@ You can start a server with:
             self.chan_mode.set('Single')
         else:
             self.chan_mode.set('Dual')
-        self.autocorr_single_chan.set(autocorr_single_chan)     
+        self.autocorr_single_chan.set(autocorr_single_chan)
         self.chan_nb.set(autocorr_chan_nb)
         self.autocorr_mode.set(True)
         self.corr_mode.set(False)
-        
+
+    @locked_calling
     def set_auto_and_corr(self, nb_Msample='min', autocorr_single_chan=False,
                           autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
         """
@@ -1462,12 +1474,13 @@ You can start a server with:
         self.nb_Msample.set(nb_Msample)
         self._set_mode_defaults()
         self.chan_mode.set('Dual')
-        self.autocorr_single_chan.set(autocorr_single_chan)    
+        self.autocorr_single_chan.set(autocorr_single_chan)
         self.chan_nb.set(autocorr_chan_nb)
         self.autocorr_mode.set(True)
         self.corr_mode.set(True)
-        
-        
+
+
+    @locked_calling
     def set_network_analyzer(self, signal_freq, nb_Msample='min', nb_harm=1,
                              lock_in_square=False, sampling_rate=None, clock_source=None):
         """
@@ -1508,7 +1521,8 @@ You can start a server with:
         self.net_signal_freq.set(signal_freq)
         self.lock_in_square.set(lock_in_square)
         self.nb_harm.set(nb_harm)
-        
+
+    @locked_calling
     def set_scope(self, nb_sample=1024, hori_offset=0, trigger_level=0., slope='Rising',
                   trig_source=1, trig_mode='Auto', chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         """
@@ -1546,7 +1560,8 @@ You can start a server with:
         self.osc_slope.set(slope)
         self.osc_trig_source(trig_source)
         self.osc_trig_mode(trig_mode)
-        
+
+    @locked_calling
     def set_spectrum(self, nb_Msample='min', fft_length=1024, window='Bartlett',
                      chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         """
@@ -1600,6 +1615,7 @@ You can start a server with:
         self.fft_length.set(fft_length)
         self.fft_window.set(window)
 
+    @locked_calling
     def set_custom(self, cust_user_lib, cust_param1, cust_param2, cust_param3, cust_param4,
                    nb_Msample='min',  chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         """
@@ -1632,7 +1648,8 @@ You can start a server with:
         self.cust_param3.set(cust_param3)
         self.cust_param4.set(cust_param4)
         self.cust_user_lib.set(cust_user_lib)
-        
+
+    @locked_calling
     def run(self):
         """
         This function checks the validity of the current configuration.

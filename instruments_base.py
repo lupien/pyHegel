@@ -7,6 +7,7 @@ import functools
 import os
 import signal
 import time
+import inspect
 import threading
 import weakref
 from collections import OrderedDict  # this is a subclass of dict
@@ -242,6 +243,105 @@ def _write_dev(val, filename, format=format, first=False):
             np.savetxt(f, val.T, fmt='%.18g', delimiter='\t')
     f.close()
 
+
+def _retry_wait(func, timeout, delay=0.01):
+    """
+    this calls func() and stops when the return value is True
+    or timeout seconds have passed.
+    delay is the sleep duration between attempts.
+    """
+    endtime = time.time() + timeout
+    ret = False
+    while True:
+        ret = func()
+        if ret:
+            break
+        remaining = endtime - time.time()
+        if remaining <= 0:
+            break
+        delay = min(delay, remaining)
+        sleep(delay)
+    return ret
+
+
+class Lock_Extra(object):
+    def acquire(self):
+        return False
+    __enter__ = acquire
+    def release(self):
+        pass
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        self.release()
+    def is_owned(self):
+        return False
+    def force_release(self):
+        pass
+
+
+class Lock_Instruments(threading._RLock):
+    """
+    This is similar to threading.RLock (reentrant lock)
+    except acquire always waits in a non-blocking state.
+    Therefore you can press CTRL-C to stop the wait.
+    However if the other threads does not release the lock for long
+    enough, we might never be able to acquire it.
+    """
+    def acquire_timeout(self, timeout):
+        func = lambda : super(Lock_Instruments, self).acquire(blocking=0)
+        return _retry_wait(func, timeout, delay=0.001)
+    def acquire(self):
+        return wait_on_event(self.acquire_timeout)
+    def is_owned(self):
+        return self._is_owned()
+    def force_release(self):
+        n = 0
+        try:
+            while True:
+                self.release()
+                n += 1
+        except RuntimeError as exc:
+            if exc.message != "cannot release un-acquired lock":
+                raise
+        if n:
+            print 'Released Intrument lock', n, 'time(s)'
+        else:
+            print 'Instrument lock was not held'
+
+# Use this as a decorator
+def locked_calling(func, extra=''):
+    """ This function is to be used as a decorator on a class method.
+        It will wrap func with
+          with self._lock_instrument, self._lock_extra:
+        Only use on method in classes derived from BaseInstrument
+    """
+    argspec = inspect.getargspec(func)
+    (args, varargs, varkw, defaults) = argspec
+    def_arg = inspect.formatargspec(*argspec) # this is: (self, arg1, arg2, kw1=1, kw2=5, *arg, *kwarg)
+    use_arg = inspect.formatargspec(*argspec, formatvalue=lambda name: '') # this is: (self, arg1, arg2, kw1, kw2, *arg, *kwarg)
+    selfname = args[0]+extra
+    def_str = """
+@functools.wraps(func)
+def locked_call_wrapper{def_arg}:
+        " locked_call_wrapper is a wrapper that executes func with the instrument locked."
+        with {self}._lock_instrument, {self}._lock_extra:
+            return func{use_arg}
+    """.format(def_arg=def_arg, use_arg=use_arg, self=selfname)
+    lcl = locals()
+    lcl.update(functools=functools)
+    #code = compile(def_str, inspect.getsourcefile(func), 'exec')
+    #exec(code, lcl)
+    exec(def_str, lcl)
+    ### only for ipython 0.12
+    ### This makes newfunc?? show the correct function def (including decorator)
+    ### note that for doc, ipython tests for getdoc method
+    locked_call_wrapper.__wrapped__ = func
+    return locked_call_wrapper
+
+def locked_calling_dev(func):
+    """ Same as locked_calling, but for a BaseDevice subclass. """
+    return locked_calling(func, extra='.instr')
+
+
 # Taken from python threading 2.7.2
 class FastEvent(threading._Event):
     def __init__(self, verbose=None):
@@ -266,17 +366,8 @@ class FastCondition(threading._Condition):
                 # Balancing act:  We can't afford a pure busy loop, so we
                 # have to sleep; but if we sleep the whole timeout time,
                 # we'll be unresponsive.
-                endtime = time.time() + timeout
-                delay = 0.01
-                while True:
-                    gotit = waiter.acquire(0)
-                    if gotit:
-                        break
-                    remaining = endtime - time.time()
-                    if remaining <= 0:
-                        break
-                    delay = min(delay, remaining)
-                    sleep(delay)
+                func = lambda : waiter.acquire(0)
+                gotit = _retry_wait(func, timeout, delay=0.01)
                 if not gotit:
                     if __debug__:
                         self._note("%s.wait(%s): timed out", self, timeout)
@@ -310,7 +401,7 @@ class FastCondition(threading._Condition):
 #Allow to chain one device on completion of another one.
 
 class asyncThread(threading.Thread):
-    def __init__(self, operations, detect=None, delay=0., trig=None):
+    def __init__(self, operations, lock_instrument, lock_extra, init_ops, detect=None, delay=0., trig=None):
         super(asyncThread, self).__init__()
         self.daemon = True
         self._stop = False
@@ -318,27 +409,27 @@ class asyncThread(threading.Thread):
         self._async_trig = trig
         self._async_detect = detect
         self._operations = operations
+        self._lock_instrument = lock_instrument
+        self._lock_extra = lock_extra
+        self._init_ops = init_ops # a list of (func, args, kwargs)
         self.results = []
+    def add_init_op(self, func, *args, **kwargs):
+        self._init_ops.append((func, args, kwargs))
     def change_delay(self, new_delay):
         self._async_delay = new_delay
     def change_trig(self, new_trig):
         self._async_trig = new_trig
     def change_detect(self, new_detect):
         self._async_detect = new_detect
+    @locked_calling
     def run(self):
         #t0 = time.time()
+        for f, args, kwargs in self._init_ops:
+            f(*args, **kwargs)
         delay = self._async_delay
         if delay and not CHECKING:
-            diff = 0.
-            start_time = time.time()
-            while diff < delay:
-                left = delay - diff
-                 # it is okay to use time.sleep instead of sleep here
-                 # because it is never running in main thread
-                time.sleep(min(left, 0.1))
-                if self._stop:
-                    break
-                diff = time.time() - start_time
+            func = lambda: self._stop
+            _retry_wait(func, timeout=delay, delay=0.1)
         if self._stop:
             return
         if self._async_trig and not CHECKING:
@@ -500,6 +591,7 @@ class BaseDevice(object):
         return doc + added + extra + doc_base
     # for cache consistency
     #    get should return the same thing set uses
+    @locked_calling_dev
     def set(self, val, **kwarg):
         self.check(val, **kwarg)
         if not CHECKING:
@@ -510,6 +602,7 @@ class BaseDevice(object):
             raise NotImplementedError, self.perror('This device does not handle _setdev')
         # only change cache after succesfull _setdev
         self._cache = val
+    @locked_calling_dev
     def get(self, **kwarg):
         if not CHECKING:
             self._last_filename = None
@@ -533,15 +626,17 @@ class BaseDevice(object):
             ret = self._cache
         self._cache = ret
         return ret
+    #@locked_calling_dev
     def getcache(self):
-        if self._cache==None and self._autoinit:
-            # This can fail, but getcache should not care for
-            #InvalidAutoArgument exceptions
-            try:
-                return self.get()
-            except InvalidAutoArgument:
-                self._cache = None
-        return self._cache
+        with self.instr._lock_instrument: # only local data, so don't need _lock_extra
+            if self._cache==None and self._autoinit:
+                # This can fail, but getcache should not care for
+                #InvalidAutoArgument exceptions
+                try:
+                    return self.get()
+                except InvalidAutoArgument:
+                    self._cache = None
+            return self._cache
     def _do_redir_async(self):
         obj = self
         # go through all redirections
@@ -550,15 +645,25 @@ class BaseDevice(object):
         return obj
     def getasync(self, async, **kwarg):
         obj = self._do_redir_async()
-        ret = obj.instr._get_async(async, obj,
+        if async != 3 or self == obj:
+            ret = obj.instr._get_async(async, obj,
                            trig=obj._trig, delay=obj._delay, **kwarg)
         # now make sure obj._cache and self._cache are the same
-        if async == 3 and self != obj:
-            self.setcache(ret)
-            self._last_filename = obj._last_filename
+        else: # async == 3 and self != obj:
+            # async thread is finished, so lock should be available
+            with self.instr._lock_instrument: # only local data, so don't need _lock_extra
+                #_get_async blocks if it is not in the correct thread and is not
+                #complete. Here we just keep the lock until setcache is complete
+                # so setcache does not have to wait for a lock.
+                ret = obj.instr._get_async(async, obj,
+                               trig=obj._trig, delay=obj._delay, **kwarg)
+                self.setcache(ret)
+                self._last_filename = obj._last_filename
         return ret
+    #@locked_calling_dev
     def setcache(self, val):
-        self._cache = val
+        with self.instr._lock_instrument: # only local data, so don't need _lock_extra
+            self._cache = val
     def __call__(self, val=None):
         if val==None:
             return self.getcache()
@@ -711,13 +816,19 @@ class BaseInstrument(object):
     alias = None
     def __init__(self):
         self.header_val = None
+        self._lock_instrument = Lock_Instruments()
+        if not hasattr(self, '_lock_extra'):
+            # don't overwrite what is assigned in subclasses
+            self._lock_extra = Lock_Extra()
         self._create_devs()
         self._async_list = []
+        self._async_list_init = []
         self._async_level = -1
         self._async_counter = 0
         self.async_delay = 0.
         self._async_delay_check = True
         self._async_task = None
+        self._async_current_calling_thread = None
         self._last_force = time.time()
         if not CHECKING:
             self.init(full=True)
@@ -727,7 +838,29 @@ class BaseInstrument(object):
         return True
     def _async_trig(self):
         pass
+    def _get_async_block(self):
+        # This only runs if we are in the same thread as previous calls to async
+        # otherwise we wait for the other async to terminate.
+        # So if we break a running async, we should be able to restart it in
+        # the same thread but another thread might hang waiting for us.
+        # This is done so that we can block an async without holding the lock
+        # since the lock needs to be held by async_thread. But we need to
+        # protect the whole async block
+        while True:
+            with self._lock_instrument:
+                current_thread = threading.current_thread()
+                if self._async_current_calling_thread == None:
+                    self._async_current_calling_thread = current_thread
+                if self._async_current_calling_thread == current_thread:
+                    return
+            # wait for another thread to give up
+            sleep(0.02)
+            with _delayed_signal_context_manager():
+                # processEvents is for the current Thread.
+                # if a thread does not have and event loop, this does nothing (not an error)
+                QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 20) # 20 ms max
     def _get_async(self, async, obj, delay=False, trig=False, **kwarg):
+        self._get_async_block()
         if async == -1: # we reset task
             if self._async_level > 1:
                 self._async_task.cancel()
@@ -741,7 +874,8 @@ class BaseInstrument(object):
         if async == 0:  # setup async task
             if self._async_level == -1: # first time through
                 self._async_list = []
-                self._async_task = asyncThread(self._async_list)
+                self._async_list_init = []
+                self._async_task = asyncThread(self._async_list, self._lock_instrument, self._lock_extra, self._async_list_init)
                 self._async_level = 0
             if delay:
                 if self._async_delay_check and self.async_delay == 0.:
@@ -768,6 +902,7 @@ class BaseInstrument(object):
             if self._async_counter == len(self._async_task.results):
                 # delete task so that instrument can be deleted
                 del self._async_task
+                self._async_current_calling_thread = None
             return ret
     def find_global_name(self):
         return _find_global_name(self)
@@ -867,6 +1002,7 @@ class BaseInstrument(object):
         if self.alias == None:
             raise TypeError, self.perror('This instrument does not have an alias for call')
         return self.alias()
+    @locked_calling
     def force_get(self):
         """
            Rereads all devices that have autoinit=True
@@ -888,6 +1024,7 @@ class BaseInstrument(object):
             except InvalidAutoArgument:
                 pass
         self._last_force = time.time()
+    @locked_calling
     def iprint(self, force=False):
         poptions = np.get_printoptions()
         if force:
@@ -921,6 +1058,17 @@ class BaseInstrument(object):
         pass
     def trigger(self):
         pass
+    def lock_force_release(self):
+        self._lock_instrument.force_release()
+        self._lock_extra.force_release()
+    def lock_is_owned(self):
+        return self._lock_instrument.is_owned() or self._lock_extra.is_owned()
+    def _lock_acquire(self):
+        self._lock_instrument.acquire()
+        self._lock_extra.acquire()
+    def _lock_release(self):
+        self._lock_instrument.release()
+        self._lock_extra.release()
 
 
 #######################################################
@@ -1088,6 +1236,7 @@ class scpiDevice(BaseDevice):
         opt.update(d)
         opt.update(extradict)
         return opt
+    @locked_calling_dev
     def getcache(self):
         #we need to check if we still are using the same options
         curr_cache = self._get_option_values()
@@ -1789,6 +1938,64 @@ class Dict_SubDevice(BaseDevice):
         self._subdevice.set(vals)
 
 
+
+
+
+class Lock_Visa(object):
+    """
+    This handles the locking of the visa session.
+    Once locked, this prevents any other visa session (same process or not) to
+    the same instrument from communicating with it.
+    It is a reentrant lock (release the same number of times as acquire
+    to fully unlock).
+    """
+    def __init__(self, vi):
+        self._vi = vi
+        self._count = 0
+    def _visa_lock(self, timeout=0.001):
+        """
+        It returns True if the lock was acquired before timeout, otherwise it
+        returns False
+        """
+        timeout = max(int(timeout/1e-3),1) # convert from seconds to milliseconds
+        try:
+            vpp43.lock(self._vi, vpp43.VI_EXCLUSIVE_LOCK, timeout)
+        except vpp43.VisaIOError as exc:
+            if exc.error_code == vpp43.VI_ERROR_TMO:
+                return False
+            else:
+                raise
+        else:
+            # we have lock
+            self._count += 1
+            return True
+    def release(self):
+        vpp43.unlock(self._vi) # could produce VI_ERROR_SESN_NLOCKED
+        self._count -= 1
+    def acquire(self):
+        return wait_on_event(self._visa_lock)
+    __enter__ = acquire
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        self.release()
+    def is_owned(self):
+        return self._count != 0
+    def force_release(self):
+        n = 0
+        expect = self._count
+        try:
+            while True:
+                self.release()
+                n += 1
+        except vpp43.VisaIOError as exc:
+            if exc.error_code != vpp43.VI_ERROR_SESN_NLOCKED:
+                raise
+        if n:
+            print 'Released Visa lock', n, 'time(s) (expected %i releases)'%expect
+        else:
+            print 'Visa lock was not held (expected %i releases)'%expect
+        self._count = 0
+
+
 #######################################################
 ##    VISA Instrument
 #######################################################
@@ -1812,6 +2019,7 @@ class visaInstrument(BaseInstrument):
         self.visa_addr = visa_addr
         if not CHECKING:
             self.visa = visa.instrument(visa_addr)
+            self._lock_extra = Lock_Visa(self.visa.vi)
         self.visa.timeout = 3 # in seconds
         BaseInstrument.__init__(self)
     def __del__(self):
@@ -1874,10 +2082,13 @@ class visaInstrument(BaseInstrument):
             else:
                 val = vpp43.VI_GPIB_REN_ADDRESS_GTL
         vpp43.gpib_control_ren(self.visa.vi, val)
+    @locked_calling
     def read(self):
         return self.visa.read()
+    @locked_calling
     def write(self, val):
         self.visa.write(val)
+    @locked_calling
     def ask(self, question, raw=False):
         """
         Does write then read.
@@ -2002,16 +2213,17 @@ class visaInstrumentAsync(visaInstrument):
         return vpp43.VI_SUCCESS
     def _get_esr(self):
         return int(self.ask('*esr?'))
+    def  _async_detect_poll_func(self):
+        status = self.read_status_byte()
+        if status & 0x40:
+            self._async_last_status = status
+            self._async_last_esr = self._get_esr()
+            return True
+        return False
     def _async_detect(self, max_time=.5): # 0.5 s max by default
         if self._async_polling:
-            to = time.time()
-            while time.time()-to < max_time:
-                status = self.read_status_byte()
-                if status & 0x40:
-                    self._async_last_status = status
-                    self._async_last_esr = self._get_esr()
-                    return True
-                sleep(.05)
+            if _retry_wait(self._async_detect_poll_func, max_time, delay=0.05):
+                return True
         elif self._RQS_status == -1:
             ev_type = context = None
             try:
@@ -2038,11 +2250,13 @@ class visaInstrumentAsync(visaInstrument):
                 self._RQS_done.clear() # so that we can detect the next SRQ if needed without  _doing async_trig (_async_trig_cleanup)
                 return True
         return False
+    @locked_calling
     def wait_after_trig(self):
         """
         waits until the triggered event is finished
         """
         return wait_on_event(self._async_detect)
+    @locked_calling
     def run_and_wait(self):
         """
         This initiate a trigger and waits for it to finish.
@@ -2065,17 +2279,21 @@ class visaInstrumentAsync(visaInstrument):
             self._RQS_status = 0
             self._RQS_done.clear()
         else:
+            n = 0
             try:
                 while True:
                     ev_type = context = None
                     ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 0)
                     if context != None:
                         vpp43.close(context)
-                    print 'Unread event queue!'
+                    n += 1
             except:
                 pass
+            if n>0:
+                print 'Unread(%i) event queue!'%n
         self._async_last_status = 0
         self._async_last_esr = 0
+    @locked_calling
     def _async_trig(self):
         self._async_trig_cleanup()
         self._async_trigger_helper()

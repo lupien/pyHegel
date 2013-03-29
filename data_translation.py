@@ -8,7 +8,7 @@ Created on Tue Aug 28 11:08:58 2012
 
 from instruments_base import BaseInstrument, scpiDevice, ChoiceIndex,\
                             wait_on_event, BaseDevice, MemoryDevice, ReadvalDev,\
-                            sleep
+                            _retry_wait, locked_calling
 import sys
 import time
 import numpy as np
@@ -207,29 +207,30 @@ class DataTranslation(BaseInstrument):
     def init(self,full = False):
         if full:
             self.output.set(0.)
+    @locked_calling
     def _output_setdev(self, val):
         self._analog_out.SetSingleValueAsVolts(0, val)
+    @locked_calling
     def write(self, string):
         exec('self.'+string)
+    @locked_calling
     def ask(self, string, raw=False):
         # raw is not used here but is needed by scpiDevice methods
         return eval('self.'+string)
     def _async_trig(self):
         self.run()
     def _async_detect(self, max_time=.5): # 0.5 s max by default
-        to = time.time()
-        is_finished = not self._analog_in.IsRunning
-        while time.time()-to < max_time or not is_finished:
-            sleep(.05)
-            is_finished = not self._analog_in.IsRunning
-        return is_finished
+        func = lambda: not self._analog_in.IsRunning
+        return _retry_wait(func, timeout=max_time, delay=0.05)
         # Also ai.State
         #return instrument.wait_on_event(self._run_finished, check_state=self, max_time=max_time)
+    @locked_calling
     def wait_after_trig(self):
         """
         waits until the triggered event is finished
         """
         return wait_on_event(self._async_detect)
+    @locked_calling
     def run_and_wait(self):
         """
         This performs a run and waits for it to finish.
@@ -237,6 +238,7 @@ class DataTranslation(BaseInstrument):
         """
         self._async_trig()
         self.wait_after_trig()
+    @locked_calling
     def abort(self):
         self._analog_in.Abort()
     def _clean_channel_list(self):
@@ -248,6 +250,7 @@ class DataTranslation(BaseInstrument):
     @staticmethod
     def _delegate_handler(source, args):
         print 'My handler Called!', source, args
+    @locked_calling
     def run(self):
         clist = self._clean_channel_list()
         if len(clist) == 0:
@@ -358,6 +361,7 @@ class DataTranslation(BaseInstrument):
         # Since user cannot change change values except without using this program
         # the cache are always up to date and this is not needed.
         pass
+    @locked_calling
     def set_simple_acq(self, nb_samples=1024, channel_list=[0], clock=None):
         """
         nb_sample is the number of samples per channel to acquire

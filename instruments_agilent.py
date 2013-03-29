@@ -12,7 +12,7 @@ from instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDevSwitch,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
                             decode_uint16_bin, _decode_block_base, decode_float64_2col,\
-                            decode_complex128, sleep
+                            decode_complex128, sleep, locked_calling
 
 #######################################################
 ##    Agilent RF 33522A generator
@@ -78,7 +78,8 @@ class agilent_PowerMeter(visaInstrumentAsync):
         super(agilent_PowerMeter, self).__init__(visa_addr, poll='not_gpib')
     def read_status_byte(self):
         if self._async_polling:
-            return int(self.ask('*STB?'))
+            with self._lock_instrument, self._lock_extra:
+                return int(self.ask('*STB?'))
         else:
             return super(agilent_PowerMeter, self).read_status_byte()
     def _current_config(self, dev_obj=None, options={}):
@@ -92,6 +93,7 @@ class agilent_PowerMeter(visaInstrumentAsync):
                                  'duty_cycle_percent', 'duty_cycle_en',
                                  'freq', 'freq_offset', 'freq_offset_unit',
                                  options)
+    @locked_calling
     def _async_trig(self):
         self.trig_delay_en.set(True)
         self.cont_trigger.set(False)
@@ -340,6 +342,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
             if self.temperature_transducer.getcache() in t_ch[['rtd', 'frtd']]:
                 extra += ('temperature_transducer_rtd_ref', 'temperature_transducer_rtd_off')
         return self._conf_helper(*(baselist + extra + (options,)))
+    @locked_calling
     def set_long_avg(self, time, force=False):
         """
         Select a time in seconds.
@@ -365,6 +368,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
                 width = line_period*round(width/line_period)
         self.aperture.set(width)
         self.sample_count.set(count)
+    @locked_calling
     def show_long_avg(self):
         # update mode first, so aperture applies to correctly
         self.mode.get()
@@ -656,6 +660,7 @@ class infiniiVision_3000(visaInstrument):
         if ret.shape[0]==1:
             ret=ret[0]
         return ret
+    @locked_calling
     def find_all_active_channels(self):
         orig_ch = self.current_channel.get()
         ret = []
@@ -731,6 +736,7 @@ class agilent_EXA(visaInstrumentAsync):
         self.write(':format REAL,64')
         self.write(':format:border swap')
         super(agilent_EXA, self).init(full=full)
+    @locked_calling
     def _async_trig(self):
         self.cont_trigger.set(False)
         super(agilent_EXA, self)._async_trig()
@@ -1020,6 +1026,7 @@ class agilent_EXA(visaInstrumentAsync):
         if mkr<1 or mkr>12:
             raise ValueError, self.perror('mkr need to be between 1 and 12')
         self.write('CALCulate:MARKer{mkr}:CENTer'.format(mkr=mkr))
+    @locked_calling
     def get_xscale(self):
         """
         Returns the currently active x scale. It uses cached values so make sure
@@ -1202,6 +1209,7 @@ class agilent_PNAL(visaInstrumentAsync):
         self.write(':format REAL,64')
         self.write(':format:border swap')
         super(agilent_PNAL, self).init(full=full)
+    @locked_calling
     def _async_trig(self):
         # we don't use the STATus:OPERation:AVERaging1? status
         # because for n averages they turn on after the n-1 average.
@@ -1236,6 +1244,7 @@ class agilent_PNAL(visaInstrumentAsync):
         return True
     def abort(self):
         self.write('ABORt')
+    @locked_calling
     def create_measurement(self, name, param, ch=None):
         """
         name: any unique, non-empty string. If it already exists, we change its param
@@ -1255,6 +1264,7 @@ class agilent_PNAL(visaInstrumentAsync):
         else:
             command = 'CALCulate{ch}:PARameter:EXTended "{name}","{param}"'.format(ch=ch, name=name, param=param)
         self.write(command)
+    @locked_calling
     def delete_measurement(self, name=None, ch=None):
         """ delete a measurement.
             if name == None: delete all measurements for ch
@@ -1269,6 +1279,7 @@ class agilent_PNAL(visaInstrumentAsync):
         else:
             command = 'CALCulate{ch}:PARameter:DELete:ALL'.format(ch=ch)
         self.write(command)
+    @locked_calling
     def restart_averaging(self, ch=None):
         #sets ch if necessary
         if not self.average_en.get(ch=ch):
@@ -1663,6 +1674,7 @@ class agilent_ENA(agilent_PNAL):
     def reset_trig(self):
         self.trig_source.set('INTernal')
         self.cont_trigger.set(True)
+    @locked_calling
     def _async_trig(self):
         self.cont_trigger.set(False)
         super(agilent_PNAL, self)._async_trig()
@@ -1741,6 +1753,7 @@ class agilent_ENA(agilent_PNAL):
         else: # traces == None
             traces = all_tr
         return traces
+    @locked_calling
     def initiate(self):
         """ Enables the current channel for triggering purposes """
         ch = self.current_channel.getcache()
@@ -1977,6 +1990,7 @@ class agilent_AWG(visaInstrumentAsync):
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
+    @locked_calling
     def run(self, enable=True, ch=None):
         """
         When channels are coupled, both are affected.
@@ -1988,6 +2002,7 @@ class agilent_AWG(visaInstrumentAsync):
             self.ask(':INITiate:IMMediate%i;*OPC?'%ch)
         else:
             self.ask(':ABORt%i;*OPC?'%ch)
+    @locked_calling
     def set_length(self, sample_length, ch=None, init_val=None):
         """
         init_val is the DAC value to use for initialization. No initialization by default.
@@ -2000,6 +2015,7 @@ class agilent_AWG(visaInstrumentAsync):
         if init_val != None:
             extra=',{init}'
         self.write((':TRACe{ch}:DELete:ALL;:TRACe{ch}:DEFine 1,{L}'+extra).format(ch=ch, L=sample_length, init=init_val))
+    @locked_calling
     def load_file(self, filename, ch=None, fill=False):
         """
         filename needs to be a file in the correct binary format.
