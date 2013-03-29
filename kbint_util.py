@@ -55,7 +55,8 @@ class _sleep_signal_context_manager():
             _empty_async()
             return self # will be used for target in : with xxx as target
         except KeyboardInterrupt: # capture a break (possibly async)
-            signal.signal(signal.SIGINT, self.old_sig)
+            if self.old_sig: # we can get here with old_sig == None, it is rare but I have seen it
+                signal.signal(signal.SIGINT, self.old_sig)
             raise
     def __exit__(self, exc_type, exc_value, exc_traceback):
         # exc_type, exc_value, exc_traceback are None if no exception occured
@@ -120,7 +121,8 @@ class _delayed_signal_context_manager():
             _empty_async()
             return self # will be used for target in : with xxx as target
         except KeyboardInterrupt: # capture a break (possibly async)
-            signal.signal(signal.SIGINT, self.old_sig)
+            if self.old_sig: # we can get here with old_sig == None, it is rare but I have seen it
+                signal.signal(signal.SIGINT, self.old_sig)
             raise
     def __exit__(self, exc_type, exc_value, exc_traceback):
         # exc_type, exc_value, exc_traceback are None if no exception occured
@@ -128,7 +130,7 @@ class _delayed_signal_context_manager():
             signal.signal(signal.SIGINT, self.old_sig)
             # Starting from here, delayed_sigint_handle will no longer be called
             # And if it was called before the switch, it completed because
-            # we are in the main thread, and the signal is executed the main thread.
+            # we are in the main thread, and the signal is executed in the main thread.
             if self.signaled and not exc_type:
                 self.ctrlc_occured = True
                 if not self.absorb_ctrlc:
