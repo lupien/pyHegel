@@ -208,6 +208,16 @@ if __name__ == "__main__":
             print 'The interrupt reached the python main thread'
         else:
             print 'WARNING: the Qt event loop absorbed the exception'
+    def test_signal_absorb(timeout=10):
+        def new_signal(sig, stack):
+            print 'Got Signal'
+        old_signal = signal.signal(signal.SIGINT, new_signal)
+        _empty_async()
+        print 'Press CTRL-C many times in the next ', timeout, ' seconds'
+        to = time.time()
+        while time.time()-to < timeout:
+            signal.signal(signal.SIGINT, new_signal)
+        signal.signal(signal.SIGINT, old_signal)
     print '------------- disassembly of _empty_async -----------------------'
     dis.dis(_empty_async)
     print '------------- test_async -----------------------'
@@ -225,3 +235,16 @@ if __name__ == "__main__":
     test_qtloop()
     print '------------- test_qtloop with context-----------------------'
     test_qtloop(with_context=True)
+    print '------------- test_signal_absorb-----------------------'
+    print '  python 2.7.2 can absorb signals when changing signals'
+    print '  Therefore it is normal that not all CTRL-C produce a Got Signal'
+    # problem is the c codes resets the tripped signal when changing the signal
+    # therefore, if a signal arrives during the change, it will not call the
+    # python handler.
+    # Only option is not change the signal handler too often, and to live with
+    # the rare event where a CTRL-C can be absorbed.
+    # This problem was first detected because a timeout was set incorrectly (too short)
+    # so that signal.signal was called too rapidly. Fixing that bug, made the problem
+    # disappear (technically still there but cannot observe it anymore because it is now
+    # too rare.)
+    test_signal_absorb()
