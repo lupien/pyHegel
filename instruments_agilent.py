@@ -1468,18 +1468,20 @@ class agilent_PNAL(visaInstrumentAsync):
             app = kwarg.pop('options_apply', ['ch'])
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
-        self.channel_list = devChOption(getstr='CALCulate{ch}:PARameter:CATalog:EXTended?', str_type=quoted_dict(), doc='Note that some , are replaced by _')
+        self.channel_list = devChOption(getstr='CALCulate{ch}:PARameter:CATalog:EXTended?', str_type=quoted_dict(),
+                                        autoinit=10, doc='Note that some "," are replaced by "_"')
         traceN_options = dict(trace=1)
         traceN_options_lim = dict(trace=(1,None))
         # The instrument complains that MEASurement12 is too long (for 2 digit trace)
         # so use just MEAS instead
         # I think it must be a limit of 12 characters for every scpi element (between :)
-        self.traceN_name = scpiDevice(getstr=':SYSTem:MEAS{trace}:NAME?', str_type=quoted_string(),
+        # make autoinit=False because the default of trace=1 might not exist
+        self.traceN_name = scpiDevice(getstr=':SYSTem:MEAS{trace}:NAME?', str_type=quoted_string(), autoinit=False,
                                       options = traceN_options, options_lim = traceN_options_lim)
-        self.traceN_window = scpiDevice(getstr=':SYSTem:MEAS{trace}:WINDow?', str_type=int,
+        self.traceN_window = scpiDevice(getstr=':SYSTem:MEAS{trace}:WINDow?', str_type=int, autoinit=False,
                                       options = traceN_options, options_lim = traceN_options_lim)
         # windowTrace restarts at 1 for each window
-        self.traceN_windowTrace = scpiDevice(getstr=':SYSTem:MEAS{trace}:TRACe?', str_type=int,
+        self.traceN_windowTrace = scpiDevice(getstr=':SYSTem:MEAS{trace}:TRACe?', str_type=int, autoinit=False,
                                       options = traceN_options, options_lim = traceN_options_lim)
         traceN_name_func = self.traceN_name
         select_trace_choices = ChoiceDevSwitch(self.channel_list,
