@@ -1164,21 +1164,24 @@ You can start a server with:
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
         
-    #class methode     
-    @locked_calling
-    def write(self, val):
+
+    def _base_unlock_write(self, val):
         self._check_error()
         val = '@' + val + '\n'
         self.s.send(val)
 
-    # only use read, ask before starting listen thread.
+    #class method
     @locked_calling
+    def write(self, val):
+        self._base_unlock_write(val)
+
+    # only use read, ask before starting listen thread.
+    # These are not locked, so can be used before initializing base class
     def read(self):
         return self.s.recv(128)
 
-    @locked_calling
     def ask(self, quest):
-        self.write(quest)
+        self._base_unlock_write(quest)
         return self.read()
 
     def force_get(self):
