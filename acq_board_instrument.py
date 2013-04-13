@@ -197,7 +197,7 @@ class Listen_thread(threading.Thread):
     def cancel(self):
         self._stop = True
     def wait(self, timeout=None):
-        # we use a the context manager because join uses sleep.
+        # we use the context manager because join uses sleep.
         with _sleep_signal_context_manager():
             self.join(timeout)
         return not self.is_alive()
