@@ -8,6 +8,7 @@ import os
 import signal
 import time
 import inspect
+import thread
 import threading
 import weakref
 from collections import OrderedDict  # this is a subclass of dict
@@ -291,6 +292,7 @@ class Lock_Instruments(threading._RLock):
         return _retry_wait(func, timeout, delay=0.001)
     def acquire(self):
         return wait_on_event(self.acquire_timeout)
+    __enter__ = acquire
     def is_owned(self):
         return self._is_owned()
     def force_release(self):
@@ -306,6 +308,14 @@ class Lock_Instruments(threading._RLock):
             print 'Released Intrument lock', n, 'time(s)'
         else:
             print 'Instrument lock was not held'
+        try:
+            self._RLock__block.release()
+        except thread.error as exc:
+            if exc.message != 'release unlocked lock':
+                raise
+        else:
+            print 'Inner lock was still locked, now released.'
+
 
 # Use this as a decorator
 def locked_calling(func, extra=''):
@@ -846,6 +856,8 @@ class BaseInstrument(object):
         # This is done so that we can block an async without holding the lock
         # since the lock needs to be held by async_thread. But we need to
         # protect the whole async block
+        # In case the trade the was interrupted cannot be restarted,
+        # it might be necessary to set _async_current_calling_thread=None
         while True:
             with self._lock_instrument:
                 current_thread = threading.current_thread()
