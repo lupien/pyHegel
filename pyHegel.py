@@ -235,6 +235,8 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         extra_conf = [extra_conf]
     elif extra_conf == None:
         extra_conf = []
+    else:
+        extra_conf = extra_conf[:] # make a copy so we can change it locally
     if setdev != None:
         hdrs.append(setdev.getfullname())
         count += 1
