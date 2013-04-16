@@ -1134,12 +1134,17 @@ You can start a server with:
         self.hist_c5 = acq_device(getstr = 'DATA:HIST:C5?', str_type = float, autoinit=False, trig=True)
         self._devwrap('hist_cs', autoinit=False, trig=True)
         
-        # network analyzer result
+        # custom result
         self.custom_result1 = acq_device(getstr = 'DATA:CUST:RESULT1?',str_type = float, autoinit=False, trig=True)
         self.custom_result2 = acq_device(getstr = 'DATA:CUST:RESULT2?',str_type = float, autoinit=False, trig=True)
         self.custom_result3 = acq_device(getstr = 'DATA:CUST:RESULT3?',str_type = float, autoinit=False, trig=True)
         self.custom_result4 = acq_device(getstr = 'DATA:CUST:RESULT4?',str_type = float, autoinit=False, trig=True)
-        
+
+        # correlation result
+        self.corr_ch1_last_avg = acq_device(getstr = 'DATA:CORR:CH1_LAST_AVG?', str_type = float, autoinit=False, trig=True)
+        self.corr_ch2_last_avg = acq_device(getstr = 'DATA:CORR:CH2_LAST_AVG?', str_type = float, autoinit=False, trig=True)
+
+        # network analyzer result
         self.net_ch1_freq = acq_device(getstr = 'DATA:NET:CH1_FREQ?',str_type = float, autoinit=False, trig=True)
         self.net_ch2_freq = acq_device(getstr = 'DATA:NET:CH2_FREQ?',str_type = float, autoinit=False, trig=True)
         self.net_ch1_ampl = acq_device(getstr = 'DATA:NET:CH1_AMPL?',str_type = float, autoinit=False, trig=True)
