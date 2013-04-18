@@ -41,6 +41,9 @@ def undo_escape(message):
     esc = '\x07'
     in_esc = False
     for c in message:
+        if c == esc and not in_esc:
+            in_esc = True
+            continue
         if in_esc:
             in_esc = False
             if c == '0':
@@ -51,9 +54,6 @@ def undo_escape(message):
                 c = '\07'
             else:
                 raise ValueError, 'Invalid escape character: %r'%c
-        if c == esc:
-            in_esc = True
-            continue
         ret += c
     return ret
 
