@@ -140,6 +140,8 @@ def getVarNames(func):
     return (para, kwpara, varargs, varkw, defaults)
 
 def toEng(p, pe, signif=2):
+    if not np.isscalar(p): # lists and arrays:
+        raise NotImplementedError
     if pe != 0:
         pe10 = np.log10(np.abs(pe))
     else:
@@ -175,7 +177,10 @@ def convVal(p, pe, signif=2):
         p_rescaled, pe_rescaled, expEng, frac_prec = toEng(p, pe, signif=signif)
     except NotImplementedError:
         # p is not a numeric type
-        return '%r'%p, None, None
+        s = '%r'%p
+        if len(s)>20:
+            s=s[:17]+'...'
+        return s, None, None
     if pe == 0:
         if p == 0:
             return '0', None, '0'
@@ -203,7 +208,10 @@ def _splitResult(names, ps, pes, signif=2):
     i = 0
     for name, p, pe, in zip(names, ps, pes):
         pstr, pestr, expstr = convVal(p, pe, signif=signif)
-        pstr_l, pstr_r = _split_decimal(pstr)
+        if expstr == None:
+            pstr_l, pstr_r = pstr, ''
+        else:
+            pstr_l, pstr_r = _split_decimal(pstr)
         pestr_l, pestr_r = _split_decimal(pestr)
         if expstr == None:
             expstr = ''
