@@ -1414,9 +1414,9 @@ def load(names=None, newnames=None):
 
        NOTE: You can always load an instrument manually. You just need to initialize
        the instrument class with the proper address. For example you can replace
-        ;load yo1
+        ;load dmm1
        with
-        yo1 = instruments.agilent_multi_34410A(10)
+        dmm1 = instruments.agilent_multi_34410A(11)
        The class names are showed when running load without arguments.
        For GPIB address you can enter just the address as an integer or the
        full visa name like those returned from find_all_instruments()
