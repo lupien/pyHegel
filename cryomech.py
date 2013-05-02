@@ -380,6 +380,18 @@ def get_startofweek(time_tuple):
     d = d - datetime.timedelta(day_offset)
     return d.timetuple()[:3] # year, month, day
 
+def time_to_str(seconds):
+    t = time.localtime(seconds)
+    s = time.strftime('%Y-%m-%d %H:%M:%S  %a', t)
+    tzoff = time.altzone if t.tm_isdst else time.timezone
+    tzoff = -tzoff # ISO 8601 is reverse of offsets
+    sign = '+'
+    if tzoff<0:
+        tzoff = -tzoff
+        sign = '-'
+    tzoff_hour = tzoff/3600
+    tzoff_min  = (tzoff/60)%60
+    return s+'  %s%02d%02d'%(sign, tzoff_hour, tzoff_min)
 
 def do_log(com_obj, path, wait=5*60.):
     """
@@ -399,9 +411,10 @@ def do_log(com_obj, path, wait=5*60.):
              'pressure_low_min', 'pressure_low', 'pressure_low_avg', 'pressure_low_max',
              'pressure_high_min', 'pressure_high', 'pressure_high_avg', 'pressure_high_max',
              'pressure_delta_avg', 'pressure_deriv']
-    header = '# Temps in C, pressures in psi\n'+'\t'.join(['time']+param)+'\n'
+    header = '# Temps in C, pressures in psi\n#'+'\t'.join(['time']+param)+'\n'
     orig_time = time.time()
     prev_time = time.localtime(orig_time)
+    last_stamp = 0
     while True:
         try:
             t = time.time()
@@ -425,6 +438,9 @@ def do_log(com_obj, path, wait=5*60.):
             data_lst = [repr(t)]
             data_lst += [repr(data[p]) for p in param]
             with open(filename, 'a') as f:
+                if t-last_stamp > 3*3600: # every 3 hours
+                    last_stamp = t
+                    f.write('# '+time_to_str(t)+'\n')
                 f.write('\t'.join(data_lst)+'\n')
             # lets try and space all points by same amount
             wait_done = (time.time()-orig_time)%wait
