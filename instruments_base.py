@@ -2113,7 +2113,8 @@ class visaInstrument(BaseInstrument):
             if raw:
                 self.visa.write(question)
                 ret = self.visa.read_raw()
-            ret = self.visa.ask(question)
+            else:
+                ret = self.visa.ask(question)
         return ret
     def idn(self):
         return self.ask('*idn?')
