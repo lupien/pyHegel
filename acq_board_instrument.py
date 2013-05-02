@@ -38,7 +38,7 @@ class acq_bool(object):
 
 class acq_filename(object):
     def __call__(self, input_str):
-        if input_str[0] != '<' or input_str[0] != '>':
+        if input_str[0] != '<' or input_str[-1] != '>':
             print 'Filename is missing < >'
             return input_str
         return input_str[1:-1]
