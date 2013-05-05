@@ -299,6 +299,7 @@ You can start a server with:
     !start /D \Codes\CarteAcquisition\Release cmd /K Ctrl_Carte_Acquistion.exe
 """
         self.set_timeout = 5
+        self._rerun_en = True
 
         # status and flag
         self.board_type = None
@@ -1116,10 +1117,11 @@ You can start a server with:
         self.cust_param3 = acq_device('CONFIG:CUST_PARAM3', str_type=float)
         self.cust_param4 = acq_device('CONFIG:CUST_PARAM4', str_type=float)
         self.cust_user_lib = acq_device('CONFIG:CUST_USER_LIB', str_type=acq_filename())
-        self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?',str_type=int, doc='The serial number of the aquisition card.')
-        self.board_status = acq_device(getstr='STATUS:STATE?',str_type=str, doc='The current status of the acquisition card. Can be Idle, Running, Transferring')
-        self.partial_status = acq_device(getstr='STATUS:PARTIAL?',str_type=decode_uint32, autoinit=False)
-        self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?',str_type=acq_bool(), doc='Is True when results are available from the card (after run completes)')
+        self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?', str_type=int, doc='The serial number of the aquisition card.')
+        self.board_status = acq_device(getstr='STATUS:STATE?', str_type=str, doc='The current status of the acquisition card. Can be Idle, Running, Transferring')
+        self.status_config_ok = acq_device('STATUS:CONFIG_OK', str_type=int, doc='Do NOT modify (run handles it)')
+        self.partial_status = acq_device(getstr='STATUS:PARTIAL?', str_type=decode_uint32, autoinit=False)
+        self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?', str_type=acq_bool(), doc='Is True when results are available from the card (after run completes)')
         
         self.format_location = acq_device('CONFIG:FORMAT:LOCATION', str_type=str, choices=format_location_str, doc='Select between sending the data through the network socket (Remote), or letting the server save it (Local)')
         self.format_type = acq_device('CONFIG:FORMAT:TYPE',str_type=str, choices=format_type_str, doc='Select saving format when in Local. Only implemented one is Default')
@@ -1663,6 +1665,12 @@ You can start a server with:
         This function checks the validity of the current configuration.
         If valid, it starts the acquisition/analysis.
         """
+        if self.status_config_ok.get() == 2 and self._rerun_en:
+            # rerun
+            self._run_finished.clear()
+            self.write('RUN')
+            return
+
         # check if the configuration are ok
         if self.op_mode.getcache() == 'Null':
             raise ValueError, 'No acquisition mode selected yet!'
@@ -1756,7 +1764,7 @@ You can start a server with:
                 self.fft_length.set(new_fft_length)
                 raise ValueError, 'Warning fft_length not a power of 2, value corrected to nearest possible value : ' + str(new_fft_length)
 
-        self.write('STATUS:CONFIG_OK True')
+        self.status_config_ok.set(1)
         self._run_finished.clear()
         self.write('RUN')
 
