@@ -1217,12 +1217,15 @@ You can start a server with:
         """
         self.write('STOP')
 
-    def force_cal(self):
+    def force_cal(self, flags=7):
         """
-        Ask the server to do the hardcal and offset/gain cal for 16bit cards.
+        Ask the server to do the hardcal (1), ADC(2) offset/gain cal and DAC(4)
+        input offset/bias for 16bit cards.
         The calibration is performed when the card is idle.
+        You can select a subset of the calibrations by adjusting flags as a sum of
+        the cals you want done.
         """
-        self.write('FORCECAL')
+        self.write('FORCECAL %i'%flags)
 
     def disconnect(self):
         """
