@@ -1069,6 +1069,7 @@ You can start a server with:
         format_location_str = ['Local','Remote']
         format_type_str = ['Default','ASCII','NPZ']
         window_str = ['None', 'Bartlett', 'Hann', 'Welch']
+        config_ok_str = ['Bad', 'Run_Ready', 'ReRun_Ready']
         
         #device init
         # Configuration
@@ -1119,7 +1120,8 @@ You can start a server with:
         self.cust_user_lib = acq_device('CONFIG:CUST_USER_LIB', str_type=acq_filename())
         self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?', str_type=int, doc='The serial number of the aquisition card.')
         self.board_status = acq_device(getstr='STATUS:STATE?', str_type=str, doc='The current status of the acquisition card. Can be Idle, Running, Transferring')
-        self.status_config_ok = acq_device('STATUS:CONFIG_OK', str_type=int, doc='Do NOT modify (run handles it)')
+        self.status_config_ok = acq_device('STATUS:CONFIG_OK', str_type=str, choices=config_ok_str,
+                                           doc='Do NOT modify (run handles it)')
         self.partial_status = acq_device(getstr='STATUS:PARTIAL?', str_type=decode_uint32, autoinit=False)
         self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?', str_type=acq_bool(), doc='Is True when results are available from the card (after run completes)')
         
@@ -1665,7 +1667,7 @@ You can start a server with:
         This function checks the validity of the current configuration.
         If valid, it starts the acquisition/analysis.
         """
-        if self.status_config_ok.get() == 2 and self._rerun_en:
+        if self.status_config_ok.get() == 'ReRun_Ready' and self._rerun_en:
             # rerun
             self._run_finished.clear()
             self.write('RUN')
@@ -1764,7 +1766,7 @@ You can start a server with:
                 self.fft_length.set(new_fft_length)
                 raise ValueError, 'Warning fft_length not a power of 2, value corrected to nearest possible value : ' + str(new_fft_length)
 
-        self.status_config_ok.set(1)
+        self.status_config_ok.set('Run_Ready')
         self._run_finished.clear()
         self.write('RUN')
 
