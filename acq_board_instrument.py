@@ -505,7 +505,7 @@ You can start a server with:
         offset = resolution/2.
         if self.board_type == 'ADC14':
             sign = -1.
-        else: # 8bit
+        else: # 8bit, 16bit
             sign = +1.
         if off == False:
             offset = 0.
@@ -1094,6 +1094,7 @@ You can start a server with:
                                             min=-volt_range, max=volt_range)
         
         self.osc_slope = acq_device('CONFIG:OSC_SLOPE', str_type=str, choices=osc_slope_str) 
+        self.osc_trig_filter = acq_device('CONFIG:OSC_TRIGGER_FILTER', str_type=int,  min=1, max=1000)
         self.osc_nb_sample = acq_device('CONFIG:OSC_NB_SAMPLE', str_type=int,  min=1, max= ((16*1024*1024)-1)) # max 16MB
         self.osc_hori_offset = acq_device('CONFIG:OSC_HORI_OFFSET', str_type=int,  min=-(8*1024*1024), max= ((8*1024*1024)-1)) # max 8MB
         self.osc_trig_source = acq_device('CONFIG:OSC_TRIG_SOURCE', str_type=int,  min=1, max=2)
@@ -1539,12 +1540,17 @@ You can start a server with:
 
     @locked_calling
     def set_scope(self, nb_sample=1024, hori_offset=0, trigger_level=0., slope='Rising',
-                  trig_source=1, trig_mode='Auto', chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
+                  trig_source=1, trig_mode='Auto', trig_filter=1,
+                  chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         """
         Activates the oscilloscope mode.
         Get nb_sample (1024 by default).
 
-        hori_offset:  delay in time_steps (integer) between trigger and data.
+        hori_offset:  delay in time_steps (integer) between start of data and trigger
+                      point. A positive value therefore shows data before the
+                      trigger event. A negative value, moves the trigger event before
+                      the start of the data. The default of 0, has the trigger event
+                      as the first data point.
         trigger_level: Voltage used for trigger (default=0.0).
         slope: the trigger slope. Either 'Rising' (default) or 'Falling'.
         trig_source: The channel used for finding a trigger. Either 1 (default)
@@ -1554,6 +1560,9 @@ You can start a server with:
                    To stop it see stop method.
                    In 'Auto' if a trigger is not seen the first section of data is
                    returned.
+        trig_filter: The number of continuous points that stay across the
+                     trigger level. A larger value decreases the possibility
+                     of accidental trigger because of noise.
         chan_mode: Either 'Single' (default) or 'Dual'.
                    In dual, both channels are read.
         chanb_nb: Channel to read when in 'Single' mode. Either 1 (default) or 2.
@@ -1572,6 +1581,7 @@ You can start a server with:
         self.osc_nb_sample.set(nb_sample)
         self.osc_hori_offset.set(hori_offset)
         self.osc_trigger_level.set(trigger_level)
+        self.osc_trig_filter.set(trig_filter)
         self.osc_slope.set(slope)
         self.osc_trig_source(trig_source)
         self.osc_trig_mode(trig_mode)
@@ -1752,14 +1762,7 @@ You can start a server with:
                 new_nb_Msample = self._max_net_Msample
                 self.nb_Msample.set(new_nb_Msample)
                 raise ValueError, 'Warning nb_Msample must be inferior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
-    
-        #if in Osc mode check if the sample to send fit the horizontal offset
-        if self.op_mode.getcache() == 'Osc':
-            nb_sample = self.osc_nb_sample.getcache()
-            if self.osc_hori_offset() > nb_sample:
-                self.osc_hori_offset.set(nb_sample)
-                raise ValueError, 'Warning osc_hori_offset larger than nb_Sample. corrected to nearest possible value : ' + str(nb_sample)
-        
+
         # check if the fft length is a power of 2 and if the nb_Msample fit too
         if self.op_mode.getcache() == 'Spec':
             pwr2 = math.log(self.fft_length.getcache(), 2)
