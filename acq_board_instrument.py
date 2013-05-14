@@ -319,8 +319,10 @@ You can start a server with:
             # TODO cleanup these limits
             self._max_nb_Msample = 4294967295 #2**32-1 max unsigned int
             self._max_Msample = 4294959104    #2*32-8192 (8192=2**13)
-            self._min_hist_Msample = 8192
-            self._min_corr_Msample = 8192
+            self._min_hist_Msample = 512
+            self._min_corr_Msample = 512
+            self._default_hist_Msample = 8192
+            self._default_corr_Msample = 8192
             self._min_acq_Msample = 32
             self._max_acq_Msample = 8192
             self._min_net_Msample = 32
@@ -332,8 +334,10 @@ You can start a server with:
             self._max_sampling = 400
             self._min_sampling = 20
             self._max_Msample = 2147479552 # (2**32-8192)/2
-            self._min_hist_Msample = 4096
-            self._min_corr_Msample = 4096
+            self._min_hist_Msample = 256
+            self._min_corr_Msample = 256
+            self._default_hist_Msample = 4096
+            self._default_corr_Msample = 4096
             self._min_acq_Msample = 16
             self._max_acq_Msample = 4096
             self._min_net_Msample = 16
@@ -345,8 +349,10 @@ You can start a server with:
             self._max_sampling = 250
             self._min_sampling = 40
             self._max_Msample = 2147479552 # (2**32-8192)/2
-            self._min_hist_Msample = 4096
-            self._min_corr_Msample = 4096
+            self._min_hist_Msample = 256
+            self._min_corr_Msample = 256
+            self._default_hist_Msample = 4096
+            self._default_corr_Msample = 4096
             self._min_acq_Msample = 16
             self._max_acq_Msample = 4096
             self._min_net_Msample = 16
@@ -1367,7 +1373,7 @@ You can start a server with:
         self._set_mode_defaults()
 
     @locked_calling
-    def set_histogram(self, nb_Msample='min', chan_nb=1, sampling_rate=None, clock_source=None, decimation=1):
+    def set_histogram(self, nb_Msample='default', chan_nb=1, sampling_rate=None, clock_source=None, decimation=1):
         """
         Activates the histogram mode.
 
@@ -1379,7 +1385,8 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the number of samples used for histogram (uses min by default)
+        nb_MSample: set the number of samples used for histogram (either a value,
+                    'min' or 'default')
         chan_nb:    select the channel to acquire for the histogram,
                     either 1(default) or 2
         decimation: only analyze one of every decimation point
@@ -1388,7 +1395,10 @@ You can start a server with:
                      for n any integer >= 1
         """
         self.op_mode.set('Hist')
-        if nb_Msample=='min':
+        if nb_Msample=='default':
+            nb_Msample = self._default_hist_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        elif nb_Msample=='min':
             nb_Msample = self._min_hist_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
@@ -1399,7 +1409,7 @@ You can start a server with:
         self._set_mode_defaults()
 
     @locked_calling
-    def set_correlation(self, nb_Msample='min', sampling_rate=None, clock_source=None):
+    def set_correlation(self, nb_Msample='default', sampling_rate=None, clock_source=None):
         """
         Activates the cross correlation mode. This reads both ch1 and ch2
         and calculates the cross correlation.
@@ -1410,11 +1420,15 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the total number of samples used (uses min by default)
+        nb_MSample: set the total number of samples used (either a value,
+                    'min' or 'default')
                     This number includes both channels.
         """
         self.op_mode.set('Corr')
-        if nb_Msample=='min':
+        if nb_Msample=='default':
+            nb_Msample = self._default_corr_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        elif nb_Msample=='min':
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
@@ -1426,7 +1440,7 @@ You can start a server with:
         self.corr_mode.set(True)
     
     @locked_calling
-    def set_autocorrelation(self, nb_Msample='min', autocorr_single_chan=True,
+    def set_autocorrelation(self, nb_Msample='default', autocorr_single_chan=True,
                             autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
         """
         Activates the auto-correlation mode.
@@ -1437,7 +1451,8 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the total number of samples used (uses min by default)
+        nb_MSample: set the total number of samples used (either a value,
+                    'min' or 'default')
                     This number includes both channels, if both are read.
         autocorr_single_chan: When True, only one channel is read and analyzed
                               otherwise both are read and analyzed.
@@ -1446,7 +1461,10 @@ You can start a server with:
                           mode. Either 1 (default) or 2.
         """
         self.op_mode.set('Corr')
-        if nb_Msample=='min':
+        if nb_Msample=='default':
+            nb_Msample = self._default_corr_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        elif nb_Msample=='min':
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
@@ -1462,7 +1480,7 @@ You can start a server with:
         self.corr_mode.set(False)
 
     @locked_calling
-    def set_auto_and_corr(self, nb_Msample='min', autocorr_single_chan=False,
+    def set_auto_and_corr(self, nb_Msample='default', autocorr_single_chan=False,
                           autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
         """
         Activates the cross-auto-correlation mode.
@@ -1475,7 +1493,8 @@ You can start a server with:
         See tau_vec to set a vector of time displacement between x and y.
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the total number of samples used (uses min by default)
+        nb_MSample: set the total number of samples used (either a value,
+                    'min' or 'default')
                     This number includes both channels.
         autocorr_single_chan: When True, only one channel is analyzed for
                               autocorrelation otherwise both are analyzed.
@@ -1483,7 +1502,10 @@ You can start a server with:
                           mode. Either 1 (default) or 2.
         """
         self.op_mode.set('Corr')
-        if nb_Msample=='min':
+        if nb_Msample=='default':
+            nb_Msample = self._default_corr_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        elif nb_Msample=='min':
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
@@ -1732,25 +1754,25 @@ You can start a server with:
         
         
         if self.op_mode.getcache() == 'Corr' and self.board_type in ['ADC14', 'ADC16']:
-            quotien = float(self.nb_Msample.getcache())/4096
+            quotien = float(self.nb_Msample.getcache())/256
             frac,entier = math.modf(quotien)
             if frac != 0.0:
-                new_nb_Msample = int(math.ceil(quotien))*4096
+                new_nb_Msample = int(math.ceil(quotien))*256
                 if new_nb_Msample > self._max_Msample:
                     new_nb_Msample = self._max_Msample
                 self.nb_Msample.set(new_nb_Msample)
-                raise ValueError, 'Warning nb_Msample must be a multiple of 4096 in Corr ADC14-ADC16, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be a multiple of 256 in Corr ADC14-ADC16, value corrected to nearest possible value : ' + str(new_nb_Msample)
 
 
         if (self.op_mode.getcache() == 'Hist' or self.op_mode.getcache() == 'Corr') and self.board_type == 'ADC8':
-            quotien = float(self.nb_Msample.getcache())/8192
+            quotien = float(self.nb_Msample.getcache())/512
             frac,entier = math.modf(quotien)
             if frac != 0.0:
-                new_nb_Msample = int(math.ceil(quotien))*8192
+                new_nb_Msample = int(math.ceil(quotien))*512
                 if new_nb_Msample > self._max_Msample:
                     new_nb_Msample = self._max_Msample
                 self.nb_Msample.set(new_nb_Msample)
-                raise ValueError, 'Warning nb_Msample must be a multiple of 8192 in Hist or Corr ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be a multiple of 512 in Hist or Corr ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
         
         
         if self.op_mode.getcache() == 'Net':
