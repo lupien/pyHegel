@@ -849,7 +849,7 @@ class agilent_EXA(visaInstrumentAsync):
         incorrect values for wrong detector/averaging. The best result is normally
         obtained with averaging detector in RMS mode.
         """
-        bw = self.bw_res.get()
+        #bw = self.bw_res.get()
         bw_mode = self.bw_res_shape.get()
         if bw_mode in self.bw_res_shape.choices[['gaussian']]:
             # The filters are always the same. They are defined for db3
@@ -867,6 +867,8 @@ class agilent_EXA(visaInstrumentAsync):
             self.bw_res_gaussian_type.set('noise')
             bw = self.bw_res.get()
             self.bw_res_gaussian_type.set(old_gaus_type)
+            # get the bw_res cache back to the correct value
+            self.bw_res.get()
         else: # flat
             # Normally the equivalent noise bandwidth of a flat filter
             # is the bw of the filter. However, in practice, it could be different.
