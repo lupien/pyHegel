@@ -38,7 +38,7 @@ class acq_bool(object):
 
 class acq_filename(object):
     def __call__(self, input_str):
-        if input_str[0] != '<' or input_str[0] != '>':
+        if input_str[0] != '<' or input_str[-1] != '>':
             print 'Filename is missing < >'
             return input_str
         return input_str[1:-1]
@@ -1118,7 +1118,7 @@ You can start a server with:
         self.cust_user_lib = acq_device('CONFIG:CUST_USER_LIB', str_type=acq_filename())
         self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?',str_type=int, doc='The serial number of the aquisition card.')
         self.board_status = acq_device(getstr='STATUS:STATE?',str_type=str, doc='The current status of the acquisition card. Can be Idle, Running, Transferring')
-        self.partial_status = acq_device(getstr='STATUS:PARTIAL?',str_type=decode_uint32)
+        self.partial_status = acq_device(getstr='STATUS:PARTIAL?',str_type=decode_uint32, autoinit=False)
         self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?',str_type=acq_bool(), doc='Is True when results are available from the card (after run completes)')
         
         self.format_location = acq_device('CONFIG:FORMAT:LOCATION', str_type=str, choices=format_location_str, doc='Select between sending the data through the network socket (Remote), or letting the server save it (Local)')
