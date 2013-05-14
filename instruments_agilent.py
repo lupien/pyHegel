@@ -1149,6 +1149,9 @@ class agilent_EXA(visaInstrumentAsync):
         self.marker_function_band_right = devMkrOption(':CALCulate:MARKer{mkr}:FUNCtion:BAND:RIGHt', str_type=float, min=0)
         self.peak_search_continuous = devMkrOption(':CALCulate:MARKer{mkr}:CPSearch', str_type=bool)
 
+        # initial hack for list sweep measurement
+        self.fetch_list = scpiDevice(getstr=':FETCh:LIST?', str_type=decode_float64, autoinit=False, trig=True)
+
         #following http://www.mathworks.com/matlabcentral/fileexchange/30791-taking-a-screenshot-of-an-agilent-signal-analyzer-over-a-tcpip-connection
         #note that because of *OPC?, the returned string is 1;#....
         self.snap_png = scpiDevice(getstr=r':MMEMory:STORe:SCReen "C:\TEMP\SCREEN.PNG";*OPC?;:MMEMory:DATA? "C:\TEMP\SCREEN.PNG"',
