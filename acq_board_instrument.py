@@ -86,17 +86,24 @@ class Listen_thread(threading.Thread):
         select_list = [self.acq_instr.s]
         socket_timeout = 0.1
         old_stuff = ''
+        prev_new_stuff = ''
         bin_mode = False
         block_length = 0
         total_byte = 0
         acq = self.acq_instr
         rcv_ptr = 0
+        reset_trans = False
         while not self._stop:
             if bin_mode and len(old_stuff) > 0:
                 pass
             else:
                 try:
-                    r, _, _ = select.select(select_list, [], [], socket_timeout)
+                    r, _, oob = select.select(select_list, [], select_list, socket_timeout)
+                    if bool(oob):
+                        acq.s.recv(1, socket.MSG_OOB) # read the data byte
+                        print 'Received out of band data. Ending transfer.'
+                        reset_trans = True
+                        prev_new_stuff = ''
                     if not bool(r):
                         continue
                 except socket.error:
@@ -108,8 +115,27 @@ class Listen_thread(threading.Thread):
                     new_stuff = old_stuff
                     old_stuff = ''
                 else:
-                    new_stuff = acq.s.recv(next_readlen)
+                    try:
+                        new_stuff = acq.s.recv(next_readlen)
+                    except socket.error as exc:
+                        print 'Connection Lost: ', exc.args
+                        break
                     next_readlen = block_length
+                if reset_trans:
+                    resync_msg = '***** This message is to end a binary transfer *****'
+                    indx = (prev_new_stuff+new_stuff).find(resync_msg)
+                    if indx != -1:
+                        indx -= len(prev_new_stuff)
+                        reset_trans = False
+                        if indx > 0:
+                            new_stuff = new_stuff[:indx]
+                        else:
+                            new_stuff = ''
+                        old_stuff = new_stuff[indx+len(resync_msg):]
+                        print 'Found Resync message. Some data not transferred ', total_byte-len(new_stuff)
+                        total_byte = len(new_stuff)
+                    else:
+                        prev_new_stuff = new_stuff
                 #print 'BIN',repr(new_stuff)
                 total_byte -= len(new_stuff)
                 if total_byte < 0:
@@ -119,80 +145,135 @@ class Listen_thread(threading.Thread):
                     acq.fetch._dump_file.write(new_stuff)
                     acq.fetch._rcv_val = None
                 else:
-                    acq.fetch._rcv_val[rcv_ptr:]=new_stuff
+                    if acq.fetch._rcv_val: # could be None
+                        # a partial slice [start:] resizes/extends the bytearray
+                        # we don't want to do that so use [start:end]
+                        acq.fetch._rcv_val[rcv_ptr:rcv_ptr+len(new_stuff)]=new_stuff
                     rcv_ptr+=len(new_stuff)
                 if total_byte <= 0:
                     if acq.fetch._dump_file == None:
-                        acq.fetch._rcv_val = bytes(acq.fetch._rcv_val)
+                        if acq.fetch._rcv_val:
+                            try:
+                                # use bytes here for python 3. future compatibility
+                                # in 2.6.. it is the same as str
+                                acq.fetch._rcv_val = bytes(acq.fetch._rcv_val)
+                            except MemoryError:
+                                err_msg = 'Binary transfer incomplete because of memory error.'
+                                print 'Error: '+err_msg
+                                acq._errors_list.append('CRITICAL: '+err_msg)
+                                acq.fetch._rcv_val = ''
                     bin_mode = False
                     acq.fetch._event_flag.set()
                     new_stuff = ''
                 else:
                     continue
             else:
-                new_stuff = acq.s.recv(128)
+                try:
+                    new_stuff = acq.s.recv(1024)
+                except socket.error as exc:
+                    print 'Connection Lost: ', exc.args
+                    self._stop = True
             #print repr(new_stuff)
             old_stuff += new_stuff
+            ind1 = old_stuff.find('@')
+            ind2 = old_stuff.find('#')
+            if ind1==-1 and ind2==-1:
+                old_stuff = ''
+            elif ind1==-1:
+                old_stuff = old_stuff[ind2:]
+            elif ind2==-1:
+                old_stuff = old_stuff[ind1:]
+            else:
+                old_stuff = old_stuff[min(ind1,ind2):]
             trames = old_stuff.split('\n', 1)
             old_stuff = trames.pop()
             while trames != []:
                 trame = trames[0]
-                if trame[0] != '@' and trame[0] != '#':
+                if len(trame) == 0:
+                    trames = old_stuff.split('\n', 1)
+                    old_stuff = trames.pop()
                     continue
-                if trame[0] == '@':
-                    trame = trame[1:]
-                    head, val = trame.split(' ', 1)
-                    if head.startswith('ERROR:'):
-                        if head == 'ERROR:STD':
-                            acq._errors_list.append('STD: '+val)
-                            print 'Error: ', val
-                        elif head == 'ERROR:CRITICAL':
-                            acq._errors_list.append('CRITICAL: '+val)
-                            acq._error_state = True
-                            print '!!!!!!!!!!!\n!!!!!CRITICAL ERROR!!!!!: ', val,'\n!!!!!!!!!!!!!'
-                        else:
-                            acq._errors_list.append('Unknown: '+val)
-                            print 'Unkown error', head, val
-                    else:
-                        obj = acq._objdict.get(head, None)
-                        if obj == None:
-                            acq._errors_list.append('Unknown @'+head+' val:'+val)
-                            print 'Listen Thread: unknown @header:',head, 'val=', val
-                        else:
-                            obj._rcv_val = val
-                            obj._event_flag.set()
-                            # update _cache for STATUS result
-                            if obj == acq.board_status or obj == acq.result_available or \
-                                      obj == acq.partial_status:
-                                obj._cache = obj._fromstr(val)
-                            if obj == acq.partial_status:
-                                partial_L, partial_v = obj._cache
-                                sys.stdout.write('\rPartial %3i/%-3i     '%(partial_v,partial_L))
-                            if obj == acq.board_status and obj._cache != 'Running':
-                                # run is finished when board_status is either Idle or Transferring
-                                acq._run_finished.set()
-                else: # trame[0]=='#'
-                    trame = trame[1:]
-                    head, val = trame.split(' ', 1)
-                    location, typ, val = val.split(' ', 2)
-                    if location == 'Local':
-                        filename = val
-                        acq.fetch._rcv_val = None
-                        acq.fetch._event_flag.set()
-                    else: # location == 'Remote'
-                        bin_mode = True
-                        rcv_ptr = 0
-                        block_length, total_byte = val.split(' ')
-                        next_readlen = block_length = int(block_length)
-                        total_byte = int(total_byte)
-                        if acq.fetch._dump_file != None:
-                            acq.fetch._rcv_val = None
-                        else:
-                            acq.fetch._rcv_val = bytearray(total_byte)
-                        break
+                if trame[0] != '@' and trame[0] != '#':
+                    # We end up here if \n was not followed by @ or #
+                    # This should not happend unless there is a bug in the server,
+                    # the communication is corrupted, or we missed a resync
+                    # while aborting a binary transfer
+                    trames = [trame[1:]]
+                    continue
+                # now setup for next loop
                 trames = old_stuff.split('\n', 1)
                 old_stuff = trames.pop()
-        print 'Thread Ending....'
+                # and parse the data
+                try:
+                    if trame[0] == '@':
+                        trame = trame[1:]
+                        head, val = trame.split(' ', 1)
+                        if head.startswith('ERROR:'):
+                            if head == 'ERROR:STD':
+                                acq._errors_list.append('STD: '+val)
+                                print 'Error: ', val
+                            elif head == 'ERROR:CRITICAL':
+                                acq._errors_list.append('CRITICAL: '+val)
+                                acq._error_state = True
+                                print '!!!!!!!!!!!\n!!!!!CRITICAL ERROR!!!!!: ', val,'\n!!!!!!!!!!!!!'
+                            else:
+                                acq._errors_list.append('Unknown: '+val)
+                                print 'Unkown error', head, val
+                        else:
+                            obj = acq._objdict.get(head, None)
+                            if obj == None:
+                                acq._errors_list.append('Unknown @'+head+' val:'+val)
+                                print 'Listen Thread: unknown @header:',head, 'val=', val
+                            else:
+                                obj._rcv_val = val
+                                obj._event_flag.set()
+                                # update _cache for STATUS result
+                                if obj == acq.board_status or obj == acq.result_available or \
+                                          obj == acq.partial_status:
+                                    obj._cache = obj._fromstr(val)
+                                if obj == acq.partial_status:
+                                    partial_L, partial_v = obj._cache
+                                    sys.stdout.write('\rPartial %3i/%-3i     '%(partial_v,partial_L))
+                                if obj == acq.board_status and obj._cache != 'Running':
+                                    # run is finished when board_status is either Idle or Transferring
+                                    acq._run_finished.set()
+                    else: # trame[0]=='#'
+                        trame = trame[1:]
+                        #TODO could check head value
+                        head, val = trame.split(' ', 1)
+                        location, typ, val = val.split(' ', 2)
+                        if location == 'Local':
+                            filename = val
+                            acq.fetch._rcv_val = None
+                            acq.fetch._event_flag.set()
+                        else: # location == 'Remote'
+                            block_length, total_byte = val.split(' ')
+                            next_readlen = block_length = int(block_length)
+                            total_byte = int(total_byte)
+                            reset_trans = False
+                            bin_mode = True
+                            rcv_ptr = 0
+                            if acq.fetch._dump_file != None:
+                                acq.fetch._rcv_val = None
+                            else:
+                                try:
+                                    acq.fetch._rcv_val = bytearray(total_byte)
+                                except MemoryError:
+                                    err_msg = 'Binary transfer failed because of memory error.'
+                                    print 'Error: '+err_msg
+                                    acq._errors_list.append('CRITICAL: '+err_msg)
+                                    acq.fetch._rcv_val = None
+                            break
+                except ValueError: # when split fails or when int() fails
+                    err_msg = 'Trouble parsing message from server'
+                    print 'Error: '+err_msg
+                    acq._errors_list.append('CRITICAL: '+err_msg)
+        print 'Acq Listen Thread Ending....'
+        try:
+            acq.s.shutdown(socket.SHUT_RD)
+        except weakref.ReferenceError:
+            # This happens when deleting an Acq_Board_Instrument instance
+            pass
 
     def cancel(self):
         self._stop = True
@@ -574,7 +655,7 @@ You can start a server with:
 
     def _fetch_filename_helper(self, filename, extra=None, newext=None):
         filestr=''
-        location = self.format_location()
+        location = self.format_location.getcache()
         tofilename = acq_filename().tostr
         if location == 'Local':
             if filename == None:
