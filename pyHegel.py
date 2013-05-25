@@ -759,9 +759,8 @@ class _Sweep(instruments.BaseInstrument):
             else:
                 dev.set(span[0]) # TODO replace with move
         if graph and close_after:
-            t.destroy()
+            t = t.destroy()
             del t
-            collect_garbage()
 
 sweep = _Sweep()
 
