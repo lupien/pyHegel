@@ -7,6 +7,7 @@
 import time
 import functools
 import sys
+import gc
 
 from PyQt4 import QtCore, QtGui
 import numpy as np
@@ -192,6 +193,11 @@ def time_stripdate(x, first=None):
     offset = time.mktime(dt)
     return x-offset
 
+class _Trace_Cleanup(object):
+    def __del__(self):
+        #print 'Trace cleanup (garbage collect)'
+        gc.collect()
+
 class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class so need object to make it new one (so super works properly for childs)
     # A useful subclass will need at least to include update
     def __init__(self, width=9.00, height=7.00, dpi=72):
@@ -208,11 +214,20 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
     def close_slot(self):
         self.isclosed = True
         _figlist.remove(self)
+        return _Trace_Cleanup() #when this return value is deleted, it will call do a gargage collect
     def destroy(self, *args):
+        """
+        This functions returns an object that will finish the clean up.
+        You should call it in this way:
+            tr = tr.destroy() # this removes the last connection to the TraceBase (tr) object
+                              # and replaces it by a new clean up class
+            del tr            # this executes the clean up class (does a garbage collect)
+        """
         self.window.disconnect(self.window, QtCore.SIGNAL('destroyed()'),
              self.close_slot)
-        self.close_slot()
+        ret = self.close_slot()
         FigureManagerQT.destroy(self, *args) # this will call self.window.close()
+        return ret
 
     def mykey_press(self, event):
         # TODO add a Rescale
