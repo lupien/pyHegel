@@ -208,6 +208,11 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
     def close_slot(self):
         self.isclosed = True
         _figlist.remove(self)
+    def destroy(self, *args):
+        self.window.disconnect(self.window, QtCore.SIGNAL('destroyed()'),
+             self.close_slot)
+        self.close_slot()
+        FigureManagerQT.destroy(self, *args) # this will call self.window.close()
 
     def mykey_press(self, event):
         # TODO add a Rescale

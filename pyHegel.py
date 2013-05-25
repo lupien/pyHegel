@@ -753,13 +753,15 @@ class _Sweep(instruments.BaseInstrument):
                 frev.close()
         if graph and t.abort_enabled:
             raise KeyboardInterrupt('Aborted sweep')
-        if graph and close_after:
-            t.window.close()
         if reset: # return to first value
             if graph and t.abort_enabled:
                 pass
             else:
                 dev.set(span[0]) # TODO replace with move
+        if graph and close_after:
+            t.destroy()
+            del t
+            collect_garbage()
 
 sweep = _Sweep()
 
