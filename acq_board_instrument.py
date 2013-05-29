@@ -200,10 +200,7 @@ class Listen_thread(threading.Thread):
                     # while aborting a binary transfer
                     trames = [trame[1:]]
                     continue
-                # now setup for next loop
-                trames = old_stuff.split('\n', 1)
-                old_stuff = trames.pop()
-                # and parse the data
+                # parse the data
                 try:
                     if trame[0] == '@':
                         trame = trame[1:]
@@ -268,6 +265,10 @@ class Listen_thread(threading.Thread):
                     err_msg = 'Trouble parsing message from server'
                     print 'Error: '+err_msg
                     acq._errors_list.append('CRITICAL: '+err_msg)
+                # now setup for next loop
+                trames = old_stuff.split('\n', 1)
+                old_stuff = trames.pop()
+
         print 'Acq Listen Thread Ending....'
         try:
             acq.s.shutdown(socket.SHUT_RD)
