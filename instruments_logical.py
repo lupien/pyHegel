@@ -53,7 +53,7 @@ class LogicalDevice(BaseDevice):
        And may be change getformat
 
        autoget can be 'all', then all basedev or basedevs are get automatically in get and
-       getasync. (So use getcache in logical _getdev). For a single basedev in can
+       getasync. (use self._cached_data in logical _getdev). For a single basedev in can
        be True or False. For Basedevs it can be a list of True or False.
        force_get always forces all subdevice unless it is overriden.
 
@@ -93,6 +93,7 @@ class LogicalDevice(BaseDevice):
         self._basedev_kwarg = basedev_kwarg
         self._basedevs = basedevs
         self._basedevs_kwarg = basedevs_kwarg
+        self._cached_data = []
         self._autoget = self._autoget_normalize(autoget)
         # TODO fix the problem here
         #doc = self.__doc__+doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev, basedevs)
@@ -183,30 +184,35 @@ class LogicalDevice(BaseDevice):
             dev.force_get()
         super(LogicalDevice, self).force_get()
     @locked_calling_dev
-    def get(self, *arg, **kwarg):
+    def get(self, **kwarg):
         # when not doing async, get all basedevs
         # when doing async, the basedevs are obtained automatically
-        task = getattr(self.instr, '_async_task', None)
+        task = getattr(self.instr, '_async_task', None) # tasks are deleted when async is done
         if not (task and task.is_alive()):
             gl, kwarg = self._get_auto_list(kwarg)
+            self._cached_data = []
             for dev, base_kwarg in gl:
-                dev.get(**base_kwarg)
-        ret = super(LogicalDevice, self).get(*arg, **kwarg)
-        if self._basedev != None and self._basedev._last_filename:
-            self._last_filename = self._basedev._last_filename
+                self._cached_data.append(dev.get(**base_kwarg))
+            ret = super(LogicalDevice, self).get(**kwarg)
+            if self._basedev != None and self._basedev._last_filename:
+                self._last_filename = self._basedev._last_filename
+        else: # in async_task, we don't know data yet so return something temporary
+            ret = 'To be replaced' # in getasync
         return ret
     def _async_detect(self, max_time=.5): # 0.5 s max by default
-        gl, kwarg = self._get_auto_list()
-        N = len(gl)
-        for dev, kwarg in gl:
-            is_async_done = dev.instr._async_detect(max_time*1./N)
-            if not is_async_done:
-                return False
-        return is_async_done
+        return True # No need to wait
     def getasync(self, async, **kwarg):
         gl, kwarg = self._get_auto_list(kwarg)
-        for dev, base_kwarg in gl:
-            dev.getasync(async, **base_kwarg)
+        if async == 3:
+            self._cached_data = []
+            for dev, base_kwarg in gl:
+                self._cached_data.append(dev.getasync(async, **base_kwarg))
+            ret = super(LogicalDevice, self).get(**kwarg)
+            # replace data with correct one
+            self.instr._async_task.replace_result(ret)
+        else:
+            for dev, base_kwarg in gl:
+                dev.getasync(async, **base_kwarg)
         return super(LogicalDevice, self).getasync(async, **kwarg)
     def _combine_kwarg(self, kwarg_dict, base=None, op='get'):
         # this combines the kwarg_dict with a base.
@@ -264,7 +270,7 @@ class ScalingDevice(LogicalDevice):
     def conv_todev(self, val):
         return (val - self._offset) / self._scale
     def _getdev(self):
-        raw = self._basedev.getcache()
+        raw = self._cached_data[0]
         val = self.conv_fromdev(raw)
         return val, raw
     def _setdev(self, val, **kwarg):
@@ -316,7 +322,7 @@ class FunctionDevice(LogicalDevice):
         x = brentq_rootsolver(func, a, b)
         return x
     def _getdev(self):
-        raw = self._basedev.getcache()
+        raw = self._cached_data[0]
         val = self.from_raw(raw)
         return val, raw
     def _setdev(self, val, **kwarg):
@@ -366,7 +372,7 @@ class LimitDevice(LogicalDevice):
         head = ['Limiting:: min=%r max=%r basedev=%s'%(self.min, self.max, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
     def _getdev(self):
-        return self._basedev.getcache()
+        return self._cached_data[0]
     def _setdev(self, val, **kwarg):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
         basedev.set(val, **base_kwarg)
@@ -403,7 +409,7 @@ class CopyDevice(LogicalDevice):
         head = ['Copy:: %r'%(self._basedevs)]
         return self._current_config_addbase(head, options=options)
     def _getdev(self):
-        return self._basedevs[0].getcache()
+        return self._cached_data[0]
     # Here _setdev and check show 2 different ways of handling the parameters
     # _setdev requires a redefinition of _combine_kwarg
     # note that _get_auto_list always handles the kw paramters itself.
@@ -469,7 +475,7 @@ class ExecuteDevice(LogicalDevice):
         head = ['Execute:: command="%s" basedev=%s'%(self._command, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
     def _getdev(self):
-        ret = self._basedev.getcache()
+        ret = self._cached_data[0]
         command = self._command
         filename = self._basedev._last_filename
         if filename != None:
@@ -520,8 +526,8 @@ class RThetaDevice(LogicalDevice):
         head = ['R_Theta_Device:: %r, xoffset=%g, yoffset=%g'%(self._basedevs, self._xoffset, self._yoffset)]
         return self._current_config_addbase(head, options=options)
     def _getdev(self):
-        raw_x = self._basedevs[0].getcache()
-        raw_y = self._basedevs[1].getcache()
+        raw_x = self._cached_data[0]
+        raw_y = self._cached_data[1]
         x = raw_x - self._xoffset
         y = raw_y - self._yoffset
         z = x+1j*y

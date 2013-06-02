@@ -423,6 +423,7 @@ class asyncThread(threading.Thread):
         self._lock_extra = lock_extra
         self._init_ops = init_ops # a list of (func, args, kwargs)
         self.results = []
+        self._replace_index = 0
     def add_init_op(self, func, *args, **kwargs):
         self._init_ops.append((func, args, kwargs))
     def change_delay(self, new_delay):
@@ -431,6 +432,11 @@ class asyncThread(threading.Thread):
         self._async_trig = new_trig
     def change_detect(self, new_detect):
         self._async_detect = new_detect
+    def replace_result(self, val, index=None):
+        if index == None:
+            index = self._replace_index
+            self._replace_index += 1
+        self.results[index] = val
     @locked_calling
     def run(self):
         #t0 = time.time()
