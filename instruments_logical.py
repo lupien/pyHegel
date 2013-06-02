@@ -13,6 +13,8 @@ from instruments_base import BaseDevice, BaseInstrument, ProxyMethod,\
 def _asDevice(dev):
     if isinstance(dev, BaseInstrument):
         dev = dev.alias
+        if dev == None:
+            raise ValueError, 'We required a device, but the given instrument has no alias'
     return dev
 
 class _LogicalInstrument(BaseInstrument):
@@ -307,7 +309,6 @@ class FunctionDevice(LogicalDevice):
         super(type(self), self).__init__(basedev=basedev, doc=doc, **extrak)
         self._format['multi'] = ['conv', 'raw']
         self._format['graph'] = [0]
-        self._format['header'] = self._current_config
     def _current_config(self, dev_obj=None, options={}):
         head = ['Func Convert:: basedev=%s'%(self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
@@ -521,7 +522,6 @@ class RThetaDevice(LogicalDevice):
         self._yoffset = yoffset
         self._format['multi'] = ['R', 'ThetaDeg', 'raw_x', 'raw_y']
         self._format['graph'] = [0,1]
-        self._format['header'] = self._current_config
     def _current_config(self, dev_obj=None, options={}):
         head = ['R_Theta_Device:: %r, xoffset=%g, yoffset=%g'%(self._basedevs, self._xoffset, self._yoffset)]
         return self._current_config_addbase(head, options=options)
@@ -534,3 +534,36 @@ class RThetaDevice(LogicalDevice):
         R = np.abs(z)
         theta = np.angle(z, deg=True)
         return [R, theta, raw_x, raw_y]
+
+#######################################################
+##    Logical PickSome device
+#######################################################
+
+class PickSome(LogicalDevice):
+    """
+       This class provides a wrapper around one device for reading only.
+       It allows to take a device that returns many points which are
+       usually dumped into a separate file and pick some of those points
+       to save in the main file.
+    """
+    def __init__(self, basedev, selector, multi, doc='', **extrak):
+        """
+        selector will be used to pick some data. The data returned from this
+                 device is: basedev.get()[selector]
+                 if a=basedev.get() then the result of a[1,0] is
+                 obtained by selector=(1,0) and a[1,:3] by
+                 selector=(1,slice(3))
+        multi is either an integer that gives the number of data that will be
+              returned (the number of columns added to the file)
+              or a list with the names of the columns.
+        """
+        if not isinstance(multi, list):
+            multi = ['base-%i'%i for i in range(multi)]
+        super(type(self), self).__init__(basedev=basedev, doc=doc, multi=multi, **extrak)
+        self._selector = selector
+    def _current_config(self, dev_obj=None, options={}):
+        head = ['PickSome:: %r, selector=%r'%(self._basedev, self._selector)]
+        return self._current_config_addbase(head, options=options)
+    def _getdev(self):
+        raw = self._cached_data[0]
+        return raw[self._selector]
