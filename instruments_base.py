@@ -856,15 +856,17 @@ class BaseInstrument(object):
         # This is done so that we can block an async without holding the lock
         # since the lock needs to be held by async_thread. But we need to
         # protect the whole async block
-        # In case the trade the was interrupted cannot be restarted,
+        # In case the thread the was interrupted cannot be restarted,
         # it might be necessary to set _async_current_calling_thread=None
+        current_thread = threading.current_thread()
         while True:
-            with self._lock_instrument:
-                current_thread = threading.current_thread()
-                if self._async_current_calling_thread == None:
-                    self._async_current_calling_thread = current_thread
-                if self._async_current_calling_thread == current_thread:
-                    return
+            if self._async_current_calling_thread == current_thread:
+                return
+            else:
+                with self._lock_instrument:
+                    if self._async_current_calling_thread == None:
+                        self._async_current_calling_thread = current_thread
+                        return
             # wait for another thread to give up
             sleep(0.02)
             with _delayed_signal_context_manager():
@@ -899,15 +901,18 @@ class BaseInstrument(object):
                 self._async_task.change_trig(self._async_trig)
             self._async_list.append((obj.get, kwarg))
         elif async == 1:  # Start async task (only once)
+            #print 'async', async, 'self', self, 'time', time.time()
             if self._async_level == 0: # First time through
                 self._async_task.start()
                 self._async_level = 1
         elif async == 2:  # Wait for task to finish
+            #print 'async', async, 'self', self, 'time', time.time()
             if self._async_level == 1: # First time through (no need to wait for subsequent calls)
                 wait_on_event(self._async_task)
                 self._async_level = -1
             self._async_counter = 0
         elif async == 3: # get values
+            #print 'async', async, 'self', self, 'time', time.time()
             #return obj.getcache()
             ret = self._async_task.results[self._async_counter]
             self._async_counter += 1
