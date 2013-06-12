@@ -52,6 +52,29 @@ def _faster_timer(stop=False, period='min'):
     if ret != 0:
         print 'Error(%i) in setting period'%ret
 
+def _patch_pyvisa():
+    """ This functions applies a patch to pyvisa
+        to allow visa read to work in multi threads
+    """
+    import pyvisa.visa as visa
+    if hasattr(visa, "_removefilter_orig"):
+        #print 'Skipping patch: already applied'
+        return
+    #print 'Installing pyvisa patch'
+    visa.warnings._filters_lock_pyvisa = threading.Lock()
+    def removefilter(*arg, **kwarg):
+        #print 'Doing remove filter %r, %r'%(arg, kwarg)
+        with visa.warnings._filters_lock_pyvisa:
+            visa._removefilter_orig(*arg, **kwarg)
+    def filterwarnings(*arg, **kwarg):
+        #print 'Doing filter warnings %r, %r'%(arg, kwarg)
+        with visa.warnings._filters_lock_pyvisa:
+            visa.warnings.filterwarnings_orig(*arg, **kwarg)
+    visa._removefilter_orig = visa._removefilter
+    visa._removefilter = removefilter
+    visa.warnings.filterwarnings_orig = visa.warnings.filterwarnings
+    visa.warnings.filterwarnings = filterwarnings
+
 _agilent_visa = False
 try:
     if os.name == 'nt':
@@ -78,6 +101,7 @@ try:
         except OSError as exc:
             print '\nError loading visa library:', exc
             raise ImportError
+    _patch_pyvisa()
 except ImportError as exc: # pyVisa not installed
     print 'Error importing visa. You will have reduced functionality.'
     # give a dummy visa to handle imports
