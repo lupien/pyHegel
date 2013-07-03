@@ -1609,10 +1609,11 @@ You can start a server with:
         Both channels are used.
          ch1 is used as the reference signal.
          ch2 is used as the measured signal.
-        WARNING: before running, make sure the net_signal_freq is set properly
-          (close to the value of the reference signal), otherwise the analysis
-          will fail. To do sweeps, you will probably be interested in the
-          instruments.CopyDevice device.
+        Note: before running, make sure the net_signal_freq is set properly
+          (close to the value of the reference signal). This used to be necessary,
+          to prevent failure but is not required anymore. It will only affect
+          a warning now. If you want to set it during sweeps anyway,
+          you will probably be interested in the instruments.CopyDevice device.
 
         Get the data from one of (for the first harmonic only)
             net_ch1_ampl, net_ch1_phase, net_ch1_real, net_ch1_imag
