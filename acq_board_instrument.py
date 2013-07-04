@@ -408,7 +408,7 @@ You can start a server with:
             self._min_acq_Msample = 32
             self._max_acq_Msample = 8192
             self._min_net_Msample = 32
-            self._max_net_Msample = 128
+            self._max_net_Msample = 512
             self._clock_internal_freq = 2000
             self._volt_range = 0.700
             self._bit_resolution = 2**8
@@ -423,7 +423,7 @@ You can start a server with:
             self._min_acq_Msample = 16
             self._max_acq_Msample = 4096
             self._min_net_Msample = 16
-            self._max_net_Msample = 64
+            self._max_net_Msample = 256
             self._clock_internal_freq = 400
             self._volt_range = 0.750
             self._bit_resolution = 2**14
@@ -438,7 +438,7 @@ You can start a server with:
             self._min_acq_Msample = 16
             self._max_acq_Msample = 4096
             self._min_net_Msample = 16
-            self._max_net_Msample = 64
+            self._max_net_Msample = 256
             self._clock_internal_freq = 250
             self._volt_range = 0.750
             self._bit_resolution = 2**16
