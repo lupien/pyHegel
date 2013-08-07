@@ -1347,7 +1347,11 @@ class scpiDevice(BaseDevice):
             val = options[k]
             option_dev  = self._options[k]
             if isinstance(option_dev, BaseDevice):
-                tostr_val = option_dev._tostr(val)
+                try:
+                    tostr_val = option_dev._tostr(val)
+                except AttributeError:
+                    # Some devices like BaseDevice, cls_WrapDevice don't have _tostr
+                    tostr_val = repr(val)
             else:
                 tostr_val = repr(val)
             try:
