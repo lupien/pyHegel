@@ -1525,6 +1525,8 @@ class agilent_PNAL(visaInstrumentAsync):
         self.coupling_mode = devChOption('SENSe{ch}:COUPle', choices=ChoiceStrings('ALL', 'NONE'), doc='ALL means sweep mode set to chopped (trans and refl measured on same sweep)\nNONE means set to alternate, imporves mixer bounce and isolation but slower')
         self.freq_start = devChOption('SENSe{ch}:FREQuency:STARt', str_type=float, min=10e6, max=40e9)
         self.freq_stop = devChOption('SENSe{ch}:FREQuency:STOP', str_type=float, min=10e6, max=40e9)
+        self.freq_center = devChOption('SENSe{ch}:FREQuency:CENTer', str_type=float, min=10e6, max=40e9)
+        self.freq_span = devChOption('SENSe{ch}:FREQuency:SPAN', str_type=float, min=0, max=40e9)
         self.freq_cw= devChOption('SENSe{ch}:FREQuency:CW', str_type=float, min=10e6, max=40e9)
         self.ext_ref = scpiDevice(getstr='SENSe:ROSCillator:SOURce?', str_type=str)
         self.npoints = devChOption('SENSe{ch}:SWEep:POINts', str_type=int, min=1)
