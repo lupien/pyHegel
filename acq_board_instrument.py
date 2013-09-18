@@ -86,17 +86,24 @@ class Listen_thread(threading.Thread):
         select_list = [self.acq_instr.s]
         socket_timeout = 0.1
         old_stuff = ''
+        prev_new_stuff = ''
         bin_mode = False
         block_length = 0
         total_byte = 0
         acq = self.acq_instr
         rcv_ptr = 0
+        reset_trans = False
         while not self._stop:
             if bin_mode and len(old_stuff) > 0:
                 pass
             else:
                 try:
-                    r, _, _ = select.select(select_list, [], [], socket_timeout)
+                    r, _, oob = select.select(select_list, [], select_list, socket_timeout)
+                    if bool(oob):
+                        acq.s.recv(1, socket.MSG_OOB) # read the data byte
+                        print 'Received out of band data. Ending transfer.'
+                        reset_trans = True
+                        prev_new_stuff = ''
                     if not bool(r):
                         continue
                 except socket.error:
@@ -108,8 +115,27 @@ class Listen_thread(threading.Thread):
                     new_stuff = old_stuff
                     old_stuff = ''
                 else:
-                    new_stuff = acq.s.recv(next_readlen)
+                    try:
+                        new_stuff = acq.s.recv(next_readlen)
+                    except socket.error as exc:
+                        print 'Connection Lost: ', exc.args
+                        break
                     next_readlen = block_length
+                if reset_trans:
+                    resync_msg = '***** This message is to end a binary transfer *****'
+                    indx = (prev_new_stuff+new_stuff).find(resync_msg)
+                    if indx != -1:
+                        indx -= len(prev_new_stuff)
+                        reset_trans = False
+                        if indx > 0:
+                            new_stuff = new_stuff[:indx]
+                        else:
+                            new_stuff = ''
+                        old_stuff = new_stuff[indx+len(resync_msg):]
+                        print 'Found Resync message. Some data not transferred ', total_byte-len(new_stuff)
+                        total_byte = len(new_stuff)
+                    else:
+                        prev_new_stuff = new_stuff
                 #print 'BIN',repr(new_stuff)
                 total_byte -= len(new_stuff)
                 if total_byte < 0:
@@ -119,80 +145,136 @@ class Listen_thread(threading.Thread):
                     acq.fetch._dump_file.write(new_stuff)
                     acq.fetch._rcv_val = None
                 else:
-                    acq.fetch._rcv_val[rcv_ptr:]=new_stuff
+                    if acq.fetch._rcv_val: # could be None
+                        # a partial slice [start:] resizes/extends the bytearray
+                        # we don't want to do that so use [start:end]
+                        acq.fetch._rcv_val[rcv_ptr:rcv_ptr+len(new_stuff)]=new_stuff
                     rcv_ptr+=len(new_stuff)
                 if total_byte <= 0:
                     if acq.fetch._dump_file == None:
-                        acq.fetch._rcv_val = bytes(acq.fetch._rcv_val)
+                        if acq.fetch._rcv_val:
+                            try:
+                                # use bytes here for python 3. future compatibility
+                                # in 2.6.. it is the same as str
+                                acq.fetch._rcv_val = bytes(acq.fetch._rcv_val)
+                            except MemoryError:
+                                err_msg = 'Binary transfer incomplete because of memory error.'
+                                print 'Error: '+err_msg
+                                acq._errors_list.append('CRITICAL: '+err_msg)
+                                acq.fetch._rcv_val = ''
                     bin_mode = False
                     acq.fetch._event_flag.set()
                     new_stuff = ''
                 else:
                     continue
             else:
-                new_stuff = acq.s.recv(128)
+                try:
+                    new_stuff = acq.s.recv(1024)
+                except socket.error as exc:
+                    print 'Connection Lost: ', exc.args
+                    self._stop = True
             #print repr(new_stuff)
             old_stuff += new_stuff
+            ind1 = old_stuff.find('@')
+            ind2 = old_stuff.find('#')
+            if ind1==-1 and ind2==-1:
+                old_stuff = ''
+            elif ind1==-1:
+                old_stuff = old_stuff[ind2:]
+            elif ind2==-1:
+                old_stuff = old_stuff[ind1:]
+            else:
+                old_stuff = old_stuff[min(ind1,ind2):]
             trames = old_stuff.split('\n', 1)
             old_stuff = trames.pop()
             while trames != []:
                 trame = trames[0]
-                if trame[0] != '@' and trame[0] != '#':
+                if len(trame) == 0:
+                    trames = old_stuff.split('\n', 1)
+                    old_stuff = trames.pop()
                     continue
-                if trame[0] == '@':
-                    trame = trame[1:]
-                    head, val = trame.split(' ', 1)
-                    if head.startswith('ERROR:'):
-                        if head == 'ERROR:STD':
-                            acq._errors_list.append('STD: '+val)
-                            print 'Error: ', val
-                        elif head == 'ERROR:CRITICAL':
-                            acq._errors_list.append('CRITICAL: '+val)
-                            acq._error_state = True
-                            print '!!!!!!!!!!!\n!!!!!CRITICAL ERROR!!!!!: ', val,'\n!!!!!!!!!!!!!'
+                if trame[0] != '@' and trame[0] != '#':
+                    # We end up here if \n was not followed by @ or #
+                    # This should not happend unless there is a bug in the server,
+                    # the communication is corrupted, or we missed a resync
+                    # while aborting a binary transfer
+                    trames = [trame[1:]]
+                    continue
+                # parse the data
+                try:
+                    if trame[0] == '@':
+                        trame = trame[1:]
+                        head, val = trame.split(' ', 1)
+                        if head.startswith('ERROR:'):
+                            if head == 'ERROR:STD':
+                                acq._errors_list.append('STD: '+val)
+                                print 'Error: ', val
+                            elif head == 'ERROR:CRITICAL':
+                                acq._errors_list.append('CRITICAL: '+val)
+                                acq._error_state = True
+                                print '!!!!!!!!!!!\n!!!!!CRITICAL ERROR!!!!!: ', val,'\n!!!!!!!!!!!!!'
+                            else:
+                                acq._errors_list.append('Unknown: '+val)
+                                print 'Unkown error', head, val
                         else:
-                            acq._errors_list.append('Unknown: '+val)
-                            print 'Unkown error', head, val
-                    else:
-                        obj = acq._objdict.get(head, None)
-                        if obj == None:
-                            acq._errors_list.append('Unknown @'+head+' val:'+val)
-                            print 'Listen Thread: unknown @header:',head, 'val=', val
-                        else:
-                            obj._rcv_val = val
-                            obj._event_flag.set()
-                            # update _cache for STATUS result
-                            if obj == acq.board_status or obj == acq.result_available or \
-                                      obj == acq.partial_status:
-                                obj._cache = obj._fromstr(val)
-                            if obj == acq.partial_status:
-                                partial_L, partial_v = obj._cache
-                                sys.stdout.write('\rPartial %3i/%-3i     '%(partial_v,partial_L))
-                            if obj == acq.board_status and obj._cache != 'Running':
-                                # run is finished when board_status is either Idle or Transferring
-                                acq._run_finished.set()
-                else: # trame[0]=='#'
-                    trame = trame[1:]
-                    head, val = trame.split(' ', 1)
-                    location, typ, val = val.split(' ', 2)
-                    if location == 'Local':
-                        filename = val
-                        acq.fetch._rcv_val = None
-                        acq.fetch._event_flag.set()
-                    else: # location == 'Remote'
-                        bin_mode = True
-                        rcv_ptr = 0
-                        block_length, total_byte = val.split(' ')
-                        next_readlen = block_length = int(block_length)
-                        total_byte = int(total_byte)
-                        if acq.fetch._dump_file != None:
+                            obj = acq._objdict.get(head, None)
+                            if obj == None:
+                                acq._errors_list.append('Unknown @'+head+' val:'+val)
+                                print 'Listen Thread: unknown @header:',head, 'val=', val
+                            else:
+                                obj._rcv_val = val
+                                obj._event_flag.set()
+                                # update _cache for STATUS result
+                                if obj == acq.board_status or obj == acq.result_available or \
+                                          obj == acq.partial_status:
+                                    obj._cache = obj._fromstr(val)
+                                if obj == acq.partial_status:
+                                    partial_L, partial_v = obj._cache
+                                    sys.stdout.write('\rPartial %3i/%-3i     '%(partial_v,partial_L))
+                                if obj == acq.board_status and obj._cache != 'Running':
+                                    # run is finished when board_status is either Idle or Transferring
+                                    acq._run_finished.set()
+                    else: # trame[0]=='#'
+                        trame = trame[1:]
+                        #TODO could check head value
+                        head, val = trame.split(' ', 1)
+                        location, typ, val = val.split(' ', 2)
+                        if location == 'Local':
+                            filename = val
                             acq.fetch._rcv_val = None
-                        else:
-                            acq.fetch._rcv_val = bytearray(total_byte)
-                        break
+                            acq.fetch._event_flag.set()
+                        else: # location == 'Remote'
+                            block_length, total_byte = val.split(' ')
+                            next_readlen = block_length = int(block_length)
+                            total_byte = int(total_byte)
+                            reset_trans = False
+                            bin_mode = True
+                            rcv_ptr = 0
+                            if acq.fetch._dump_file != None:
+                                acq.fetch._rcv_val = None
+                            else:
+                                try:
+                                    acq.fetch._rcv_val = bytearray(total_byte)
+                                except MemoryError:
+                                    err_msg = 'Binary transfer failed because of memory error.'
+                                    print 'Error: '+err_msg
+                                    acq._errors_list.append('CRITICAL: '+err_msg)
+                                    acq.fetch._rcv_val = None
+                            break
+                except ValueError: # when split fails or when int() fails
+                    err_msg = 'Trouble parsing message from server'
+                    print 'Error: '+err_msg
+                    acq._errors_list.append('CRITICAL: '+err_msg)
+                # now setup for next loop
                 trames = old_stuff.split('\n', 1)
                 old_stuff = trames.pop()
-        print 'Thread Ending....'
+
+        print 'Acq Listen Thread Ending....'
+        try:
+            acq.s.shutdown(socket.SHUT_RD)
+        except weakref.ReferenceError:
+            # This happens when deleting an Acq_Board_Instrument instance
+            pass
 
     def cancel(self):
         self._stop = True
@@ -299,6 +381,7 @@ You can start a server with:
     !start /D \Codes\CarteAcquisition\Release cmd /K Ctrl_Carte_Acquistion.exe
 """
         self.set_timeout = 5
+        self._rerun_en = True
 
         # status and flag
         self.board_type = None
@@ -318,12 +401,14 @@ You can start a server with:
             # TODO cleanup these limits
             self._max_nb_Msample = 4294967295 #2**32-1 max unsigned int
             self._max_Msample = 4294959104    #2*32-8192 (8192=2**13)
-            self._min_hist_Msample = 8192
-            self._min_corr_Msample = 8192
+            self._min_hist_Msample = 512
+            self._min_corr_Msample = 512
+            self._default_hist_Msample = 8192
+            self._default_corr_Msample = 8192
             self._min_acq_Msample = 32
             self._max_acq_Msample = 8192
             self._min_net_Msample = 32
-            self._max_net_Msample = 128
+            self._max_net_Msample = 512
             self._clock_internal_freq = 2000
             self._volt_range = 0.700
             self._bit_resolution = 2**8
@@ -331,12 +416,14 @@ You can start a server with:
             self._max_sampling = 400
             self._min_sampling = 20
             self._max_Msample = 2147479552 # (2**32-8192)/2
-            self._min_hist_Msample = 4096
-            self._min_corr_Msample = 4096
+            self._min_hist_Msample = 256
+            self._min_corr_Msample = 256
+            self._default_hist_Msample = 4096
+            self._default_corr_Msample = 4096
             self._min_acq_Msample = 16
             self._max_acq_Msample = 4096
             self._min_net_Msample = 16
-            self._max_net_Msample = 64
+            self._max_net_Msample = 256
             self._clock_internal_freq = 400
             self._volt_range = 0.750
             self._bit_resolution = 2**14
@@ -344,12 +431,14 @@ You can start a server with:
             self._max_sampling = 250
             self._min_sampling = 40
             self._max_Msample = 2147479552 # (2**32-8192)/2
-            self._min_hist_Msample = 4096
-            self._min_corr_Msample = 4096
+            self._min_hist_Msample = 256
+            self._min_corr_Msample = 256
+            self._default_hist_Msample = 4096
+            self._default_corr_Msample = 4096
             self._min_acq_Msample = 16
             self._max_acq_Msample = 4096
             self._min_net_Msample = 16
-            self._max_net_Msample = 64
+            self._max_net_Msample = 256
             self._clock_internal_freq = 250
             self._volt_range = 0.750
             self._bit_resolution = 2**16
@@ -504,7 +593,7 @@ You can start a server with:
         offset = resolution/2.
         if self.board_type == 'ADC14':
             sign = -1.
-        else: # 8bit
+        else: # 8bit, 16bit
             sign = +1.
         if off == False:
             offset = 0.
@@ -567,7 +656,7 @@ You can start a server with:
 
     def _fetch_filename_helper(self, filename, extra=None, newext=None):
         filestr=''
-        location = self.format_location()
+        location = self.format_location.getcache()
         tofilename = acq_filename().tostr
         if location == 'Local':
             if filename == None:
@@ -1068,6 +1157,7 @@ You can start a server with:
         format_location_str = ['Local','Remote']
         format_type_str = ['Default','ASCII','NPZ']
         window_str = ['None', 'Bartlett', 'Hann', 'Welch']
+        config_ok_str = ['Bad', 'Run_Ready', 'ReRun_Ready']
         
         #device init
         # Configuration
@@ -1092,6 +1182,7 @@ You can start a server with:
                                             min=-volt_range, max=volt_range)
         
         self.osc_slope = acq_device('CONFIG:OSC_SLOPE', str_type=str, choices=osc_slope_str) 
+        self.osc_trig_filter = acq_device('CONFIG:OSC_TRIGGER_FILTER', str_type=int,  min=1, max=1000)
         self.osc_nb_sample = acq_device('CONFIG:OSC_NB_SAMPLE', str_type=int,  min=1, max= ((16*1024*1024)-1)) # max 16MB
         self.osc_hori_offset = acq_device('CONFIG:OSC_HORI_OFFSET', str_type=int,  min=-(8*1024*1024), max= ((8*1024*1024)-1)) # max 8MB
         self.osc_trig_source = acq_device('CONFIG:OSC_TRIG_SOURCE', str_type=int,  min=1, max=2)
@@ -1116,10 +1207,12 @@ You can start a server with:
         self.cust_param3 = acq_device('CONFIG:CUST_PARAM3', str_type=float)
         self.cust_param4 = acq_device('CONFIG:CUST_PARAM4', str_type=float)
         self.cust_user_lib = acq_device('CONFIG:CUST_USER_LIB', str_type=acq_filename())
-        self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?',str_type=int, doc='The serial number of the aquisition card.')
-        self.board_status = acq_device(getstr='STATUS:STATE?',str_type=str, doc='The current status of the acquisition card. Can be Idle, Running, Transferring')
-        self.partial_status = acq_device(getstr='STATUS:PARTIAL?',str_type=decode_uint32, autoinit=False)
-        self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?',str_type=acq_bool(), doc='Is True when results are available from the card (after run completes)')
+        self.board_serial = acq_device(getstr='CONFIG:BOARD_SERIAL?', str_type=int, doc='The serial number of the aquisition card.')
+        self.board_status = acq_device(getstr='STATUS:STATE?', str_type=str, doc='The current status of the acquisition card. Can be Idle, Running, Transferring')
+        self.status_config_ok = acq_device('STATUS:CONFIG_OK', str_type=str, choices=config_ok_str,
+                                           doc='Do NOT modify (run handles it)')
+        self.partial_status = acq_device(getstr='STATUS:PARTIAL?', str_type=decode_uint32, autoinit=False)
+        self.result_available = acq_device(getstr='STATUS:RESULT_AVAILABLE?', str_type=acq_bool(), doc='Is True when results are available from the card (after run completes)')
         
         self.format_location = acq_device('CONFIG:FORMAT:LOCATION', str_type=str, choices=format_location_str, doc='Select between sending the data through the network socket (Remote), or letting the server save it (Local)')
         self.format_type = acq_device('CONFIG:FORMAT:TYPE',str_type=str, choices=format_type_str, doc='Select saving format when in Local. Only implemented one is Default')
@@ -1213,12 +1306,15 @@ You can start a server with:
         """
         self.write('STOP')
 
-    def force_cal(self):
+    def force_cal(self, flags=7):
         """
-        Ask the server to do the hardcal and offset/gain cal for 16bit cards.
+        Ask the server to do the hardcal (1), ADC(2) offset/gain cal and DAC(4)
+        input offset/bias for 16bit cards.
         The calibration is performed when the card is idle.
+        You can select a subset of the calibrations by adjusting flags as a sum of
+        the cals you want done.
         """
-        self.write('FORCECAL')
+        self.write('FORCECAL %i'%flags)
 
     def disconnect(self):
         """
@@ -1359,7 +1455,7 @@ You can start a server with:
         self._set_mode_defaults()
 
     @locked_calling
-    def set_histogram(self, nb_Msample='min', chan_nb=1, sampling_rate=None, clock_source=None, decimation=1):
+    def set_histogram(self, nb_Msample='default', chan_nb=1, sampling_rate=None, clock_source=None, decimation=1):
         """
         Activates the histogram mode.
 
@@ -1371,7 +1467,8 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the number of samples used for histogram (uses min by default)
+        nb_MSample: set the number of samples used for histogram (either a value,
+                    'min' or 'default')
         chan_nb:    select the channel to acquire for the histogram,
                     either 1(default) or 2
         decimation: only analyze one of every decimation point
@@ -1380,7 +1477,10 @@ You can start a server with:
                      for n any integer >= 1
         """
         self.op_mode.set('Hist')
-        if nb_Msample=='min':
+        if nb_Msample=='default':
+            nb_Msample = self._default_hist_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        elif nb_Msample=='min':
             nb_Msample = self._min_hist_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
@@ -1391,7 +1491,7 @@ You can start a server with:
         self._set_mode_defaults()
 
     @locked_calling
-    def set_correlation(self, nb_Msample='min', sampling_rate=None, clock_source=None):
+    def set_correlation(self, nb_Msample='default', sampling_rate=None, clock_source=None):
         """
         Activates the cross correlation mode. This reads both ch1 and ch2
         and calculates the cross correlation.
@@ -1402,11 +1502,15 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the total number of samples used (uses min by default)
+        nb_MSample: set the total number of samples used (either a value,
+                    'min' or 'default')
                     This number includes both channels.
         """
         self.op_mode.set('Corr')
-        if nb_Msample=='min':
+        if nb_Msample=='default':
+            nb_Msample = self._default_corr_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        elif nb_Msample=='min':
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
@@ -1418,7 +1522,7 @@ You can start a server with:
         self.corr_mode.set(True)
     
     @locked_calling
-    def set_autocorrelation(self, nb_Msample='min', autocorr_single_chan=True,
+    def set_autocorrelation(self, nb_Msample='default', autocorr_single_chan=True,
                             autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
         """
         Activates the auto-correlation mode.
@@ -1429,7 +1533,8 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the total number of samples used (uses min by default)
+        nb_MSample: set the total number of samples used (either a value,
+                    'min' or 'default')
                     This number includes both channels, if both are read.
         autocorr_single_chan: When True, only one channel is read and analyzed
                               otherwise both are read and analyzed.
@@ -1438,7 +1543,10 @@ You can start a server with:
                           mode. Either 1 (default) or 2.
         """
         self.op_mode.set('Corr')
-        if nb_Msample=='min':
+        if nb_Msample=='default':
+            nb_Msample = self._default_corr_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        elif nb_Msample=='min':
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
@@ -1454,7 +1562,7 @@ You can start a server with:
         self.corr_mode.set(False)
 
     @locked_calling
-    def set_auto_and_corr(self, nb_Msample='min', autocorr_single_chan=False,
+    def set_auto_and_corr(self, nb_Msample='default', autocorr_single_chan=False,
                           autocorr_chan_nb=1, sampling_rate=None, clock_source=None):
         """
         Activates the cross-auto-correlation mode.
@@ -1467,7 +1575,8 @@ You can start a server with:
         See tau_vec to set a vector of time displacement between x and y.
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the total number of samples used (uses min by default)
+        nb_MSample: set the total number of samples used (either a value,
+                    'min' or 'default')
                     This number includes both channels.
         autocorr_single_chan: When True, only one channel is analyzed for
                               autocorrelation otherwise both are analyzed.
@@ -1475,7 +1584,10 @@ You can start a server with:
                           mode. Either 1 (default) or 2.
         """
         self.op_mode.set('Corr')
-        if nb_Msample=='min':
+        if nb_Msample=='default':
+            nb_Msample = self._default_corr_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        elif nb_Msample=='min':
             nb_Msample = self._min_corr_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
         self.set_clock_source(sampling_rate, clock_source)
@@ -1497,10 +1609,11 @@ You can start a server with:
         Both channels are used.
          ch1 is used as the reference signal.
          ch2 is used as the measured signal.
-        WARNING: before running, make sure the net_signal_freq is set properly
-          (close to the value of the reference signal), otherwise the analysis
-          will fail. To do sweeps, you will probably be interested in the
-          instruments.CopyDevice device.
+        Note: before running, make sure the net_signal_freq is set properly
+          (close to the value of the reference signal). This used to be necessary,
+          to prevent failure but is not required anymore. It will only affect
+          a warning now. If you want to set it during sweeps anyway,
+          you will probably be interested in the instruments.CopyDevice device.
 
         Get the data from one of (for the first harmonic only)
             net_ch1_ampl, net_ch1_phase, net_ch1_real, net_ch1_imag
@@ -1532,12 +1645,17 @@ You can start a server with:
 
     @locked_calling
     def set_scope(self, nb_sample=1024, hori_offset=0, trigger_level=0., slope='Rising',
-                  trig_source=1, trig_mode='Auto', chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
+                  trig_source=1, trig_mode='Auto', trig_filter=1,
+                  chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         """
         Activates the oscilloscope mode.
         Get nb_sample (1024 by default).
 
-        hori_offset:  delay in time_steps (integer) between trigger and data.
+        hori_offset:  delay in time_steps (integer) between start of data and trigger
+                      point. A positive value therefore shows data before the
+                      trigger event. A negative value, moves the trigger event before
+                      the start of the data. The default of 0, has the trigger event
+                      as the first data point.
         trigger_level: Voltage used for trigger (default=0.0).
         slope: the trigger slope. Either 'Rising' (default) or 'Falling'.
         trig_source: The channel used for finding a trigger. Either 1 (default)
@@ -1547,6 +1665,9 @@ You can start a server with:
                    To stop it see stop method.
                    In 'Auto' if a trigger is not seen the first section of data is
                    returned.
+        trig_filter: The number of continuous points that stay across the
+                     trigger level. A larger value decreases the possibility
+                     of accidental trigger because of noise.
         chan_mode: Either 'Single' (default) or 'Dual'.
                    In dual, both channels are read.
         chanb_nb: Channel to read when in 'Single' mode. Either 1 (default) or 2.
@@ -1565,6 +1686,7 @@ You can start a server with:
         self.osc_nb_sample.set(nb_sample)
         self.osc_hori_offset.set(hori_offset)
         self.osc_trigger_level.set(trigger_level)
+        self.osc_trig_filter.set(trig_filter)
         self.osc_slope.set(slope)
         self.osc_trig_source(trig_source)
         self.osc_trig_mode(trig_mode)
@@ -1663,6 +1785,12 @@ You can start a server with:
         This function checks the validity of the current configuration.
         If valid, it starts the acquisition/analysis.
         """
+        if self.status_config_ok.get() == 'ReRun_Ready' and self._rerun_en:
+            # rerun
+            self._run_finished.clear()
+            self.write('RUN')
+            return
+
         # check if the configuration are ok
         if self.op_mode.getcache() == 'Null':
             raise ValueError, 'No acquisition mode selected yet!'
@@ -1709,25 +1837,25 @@ You can start a server with:
         
         
         if self.op_mode.getcache() == 'Corr' and self.board_type in ['ADC14', 'ADC16']:
-            quotien = float(self.nb_Msample.getcache())/4096
+            quotien = float(self.nb_Msample.getcache())/256
             frac,entier = math.modf(quotien)
             if frac != 0.0:
-                new_nb_Msample = int(math.ceil(quotien))*4096
+                new_nb_Msample = int(math.ceil(quotien))*256
                 if new_nb_Msample > self._max_Msample:
                     new_nb_Msample = self._max_Msample
                 self.nb_Msample.set(new_nb_Msample)
-                raise ValueError, 'Warning nb_Msample must be a multiple of 4096 in Corr ADC14-ADC16, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be a multiple of 256 in Corr ADC14-ADC16, value corrected to nearest possible value : ' + str(new_nb_Msample)
 
 
         if (self.op_mode.getcache() == 'Hist' or self.op_mode.getcache() == 'Corr') and self.board_type == 'ADC8':
-            quotien = float(self.nb_Msample.getcache())/8192
+            quotien = float(self.nb_Msample.getcache())/512
             frac,entier = math.modf(quotien)
             if frac != 0.0:
-                new_nb_Msample = int(math.ceil(quotien))*8192
+                new_nb_Msample = int(math.ceil(quotien))*512
                 if new_nb_Msample > self._max_Msample:
                     new_nb_Msample = self._max_Msample
                 self.nb_Msample.set(new_nb_Msample)
-                raise ValueError, 'Warning nb_Msample must be a multiple of 8192 in Hist or Corr ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be a multiple of 512 in Hist or Corr ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
         
         
         if self.op_mode.getcache() == 'Net':
@@ -1739,14 +1867,7 @@ You can start a server with:
                 new_nb_Msample = self._max_net_Msample
                 self.nb_Msample.set(new_nb_Msample)
                 raise ValueError, 'Warning nb_Msample must be inferior or equal to %i in Acq %s, value corrected to %i'%(new_nb_Msample,self.board_type,new_nb_Msample)
-    
-        #if in Osc mode check if the sample to send fit the horizontal offset
-        if self.op_mode.getcache() == 'Osc':
-            nb_sample = self.osc_nb_sample.getcache()
-            if self.osc_hori_offset() > nb_sample:
-                self.osc_hori_offset.set(nb_sample)
-                raise ValueError, 'Warning osc_hori_offset larger than nb_Sample. corrected to nearest possible value : ' + str(nb_sample)
-        
+
         # check if the fft length is a power of 2 and if the nb_Msample fit too
         if self.op_mode.getcache() == 'Spec':
             pwr2 = math.log(self.fft_length.getcache(), 2)
@@ -1756,7 +1877,7 @@ You can start a server with:
                 self.fft_length.set(new_fft_length)
                 raise ValueError, 'Warning fft_length not a power of 2, value corrected to nearest possible value : ' + str(new_fft_length)
 
-        self.write('STATUS:CONFIG_OK True')
+        self.status_config_ok.set('Run_Ready')
         self._run_finished.clear()
         self.write('RUN')
 
