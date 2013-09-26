@@ -322,6 +322,7 @@ class Acq_Board_Instrument(visaInstrument):
 
     Once loaded, an acquisition mode needs to be selected. See the methods
         set_histogram
+        set_histo2d
         set_scope
         set_simple_acq
         set_spectrum
@@ -530,6 +531,10 @@ You can start a server with:
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
                                      'chan_nb', 'decimation', options)
                                      
+        if self.op_mode.getcache() == 'Hist2d':
+            return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
+                                     options)
+
         if self.op_mode.getcache() == 'Corr':
             return self._conf_helper('op_mode', 'nb_Msample', 'sampling_rate', 'clock_source',
                                      'autocorr_mode', 'corr_mode','autocorr_single_chan',
@@ -652,6 +657,8 @@ You can start a server with:
             fmt.update(multi=headers, graph=graphs)
         if mode == 'Hist' or mode == 'Spec' or mode == 'Osc':
             fmt.update(xaxis=True) # This is the default, will be overriden if necessary in BaseDevice.getformat
+        if mode == 'Hist2d':
+            fmt.update(bin=True)
         return BaseDevice.getformat(self.fetch, **kwarg)
 
     def _fetch_filename_helper(self, filename, extra=None, newext=None):
@@ -695,7 +702,7 @@ You can start a server with:
             -ch        to select which channel to read (can be a list)
             -xaxis     When True, the first returned column will be the xaxis values
                        default is True for all except correlations
-                       Not used for Acq, Net or Custom mode
+                       Not used for Acq, Net, Hist2d or Custom mode
             -ss        Used to smooth get a stable peak amplitude for spectra
 
            Behavior according to modes:
@@ -715,6 +722,20 @@ You can start a server with:
                      of events in that binary code from the ADC.
                      When unit='rate', the return vector is the count rate
                      in count/s as floats.
+              Hist2d: returns square 2D array of uint64
+                      the bins contain the count. Data is saved as binary
+                      by default.
+                      The first dimension is for ch1, the second for ch2
+                      Examples of using imshow to display data, assuming v is data
+                       # simplest, but axes are unusual (ch1 is vertical, ch2 horizontal)
+                       imshow(v)
+                       # Take transpose to have horizontal be ch1, vertical be ch2
+                       imshow(v.T, interpolation='nearest', origin='lower')
+                       # change color palete and display it
+                       spectral()
+                       colorbar()
+                       # Make color represent log (add 1 to prevent log10(0) -inf)
+                       imshow(log10(v.T+1), interpolation='nearest', origin='lower')
 
                For all the following, ch can select which channels to return
                To select one channel: ch=1 or ch=[1]
@@ -827,6 +848,17 @@ You can start a server with:
                         self.sampling_rate.getcache()*self.decimation.getcache()
             if xaxis:
                 ret = np.asarray([self.get_xscale(), ret*1.])
+            return ret
+
+        if mode == 'Hist2d':
+            self.fetch._event_flag.clear()
+            s = 'DATA:HIST2D:DATA?'+filestr
+            self.write(s)
+            wait_on_event(self.fetch._event_flag, check_state=self)
+            if self.fetch._rcv_val == None:
+                return None
+            ret = np.fromstring(self.fetch._rcv_val, np.uint64)
+            ret.shape = (np.sqrt(len(ret)),-1)
             return ret
 
         if mode == 'Net':
@@ -1149,7 +1181,7 @@ You can start a server with:
         #device member
     def _create_devs(self):
         # choices string and number
-        op_mode_str = ['Null', 'Acq', 'Corr', 'Cust', 'Hist', 'Net', 'Osc', 'Spec']
+        op_mode_str = ['Null', 'Acq', 'Corr', 'Cust', 'Hist', 'Net', 'Osc', 'Spec', 'Hist2d']
         clock_source_str = ['Internal', 'External', 'USB']
         chan_mode_str = ['Single','Dual']
         osc_slope_str = ['Rising','Falling']
@@ -1488,6 +1520,32 @@ You can start a server with:
         self.nb_Msample.set(nb_Msample)
         self.chan_mode.set('Single')
         self.chan_nb.set(chan_nb)
+        self._set_mode_defaults()
+
+    @locked_calling
+    def set_histo2d(self, nb_Msample='default', chan_nb=1, sampling_rate=None, clock_source=None):
+        """
+        Activates the 2D histogram mode.
+        It reads both channels and creates a matrix of both signals together.
+
+        Get the data from fetch (readval) to capture the full 2D histogram.
+
+        Set sampling_rate anc clock_source, or reuse the previous ones by
+        default (see set_clock_source).
+        nb_MSample: set the number of samples used for histogram (either a value,
+                    'min' or 'default')
+        It does not handle decimation
+        """
+        self.op_mode.set('Hist2d')
+        if nb_Msample=='default':
+            nb_Msample = self._default_hist_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        elif nb_Msample=='min':
+            nb_Msample = self._min_hist_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        self.set_clock_source(sampling_rate, clock_source)
+        self.nb_Msample.set(nb_Msample)
+        self.chan_mode.set('Dual')
         self._set_mode_defaults()
 
     @locked_calling
