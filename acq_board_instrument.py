@@ -600,7 +600,7 @@ You can start a server with:
         self.board_serial.get()
         self.board_status.get()
         self.result_available.get()
-        self.tau_vec([0])
+        self.tau_vec.set([0])
 
     def convert_bin2v(self, bin, off=True, auto_inv=True):
         """
@@ -814,7 +814,7 @@ You can start a server with:
             Their default are usually ok.
         """
         mode = self.op_mode.getcache()
-        location = self.format_location()
+        location = self.format_location.getcache()
         # All saving by server or by dump_file is binary so change ext
         if filename != None:
             filename = _replace_ext(filename, '.bin')
