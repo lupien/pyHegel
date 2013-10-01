@@ -1495,6 +1495,13 @@ class Block_Codec(object):
             array = array.astype(self._dtype)
         return _encode_block(array, self._sep)
 
+class Block_Codec_Raw(object):
+    def __init__(self, dtype=np.float64, sep=None):
+        self._dtype = dtype
+    def __call__(self, input_str):
+        return np.fromstring(input_str, self._dtype)
+    def tostr(self, array):
+        return array.tostring()
 
 decode_float64 = functools.partial(_decode_block_auto, t=np.float64)
 decode_float32 = functools.partial(_decode_block_auto, t=np.float32)

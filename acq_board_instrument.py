@@ -19,7 +19,8 @@ import sys
 # user made import
 from instruments_base import FastEvent, scpiDevice, wait_on_event,\
                             visaInstrument, BaseInstrument, BaseDevice,\
-                            ReadvalDev, decode_uint32, _replace_ext, locked_calling
+                            ReadvalDev, decode_uint32, _replace_ext, locked_calling,\
+                            Block_Codec_Raw
 from kbint_util import _sleep_signal_context_manager
 
 
@@ -51,6 +52,7 @@ class acq_device(scpiDevice):
         self._event_flag = FastEvent()
         self._event_flag.set()
         self._rcv_val = None
+        self._dump_file = None
     def _getdev(self):
         if self._getdev_p == None:
             raise NotImplementedError, self.perror('This device does not handle _getdev')
@@ -58,6 +60,20 @@ class acq_device(scpiDevice):
         self.instr.write(self._getdev_p)
         wait_on_event(self._event_flag, check_state=self.instr)
         return self._fromstr(self._rcv_val)
+
+class acq_blockRW(acq_device):
+    def __init__(self, *arg, **kwarg):
+        super(acq_blockRW, self).__init__(*arg, **kwarg)
+        if self._setdev_p != None:
+            self._setdev_p = self._setdev_p.split(' ', 1)[0] # remove ' {var}'
+    def _setdev(self, val):
+        if self._setdev_p == None:
+            raise NotImplementedError, self.perror('This device does not handle _setdev')
+        valstr = self._tostr(val)
+        d={np.dtype('int32').name:'int32'}
+        command = '%s %s %i'%(self._setdev_p, d[val.dtype.name], val.nbytes)
+        self.instr.write(command, valstr)
+
 
 class dummy_device(object):
     def __init__(self, getstr):
@@ -93,6 +109,7 @@ class Listen_thread(threading.Thread):
         acq = self.acq_instr
         rcv_ptr = 0
         reset_trans = False
+        block_obj = None
         while not self._stop:
             if bin_mode and len(old_stuff) > 0:
                 pass
@@ -141,29 +158,29 @@ class Listen_thread(threading.Thread):
                 if total_byte < 0:
                     old_stuff = new_stuff[total_byte:]
                     new_stuff = new_stuff[:total_byte]
-                if acq.fetch._dump_file != None:
-                    acq.fetch._dump_file.write(new_stuff)
-                    acq.fetch._rcv_val = None
+                if block_obj._dump_file != None:
+                    block_obj._dump_file.write(new_stuff)
+                    block_obj._rcv_val = None
                 else:
-                    if acq.fetch._rcv_val: # could be None
+                    if block_obj._rcv_val: # could be None
                         # a partial slice [start:] resizes/extends the bytearray
                         # we don't want to do that so use [start:end]
-                        acq.fetch._rcv_val[rcv_ptr:rcv_ptr+len(new_stuff)]=new_stuff
+                        block_obj._rcv_val[rcv_ptr:rcv_ptr+len(new_stuff)]=new_stuff
                     rcv_ptr+=len(new_stuff)
                 if total_byte <= 0:
-                    if acq.fetch._dump_file == None:
-                        if acq.fetch._rcv_val:
+                    if block_obj._dump_file == None:
+                        if block_obj._rcv_val:
                             try:
                                 # use bytes here for python 3. future compatibility
                                 # in 2.6.. it is the same as str
-                                acq.fetch._rcv_val = bytes(acq.fetch._rcv_val)
+                                block_obj._rcv_val = bytes(block_obj._rcv_val)
                             except MemoryError:
                                 err_msg = 'Binary transfer incomplete because of memory error.'
                                 print 'Error: '+err_msg
                                 acq._errors_list.append('CRITICAL: '+err_msg)
-                                acq.fetch._rcv_val = ''
+                                block_obj._rcv_val = ''
                     bin_mode = False
-                    acq.fetch._event_flag.set()
+                    block_obj._event_flag.set()
                     new_stuff = ''
                 else:
                     continue
@@ -239,10 +256,11 @@ class Listen_thread(threading.Thread):
                         #TODO could check head value
                         head, val = trame.split(' ', 1)
                         location, typ, val = val.split(' ', 2)
+                        block_obj = acq._objdict.get(head, acq.fetch)
                         if location == 'Local':
                             filename = val
-                            acq.fetch._rcv_val = None
-                            acq.fetch._event_flag.set()
+                            block_obj._rcv_val = None
+                            block_obj._event_flag.set()
                         else: # location == 'Remote'
                             block_length, total_byte = val.split(' ')
                             next_readlen = block_length = int(block_length)
@@ -250,16 +268,16 @@ class Listen_thread(threading.Thread):
                             reset_trans = False
                             bin_mode = True
                             rcv_ptr = 0
-                            if acq.fetch._dump_file != None:
-                                acq.fetch._rcv_val = None
+                            if block_obj._dump_file != None:
+                                block_obj._rcv_val = None
                             else:
                                 try:
-                                    acq.fetch._rcv_val = bytearray(total_byte)
+                                    block_obj._rcv_val = bytearray(total_byte)
                                 except MemoryError:
                                     err_msg = 'Binary transfer failed because of memory error.'
                                     print 'Error: '+err_msg
                                     acq._errors_list.append('CRITICAL: '+err_msg)
-                                    acq.fetch._rcv_val = None
+                                    block_obj._rcv_val = None
                             break
                 except ValueError: # when split fails or when int() fails
                     err_msg = 'Trouble parsing message from server'
@@ -1250,6 +1268,8 @@ You can start a server with:
         self.format_type = acq_device('CONFIG:FORMAT:TYPE',str_type=str, choices=format_type_str, doc='Select saving format when in Local. Only implemented one is Default')
         self.format_block_length = acq_device('CONFIG:FORMAT:BLOCK_LENGTH',str_type = int, min=1, max=4294967296, doc='Size of blocks used in Remote transmission')
 
+        self.histo2d_redirect = acq_blockRW('CONFIG:HIST2D_REDIRECT', str_type=Block_Codec_Raw(np.int32), doc='A vector of int32 used for redirection of length _bit_resolution')
+
         # Results
         #histogram result
         self.hist_c1 = acq_device(getstr = 'DATA:HIST:C1?', str_type = float, autoinit=False, trig=True)
@@ -1295,15 +1315,18 @@ You can start a server with:
         super(type(self),self)._create_devs()
         
 
-    def _base_unlock_write(self, val):
+    def _base_unlock_write(self, val, block=None):
         self._check_error()
-        val = '@' + val + '\n'
+        if block==None:
+            val = '@' + val + '\n'
+        else:
+            val = '#' + val + '\n' + block
         self.s.send(val)
 
     #class method
     @locked_calling
-    def write(self, val):
-        self._base_unlock_write(val)
+    def write(self, val, block=None):
+        self._base_unlock_write(val, block)
 
     # only use read, ask before starting listen thread.
     # These are not locked, so can be used before initializing base class
@@ -1522,11 +1545,31 @@ You can start a server with:
         self.chan_nb.set(chan_nb)
         self._set_mode_defaults()
 
+    def set_histo2d_redirect(self, nb_bitsbins=10):
+        """
+        This sets the redirection using either a set number of bits (<=12)
+        or a set number of bins (>12). All bins will be the same size unless
+        nb_bins is not a multiple of the data acquisition card number of bins.
+        In that case the last bin will be smaller.
+        """
+        bins = np.arange(self._bit_resolution)
+        if nb_bitsbins <= 12:
+            nb_bitsbins = 2**nb_bitsbins
+        if nb_bitsbins > 2**12:
+            raise ValueError, 'You cannot use more than 12 bits for histo2d_redirect'
+        binswidth = np.ceil(float(self._bit_resolution)/nb_bitsbins)
+        bins /= binswidth
+        self.histo2d_redirect.set(bins)
+
     @locked_calling
-    def set_histo2d(self, nb_Msample='default', chan_nb=1, sampling_rate=None, clock_source=None):
+    def set_histo2d(self, nb_Msample='default', nb_bitsbins=10, sampling_rate=None, clock_source=None):
         """
         Activates the 2D histogram mode.
         It reads both channels and creates a matrix of both signals together.
+        You can change the redirection (from acquired value to returned bin)
+        using nb_bitsbins which is the value passed to the
+        set_histo2_redirect function. You can also use the histo2_redirect
+        device directly.
 
         Get the data from fetch (readval) to capture the full 2D histogram.
 
@@ -1537,6 +1580,7 @@ You can start a server with:
         It does not handle decimation
         """
         self.op_mode.set('Hist2d')
+        self.set_histo2d_redirect(nb_bitsbins)
         if nb_Msample=='default':
             nb_Msample = self._default_hist_Msample
             print 'Using ', nb_Msample, 'nb_Msample'
