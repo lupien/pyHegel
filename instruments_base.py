@@ -559,17 +559,16 @@ def _general_check(val, min=None, max=None, choices=None ,lims=None):
 
 class BaseDevice(object):
     """
-        ----------------
+        ---------------- General device documentation
         All devices provide a get method.
         Some device also implement set, check methods.
+        Users should not call the get/set methods directly bus instead
+        should use the pyHegel set/get functions.
         Both get and set use a cache variable which is accessible
         with getcache, setcache methods
-        The gets have no parameters.
-        The sets and check have one parameter, which is the value.
-
-        The device dev can be called as
-         dev() which is the same as getcache
-         dev(val) which is the same as set(val)
+        The gets have no positional parameters.
+        The sets and check have one positional parameter, which is the value.
+        They can have multiple keyword parameters
     """
     def __init__(self, autoinit=True, doc='', setget=False,
                   min=None, max=None, choices=None, multi=False, graph=True,
@@ -705,10 +704,9 @@ class BaseDevice(object):
         with self.instr._lock_instrument: # only local data, so don't need _lock_extra
             self._cache = val
     def __call__(self, val=None):
-        if val==None:
-            return self.getcache()
-        else:
-            self.set(val)
+        raise SyntaxError, """Do NOT call a device directly, like instr.dev().
+        Instead use set/get on the device or
+        functions that use set/get like sweep or record."""
     def __repr__(self):
         gn, cn, p = self.instr._info()
         return '<device "%s" of %s=(class "%s" at 0x%08x)>'%(self.name, gn, cn, p)
