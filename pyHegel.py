@@ -895,13 +895,21 @@ def readfile(filename, nojoin=False, getnames=False, csv='auto', dtype=None):
 ###  set overides set builtin function
 def set(dev, value, **kwarg):
     """
-       Change the value of device dev.
+       Change the value of device dev (or the alias for an instrument).
+       The options for the device are listed as keyword arguments (**kwarg).
+       Example:
+           set(yo1, 1) # uses yo1.alias which is yo1.level
+           set(yo1.range, 10)
+           set(pnax.marker_x, 1e9, mkr=3) # changes marker 3 to 1 GHz
+
+       Note that dev can also be a tuple like in sweep.out
     """
     dev, kwarg = _get_dev_kw(dev, **kwarg)
     dev.set(value, **kwarg)
 
 def move(dev, value, rate):
     """
+       NOT IMPLEMENTED
        Change the value of dev at a particular rate (val/s)
     """
     dev.move(value, rate)
@@ -1226,7 +1234,7 @@ def _process_filename(filename, now=None, next_i=None, start_i=0, search=True, *
 ### get overides get the mathplotlib
 def get(dev, filename=None, **kwarg):
     """
-       Get a value from device
+       Get a value from device (or the alias for an instrument)
        When giving it a filename, data will be saved to it
        and the strings uses the following format
                     use %T: for date time string (20120115-145030)
@@ -1236,7 +1244,14 @@ def get(dev, filename=None, **kwarg):
                               %03i for   3 digits
        The path for saving is sweep.path if it is defined otherwise it saves
        in the current directory.
-       extrap are all other keyword arguments and depende on the device.
+
+       The options for the device are listed as keyword arguments (**kwarg).
+       Example:
+            get(dmm1) # uses dmm1.alias which is dmm1.readval
+            # use filename and keyword argument unit with value 'db_deg'
+            get(pna1.readval, filename='Test-%T.txt', unit='db_deg')
+            # you can have multiple keyword arguments
+            get(pna1.readval, unit='db_deg', mem=True)
 
        Note that dev can also be a tuple like in sweep.out
     """
@@ -1250,7 +1265,7 @@ def get(dev, filename=None, **kwarg):
 
 def setget(dev, val=None, **kwarg):
     """
-    Either calls set or get depending on the presence of a value
+    Either calls set or get depending on the presence of a value.
     """
     if val == None:
         return get(dev, **kwarg)
@@ -1258,6 +1273,10 @@ def setget(dev, val=None, **kwarg):
         set(dev, val, **kwarg)
 
 def getasync(devs, filename=None, **kwarg):
+    """
+    Performs a get of a list of devices (devs), using the async algorithm.
+    Mostly useful for testing.
+    """
     if filename != None:
         raise ValueError, 'getasync does not currently handle the filename option'
     if not isinstance(devs, list):
@@ -1278,7 +1297,11 @@ def make_dir(directory, setsweep=True):
     """
         Creates a directory if it does now already exists
         and changes sweep.path to point there unless
-        setsweep is False
+        setsweep is False.
+
+        It recognizes the % format string of _process_filename.
+        It is often used to set a directory for the day like:
+            make_dir('C:/Projets/UnProjet/Data/%D')
     """
     dirname, unique_i = _process_filename(directory)
     if not os.path.exists(dirname):
@@ -1411,7 +1434,8 @@ def load(names=None, newnames=None):
        configured devices.
        See the find_all_instruments command to see the instruments available
        via Visa (GPIB or USB) (Can also use the external Visa explorer from
-       Agilent or National Instruments).
+       Agilent or National Instruments). You can load all known usb instruments
+       with the load_all_usb function.
 
        NOTE: You can always load an instrument manually. You just need to initialize
        the instrument class with the proper address. For example you can replace
