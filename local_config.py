@@ -37,6 +37,10 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              gen1 = (instruments.agilent_rf_33522A, (10,)),
              gen2 = (instruments.agilent_rf_33522A, (14,)),
              gen5 = (instruments.agilent_rf_33522A, ('USB0::0x0957::0x2307::MY50005306',)),
+             bnc1 = (instruments.BNC_rf_845, ('USB0::0x03EB::0xAFFF::141-215330500-0233::0',)),
+             bnc2 = (instruments.BNC_rf_845, ('USB0::0x03EB::0xAFFF::141-215330500-0234::0',)),
+             bnc3 = (instruments.BNC_rf_845, ('USB0::0x03EB::0xAFFF::141-215330500-0235::0',)),
+             bnc4 = (instruments.BNC_rf_845, ('USB0::0x03EB::0xAFFF::141-215330500-0236::0',)),
              rf1 = (instruments.sr384_rf, (16,)),
              rf2 = (instruments.sr384_rf, (27,)),
              foo1 = (instruments.dummy, ()),
@@ -85,5 +89,6 @@ usb_manuf = { 0x0957 : ('Agilent', { 0x0607 : 'multimeter',
                                      0x1F01 : 'MXG',
                                      0x5418 : 'PowerMeter',
                                      0x4C18 : 'RF_attenuator' }),
-              0x0B21 : ('Yokogawa',  {0x0039 : 'GS200' })
+              0x0B21 : ('Yokogawa',  {0x0039 : 'GS200' }),
+              0x03EB : ('BNC', {0xAFFF : 'rf_845'})
             }
