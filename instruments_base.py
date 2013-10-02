@@ -863,7 +863,6 @@ class BaseInstrument(object):
         self._async_list_init = []
         self._async_level = -1
         self._async_counter = 0
-        self.async_delay = 0.
         self._async_delay_check = True
         self._async_task = None
         self._async_current_calling_thread = None
@@ -920,10 +919,10 @@ class BaseInstrument(object):
                 self._async_task = asyncThread(self._async_list, self._lock_instrument, self._lock_extra, self._async_list_init)
                 self._async_level = 0
             if delay:
-                if self._async_delay_check and self.async_delay == 0.:
+                if self._async_delay_check and self.async_delay.getcache() == 0.:
                     print self.perror('***** WARNING You should give a value for async_delay *****')
                 self._async_delay_check = False
-                self._async_task.change_delay(self.async_delay)
+                self._async_task.change_delay(self.async_delay.getcache())
             if trig:
                 self._async_task.change_detect(self._async_detect)
                 self._async_task.change_trig(self._async_trig)
@@ -994,6 +993,8 @@ class BaseInstrument(object):
         # if instrument had a _current_config function and the device does
         # not specify anything for header in its format string than
         # we assign it.
+        self.async_delay = MemoryDevice(0., doc=
+            "In seconds. Used in async mode for devices that don't start/wait (run_and_wait) functions.")
         self._devwrap('header')
         # need the ProxyMethod to prevent binding which blocks __del__
         if hasattr(self, '_current_config'):

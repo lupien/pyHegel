@@ -70,11 +70,11 @@ class sr830_lia(visaInstrument):
     """
     When using async mode, don't forget to set the async_delay
     to some usefull values.
-     might do sr1.async_delay = 1
+     might do set(sr1.async_delay, 1.)
     when using 24dB/oct, 100ms filter.
 
     You can use find_n_time and find_fraction to set the time.
-    For example: sr1.async_delay = sr1.find_n_time(.99,sec=True)
+    For example: set(sr1.async_delay, sr1.find_n_time(.99,sec=True))
 
     To read more than one channel at a time use snap
     Otherwise you can use x, y, t, theta and snap
@@ -108,8 +108,8 @@ class sr830_lia(visaInstrument):
         ch_i = choices.tostr(ch)
         self.write('aoff '+ch_i)
     def _current_config(self, dev_obj=None, options={}):
-        base = ['async_delay=%r'%self.async_delay]
-        return base+self._conf_helper('freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
+        #base = ['async_delay=%r'%self.async_delay]
+        return self._conf_helper('async_delay',' freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
                                  'sync_filter', 'reserve_mode',
                                  'offset_expand_x', 'offset_expand_y', 'offset_expand_r',
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf', options)
@@ -325,7 +325,6 @@ class sr780_analyzer(visaInstrumentAsync):
         average_type
         average_mode
         average_count_requested
-    Useful attribute:
         async_delay (needed for exponential average, not for linear)
     Useful methods:
         start
@@ -380,7 +379,7 @@ class sr780_analyzer(visaInstrumentAsync):
             if self.average_type.get() in ['linear', 'FixedLength']:
                 tocheck = 0x2
             else:
-                if self._async_delay_check and self.async_delay == 0.:
+                if self._async_delay_check and self.async_delay.getcache() == 0.:
                     print self.perror('***** WARNING You should give a value for async_delay *****')
                     self._async_delay_check = False
                 self._async_use_delay = True
@@ -421,7 +420,7 @@ class sr780_analyzer(visaInstrumentAsync):
         disp_st = self.get_display_status()
         self._cum_display_status |= disp_st
         if self._async_use_delay:
-            if time.time()-self._async_trig_time < self.async_delay:
+            if time.time()-self._async_trig_time < self.async_delay.getcache():
                 #print 'wait delay %0x %f'%(self._cum_display_status, time.time()-self._async_trig_time)
                 return False
         tocheck = self._async_tocheck
@@ -448,7 +447,7 @@ class sr780_analyzer(visaInstrumentAsync):
         For faster transfer, make the view and unit the same type (both linear or both log)
         It is STRONGLY recommended to use linear averaging.
         For exponential averaging you need to specify a wait time with async_delay
-         i.e. srnet.async_delay=3  # for 2 seconds
+         i.e. set(srnet.async_delay,3)  # for 3 seconds
         """
         # The instrument has 5 Traces that can be used for memory.
         # There is REFY? d,j to obtain pint j (0..length-1) in ref curve of display d
