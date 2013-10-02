@@ -140,6 +140,10 @@ def help_pyHegel():
         iprint yo1
         get yo1
         get yo1.range
+        # using alias
+        set yo1, 0.01
+        # now the same but using the device directly instead of through alias
+        set yo1.level, 0.01
         iprint dmm1
         dmm1?
         dmm1.fetch?
