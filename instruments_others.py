@@ -1123,6 +1123,99 @@ class colby_pdl_100a(visaInstrument):
 
 
 #######################################################
+##    BNC 845 microwave/RF generator
+#######################################################
+
+class BNC_rf_845(visaInstrument):
+    """
+    This controls a BNC 845 signal generetor
+    Most useful devices:
+        ampl_dbm
+        rf_en
+        freq_cw
+    The alc devices refer to automatic level (amplitude) control.
+    Available methods:
+        phase_sync
+
+    According to specs, it takes less than 0.1 ms for settling after
+    a frequency change.
+    """
+    def _current_config(self, dev_obj=None, options={}):
+        # TODO Get the proper config
+        return self._conf_helper('oscillator_source', 'oscillator_ext_freq_MHz', 'oscillator_locked',
+                                 'oscillator_out_en', 'oscillator_out_freq',
+                                 'rf_en', 'ampl_dbm', 'amp_flatness_corr_en', 'output_blanking_en',
+                                 'ampl_mode', 'ampl_start', 'ampl_stop',
+                                 'alc_en', 'alc_low_amp_noise_en', 'alc_hold_en',
+                                 'attenuation_db', 'attenuation_auto_en', 'amp_flatness_corr_en',
+                                 'freq_mode', 'freq_cw', 'freq_start', 'freq_stop',
+                                 'sweep_nbpoints', 'sweep_type', 'sweep_dwell_s', 'sweep_delay_s', 'sweep_delay_auto_en',
+                                 'sweep_direction',
+                                 'lowfout_freq', 'lowfout_amp_V', 'lowfout_shape', 'lowfout_source', 'lowfout_en',
+                                 'phase', 'mod_am_en', 'mod_fm_en', 'mod_phase_en', 'mod_pulse_en', options)
+    def _create_devs(self):
+        self.installed_options = scpiDevice(getstr='*OPT?')
+        self.oscillator_source = scpiDevice(':ROSCillator:SOURce', choices=ChoiceStrings('INTernal', 'EXTernal')) # 'SLAVe' not useful for us
+        self.oscillator_ext_freq_MHz = scpiDevice(':ROSCillator:EXTernal:FREQuency', str_type=float, min=1, max=250)
+        self.oscillator_locked = scpiDevice(getstr=':ROSCillator:LOCKed?', str_type=bool)
+        self.oscillator_out_en = scpiDevice(':ROSCillator:OUTPut:STATe', str_type=bool)
+        self.oscillator_out_freq = scpiDevice(':ROSCillator:OUTPut:FREQuency', str_type=float, choices=[10e6, 100e6])
+        self.rf_en = scpiDevice(':OUTPut', str_type=bool)
+        #self.unit_power('UNIT:POWer', choices=ChoiceStrings('W', 'V', 'DBM', 'DB')) # only affects display
+        #self.unit_freq('UNIT:FREQuency', choices=ChoiceStrings('HZ', 'MHZ', 'GHZ')) # only affects display
+        self.ampl_dbm = scpiDevice(':POWer', str_type=float, setget=True, min=-105, max=20)
+        # unit:volt:type affects volt scale like power:alc:search:ref:level, which are not user changeable
+        self.ampl_mode = scpiDevice(':POWer:MODE', choices=ChoiceStrings('FIXed', 'LIST', 'SWEep'))
+        self.ampl_start = scpiDevice(':POWer:STARt', str_type=float, setget=True)
+        self.ampl_stop = scpiDevice(':POWer:STOP', str_type=float, setget=True)
+        self.ampl_step = scpiDevice(getstr=':POWer:STEP?', str_type=float)
+        self.alc_en = scpiDevice(':POWer:ALC', str_type=bool)
+        self.alc_low_amp_noise_en = scpiDevice(':POWer:ALC:LOWN', str_type=bool, doc='When enabled provides up to 0.001 dB output resolution. Works similarly to hold')
+        self.alc_hold_en = scpiDevice(':POWer:ALC:HOLD', str_type=bool, doc='Open loops ALC control')
+        att_list = list(decode_float64(self.ask('POWer:ATTenuation:LIST?')))
+        self.attenuation_db = scpiDevice(':POWer:ATTenuation', str_type=float, choices=att_list)
+        self.attenuation_auto_en = scpiDevice(':POWer:ATTenuation:AUTO', str_type=bool)
+        self.amp_flatness_corr_en = scpiDevice(':CORRection:FLATness', str_type=bool)
+        self.output_blanking_en = scpiDevice(':OUTPut:BLANKing:STATe', str_type=bool, doc='disable RF output when changing frequency')
+        self.phase = scpiDevice(':PHASe', str_type=float, min=0, max=2*np.pi, doc='Adjust phase arounf ref. In rad.')
+        self.freq_mode = scpiDevice(':FREQuency:MODE', choices=ChoiceStrings('CW', 'FIXed', 'LIST', 'SWEep', 'CHIRp'), doc='CW and FIXed are the same.')
+        minfreq=9e3
+        maxfreq=20.5e9
+        self.freq_cw = scpiDevice(':FREQuency', str_type=float, min=minfreq, max=maxfreq)
+        self.freq_start = scpiDevice('FREQuency:STARt', str_type=float, min=minfreq, max=maxfreq)
+        self.freq_stop = scpiDevice('FREQuency:STOP', str_type=float, min=minfreq, max=maxfreq)
+        self.freq_step = scpiDevice(getstr='FREQuency:STEP?', str_type=float)
+        #self.freq_steplog = scpiDevice(getstr='FREQuency:STEP:LOGarithmic?', str_type=float) # This is in the manual but does not seem to work
+        self.sweep_nbpoints = scpiDevice('SWEep:POINt', str_type=int, min=2, max=65535) # manual says points but that does not work, use point instead
+        self.sweep_progress = scpiDevice(getstr='SWEep:PROGress?', str_type=float) # manual says proggress but is wrong
+        self.sweep_type = scpiDevice('SWEep:SPACing', choices=ChoiceStrings('LINear', 'LOGarithmic'))
+        self.sweep_dwell_s = scpiDevice('SWEep:DWELl', str_type=float)
+        self.sweep_delay_s = scpiDevice('SWEep:DELay', str_type=float)
+        self.sweep_delay_auto_en = scpiDevice('SWEep:DELay:AUTO', str_type=bool)
+        self.sweep_direction = scpiDevice('SWEep:DIRection', choices=ChoiceStrings('UP', 'DOWN', 'RANDom'))
+        self.lowfout_freq = scpiDevice(':LFOutput:FREQuency', str_type=float, min=10, max=5e6)
+        self.lowfout_amp_V = scpiDevice(':LFOutput:AMPLitude', str_type=float, min=0, max=2.5, doc=
+            """Vpp, only for LFGenerator and sine or triangle into 50 Ohm
+               (not accurate, and with an offset).
+               For Square amp=5V CMOS always.""")
+        self.lowfout_shape = scpiDevice(':LFOutput:SHAPe', choices=ChoiceStrings('SINE', 'TRIangle', 'SQUare'))
+        self.lowfout_source = scpiDevice(':LFOutput:SOURce', choices=ChoiceStrings('LFGenerator', 'PULM', 'TRIGger'))
+        self.lowfout_en = scpiDevice(':LFOutput:STATe', str_type=bool)
+        self.mod_am_en = scpiDevice(':AM:STATe', str_type=bool)
+        self.mod_fm_en = scpiDevice(':FM:STATe', str_type=bool)
+        self.mod_phase_en = scpiDevice(':PM:STATe', str_type=bool)
+        self.mod_pulse_en = scpiDevice(':PULM:STATe', str_type=bool)
+        self.alias = self.freq_cw
+        # This needs to be last to complete creation
+        super(BNC_rf_845, self)._create_devs()
+    def phase_sync(self):
+        """
+        Sets the current output phase as a zero reference.
+        """
+        self.write('PHASe:REFerence')
+
+
+#######################################################
 ##    Dummy instrument
 #######################################################
 
