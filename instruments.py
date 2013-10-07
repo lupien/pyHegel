@@ -41,5 +41,7 @@ from instruments_agilent import agilent_rf_33522A, agilent_PowerMeter,\
 
 from acq_board_instrument import Acq_Board_Instrument, HistoSmooth, calc_cumulants
 
+from instruments_lecroy import lecroy_wavemaster
+
 DataTranslation = data_translation.DataTranslation
 find_all_Ol = data_translation.find_all_Ol
