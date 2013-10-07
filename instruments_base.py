@@ -985,27 +985,36 @@ class BaseInstrument(object):
             obj = getattr(self, devname)
             if devname != 'alias' and isinstance(obj, BaseDevice):
                 yield devname, obj
-    def _create_devs(self):
-        # devices need to be created here (not at class level)
-        # because we want each instrument instance to use its own
-        # device instance (otherwise they would share the instance data)
-        #
+    def _create_devs_helper(self, once=False):
+        """
+        Users can call this function after creating new device for an instrument
+        that already exists. It will properly initialize the new devices.
+        The user might call it with once=True.
+        """
         # if instrument had a _current_config function and the device does
         # not specify anything for header in its format string than
         # we assign it.
-        self.async_delay = MemoryDevice(0., doc=
-            "In seconds. Used in async mode for devices that don't start/wait (run_and_wait) functions.")
-        self._devwrap('header')
+        #
         # need the ProxyMethod to prevent binding which blocks __del__
         if hasattr(self, '_current_config'):
             conf = ProxyMethod(self._current_config)
         else:
             conf = None
         for devname, obj in self.devs_iter():
+            if once and obj.instr != None:
+                continue
             obj.instr = weakref.proxy(self)
             obj.name = devname
             if conf and not obj._format['header']:
                 obj._format['header'] = conf
+    def _create_devs(self):
+        # devices need to be created here (not at class level)
+        # because we want each instrument instance to use its own
+        # device instance (otherwise they would share the instance data)
+        self.async_delay = MemoryDevice(0., doc=
+            "In seconds. Used in async mode for devices that don't start/wait (run_and_wait) functions.")
+        self._devwrap('header')
+        self._create_devs_helper()
 #    def _current_config(self, dev_obj, get_options):
 #        pass
     def _conf_helper(self, *devnames):
@@ -1576,7 +1585,14 @@ class quoted_dict(quoted_list):
         return super(quoted_dict,self).tostr(l)
 
 class ChoiceBase(object):
-    pass
+    def __call__(self, input_str):
+        raise NotImplementedError, 'ChoiceBase subclass should overwrite __call__'
+    def tostr(self, val):
+        raise NotImplementedError, 'ChoiceBase subclass should overwrite __tostr__'
+    def __repr__(self):
+        raise NotImplementedError, 'ChoiceBase subclass should overwrite __repr__'
+    def __contains__(self, val):
+        raise NotImplementedError, 'ChoiceBase subclass should overwrite __contains__'
 
 class ChoiceStrings(ChoiceBase):
     """
