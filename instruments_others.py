@@ -109,7 +109,7 @@ class sr830_lia(visaInstrument):
         self.write('aoff '+ch_i)
     def _current_config(self, dev_obj=None, options={}):
         #base = ['async_delay=%r'%self.async_delay]
-        return self._conf_helper('async_delay',' freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
+        return self._conf_helper('async_delay', 'freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
                                  'sync_filter', 'reserve_mode',
                                  'offset_expand_x', 'offset_expand_y', 'offset_expand_r',
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf', options)
