@@ -747,7 +747,7 @@ class BaseDevice(object):
             format['xaxis'] = xaxis
         return format
     def getfullname(self):
-        return self.instr.header()+'.'+self.name
+        return self.instr.header.getcache()+'.'+self.name
     def force_get(self):
         """
         Force a reread of the instrument attached to this device.
