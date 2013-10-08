@@ -17,6 +17,9 @@ from kbint_util import sleep, _sleep_signal_context_manager, _delayed_signal_con
 
 
 def _get_lib_properties(libraryHandle):
+    import win32api
+    global _win32api
+    _win32api = win32api
     filename = win32api.GetModuleFileName(libraryHandle)
     fixedInfo = win32api.GetFileVersionInfo(filename, '\\')
     # Only pick the first lang, codepage combination
@@ -76,6 +79,14 @@ def _patch_pyvisa():
     visa.warnings.filterwarnings = filterwarnings
 
 _agilent_visa = False
+def _visa_test_agilent():
+    global _visa_lib_properties, _agilent_visa
+    _visa_lib_properties = _get_lib_properties(vpp43.visa_library()._handle)
+    if 'agilent' in _visa_lib_properties['company'].lower():
+        _agilent_visa = True
+    else:
+        _agilent_visa = False
+
 try:
     if os.name == 'nt':
         import pyvisa.vpp43 as vpp43
@@ -90,10 +101,7 @@ try:
         except WindowsError:
             print 'Unable to load visa32.dll.'
             raise ImportError
-        import win32api
-        _visa_lib_properties = _get_lib_properties(vpp43.visa_library()._handle)
-        if 'agilent' in _visa_lib_properties['company'].lower():
-            _agilent_visa = True
+        _visa_test_agilent()
     else:
         try:
             import visa
@@ -108,6 +116,23 @@ except ImportError as exc: # pyVisa not installed
     visa = None
 #can list instruments with : 	visa.get_instruments_list()
 #     or :                      visa.get_instruments_list(use_aliases=True)
+
+def _visa_reload(dllfile=r'c:\Windows\system32\agvisa32.dll'):
+    """
+    reloads the same or different visa dll.
+    For National instrument visa: r'c:\Windows\system32\visa32.dll'
+       or None
+    For Agilent (default): r'c:\Windows\system32\agvisa32.dll'
+    """
+    # we assume os.name == 'nt'
+    vpp43.visa_library.load_library(dllfile)
+    # now need to reset ResourceManager
+    try:
+        visa.resource_manager.close()
+    except visa.VisaIOError:
+        pass
+    visa.resource_manager.init()
+    _visa_test_agilent()
 
 
 _globaldict = dict() # This is set in pyHegel.py
