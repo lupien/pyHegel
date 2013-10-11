@@ -186,6 +186,7 @@ def reset_pyHegel():
     reload(instruments.instruments_others)
     reload(instruments.instruments_logical)
     reload(instruments.acq_board_instrument)
+    reload(instruments.instruments_lecroy)
     import types
     if isinstance(instruments.data_translation, types.ModuleType):
         reload(instruments.data_translation)
