@@ -7,40 +7,209 @@ from ctypes import Structure, c_float, c_double, c_int8, c_int16, c_int32, c_cha
 
 from instruments_base import visaInstrumentAsync, visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
-                            ChoiceMultiple, _repr_or_string,\
-                            quoted_string, quoted_list, quoted_dict,\
-                            ChoiceBase,\
-                            ChoiceStrings, ChoiceDevDep, ChoiceDevSwitch,\
+                            ChoiceBase, _general_check, _fromstr_helper, _tostr_helper,\
+                            ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
                             _decode_block_base,\
                             sleep, locked_calling
+
+
+class lecroy_dict(ChoiceBase):
+    def __init__(self, field_names, fmts=int, sep=',', required=None, repeats=None):
+        """
+        This handles commands that return a list of options like
+           opt1,5,opt2,34,opt3,DC
+        On reading, they will probably all be present.
+        On writing, it is not necessary to gave all. Values not given are not
+        changed by lecroy instrument.
+        fielnames is a list of ('SN', 'dict_name'), where SN is the shortname
+        used to communicate with the instrument, dict_name is the name
+        used for the pyHegel dictionnary. It can also be a list of strings, in
+        which case it is used as both SN and dict_name
+        'SN' can be '', in which case it should be the first elements of the list.
+        and is not named. There can only be more than one.
+        'SN' are compared in a case insensitive way.
+        required is to set the number of required '' parameters. By default
+        all of them are, otherwise tell it a number.
+        repeats select the '' which will be vectors containing the extra data.
+        It can be a single value (index of field_names to repeat) or a (start, stop)
+        pair, where stop is included.
+
+        fmts can be a single converter or a list of converters
+        the same length as field_names
+        A converter is either a type or a (type, lims) tuple
+        where lims can be a tuple (min, max) with either one being None
+        or a list/object of choices.
+        Not that if you use a ChoiceBase object, you only need to specify
+        it as the type. It is automatically used as a choice also.
+
+        Based on ChoiceMultiple
+        """
+        def make_tuple(val):
+            if isinstance(val, basestring):
+                return (val, val)
+            else:
+                return val
+        field_names = map(make_tuple, field_names)
+        self.field_names_sn = [sn.lower() for sn,dn in field_names]
+        cnt = 0
+        maxlen = len(field_names)
+        while cnt<maxlen and self.field_names_sn[cnt] == '':
+            cnt += 1
+        self.nosn_cnt = cnt
+        if '' in self.field_names_sn[cnt:]:
+            raise ValueError,'Only the first SNs can be the empty string'
+        if len(set(self.field_names_sn[cnt:])) != len(self.field_names_sn[cnt:]):
+            raise ValueError,'There is a duplicated SN which is not allowed'
+        self.field_names_dn = [dn.lower() for sn,dn in field_names]
+        self.field_names = self.field_names_dn # needed for Dict_SubDevice
+        if len(set(self.field_names_dn)) != len(self.field_names_dn):
+            raise ValueError,'There is a duplicated dict_name which is not allowed'
+        if not isinstance(fmts, (list, np.ndarray)):
+            fmts = [fmts]*len(field_names)
+        fmts_type = []
+        fmts_lims = []
+        for f in fmts:
+            if not isinstance(f, tuple):
+                if isinstance(f, ChoiceBase):
+                    f = (f,f)
+                else:
+                    f = (f, None)
+            fmts_type.append(f[0])
+            fmts_lims.append(f[1])
+        self.fmts_type = fmts_type
+        self.fmts_lims = fmts_lims
+        self.sep = sep
+        if required == None:
+            required = cnt
+        self.required = required
+        if repeats != None:
+            if not isinstance(repeats, (tuple, list)):
+                repeats = (repeats, repeats)
+        else:
+            repeats = (-1, -2)
+        self.repeats = repeats
+    def __call__(self, fromstr):
+        v_base = fromstr.split(self.sep)
+        if len(v_base) < self.required:
+            raise ValueError, 'Returned result (%s) is too short.'%fromstr
+        names = []
+        fmts = []
+        vals = []
+        maxlen = len(v_base)
+        cnt = min(maxlen, self.nosn_cnt)
+        cycle = 0
+        N = self.repeats[1]+1-self.repeats[0]
+        full_elem = 2*len(self.field_names) - self.nosn_cnt
+        if N!=0:
+            Ncycles = (len(v_base) - (full_elem-N))/N
+            if Ncycles < 1:
+                Ncycles = 1
+        else:
+            Ncycles = 0
+        cnt = cnt-N+Ncycles*N
+        for i in range(cnt):
+            j = i - N*cycle
+            if j>=self.repeats[0] and j<=self.repeats[1] and cycle<Ncycles:
+                if cycle != 0:
+                    vals[j].append(v_base[i])
+                else:
+                    names.append(self.field_names_dn[j])
+                    fmts.append(self.fmts_type[j])
+                    vals.append([v_base[i]])
+            else:
+                names.append(self.field_names_dn[j])
+                fmts.append(self.fmts_type[j])
+                vals.append(v_base[i])
+            if j == self.repeats[1]:
+                cycle += 1
+        v_base = v_base[cnt:]
+        vals.extend(v_base[1::2])
+        for n in v_base[::2]:
+            i = self.field_names_sn.index(n.lower())
+            names.append(self.field_names_dn[i])
+            fmts.append(self.fmts_type[i])
+        v_conv = []
+        v_names = []
+        for k, val, fmt in zip(names, vals, fmts):
+            if isinstance(fmt, ChoiceMultipleDep):
+                fmt.set_current_vals(dict(zip(v_names, v_conv)))
+            if isinstance(val, list):
+                v_conv.append(map(lambda v: _fromstr_helper(v, fmt), val))
+            else:
+                v_conv.append(_fromstr_helper(val, fmt))
+            v_names.append(k)
+        return OrderedDict(zip(names, v_conv))
+    # TODO handle repeats for tostr
+    def tostr(self, fromdict=None, **kwarg):
+        # we assume check (__contains__) was called so we don't need to
+        # do fmt.set_current_vals again
+        if fromdict == None:
+            fromdict = kwarg
+        fromdict = fromdict.copy() # don't change incomning argument
+        ret = []
+        for i in range(self.nosn_cnt):
+            key = self.field_names_dn[i]
+            try:
+                val = fromdict.pop(key)
+            except KeyError:
+                if i < self.required:
+                    raise KeyError, 'The field with key "%s" is always required'%key
+                else:
+                    break
+            s = _tostr_helper(val, self.fmts_type[i])
+            ret.append(s)
+        for k,v in fromdict.iteritems():
+            i = self.field_names_dn.index(k)
+            fmt = self.fmts_type[i]
+            name = self.field_names_sn[i]
+            ret.append(name + self.sep + _tostr_helper(v, fmt))
+        ret = self.sep.join(ret)
+        return ret
+    def __contains__(self, x): # performs x in y; with y=Choice(). Used for check
+        for i in range(self.required):
+            key = self.field_names_dn[i]
+            if key not in x:
+                raise KeyError, 'The field with key "%s" is always required'%key
+        for k, v in x.iteritems():
+            i = self.field_names_dn.index(k)
+            fmt = self.fmts_type[i]
+            lims = self.fmts_lims[i]
+            try:
+                if isinstance(fmt, ChoiceMultipleDep):
+                    fmt.set_current_vals(x)
+                _general_check(x[k], lims=lims)
+            except ValueError as e:
+                raise ValueError('for key %s: '%k + e.args[0], e.args[1])
+        return True
+    def __repr__(self):
+        r = ''
+        first = True
+        for k, lims in zip(self.field_names_dn, self.fmts_lims):
+            if not first:
+                r += '\n'
+            first = False
+            r += 'key %s has limits %r'%(k, lims)
+        return r
+
 
 """
 Unimplemented commands that could be interesting
 
      ACQUISITION — TO CONTROL WAVEFORM CAPTURE
   ASET AUTO_SETUP Adjusts vertical, timebase and trigger parameters for signal display.
-BWL BANDWIDTH_LIMIT Enables or disables the bandwidth-limiting low-pass filter.
-COMB COMBINE_CHANNELS Controls the channel interleaving function.
-CPL COUPLING Selects the specified input channel’s coupling mode.
-ILVD INTERLEAVED Enables or disables Random Interleaved Sampling (RIS).
-SCLK SAMPLE_CLOCK Toggles between internal clock and external clock.
+  COMB COMBINE_CHANNELS Controls the channel interleaving function.
 SEQ SEQUENCE Controls the sequence mode of acquisition.
 *TRG *TRG Executes an ARM command.
-TRDL TRIG_DELAY Sets the time at which the trigger is to occur.
 WAIT WAIT Prevents new command analysis until current acquisition completion.
      CURSOR — TO PERFORM MEASUREMENTS
-CRMS CURSOR_MEASURE Specifies the type of cursor or parameter measurement for display.
-CRST CURSOR_SET Allows positioning of any cursor.
-CRVA? CURSOR_VALUE? Returns the values measured by the specified cursors for a given trace.
-CRS CURSORS Sets the cursor type.
-PARM PARAMETER Controls the parameter mode.
-PACL PARAMETER_CLR Clears all current parameters in Custom and Pass/Fail modes.
-PACU PARAMETER_CUSTOM Controls parameters with customizable qualifiers.
-PADL PARAMETER_DELETE Deletes a specified parameter in Custom and Pass/Fail modes.
-PAST? PARAMETER_STATISTICS Returns parameter statistics results.
+  CRMS CURSOR_MEASURE Specifies the type of cursor or parameter measurement for display.
+  CRST CURSOR_SET Allows positioning of any cursor.
+  CRVA? CURSOR_VALUE? Returns the values measured by the specified cursors for a given trace.
+  CRS CURSORS Sets the cursor type.
+  PACU PARAMETER_CUSTOM Controls parameters with customizable qualifiers.
 PAVA? PARAMETER_VALUE? Returns current value(s) of parameter(s) and mask tests.
-PF PASS_FAIL Sets up the Pass / Fail system.
-PFDO PASS_FAIL_DO Defines outcome and actions for the Pass/Fail system.
+  PF PASS_FAIL Sets up the Pass / Fail system.
+  PFDO PASS_FAIL_DO Defines outcome and actions for the Pass/Fail system.
 PECS PER_CURSOR_SET Positions one of the six independent cursors.
       DISPLAY — TO DISPLAY WAVEFORMS
   HMAG HOR_MAGNIFY Horizontally expands the selected expansion trace.
@@ -53,10 +222,8 @@ PECS PER_CURSOR_SET Positions one of the six independent cursors.
   VMAG VERT_MAGNIFY Vertically expands the specified trace.
   VPOS VERT_POSITION Adjusts the vertical position of the specified trace.
       FUNCTION — TO PERFORM WAVEFORM MATHEMATICAL OPERATIONS
-CLM CLEAR_MEMORY Clears the specified memory.
+  CLM CLEAR_MEMORY Clears the specified memory.
 DEF DEFINE Specifies math expression for function evaluation.
-FCR FIND_CENTER_RANGE Automatically sets the center and width of a histogram.
-FRST FUNCTION_RESET Resets a waveform processing function.
      MISCELLANEOUS
   COUT CAL_OUTPUT Sets the type of signal put out at the CAL connector.
   *TST? *TST? Performs internal self-test.
@@ -349,6 +516,39 @@ class RISTIME(StructureImproved):
 #9 UNKNOWN
 
 
+class _conv_stripUnit(object):
+    def __init__(self, typ):
+        self.typ = typ
+    def __call__(self, fromstr):
+        return _fromstr_helper(fromstr.split(' ',1)[0], self.typ)
+    def tostr(self, val):
+        return _tostr_helper(val, self.typ)
+float_stripUnit = _conv_stripUnit(float)
+
+class _conv_undef(object):
+    def __init__(self, typ=float, undef_val=np.NaN, undef_str='UNDEF'):
+        self.typ = typ
+        self.undef_val = undef_val
+        self.undef_str = undef_str
+    def __call__(self, fromstr):
+        if self.undef_str == fromstr:
+            return self.undef_val
+        return _fromstr_helper(fromstr, self.typ)
+    def tostr(self, val):
+        if val == self.undef_val:
+            return self.undef_str
+        return _tostr_helper(val, self.typ)
+float_undef = _conv_undef()
+
+class _conv_upper(object):
+    def __init__(self, typ):
+        self.typ = typ
+    def __call__(self, fromstr):
+        return _fromstr_helper(fromstr, self.typ)
+    def tostr(self, val):
+        return _tostr_helper(val, self.typ).upper()
+str_upper = _conv_upper(str)
+
 class ChoiceDict(ChoiceBase):
     """
     Assigns python values to instrument strings
@@ -421,7 +621,7 @@ class waveformdata(object):
 ##    LeCroy WaveMaster 820Zi-A
 #######################################################
 
-class lecroy_wavemaster(visaInstrument):
+class lecroy_wavemaster(visaInstrumentAsync):
     """
     This instrument controls a LeCory WaveMaster 820Zi-A
      To use this instrument, the most useful devices are probably:
@@ -429,6 +629,10 @@ class lecroy_wavemaster(visaInstrument):
        readval
        snap_png
     """
+    def __init__(self, visa_addr):
+        # The SRQ for this intrument does not work
+        # as of version 7.2.1.0
+        super(lecroy_wavemaster, self).__init__(visa_addr, poll=True)
     def init(self, full=False):
         self.write('Comm_ORDer LO') # can be LO or HI: LO=LSB first
         self.write('Comm_ForMaT DEF9,WORD,BIN') #DEF9=IEEE 488.2 block data, WORD (default is BYTE)
@@ -576,8 +780,22 @@ class lecroy_wavemaster(visaInstrument):
     def clear_sweeps(self):
         """ This restarts cummalive processing functions like averages, histogram, persistence"""
         self.write('CLear_SWeeps')
+    def reset_function(self, ch):
+        """ This resets the calculation on a particular channel F1-F12. ch is the number"""
+        self.write('F%i:Function_ReSeT'%ch)
+    def delete_parameter(self, ch):
+        """ This deletes the custom setup for P1-P12. ch is the number, or 'all' to delete all channels"""
+        if ch=='all':
+            self.write('PArameter_CLr')
+        else:
+            self.write('PArameter_DeLete %i'%ch)
     def buzz(self):
         self.write('BUZZer BEEP')
+    def histo_auto_range(self, ch=None):
+        """ Adjust the range and center of an histogram. For F1-F12 """
+        if ch==None:
+            ch = self.current_channel.getcache()
+        self.write('%s:Find_Ctr_Range'%ch)
     def message(self, msg=''):
         """ Will show msg on the message field at bottom of instrument. Not message clears line."""
         self.write('MeSsaGe "%s"'%msg)
@@ -592,7 +810,14 @@ class lecroy_wavemaster(visaInstrument):
         self.autocal_en = scpiDevice('Auto_CALibrate', choices=bool_lecroy)
         self.display_en = scpiDevice('DISPlay', choices=bool_lecroy)
         self.lecroy_options = scpiDevice(getstr='*OPT?')
-        self.reference_clock = scpiDevice('Reference_CLocK', choices=ChoiceStrings('INTERNAL', 'EXTERNAL'))
+        self.reference_clock = scpiDevice('Reference_CLocK', choices=ChoiceStrings('INTernal', 'EXTernal'))
+        self.sample_clock = scpiDevice('Sample_ClocK', choices=ChoiceStrings('INTernal', 'ECL', 'L0V', 'TTL'))
+        self.RIS_mode_en = scpiDevice('InterLeaVeD', choices=bool_lecroy)
+        para_type = ChoiceStrings('CUST', 'HPAR', 'VPAR', 'OFF')
+        para_readout = ChoiceStrings('STAT', 'HISTICON', 'BOTH', 'OFF')
+        para_mode_ch = lecroy_dict([('', 'type'), ('','readout')], [para_type, para_readout], required=1)
+        self.parameter_mode = scpiDevice('PARaMeter', choices=para_mode_ch)
+        self.parameter_mode_type = Dict_SubDevice(self.parameter_mode, 'type')
         channels = ['C%i'%i for i in range(1,5)] +\
                    ['M%i'%i for i in range(1,5)] +\
                    ['F%i'%i for i in range(1,9)] +\
@@ -623,31 +848,76 @@ class lecroy_wavemaster(visaInstrument):
             app = kwarg.pop('options_apply', ['ch'])
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
-        self.data = devChannelOption(getstr='{ch}:WaveForm? ALL', str_type=waveformdata(), autoinit=False)
+        self.data = devChannelOption(getstr='{ch}:WaveForm? ALL', str_type=waveformdata(), autoinit=False, trig=True)
         self.trace_en = devChannelOption('{ch}:TRAce', choices=bool_lecroy)
         # TODO only channelsIn
-        self.volts_div = devChannelOption('{ch}:Volt_DIV', choices=float)
-        self.attenuation = devChannelOption('{ch}:Volt_DIV', str_type=int, choices=[1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 10000])
-        #returns 'C1,OFF,C2,ON,C3,OFF,C4,OFF,C1A,OFF,C2A,ON,C3A,OFF,C4A,OFF,C1B,OFF,C2B,OFF,C3B,OFF,C4B,OFF'
-        self.bandwith_limit = devChannelOption('BandWidth_Limit {ch},{val}', 'BandWidth_Limit?', choices=ChoiceStrings('OFF', '16GHZ', '13GHZ', '8GHZ', '6GHZ', '4GHZ', '3GHZ', '1GHZ', '200MHZ', 'ON'), autoinit=False, doc='OFF=full, ON=20 MHz')
-        self.offset = devChannelOption('{ch}:OFfSeT', choices=float)
+        self.volts_div = devChannelOption('{ch}:Volt_DIV', str_type=float)
+        self.attenuation = devChannelOption('{ch}:ATTeNuation', str_type=int, choices=[1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 10000])
+        self.coupling = devChannelOption('{ch}:CouPLing', choices=ChoiceStrings('D50', 'GND', 'D1M', 'A1M', 'OVL'), doc='OVL is returned on input overload in d50. Do not set it.')
+        bwlim = ChoiceStrings('OFF', '16GHZ', '13GHZ', '8GHZ', '6GHZ', '4GHZ', '3GHZ', '1GHZ', '200MHZ', 'ON')
+        cl = ['C%i'%i for i in range(1,5)] + ['C%iA'%i for i in range(1,5)] + ['C%iB'%i for i in range(1,5)]
+        bwlim_choices = lecroy_dict(cl, bwlim)
+        self.bandwith_limit = devChannelOption('BandWidth_Limit', choices=bwlim_choices, doc='OFF=full, ON=20 MHz')
+        self.offset = devChannelOption('{ch}:OFfSeT', str_type=float)
         self.offset_constant_mode = scpiDevice('OFFset_ConstanT', choices=ChoiceStrings('VOLTS', 'DIV'))
-        self.time_div = scpiDevice('Time_DIV', choices=float)
-        self.memory_size = scpiDevice('Memory_SIZe', choices=float)
+        self.time_div = scpiDevice('Time_DIV', str_type=float)
+        self.memory_size = scpiDevice('Memory_SIZe', str_type=float)
         # C1-C4, EX, EX10, ETM10
         self.trig_coupling = devChannelOption('{ch}:TRig_CouPling', choices=ChoiceStrings('DC', 'DC50', 'GND', 'DC1M', 'AC1M'))
-        self.trig_level = devChannelOption('{ch}:TRig_LeVel', str_type=float)
+        self.trig_level = devChannelOption('{ch}:TRig_LeVel', str_type=float_stripUnit)
         self.trig_mode = scpiDevice('TRig_MoDe', choices=ChoiceStrings('AUTO', 'NORM', 'SINGLE', 'STOP'))
         self.trig_pattern = scpiDevice('TRig_PAttern', autoinit=False)
         self.trig_slope = devChannelOption('{ch}:TRig_SLope', choices=ChoiceStrings('NEG', 'POS'))
-        # C1, C2, C3, C4, LINE, EX, EX10, PA, ETM10
-        # holdtype: TI, TL, EV, PS, PL, IS, IL, P2, I2, OFF
-        self.trig_select = devChannelOption('TRig_SElect {val},SR,{ch},QL,{ch},HT,{holdtype},HV,{holdvalue},{holdvalue2}', choices=ChoiceStrings('DROP', 'EDGE', 'GLIT', 'INTV', 'STD', 'SNG', 'SQ', 'TEQ'), autoinit=False)
-        #self.timebase_mode= scpiDevice(':TIMebase:MODE', choices=ChoiceStrings('MAIN', 'WINDow', 'XY', 'ROLL'))
-        #self.timebase_pos= scpiDevice(':TIMebase:POSition', str_type=float) # in seconds from trigger to display ref
-        #self.timebase_range= scpiDevice(':TIMebase:RANGe', str_type=float) # in seconds, full scale
-        #self.timebase_reference= scpiDevice(':TIMebase:REFerence', choices=ChoiceStrings('LEFT', 'CENTer', 'RIGHt'))
+        channelsTrig = ['C%i'%i for i in range(1,5)] + ['LINE', 'EX', 'EX10', 'PA', 'ETM10']
+        channelsTrig = ChoiceStrings(*channelsTrig)
+        trig_select_holdtype = ChoiceDict({'time':'TI', 'tl':'TL', 'event':'EV', 'ps':'PS', 'pl':'PL', 'is':'IS', 'il':'IL', 'p2':'P2', 'i2':'I2', 'off':'OFF'})
+        trig_select_mode = ChoiceStrings('DROP', 'EDGE', 'GLIT', 'INTV', 'STD', 'SNG', 'SQ', 'TEQ')
+        trig_select_opt = lecroy_dict([('', 'mode'), ('SR', 'ch', ), ('QL','ch2'), ('HT','holdtype'), ('HV','holdvalue'), ('HV2','holdvalue2')], [trig_select_mode, channelsTrig, channelsTrig, trig_select_holdtype, float_stripUnit, float_stripUnit])
+        self.trig_select = devChannelOption('TRig_SElect', choices=trig_select_opt)
+        self.trig_pos_s = scpiDevice('TRig_DeLay', str_type=float, doc='The values are in seconds away from the center. Negative values move the trigger to the left of the screen.')
+        pval_state = ChoiceDict({'OK':'OK', 'averaged':'AV', 'period truncated':'PT', 'invalid':'IV', 'no pulse':'NP', 'greather than':'GT', 'less than':'LT', 'overflow':'OF', 'undeflow':'UF', 'over and under flow':'OU'})
+        self.current_parafunc = MemoryDevice('AMPL', doc="""Possible values are numerous: 'AMPL': amplitude, 'TOTP':histogram total population""")
+        def devParaOption(*arg, **kwarg):
+            # This will check if the marker is currently enabled.
+            options = kwarg.pop('options', {}).copy()
+            options.update(func=self.current_parafunc)
+            # TODO check if this is necessary
+            app = ['ch', 'func']
+            kwarg.update(options=options, options_apply=app)
+            return devChannelOption(*arg, **kwarg)
+        pval_choice = ChoiceMultiple(['func', 'value', 'state'], [str, float_undef, pval_state])
+        # TODO handle 'ALL' which returns many blocks of pval_choice
+        self.parameter_value = devParaOption(getstr='{ch}:PArameter_VAlue? {func}', choices=pval_choice, autoinit=False, trig=True)
+        self.current_para = MemoryDevice(1, min=1, max=12)
+        # TODO understand dtrig, then renane it
+        pstat_choice = lecroy_dict([('', 'mode'), ('', 'ch'), ('', 'func'), 'avg', 'high', 'last', 'low', 'sigma', 'sweeps'], [str]*4+[float_undef]*7, required=2, repeats=2)
+        pstat_modes = para_type[:3] # skip OFF
+        #self.parameter_stat_custom = scpiDevice(getstr='PArameter_STatistics? {mode},P{ch}', choices=pstat_choice, options=dict(ch=self.current_para, mode='CUST'), options_lim=dict(mode=pstat_modes))
+        self.parameter_stat_ch = scpiDevice(getstr='PArameter_STatistics? {mode:s},P{ch}', choices=pstat_choice, autoinit=False, trig=True,
+                                         options=dict(ch=self.current_para, mode=self.parameter_mode_type),
+                                         options_apply=['ch'],
+                                         options_lim=dict(mode=pstat_modes),
+                                         options_conv=dict(mode=lambda s,ts: s))
+        para_stat = ChoiceStrings('AVG', 'LOW', 'HIGH', 'SIGMA', 'SWEEPS', 'LAST')
+        pstat_all_ch = lecroy_dict([('', 'mode'), ('', 'stat'), ('', 'data')], [str]*2 + [float_undef], required=2, repeats=2)
+        def takefirst(x,y):
+            return x
+        self.parameter_stat_all = scpiDevice(getstr='PArameter_STatistics? {mode},{stat}', choices=pstat_all_ch, autoinit=False, trig=True,
+                                         options=dict(stat='AVG', mode=self.parameter_mode_type),
+                                         options_lim=dict(stat=para_stat, mode=pstat_modes),
+                                         options_conv=dict(mode=takefirst, stat=takefirst))
+        self.parameter_stat_all_data = Dict_SubDevice(self.parameter_stat_all, 'data')
+        pstat_params_ch = lecroy_dict([('', 'mode'), ('', 'stat'), ('', 'func'), ('', 'src')], [str]*4, required=2, repeats=(2,3))
+        self.parameter_stat_params = scpiDevice(getstr='PArameter_STatistics? {mode},PARAM', choices=pstat_params_ch,
+                                         options=dict(mode=self.parameter_mode_type),
+                                         options_lim=dict(mode=pstat_modes),
+                                         options_conv=dict(mode=takefirst))
+        self.function_def = devChannelOption('{ch}:DEFine', autoinit=False, doc="""Note that doing set on the return of get might fail because of values with unit. Removes those and it will probably work.""")
         self._devwrap('fetch', autoinit=False, trig=True)
         #self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(lecroy_wavemaster, self)._create_devs()
+
+#F1:DEF EQN,"HIST(P1)",VALUES,'+str(V)+',BINS,'+str(B)
+# Directory for DISK option can us FLPY, HDD, C, D ...
+# Lots of unknown trig_select modes like cascaded
