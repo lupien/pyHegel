@@ -1916,7 +1916,7 @@ class ChoiceMultiple(ChoiceBase):
                 ret.append(_tostr_helper(v, fmt))
         if fromdict != {}:
             raise KeyError, 'The following keys in the dictionnary are incorrect: %r'%fromdict.keys()
-        ret = ','.join(ret)
+        ret = self.sep.join(ret)
         return ret
     def __contains__(self, x): # performs x in y; with y=Choice(). Used for check
         for k, fmt, lims in zip(self.field_names, self.fmts_type, self.fmts_lims):
@@ -2014,7 +2014,11 @@ class Dict_SubDevice(BaseDevice):
                 setget=setget, autoinit=autoinit, trig=trig, delay=delay, **kwarg)
         self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
         self._getdev_p = True # needed to enable BaseDevice get in Checking mode
-
+    def getcache(self):
+        vals = self._subdevice.getcache()
+        ret = vals[self._sub_key]
+        self._cache = ret
+        return ret
     def _getdev(self, **kwarg):
         vals = self._subdevice.get(**kwarg)
         return vals[self._sub_key]
@@ -2034,8 +2038,6 @@ class Dict_SubDevice(BaseDevice):
         vals = vals.copy()
         vals[self._sub_key] = val
         self._subdevice.set(vals)
-
-
 
 
 
