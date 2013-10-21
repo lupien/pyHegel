@@ -848,7 +848,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
             app = kwarg.pop('options_apply', ['ch'])
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
-        self.data = devChannelOption(getstr='{ch}:WaveForm? ALL', str_type=waveformdata(), autoinit=False, trig=True)
+        self.data = devChannelOption(getstr='{ch}:WaveForm? ALL', str_type=waveformdata(), autoinit=False, trig=True, raw=True)
         self.trace_en = devChannelOption('{ch}:TRAce', choices=bool_lecroy)
         # TODO only channelsIn
         self.volts_div = devChannelOption('{ch}:Volt_DIV', str_type=float)
