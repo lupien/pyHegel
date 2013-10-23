@@ -1208,7 +1208,9 @@ def _fromstr_helper(valstr, t):
 
 class scpiDevice(BaseDevice):
     def __init__(self,setstr=None, getstr=None, raw=False, autoinit=True, autoget=True, str_type=None,
-                 choices=None, doc='', options={}, options_lim={}, options_apply=[], options_conv={}, **kwarg):
+                 choices=None, doc='',
+                 options={}, options_lim={}, options_apply=[], options_conv={},
+                 ask_write_opt={}, **kwarg):
         """
            str_type can be float, int, None
            If choices is a subclass of ChoiceBase, then str_Type will be
@@ -1270,6 +1272,7 @@ class scpiDevice(BaseDevice):
         self._options_lim = options_lim
         self._options_apply = options_apply
         self._options_conv = options_conv
+        self._ask_write_opt = ask_write_opt
         self.type = str_type
         self._raw = raw
         self._option_cache = {}
@@ -1400,7 +1403,7 @@ class scpiDevice(BaseDevice):
         options = self._combine_options(**kwarg)
         command = self._setdev_p
         command = command.format(val=val, **options)
-        self.instr.write(command)
+        self.instr.write(command, **self._ask_write_opt)
     def _getdev(self, **kwarg):
         if self._getdev_p == None:
             raise NotImplementedError, self.perror('This device does not handle _getdev')
@@ -1411,7 +1414,7 @@ class scpiDevice(BaseDevice):
             raise
         command = self._getdev_p
         command = command.format(**options)
-        ret = self.instr.ask(command, self._raw)
+        ret = self.instr.ask(command, self._raw, **self._ask_write_opt)
         return self._fromstr(ret)
     def check(self, val, **kwarg):
         #TODO handle checking of kwarg
@@ -1625,6 +1628,7 @@ class ChoiceStrings(ChoiceBase):
         s=ChoiceStrings('Aa', 'Bb', ..)
        then 'A' in s  or 'aa' in s will return True
        irrespective of capitalization.
+       if no_short=True option is given, then only the long names are allowed
        The elements need to have the following format:
           ABCdef
        where: ABC is known as the short name and
@@ -1635,17 +1639,21 @@ class ChoiceStrings(ChoiceBase):
          (short is upper, long is lower)
        Long and short name can be the same.
     """
-    def __init__(self, *values, **extrap):
-        # use **extrap because we can't have keyword arguments after *arg
-        self.quotes = extrap.pop('quotes', False)
-        if extrap != {}:
-            raise TypeError, 'ChoiceStrings only has quotes=False as keyword argument'
+    def __init__(self, *values, **kwarg):
+        # use **kwarg because we can't have keyword arguments after *arg
+        self.quotes = kwarg.pop('quotes', False)
+        no_short = kwarg.pop('no_short', False)
+        if kwarg != {}:
+            raise TypeError, 'ChoiceStrings only has quotes=False and no_short=False as keyword arguments'
         self.values = values
-        self.short = [v.translate(None, string.ascii_lowercase).lower() for v in values]
         self.long = [v.lower() for v in values]
-        # for short having '', use the long name instead
-        # this happens for a string all in lower cap.
-        self.short = [s if s!='' else l for s,l in zip(self.short, self.long)]
+        if no_short:
+            self.short = self.long
+        else:
+            self.short = [v.translate(None, string.ascii_lowercase).lower() for v in values]
+            # for short having '', use the long name instead
+            # this happens for a string all in lower cap.
+            self.short = [s if s!='' else l for s,l in zip(self.short, self.long)]
     def __contains__(self, x): # performs x in y; with y=Choice()
         xl = x.lower()
         inshort = xl in self.short
@@ -2016,7 +2024,10 @@ class Dict_SubDevice(BaseDevice):
         self._getdev_p = True # needed to enable BaseDevice get in Checking mode
     def getcache(self):
         vals = self._subdevice.getcache()
-        ret = vals[self._sub_key]
+        if vals == None:
+            ret = None
+        else:
+            ret = vals[self._sub_key]
         self._cache = ret
         return ret
     def _getdev(self, **kwarg):
