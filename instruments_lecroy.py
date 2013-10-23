@@ -12,6 +12,12 @@ from instruments_base import visaInstrumentAsync, visaInstrument,\
                             _decode_block_base,\
                             sleep, locked_calling
 
+_ChoiceStrings = ChoiceStrings
+
+class ChoiceStrings(_ChoiceStrings):
+    def __init__(self, *arg, **kwarg):
+        kwarg.update(no_short=True)
+        super(ChoiceStrings, self).__init__(*arg, **kwarg)
 
 class lecroy_dict(ChoiceBase):
     def __init__(self, field_names, fmts=int, sep=',', required=None, repeats=None):
@@ -207,10 +213,9 @@ WAIT WAIT Prevents new command analysis until current acquisition completion.
   CRVA? CURSOR_VALUE? Returns the values measured by the specified cursors for a given trace.
   CRS CURSORS Sets the cursor type.
   PACU PARAMETER_CUSTOM Controls parameters with customizable qualifiers.
-PAVA? PARAMETER_VALUE? Returns current value(s) of parameter(s) and mask tests.
   PF PASS_FAIL Sets up the Pass / Fail system.
   PFDO PASS_FAIL_DO Defines outcome and actions for the Pass/Fail system.
-PECS PER_CURSOR_SET Positions one of the six independent cursors.
+  PECS PER_CURSOR_SET Positions one of the six independent cursors.
       DISPLAY — TO DISPLAY WAVEFORMS
   HMAG HOR_MAGNIFY Horizontally expands the selected expansion trace.
   HPOS HOR_POSITION Horizontally positions the intensified zone’s center on the source trace.
@@ -223,7 +228,6 @@ PECS PER_CURSOR_SET Positions one of the six independent cursors.
   VPOS VERT_POSITION Adjusts the vertical position of the specified trace.
       FUNCTION — TO PERFORM WAVEFORM MATHEMATICAL OPERATIONS
   CLM CLEAR_MEMORY Clears the specified memory.
-DEF DEFINE Specifies math expression for function evaluation.
      MISCELLANEOUS
   COUT CAL_OUTPUT Sets the type of signal put out at the CAL connector.
   *TST? *TST? Performs internal self-test.
@@ -251,10 +255,8 @@ IST? IST? Individual STatus reads the current state of IEEE 488.
 *STB? *STB? Reads the contents of IEEE 488.
   *WAI *WAI WAIt to continue (required by IEEE 488)
      WAVEFORM TRANSFER — TO PRESERVE AND RESTORE WAVEFORMS
-INSP? INSPECT? Allows acquired waveform parts to be read.
   STO STORE Stores a trace in one of the internal memories M1–4 or mass storage.
   STST STORE_SETUP Sets up waveform storage
-WFSU WAVEFORM_SETUP Specifies amount of waveform data for transmission to controller.
 """
 
 # get structure with print osc.ask('TeMPLate?')
@@ -576,13 +578,18 @@ class ChoiceDict(ChoiceBase):
         return val in self.choices_dict.keys()
 
 bool_lecroy = ChoiceDict({True:'ON', False:'OFF'})
+bool_lecroy_vbs = ChoiceDict({True:'1', False:'0'})
 
 waveformdataType = namedtuple('waveformdataType', 'header data1 data2 trigtime ristime usertext')
 class waveformdata(object):
+    def __init__(self, return_only_header=False):
+        self.return_only_header = return_only_header
     def __call__(self, inputstr):
         ds =inputstr.split(',', 1) # strip DESC, TEXT, TIME, DAT1, DAT2, ALL
         fullblock = _decode_block_base(ds[1])
         header = WAVEDESC.from_buffer_copy(fullblock)
+        if self.return_only_header:
+            return header
         ptr = header.WAVE_DESCRIPTOR
         w = header.USER_TEXT
         usertext = fullblock[ptr:ptr+w]
@@ -610,12 +617,23 @@ class waveformdata(object):
         if data2:
             data2 = np.fromstring(data1, data_type)
         if trigtime:
-            trigtime = fromstring(trigtime, [('trig_time', float64), ('time_offset', float64)])
+            trigtime = np.fromstring(trigtime, [('trig_time', np.float64), ('time_offset', np.float64)])
         if ristime:
-            ristime = fromstring(ristime, float64)
+            ristime = np.fromstring(ristime, np.float64)
         return waveformdataType(header, data1, data2, trigtime, ristime, usertext)
     def tostr(self, val):
         pass
+
+class lecroy_vbs_scpi(scpiDevice):
+    def __init__(self, setstr=None, getstr=None, autoget=True, write_quotes=True, *arg, **kwarg):
+        if getstr == None and autoget:
+            getstr = setstr
+            if write_quotes:
+                setstr = setstr+'="{val}"'
+            else:
+                setstr = setstr+'={val}'
+        kwarg.update(ask_write_opt=dict(use_vbs=True))
+        super(lecroy_vbs_scpi,self).__init__(setstr, getstr, *arg, autoget=autoget, **kwarg)
 
 #######################################################
 ##    LeCroy WaveMaster 820Zi-A
@@ -733,6 +751,16 @@ class lecroy_wavemaster(visaInstrumentAsync):
         see also vbs_write
         """
         return self.ask("VBS? 'Return=%s'"%command)
+    def write(self, command, use_vbs=False):
+        if use_vbs:
+            self.vbs_write(command)
+        else:
+            super(lecroy_wavemaster, self).write(command)
+    def ask(self, command, raw=False, use_vbs=False):
+        if use_vbs:
+            return self.vbs_ask(command)
+        else:
+            return super(lecroy_wavemaster, self).ask(command, raw=raw)
     def _snap_png_getdev(self, area='dso', white_back=False):
         """
         Use like this: get(wave.snap_png, filename='testname.png')
@@ -804,18 +832,45 @@ class lecroy_wavemaster(visaInstrumentAsync):
         #if errors == []:
         #    errors = ['No errors']
         return errors
+    def _inspect(self, ch='C1', info='wavedesc', data_fmt=None, do_print=True):
+        """
+        Inspect the data structures returned from channel ch.
+        when do_print=True (default) the result is displayed on the screen
+        otherwise the result is returned as a string.
+        info can be:
+            'wavedesc': default. This shows all the structure info
+            any of the wavedesc field names: only shows that field
+            'data_array_1': shows the data_array_1
+            'data_array_2': shows the data_array_2
+            'simple': shows data_array_1
+            'dual': shows both data_array 1 and 2
+            'ristime':  shows the ristime array
+            'trigtime': show the trigtime array
+        data_fmt is only usefull for data arrays and can be 'byte', 'word', or 'float'
+        """
+        extra = ''
+        if data_fmt != None:
+            extra = ',' + data_fmt
+        ret = self.ask('%s:INSPect? %s%s'%(ch, info, extra))
+        if do_print:
+            print ret
+        else:
+            return ret
     def _create_devs(self):
         self._devwrap('snap_png', autoinit=False)
         self.snap_png._format['bin']='.png'
         self.autocal_en = scpiDevice('Auto_CALibrate', choices=bool_lecroy)
         self.display_en = scpiDevice('DISPlay', choices=bool_lecroy)
         self.lecroy_options = scpiDevice(getstr='*OPT?')
-        self.reference_clock = scpiDevice('Reference_CLocK', choices=ChoiceStrings('INTernal', 'EXTernal'))
-        self.sample_clock = scpiDevice('Sample_ClocK', choices=ChoiceStrings('INTernal', 'ECL', 'L0V', 'TTL'))
+        self.reference_clock = scpiDevice('Reference_CLocK', choices=_ChoiceStrings('INTernal', 'EXTernal'))
+        self.sample_clock = scpiDevice('Sample_ClocK', choices=_ChoiceStrings('INTernal', 'ECL', 'L0V', 'TTL'))
         self.RIS_mode_en = scpiDevice('InterLeaVeD', choices=bool_lecroy)
         para_type = ChoiceStrings('CUST', 'HPAR', 'VPAR', 'OFF')
         para_readout = ChoiceStrings('STAT', 'HISTICON', 'BOTH', 'OFF')
         para_mode_ch = lecroy_dict([('', 'type'), ('','readout')], [para_type, para_readout], required=1)
+        self.max_rate_memory = lecroy_vbs_scpi('app.Acquisition.Horizontal.Maximize', choices=ChoiceStrings('SetMaximumMemory', 'FixedSampleRate'))
+        self.sample_rate = lecroy_vbs_scpi('app.Acquisition.Horizontal.SampleRate', str_type=float, setget=True)
+        self.sample_rate_used = lecroy_vbs_scpi(getstr='app.Acquisition.Horizontal.SamplingRate', str_type=float, doc='Returns 1S/s when using an external sample clock')
         self.parameter_mode = scpiDevice('PARaMeter', choices=para_mode_ch)
         self.parameter_mode_type = Dict_SubDevice(self.parameter_mode, 'type')
         channels = ['C%i'%i for i in range(1,5)] +\
@@ -829,16 +884,8 @@ class lecroy_wavemaster(visaInstrumentAsync):
         channelsIn = ['C%i'%i for i in range(1,5)]
         # also XY, math(ET, SpecAn, Spectro, SpecWindow), trigger(EX, EX10, EX5, LINE)
         self.current_channel = MemoryDevice('C1', choices=channelsF)
-        #self.data = scpiDevice(getstr=':waveform:DATA?', raw=True, str_type=decode_uint16_bin, autoinit=False) # returns block of data (always header# for asci byte and word)
-          # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
-          #  type (Normal, peak, average, HRes), #points, #avg, xincr, xorg, xref, yincr, yorg, yref
-          #  xconv = xorg+x*xincr, yconv= (y-yref)*yincr + yorg
         #self.points = scpiDevice(':WAVeform:POINts', str_type=int) # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
-        #self.points_mode = scpiDevice(':WAVeform:POINts:MODE', choices=ChoiceStrings('NORMal', 'MAXimum', 'RAW'))
-        #self.preamble = scpiDevice(getstr=':waveform:PREamble?', choices=ChoiceMultiple(['format', 'type', 'points', 'count', 'xinc', 'xorig', 'xref', 'yinc', 'yorig', 'yref'],[int, int, int, int, float, float, int, float, float, int]))
         #self.waveform_count = scpiDevice(getstr=':WAVeform:COUNt?', str_type=int)
-        #self.acq_type = scpiDevice(':ACQuire:TYPE', choices=ChoiceStrings('NORMal', 'AVERage', 'HRESolution', 'PEAK'))
-        #self.acq_mode= scpiDevice(':ACQuire:MODE', choices=ChoiceStrings('RTIM', 'SEGM'))
         #self.average_count = scpiDevice(':ACQuire:COUNt', str_type=int, min=2, max=65536)
         #self.acq_samplerate = scpiDevice(getstr=':ACQuire:SRATe?', str_type=float)
         #self.acq_npoints = scpiDevice(getstr=':ACQuire:POINts?', str_type=int)
@@ -849,9 +896,29 @@ class lecroy_wavemaster(visaInstrumentAsync):
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
         self.data = devChannelOption(getstr='{ch}:WaveForm? ALL', str_type=waveformdata(), autoinit=False, trig=True, raw=True)
+        self.data_header = devChannelOption(getstr='{ch}:WaveForm? DESC', str_type=waveformdata(return_only_header=True), autoinit=False, trig=True, raw=True)
+        data_setup_ch = lecroy_dict([('SP', 'steps'), ('NP', 'maxpnts'), ('FP', 'first'), ('SN', 'segment_n')], [int]*4)
+        self.data_setup = scpiDevice('WaveForm_SetUp', choices=data_setup_ch, doc="""
+             steps of 0,1 is all, otherwise is every n pnts.
+             maxpnts=0 means all
+             first is 0 bases index of first point returned
+             segment_n selects segment to return or all segements if set to 0""")
         self.trace_en = devChannelOption('{ch}:TRAce', choices=bool_lecroy)
+        self.current_input_channel = MemoryDevice('C1', choices=ChoiceStrings('C1', 'C2', 'C3', 'C4'))
         # TODO only channelsIn
-        self.volts_div = devChannelOption('{ch}:Volt_DIV', str_type=float)
+        def lecChannelOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_input_channel)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return lecroy_vbs_scpi(*arg, **kwarg)
+        self.interpolation = lecChannelOption('app.Acquisition.{ch}.InterpolateType', choices=ChoiceStrings('LINEAR', 'SINXX'))
+        self.input_sel = lecChannelOption('app.Acquisition.{ch}.ActiveInput', choices=ChoiceStrings('INPUTA', 'INPUTB'))
+        self.input_avg = lecChannelOption('app.Acquisition.{ch}.AverageSweeps', str_type=int)
+        self.input_deskew = lecChannelOption('app.Acquisition.{ch}.Deskew', str_type=float)
+        self.input_enh_resol = lecChannelOption('app.Acquisition.{ch}.EnhanceResType', choices=ChoiceStrings('0.5BITS', '1BITS', '1.5BITS', '2BITS', '2.5BITS', '3BITS', 'NONE'))
+        self.input_invert = lecChannelOption('app.Acquisition.{ch}.Invert', choices=ChoiceDict({True:'-1', False:'0'}), write_quotes=False)
+        self.volts_div = devChannelOption('{ch}:Volt_DIV', str_type=float, setget=True)
         self.attenuation = devChannelOption('{ch}:ATTeNuation', str_type=int, choices=[1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 10000])
         self.coupling = devChannelOption('{ch}:CouPLing', choices=ChoiceStrings('D50', 'GND', 'D1M', 'A1M', 'OVL'), doc='OVL is returned on input overload in d50. Do not set it.')
         bwlim = ChoiceStrings('OFF', '16GHZ', '13GHZ', '8GHZ', '6GHZ', '4GHZ', '3GHZ', '1GHZ', '200MHZ', 'ON')
@@ -875,25 +942,26 @@ class lecroy_wavemaster(visaInstrumentAsync):
         trig_select_opt = lecroy_dict([('', 'mode'), ('SR', 'ch', ), ('QL','ch2'), ('HT','holdtype'), ('HV','holdvalue'), ('HV2','holdvalue2')], [trig_select_mode, channelsTrig, channelsTrig, trig_select_holdtype, float_stripUnit, float_stripUnit])
         self.trig_select = devChannelOption('TRig_SElect', choices=trig_select_opt)
         self.trig_pos_s = scpiDevice('TRig_DeLay', str_type=float, doc='The values are in seconds away from the center. Negative values move the trigger to the left of the screen.')
+
+        self.current_parafunc = MemoryDevice('AMPL', doc="""
+         Possible values are numerous:
+             'AMPL': amplitude
+             'TOTP': histogram total population
+             'ALL': a bunch of parameters
+             'AMPL,FREQ': both amplitude and frequency
+             'CUST1': The result of P1
+          See the lecroy Remote control manual for more options.""")
         pval_state = ChoiceDict({'OK':'OK', 'averaged':'AV', 'period truncated':'PT', 'invalid':'IV', 'no pulse':'NP', 'greather than':'GT', 'less than':'LT', 'overflow':'OF', 'undeflow':'UF', 'over and under flow':'OU'})
-        self.current_parafunc = MemoryDevice('AMPL', doc="""Possible values are numerous: 'AMPL': amplitude, 'TOTP':histogram total population""")
-        def devParaOption(*arg, **kwarg):
-            # This will check if the marker is currently enabled.
-            options = kwarg.pop('options', {}).copy()
-            options.update(func=self.current_parafunc)
-            # TODO check if this is necessary
-            app = ['ch', 'func']
-            kwarg.update(options=options, options_apply=app)
-            return devChannelOption(*arg, **kwarg)
-        pval_choice = ChoiceMultiple(['func', 'value', 'state'], [str, float_undef, pval_state])
-        # TODO handle 'ALL' which returns many blocks of pval_choice
-        self.parameter_value = devParaOption(getstr='{ch}:PArameter_VAlue? {func}', choices=pval_choice, autoinit=False, trig=True)
+        pval_choice = lecroy_dict([('','func'), ('', 'value'), ('', 'state')], [str, float_undef, pval_state], repeats=(0,2))
+        self.parameter_value = devChannelOption(getstr='{ch}:PArameter_VAlue? {func}', choices=pval_choice, autoinit=False, trig=True,
+                                             doc="""This calculates some parameter on a waveform. See current_parafunc for some function examples.""",
+                                             options=dict(func=self.current_parafunc),
+                                             options_apply=['ch', 'func'])
+
         self.current_para = MemoryDevice(1, min=1, max=12)
-        # TODO understand dtrig, then renane it
         pstat_choice = lecroy_dict([('', 'mode'), ('', 'ch'), ('', 'func'), 'avg', 'high', 'last', 'low', 'sigma', 'sweeps'], [str]*4+[float_undef]*7, required=2, repeats=2)
         pstat_modes = para_type[:3] # skip OFF
-        #self.parameter_stat_custom = scpiDevice(getstr='PArameter_STatistics? {mode},P{ch}', choices=pstat_choice, options=dict(ch=self.current_para, mode='CUST'), options_lim=dict(mode=pstat_modes))
-        self.parameter_stat_ch = scpiDevice(getstr='PArameter_STatistics? {mode:s},P{ch}', choices=pstat_choice, autoinit=False, trig=True,
+        self.parameter_stat_ch = scpiDevice(getstr='PArameter_STatistics? {mode},P{ch}', choices=pstat_choice, autoinit=False, trig=True,
                                          options=dict(ch=self.current_para, mode=self.parameter_mode_type),
                                          options_apply=['ch'],
                                          options_lim=dict(mode=pstat_modes),
@@ -912,12 +980,22 @@ class lecroy_wavemaster(visaInstrumentAsync):
                                          options=dict(mode=self.parameter_mode_type),
                                          options_lim=dict(mode=pstat_modes),
                                          options_conv=dict(mode=takefirst))
-        self.function_def = devChannelOption('{ch}:DEFine', autoinit=False, doc="""Note that doing set on the return of get might fail because of values with unit. Removes those and it will probably work.""")
+        self.function_def = devChannelOption('{ch}:DEFine', autoinit=False, doc="""
+            Note that doing set on the return of get might fail because of values with unit.
+            Removes those and it will probably work.
+            A full value for set might look like:
+                'EQN,"HIST(P1)",VALUES,100,BINS,1024'
+            when called with ch='F1' this will make trace F1
+            be the histogram of P1, using  1024 bins and using the last
+            1000 values, i.e. the sum of all the bins will eventually add up
+            to 1000.""")
         self._devwrap('fetch', autoinit=False, trig=True)
         #self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(lecroy_wavemaster, self)._create_devs()
 
-#F1:DEF EQN,"HIST(P1)",VALUES,'+str(V)+',BINS,'+str(B)
-# Directory for DISK option can us FLPY, HDD, C, D ...
+# Directory for DISK option can use FLPY, HDD, C, D ...
 # Lots of unknown trig_select modes like cascaded
+#Functions like trace_en (C1:trace?) don't work for F9-f12, M5-M12, Z5-Z12
+#            same with PArameter_STatistics? {mode},P{ch} for P10-12
+#            ...
