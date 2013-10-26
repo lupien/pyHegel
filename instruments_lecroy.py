@@ -9,7 +9,7 @@ from instruments_base import visaInstrumentAsync, visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceBase, _general_check, _fromstr_helper, _tostr_helper,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
-                            _decode_block_base,\
+                            _decode_block_base, make_choice_list,\
                             sleep, locked_calling
 
 _ChoiceStrings = ChoiceStrings
@@ -400,122 +400,29 @@ class TRIGTIME(StructureImproved):
 class RISTIME(StructureImproved):
     _fields_ = [("RIS_OFFSET", c_double)]
 
-#COMM_TYPE: chosen by remote command COMM_FORMAT
-#0:byte  1:word
+# The structure has an int which is the 0 based index into the following lists
+#  chosen by remote command COMM_FORMAT
+_COMM_TYPE_opt = ['byte', 'word']
+_COMM_ORDER_opt = ['HI_first_big-endian', 'LO_first_little-endian']
 
-#COMM_ORDER: 0:HIFIRST 1:LOFIRST
+_RECORD_TYPE_opt = ['single_sweep', 'interleaved', 'histogram', 'graph',
+                    'filter_coefficient', 'complex', 'extrema', 'sequence_obsolete',
+                    'centered_RIS', 'peak_detect']
 
-# RECORD_TYPE:
-#0 single_sweep
-#1 interleaved
-#2 histogram
-#3 graph
-#4 filter_coefficient
-#5 complex
-#6 extrema
-#7 sequence_obsolete
-#8 centered_RIS
-#9 peak_detect
+_PROCESSING_DONE_opt = ['no_processing', 'fir_filter', 'interpolated', 'sparsed',
+                        'autoscaled', 'no_result', 'rolling', 'cumulative']
 
-#PROCESSING_DONE
-#0 no_processing
-#1 fir_filter
-#2 interpolated
-#3 sparsed
-#4 autoscaled
-#5 no_result
-#6 rolling
-#7 cumulative
+# s/div
+_TIMEBASE_opt = make_choice_list([1, 2, 5], -12, 3)
+_TIMEBASE_opt_extra = {100:'external'}
 
-#TIMEBASE
-#0 1_ps/div
-#1 2_ps/div
-#2 5_ps/div
-#3 10_ps/div
-#4 20_ps/div
-#5 50_ps/div
-#6 100_ps/div
-#7 200_ps/div
-#8 500_ps/div
-#9 1_ns/div
-#10 2_ns/div
-#11 5_ns/div
-#12 10_ns/div
-#13 20_ns/div
-#14 50_ns/div
-#15 100_ns/div
-#16 200_ns/div
-#17 500_ns/div
-#18 1_us/div
-#19 2_us/div
-#20 5_us/div
-#21 10_us/div
-#22 20_us/div
-#23 50_us/div
-#24 100_us/div
-#25 200_us/div
-#26 500_us/div
-#27 1_ms/div
-#28 2_ms/div
-#29 5_ms/div
-#30 10_ms/div
-#31 20_ms/div
-#32 50_ms/div
-#33 100_ms/div
-#34 200_ms/div
-#35 500_ms/div
-#36 1_s/div
-#37 2_s/div
-#38 5_s/div
-#39 10_s/div
-#40 20_s/div
-#41 50_s/div
-#42 100_s/div
-#43 200_s/div
-#44 500_s/div
-#45 1_ks/div
-#46 2_ks/div
-#47 5_ks/div
-#100 EXTERNAL
+# V/div
+_FIXED_VERT_GAIN_opt = make_choice_list([1,2,5],-6,3)[:-2]
 
-#FIXED_VERT_GAIN
-#0 1_uV/div
-#1 2_uV/div
-#2 5_uV/div
-#3 10_uV/div
-#4 20_uV/div
-#5 50_uV/div
-#6 100_uV/div
-#7 200_uV/div
-#8 500_uV/div
-#9 1_mV/div
-#10 2_mV/div
-#11 5_mV/div
-#12 10_mV/div
-#13 20_mV/div
-#14 50_mV/div
-#15 100_mV/div
-#16 200_mV/div
-#17 500_mV/div
-#18 1_V/div
-#19 2_V/div
-#20 5_V/div
-#21 10_V/div
-#22 20_V/div
-#23 50_V/div
-#24 100_V/div
-#25 200_V/div
-#26 500_V/div
-#27 1_kV/div
+_BANDWIDTH_LIMIT_opt = ['off', 'on']
 
-#BANDWIDTH_LIMIT: 0:off 1:on
-
-#WAVE_SOURCE:
-#0 CHANNEL_1
-#1 CHANNEL_2
-#2 CHANNEL_3
-#3 CHANNEL_4
-#9 UNKNOWN
+_WAVE_SOURCE_opt = ['C1', 'C2', 'C3', 'C4']
+_WAVE_SOURCE_opt_extra = {9:'unknown'}
 
 
 class _conv_stripUnit(object):
