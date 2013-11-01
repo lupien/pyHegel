@@ -1207,7 +1207,7 @@ def _fromstr_helper(valstr, t):
 #######################################################
 
 class scpiDevice(BaseDevice):
-    _autoset_val_str = ' {var}'
+    _autoset_val_str = ' {val}'
     def __init__(self,setstr=None, getstr=None, raw=False, autoinit=True, autoget=True, str_type=None,
                  choices=None, doc='',
                  options={}, options_lim={}, options_apply=[], options_conv={},
