@@ -1692,6 +1692,7 @@ class agilent_ENA(agilent_PNAL):
     def _async_trigger_helper(self):
         self.trig_source.set('BUS')
         self.average_triggering_en.set(True)
+        self.write(':TRIGger:POINt OFF')
         self.initiate()
         self.write(':TRIGger:SINGle;*OPC')
         #self.trig_source.set('INTernal')
