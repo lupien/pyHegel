@@ -8,10 +8,10 @@ import zhinst.utils as ziu
 from instruments_base import BaseInstrument,\
                             BaseDevice, scpiDevice, InvalidAutoArgument,\
                             MemoryDevice, ReadvalDev,\
-                            ChoiceBase, _general_check, _fromstr_helper, _tostr_helper,\
+                            ChoiceBase, _general_check,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
                             _decode_block_base, make_choice_list,\
-                            sleep, locked_calling
+                            sleep, locked_calling, ProxyMethod
 
 def _tostr_helper(val, t):
     # This function converts from pyHegel val to ZI val (on set/write)
@@ -255,13 +255,18 @@ class zurich_UHF(BaseInstrument):
         return self._conf_helper('memory_size', 'trig_coupling', options)
     def _conv_command(self, comm):
         """
-        comm can be a string or a list of strings
+        comm can be a string, a list of strings (to concatenate together)
+        or a list of tuples (command, value)
         and it replaces {dev} with the current device
         """
         sep = self._zi_sep
         if isinstance(comm, (list, tuple)):
-            comm = sep+ sep.join(comm)
-        comm = comm.format(dev=self._zi_dev)
+            if isinstance(comm[0], (list, tuple)):
+                comm = [(c.format(dev=self._zi_dev), v) for c,v in comm]
+            else: # a list of strings to join using sep
+                comm = sep+ sep.join(comm)
+        else: # a single command
+            comm = comm.format(dev=self._zi_dev)
         return comm
     def _select_src(self, src):
         """
@@ -336,7 +341,7 @@ class zurich_UHF(BaseInstrument):
         #   so the duration can be rounded up by timeout if no data is available.
         return self._zi_daq.pollEvent(timeout_ms)
     @locked_calling
-    def write(self, command, val, src='main', t=None):
+    def write(self, command, val=None, src='main', t=None):
         """
          use like:
              obj.write('/dev2021/sigins/0/on', 1, t='int')
@@ -348,6 +353,7 @@ class zurich_UHF(BaseInstrument):
             it only affects t==None
             for src not 'main', the only choice is
             t==None, and to give a single val.
+        You can replace /dev2021/ by /{dev}/
         """
         command = self._conv_command(command)
         if t=='byte':
@@ -481,7 +487,15 @@ class zurich_UHF(BaseInstrument):
         return ret
     def _create_devs(self):
         self.mac_addr = ziDev('system/nics/mac/{rpt_i}', input_repeat=range(6))
-        #self.current_channel = MemoryDevice('C1', choices=channelsF)
+        self.current_demod = MemoryDevice(0, choices=range(8))
+        self.demod_freq = ziDev(getstr='demods/{ch}/freq', ask_write_opt=dict(t='double'),
+                                input_sel=None,
+                                options=dict(ch=self.current_demod),
+                                options_conv=dict(ch=lambda a,b: a) )
+        self.demod_harm = ziDev('demods/{ch}/harmonic', ask_write_opt=dict(t='int'),
+                                input_sel=None,
+                                options=dict(ch=self.current_demod),
+                                options_conv=dict(ch=lambda a,b: a) )
         #def devChannelOption(*arg, **kwarg):
         #    options = kwarg.pop('options', {}).copy()
         #    options.update(ch=self.current_channel)
@@ -517,6 +531,7 @@ class zurich_UHF(BaseInstrument):
 ##################################################################
 
 import ctypes
+import weakref
 from ctypes import Structure, Union, pointer, POINTER, byref,\
                    c_int, c_longlong, c_ulonglong, c_short, c_ushort, c_uint,\
                    c_double,\
@@ -755,10 +770,11 @@ class ziAPI(object):
     def _makefunc(self, f, argtypes, prepend_con=True):
         rr = r = getattr(self._ziDll, f)
         r.restype = ZI_STATUS
-        r.errcheck = self._errcheck_func
+        r.errcheck = ProxyMethod(self._errcheck_func)
         if prepend_con:
             argtypes = [ziConnection]+argtypes
-            rr = lambda *arg, **kwarg: r(self._conn, *arg, **kwarg)
+            selfw = weakref.proxy(self)
+            rr = lambda *arg, **kwarg: r(selfw._conn, *arg, **kwarg)
             setattr(self, '_'+f[5:] , rr) # remove 'ziAPI'
         r.argtypes = argtypes
         setattr(self, '_'+f , r)
@@ -768,25 +784,27 @@ class ziAPI(object):
             self._makefunc(fullname, [c_char_p, argtype, POINTER(c_uint), c_uint])
         else:
             self._makefunc(fullname, [c_char_p, POINTER(argtype)])
+        basefunc = getattr(self, '_GetValue'+f)
         def newfunc(path):
             val = argtype()
-            func = getattr(self, '_GetValue'+f)
             if argtype == c_char_p:
                 val = create_string_buffer(1024)
                 length = c_uint()
-                func(path, val, byref(length), len(val))
+                basefunc(path, val, byref(length), len(val))
                 return val.raw[:length.value]
-            func(path, byref(val))
+            basefunc(path, byref(val))
             if isinstance(val, Structure):
                 return val
             else:
                 return val.value
         setattr(self, 'get'+f, newfunc)
     def __del__(self):
-        # TODO make this work. probably need some weak ref somewhere
-        self.disconnect()
-        self.destroy()
-        print 'Runnig del on ziAPI'
+        # can't use the redirected functions because weakproxy not longer works here
+        print 'Runnig del on ziAPI:', self
+        del self._ziAPIDisconnect.errcheck
+        del self._ziAPIDestroy.errcheck
+        self._ziAPIDisconnect(self._conn)
+        self._ziAPIDestroy(self._conn)
     def restart(self, hostname=_default_host, port=_default_port, autoconnect=True):
         self.disconnect()
         self.destroy()
