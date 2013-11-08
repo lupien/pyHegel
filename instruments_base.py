@@ -848,7 +848,7 @@ class cls_wrapDevice(BaseDevice):
         if self._getformat != None:
             return self._getformat(self.instr, **kwarg)
         else:
-            return super(cls_wrapDevice, self).getformat(self.instr, **kwarg)
+            return super(cls_wrapDevice, self).getformat(**kwarg)
 
 def _find_global_name(obj):
     dic = _globaldict
