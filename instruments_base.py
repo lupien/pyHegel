@@ -1241,6 +1241,7 @@ class scpiDevice(BaseDevice):
            options_apply is a list of options that need to be set. In that order when defined.
            By default, autoinit=True is transformed to 10 (higher priority)
            unless options contains another device, then it is set to 1.
+           ask_write_options are options passed to the ask and write methods
 
         """
         if setstr == None and getstr == None:

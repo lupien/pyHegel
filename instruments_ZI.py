@@ -12,6 +12,8 @@ from instruments_base import BaseInstrument,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
                             _decode_block_base, make_choice_list,\
                             sleep, locked_calling, ProxyMethod
+from instruments_logical import FunctionDevice
+from scipy.special import gamma
 
 def _tostr_helper(val, t):
     # This function converts from pyHegel val to ZI val (on set/write)
@@ -44,9 +46,11 @@ def _fromstr_helper(valstr, t):
 
 class ziDev(scpiDevice):
     _autoset_val_str = ''
-    def __init__(self, setstr=None, getstr=None, autoget=True, insert_dev=True, input_sel=0, input_repeat=None, **kwarg):
+    def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None, insert_dev=True,
+                 input_sel=None, input_repeat=None, input_type='auto', input_src='main', **kwarg):
         """
         input_sel can be None: then it returns the whole thing
+                    otherwise it is the index to use
         input_repeat is an iterable that will be passed to set/getstr
                      as rpt_i
         The _tostr and _fromstr converter no longer need to convert to and from
@@ -57,13 +61,27 @@ class ziDev(scpiDevice):
                   bool (bool, 'int')
                   float(float, 'double')
                   int(int, 'int')
-                  int(int, 'int')
                   str(str, 'byte')
                   unicode(unicode, 'byte')
+
+        if ask_write_options is given, it is used as is, otherwise:
+         input_type can be None, 'auto', 'int', 'double', 'byte'
+              and for getstr only it can also be: 'dio', 'sample', 'dict'
+             'auto' will select according to str_type
+           it is uses as the t value for ask_write_opt options if not givent
+         input_src selects the source of the info. It can be
+             'main', 'sweep', 'record' or 'zoomFFT'
         """
         self._input_sel = input_sel
         self._input_repeat = input_repeat
-        if autoget:
+        ask_write_opt = kwarg.pop('ask_write_opt', None)
+        if ask_write_opt == None:
+            t = input_type
+            if t == 'auto':
+                t = {None:None, bool:'int', float:'double', int:'int', str:'byte', unicode:'byte'}[str_type]
+            ask_write_opt = dict(t=t, src=input_src)
+        kwarg.update(ask_write_opt=ask_write_opt)
+        if autoget and setstr != None:
             getstr = setstr
         insert_dev_pre = '/{{dev}}/'
         if insert_dev:
@@ -71,7 +89,7 @@ class ziDev(scpiDevice):
                 getstr = insert_dev_pre+getstr
             if setstr:
                 setstr = insert_dev_pre+setstr
-        super(ziDev, self).__init__(setstr, getstr, **kwarg)
+        super(ziDev, self).__init__(setstr, getstr, str_type=str_type, **kwarg)
     def _tostr(self, val):
         # This function converts from val to a str for the command
         t = self.type
@@ -248,9 +266,23 @@ class zurich_UHF(BaseInstrument):
             raise ValueError, 'Device "%s" is not available'%zi_dev
         self._zi_dev = zi_dev
         super(zurich_UHF, self).__init__()
+    def _tc_to_bw3dB(self, tc=None, order=None):
+        if order == None:
+            order = self.demod_order.getcache()
+        if tc == None:
+            tc = self.demod_tc.getcache()
+        return np.sqrt(2.**(1./order) -1) / (2*np.pi*tc)
+    def _tc_to_enbw(self, tc=None, order=None):
+        if order == None:
+            order = self.demod_order.getcache()
+        if tc == None:
+            tc = self.demod_tc.getcache()
+        return (1./(2*np.pi*tc)) * np.sqrt(np.pi)*gamma(order-0.5)/(2*gamma(order))
     def init(self, full=False):
         #self.write('Comm_HeaDeR OFF') #can be OFF, SHORT, LONG. OFF removes command echo and units
         super(zurich_UHF, self).init(full=full)
+        #if full:
+        #    self.demod_bw = FunctionDevice(self.demod_tc, lambda v: 1./(2*np.pi*v), lambda v: 1./(2*np.pi*v))
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('memory_size', 'trig_coupling', options)
     def _conv_command(self, comm):
@@ -297,6 +329,7 @@ class zurich_UHF(BaseInstrument):
         it will be '/*'
         see _select_src for available src
         """
+        base = self._conv_command(base)
         flags = 0
         if base == '/' and src != 'main':
             base = '/*'
@@ -310,6 +343,17 @@ class zurich_UHF(BaseInstrument):
             flags |= (1<<3)
         src, pre = self._select_src(src)
         return src.listNodes(pre+base, flags)
+    def echo_dev(self):
+        """
+        It is suppose to wait until all buffers are flushed.
+        """
+        self._zi_daq.echoDevice(self._zi_dev)
+    def flush(self):
+        """
+        Flush data in socket connection and API buffers.
+        Use between subscribe and poll.
+        """
+        self._zi_daq.flush()
     def _flat_dict(self, in_dict):
         """
         this converts the get(str,False) or get for
@@ -341,7 +385,7 @@ class zurich_UHF(BaseInstrument):
         #   so the duration can be rounded up by timeout if no data is available.
         return self._zi_daq.pollEvent(timeout_ms)
     @locked_calling
-    def write(self, command, val=None, src='main', t=None):
+    def write(self, command, val=None, src='main', t=None, sync=True):
         """
          use like:
              obj.write('/dev2021/sigins/0/on', 1, t='int')
@@ -353,15 +397,23 @@ class zurich_UHF(BaseInstrument):
             it only affects t==None
             for src not 'main', the only choice is
             t==None, and to give a single val.
+        sync is for 'double' or 'int' and is to use the sync interface
+
         You can replace /dev2021/ by /{dev}/
         """
         command = self._conv_command(command)
         if t=='byte':
             self._zi_daq.setByte(command, val)
         elif t=='double':
-            self._zi_daq.setDouble(command, val)
+            if sync:
+                self._zi_daq.syncSetDouble(command, val)
+            else:
+                self._zi_daq.setDouble(command, val)
         elif t=='int':
-            self._zi_daq.setInt(command, val)
+            if sync:
+                self._zi_daq.syncSetInt(command, val)
+            else:
+                self._zi_daq.setInt(command, val)
         else:
             src, pre = self._select_src(src)
             if pre == '':
@@ -486,16 +538,37 @@ class zurich_UHF(BaseInstrument):
             ret=ret[0]
         return ret
     def _create_devs(self):
-        self.mac_addr = ziDev('system/nics/mac/{rpt_i}', input_repeat=range(6))
+        self.mac_addr = ziDev('system/nics/mac/{rpt_i}', input_repeat=range(6), str_type=int)
         self.current_demod = MemoryDevice(0, choices=range(8))
-        self.demod_freq = ziDev(getstr='demods/{ch}/freq', ask_write_opt=dict(t='double'),
-                                input_sel=None,
-                                options=dict(ch=self.current_demod),
-                                options_conv=dict(ch=lambda a,b: a) )
-        self.demod_harm = ziDev('demods/{ch}/harmonic', ask_write_opt=dict(t='int'),
-                                input_sel=None,
-                                options=dict(ch=self.current_demod),
-                                options_conv=dict(ch=lambda a,b: a) )
+        def ziDev_ch(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_demod)
+            app = kwarg.pop('options_apply', ['ch'])
+            options_conv = kwarg.pop('options_conv', {}).copy()
+            options_conv.update(ch=lambda base_val, conv_val: base_val)
+            kwarg.update(options=options, options_apply=app, options_conv=options_conv)
+            return ziDev(*arg, **kwarg)
+        self.demod_freq = ziDev_ch(getstr='demods/{ch}/freq', str_type=float)
+        #self.demod_freq = ziDev(getstr='demods/{ch}/freq', ask_write_opt=dict(t='double'),
+        #                        input_sel=None,
+        #                        options=dict(ch=self.current_demod),
+        #                        options_conv=dict(ch=lambda a,b: a) )
+        self.demod_harm = ziDev_ch('demods/{ch}/harmonic', str_type=int)
+        self.demod_en = ziDev_ch('demods/{ch}/enable', str_type=bool)
+        self.demod_sinc_en = ziDev_ch('demods/{ch}/sinc', str_type=bool)
+        self.demod_bypass_en = ziDev_ch('demods/{ch}/bypass', str_type=bool, doc="Don't know what this does.")
+        self.demod_osc_src = ziDev_ch(getstr='demods/{ch}/oscselect', str_type=int, choices=[0,1])
+        self.demod_adc_src = ziDev_ch('demods/{ch}/adcselect', str_type=int, choices=range(13))
+        self.demod_rate = ziDev_ch('demods/{ch}/rate', str_type=float, setget=True)
+        self.demod_tc = ziDev_ch('demods/{ch}/timeconstant', str_type=float, setget=True)
+        self.demod_order = ziDev_ch('demods/{ch}/order', str_type=int, choices=range(1,9))
+        self.demod_phase = ziDev_ch('demods/{ch}/phaseshift', str_type=float, setget=True)
+        self.demod_trigger = ziDev_ch('demods/{ch}/trigger', str_type=int)
+        self.demod_data = ziDev_ch(getstr='demods/{ch}/sample', input_type='sample', doc='It will wait for the next available samples (depends on rate)')
+        #self.demod_harm = ziDev('demods/{ch}/harmonic', ask_write_opt=dict(t='int'),
+        #                        input_sel=None,
+        #                        options=dict(ch=self.current_demod),
+        #                        options_conv=dict(ch=lambda a,b: a) )
         #def devChannelOption(*arg, **kwarg):
         #    options = kwarg.pop('options', {}).copy()
         #    options.update(ch=self.current_channel)
@@ -524,6 +597,10 @@ class zurich_UHF(BaseInstrument):
 #  10 loops, best of 3: 250 ms per loop
 # I don't see /dev2021/system/calib/required
 # in listnodes
+#
+# echoDevice does not work
+# syncSetInt takes 250 ms
+# setInt followed by getInt does not return the new value, but the old one instead
 
 ##################################################################
 #   Direct Access to ZI C API
