@@ -141,38 +141,6 @@ class ziDev(scpiDevice):
 
 
 
-# data structure
-#  dev2021
-#    auxins
-#      0
-#    auxouts
-#      0-3
-#    clockbase
-#    conn
-#    demods
-#      0-7
-#    dios
-#      0
-#    extrefs
-#      0-1
-#    features
-#    oscs
-#      0-1
-#    scopes
-#      0
-#    sigins
-#      0-1
-#    sigouts
-#      0-1
-#    stats
-#    status
-#    system
-#    triggers
-#  zi
-#    about
-#    clockbase
-#    config
-
 # sweeper structure
 #  sweep/averaging/sample
 #  sweep/averaging/tc
@@ -250,10 +218,11 @@ class zurich_UHF(BaseInstrument):
         """
         # The SRQ for this intrument does not work
         # as of version 7.2.1.0
+        timeout = 500 #ms
         self._zi_daq = zi.ziDAQServer(host, port)
-        self._zi_record = None
-        self._zi_sweep = None
-        self._zi_zoomFFT = None
+        self._zi_record = self._zi_daq.record(10, timeout) # 10s length
+        self._zi_sweep = self._zi_daq.sweep(timeout)
+        self._zi_zoomFFT = self._zi_daq.zoomFFT(timeout)
         self._zi_devs = ziu.devices(self._zi_daq)
         self._zi_sep = '/'
         if zi_dev == None:
@@ -266,23 +235,32 @@ class zurich_UHF(BaseInstrument):
             raise ValueError, 'Device "%s" is not available'%zi_dev
         self._zi_dev = zi_dev
         super(zurich_UHF, self).__init__()
-    def _tc_to_bw3dB(self, tc=None, order=None):
+    def _tc_to_enbw_3dB(self, tc=None, order=None, enbw=True):
+        """
+        When enbw=True, uses the formula for the equivalent noise bandwidth
+        When enbw=False, uses the formula for the 3dB point.
+        When either or both tc and order are None, the cached values are used
+        for the current_demod channel.
+        If you enter the bandwith frequencyfor tc, a time constant is returned.
+        If you enter a timeconstant for tc, a bandwidth frequency is returned.
+        """
         if order == None:
             order = self.demod_order.getcache()
         if tc == None:
             tc = self.demod_tc.getcache()
-        return np.sqrt(2.**(1./order) -1) / (2*np.pi*tc)
-    def _tc_to_enbw(self, tc=None, order=None):
-        if order == None:
-            order = self.demod_order.getcache()
-        if tc == None:
-            tc = self.demod_tc.getcache()
-        return (1./(2*np.pi*tc)) * np.sqrt(np.pi)*gamma(order-0.5)/(2*gamma(order))
+        if enbw:
+            return (1./(2*np.pi*tc)) * np.sqrt(np.pi)*gamma(order-0.5)/(2*gamma(order))
+        else:
+            return np.sqrt(2.**(1./order) -1) / (2*np.pi*tc)
     def init(self, full=False):
         #self.write('Comm_HeaDeR OFF') #can be OFF, SHORT, LONG. OFF removes command echo and units
         super(zurich_UHF, self).init(full=full)
-        #if full:
-        #    self.demod_bw = FunctionDevice(self.demod_tc, lambda v: 1./(2*np.pi*v), lambda v: 1./(2*np.pi*v))
+        if full:
+            tc_to_bw = ProxyMethod(self._tc_to_enbw_3dB)
+            func1 = lambda v: tc_to_bw(v, enbw=False)
+            self.demod_bw3db = FunctionDevice(self.demod_tc, func1, func1)
+            func2 = lambda v: tc_to_bw(v)
+            self.demod_enbw = FunctionDevice(self.demod_tc, func2, func2)
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('memory_size', 'trig_coupling', options)
     def _conv_command(self, comm):
@@ -343,6 +321,14 @@ class zurich_UHF(BaseInstrument):
             flags |= (1<<3)
         src, pre = self._select_src(src)
         return src.listNodes(pre+base, flags)
+    def _subscribe(self, base='/{dev}/demods/*/sample', src='main'):
+        src, pre = self._select_src(src)
+        sub = getattr(src, 'subscribe')
+        sub(base)
+    def _unsubscribe(self, base='/{dev}/demods/*/sample', src='main'):
+        src, pre = self._select_src(src)
+        unsub = getattr(src, 'unsubscribe')
+        unsub(base)
     def echo_dev(self):
         """
         It is suppose to wait until all buffers are flushed.
@@ -368,9 +354,10 @@ class zurich_UHF(BaseInstrument):
         for k,v in in_dict.iteritems():
             if isinstance(v, dict):
                 v = self._flat_dict(v)
-                for ks, vs in v:
+                for ks, vs in v.iteritems():
                     out_dict[k+sep+ks] = vs
-            out_dict[k] = v
+            else:
+                out_dict[k] = v
         return out_dict
     @locked_calling
     def read(self, timeout_ms=0):
@@ -414,12 +401,14 @@ class zurich_UHF(BaseInstrument):
                 self._zi_daq.syncSetInt(command, val)
             else:
                 self._zi_daq.setInt(command, val)
-        else:
+        elif t==None:
             src, pre = self._select_src(src)
             if pre == '':
                 src.set(command)
             else:
                 src.set(pre+'/'+command, val)
+        else:
+            raise ValueError, 'Invalid value for t=%r'%t
     @locked_calling
     def ask(self, question, src='main', t=None):
         """
@@ -449,7 +438,7 @@ class zurich_UHF(BaseInstrument):
             return self._zi_daq.getSample(question)
         elif t=='dio':
             return self._zi_daq.getDIO(question)
-        else:
+        elif t==None or t=='dict':
             src, pre = self._select_src(src)
             if pre == '':
                 ret = src.get(question, True) # True makes it flat
@@ -458,13 +447,15 @@ class zurich_UHF(BaseInstrument):
             if t == 'dict' or len(ret) != 1:
                 return ret
             return ret.values()[0]
+        else:
+            raise ValueError, 'Invalid value for t=%r'%t
     def timestamp_to_s(self, timestamp):
         """
         Using a timestamp from the instrument, returns
         the number of seconds since the instrument turn on.
         """
         # The timestamp just seems to be the counter of the 1.8 GHz clock
-        return timestamp/1.8e9
+        return timestamp/self.clockbase.getcache()
     def idn(self):
         name = 'Zurich Instrument'
         python_ver = self._zi_daq.version()
@@ -538,46 +529,55 @@ class zurich_UHF(BaseInstrument):
             ret=ret[0]
         return ret
     def _create_devs(self):
+        self.clockbase = ziDev(getstr='clockbase', str_type=float)
+        self.fpga_core_temp = ziDev(getstr='stats/physical/fpga/temp', str_type=float)
+        self.calib_required = ziDev(getstr='system/calib/required', str_type=bool)
         self.mac_addr = ziDev('system/nics/mac/{rpt_i}', input_repeat=range(6), str_type=int)
         self.current_demod = MemoryDevice(0, choices=range(8))
-        def ziDev_ch(*arg, **kwarg):
+        self.current_osc = MemoryDevice(0, choices=range(2))
+        self.current_sigins = MemoryDevice(0, choices=range(2))
+        self.current_sigouts = MemoryDevice(0, choices=range(2))
+        def ziDev_ch_gen(ch, *arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
-            options.update(ch=self.current_demod)
+            options.update(ch=ch)
             app = kwarg.pop('options_apply', ['ch'])
             options_conv = kwarg.pop('options_conv', {}).copy()
             options_conv.update(ch=lambda base_val, conv_val: base_val)
             kwarg.update(options=options, options_apply=app, options_conv=options_conv)
             return ziDev(*arg, **kwarg)
-        self.demod_freq = ziDev_ch(getstr='demods/{ch}/freq', str_type=float)
-        #self.demod_freq = ziDev(getstr='demods/{ch}/freq', ask_write_opt=dict(t='double'),
-        #                        input_sel=None,
-        #                        options=dict(ch=self.current_demod),
-        #                        options_conv=dict(ch=lambda a,b: a) )
-        self.demod_harm = ziDev_ch('demods/{ch}/harmonic', str_type=int)
-        self.demod_en = ziDev_ch('demods/{ch}/enable', str_type=bool)
-        self.demod_sinc_en = ziDev_ch('demods/{ch}/sinc', str_type=bool)
-        self.demod_bypass_en = ziDev_ch('demods/{ch}/bypass', str_type=bool, doc="Don't know what this does.")
-        self.demod_osc_src = ziDev_ch(getstr='demods/{ch}/oscselect', str_type=int, choices=[0,1])
-        self.demod_adc_src = ziDev_ch('demods/{ch}/adcselect', str_type=int, choices=range(13))
-        self.demod_rate = ziDev_ch('demods/{ch}/rate', str_type=float, setget=True)
-        self.demod_tc = ziDev_ch('demods/{ch}/timeconstant', str_type=float, setget=True)
-        self.demod_order = ziDev_ch('demods/{ch}/order', str_type=int, choices=range(1,9))
-        self.demod_phase = ziDev_ch('demods/{ch}/phaseshift', str_type=float, setget=True)
-        self.demod_trigger = ziDev_ch('demods/{ch}/trigger', str_type=int)
-        self.demod_data = ziDev_ch(getstr='demods/{ch}/sample', input_type='sample', doc='It will wait for the next available samples (depends on rate)')
-        #self.demod_harm = ziDev('demods/{ch}/harmonic', ask_write_opt=dict(t='int'),
-        #                        input_sel=None,
-        #                        options=dict(ch=self.current_demod),
-        #                        options_conv=dict(ch=lambda a,b: a) )
-        #def devChannelOption(*arg, **kwarg):
-        #    options = kwarg.pop('options', {}).copy()
-        #    options.update(ch=self.current_channel)
-        #    app = kwarg.pop('options_apply', ['ch'])
-        #    kwarg.update(options=options, options_apply=app)
-        #    return scpiDevice(*arg, **kwarg)
-        #self.data = devChannelOption(getstr='{ch}:WaveForm? ALL', str_type=waveformdata(), autoinit=False, trig=True, raw=True)
-        #self.data_header = devChannelOption(getstr='{ch}:WaveForm? DESC', str_type=waveformdata(return_only_header=True), autoinit=False, trig=True, raw=True)
-        #self.trig_mode = scpiDevice('TRig_MoDe', choices=ChoiceStrings('AUTO', 'NORM', 'SINGLE', 'STOP'))
+        ziDev_ch_demod = lambda *arg, **kwarg: ziDev_ch_gen(self.current_demod, *arg, **kwarg)
+        ziDev_ch_osc = lambda *arg, **kwarg: ziDev_ch_gen(self.current_osc, *arg, **kwarg)
+        ziDev_ch_sigins = lambda *arg, **kwarg: ziDev_ch_gen(self.current_sigins, *arg, **kwarg)
+        ziDev_ch_sigouts = lambda *arg, **kwarg: ziDev_ch_gen(self.current_sigouts, *arg, **kwarg)
+        self.demod_freq = ziDev_ch_demod(getstr='demods/{ch}/freq', str_type=float)
+        self.demod_harm = ziDev_ch_demod('demods/{ch}/harmonic', str_type=int)
+        self.demod_en = ziDev_ch_demod('demods/{ch}/enable', str_type=bool)
+        self.demod_sinc_en = ziDev_ch_demod('demods/{ch}/sinc', str_type=bool)
+        self.demod_bypass_en = ziDev_ch_demod('demods/{ch}/bypass', str_type=bool, doc="Don't know what this does.")
+        self.demod_osc_src = ziDev_ch_demod(getstr='demods/{ch}/oscselect', str_type=int, choices=[0,1])
+        self.demod_adc_src = ziDev_ch_demod('demods/{ch}/adcselect', str_type=int, choices=range(13))
+        self.demod_rate = ziDev_ch_demod('demods/{ch}/rate', str_type=float, setget=True)
+        self.demod_tc = ziDev_ch_demod('demods/{ch}/timeconstant', str_type=float, setget=True)
+        self.demod_order = ziDev_ch_demod('demods/{ch}/order', str_type=int, choices=range(1,9))
+        self.demod_phase = ziDev_ch_demod('demods/{ch}/phaseshift', str_type=float, setget=True)
+        self.demod_trigger = ziDev_ch_demod('demods/{ch}/trigger', str_type=int)
+        self.demod_data = ziDev_ch_demod(getstr='demods/{ch}/sample', input_type='sample', doc='It will wait for the next available samples (depends on rate). X and Y are in RMS')
+        self.osc_freq = ziDev_ch_osc('oscs/{ch}/freq', str_type=float, setget=True)
+        self.sigins_ac_en = ziDev_ch_sigins('sigins/{ch}/ac', str_type=bool)
+        self.sigins_50ohm_en = ziDev_ch_sigins('sigins/{ch}/imp50', str_type=bool)
+        self.sigins_en = ziDev_ch_sigins('sigins/{ch}/on', str_type=bool)
+        range_lst = np.concatenate( (np.linspace(0.01, .1, 10), np.linspace(0.2, 1.5, 14)))
+        range_lst = [float(v) for v in np.around(range_lst, 3)]
+        self.sigins_range = ziDev_ch_sigins('sigins/{ch}/range', str_type=float, setget=True, choices=range_lst, doc='The voltage range amplitude A (the input needs to be between -A and +A. There is a attenuator for A<= 0.1')
+        self.sigouts_en = ziDev_ch_sigouts('sigouts/{ch}/on', str_type=bool)
+        self.sigouts_offset = ziDev_ch_sigouts('sigouts/{ch}/offset', str_type=float, setget=True)
+        self.sigouts_range = ziDev_ch_sigouts('sigouts/{ch}/range', str_type=float, setget=True, choices=[0.15, 1.5])
+        self.sigouts_output_clipped = ziDev_ch_sigouts(getstr='sigouts/{ch}/over', str_type=bool)
+        # There is also amplitudes/7, enables/3, enables/7, syncfallings/3 and /7, syncrisings/3 and /7
+        self.sigouts_ampl_Vp = ziDev_ch_sigouts(getstr='sigouts/{ch}/amplitudes/3', str_type=bool, doc='Amplitude A of sin wave (it goes from -A to +A without an offset')
+        # TODO: triggers, SYSTEM/EXTCLK, EXTREFS/0, status/flags/binary
+        #       auxins/0/sample, auxins/0/averaging
+        #       auxouts/0-4, dios/0, scopes/0
         #self._devwrap('fetch', autoinit=False, trig=True)
         #self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
@@ -877,7 +877,7 @@ class ziAPI(object):
         setattr(self, 'get'+f, newfunc)
     def __del__(self):
         # can't use the redirected functions because weakproxy not longer works here
-        print 'Runnig del on ziAPI:', self
+        print 'Running del on ziAPI:', self
         del self._ziAPIDisconnect.errcheck
         del self._ziAPIDestroy.errcheck
         self._ziAPIDisconnect(self._conn)
@@ -954,6 +954,8 @@ class ziAPI(object):
             self._SetValueD(path, val)
         elif isinstance(val, basestring):
             self._SetValueB(path, val, len(val))
+        else:
+            raise TypeError, 'Unhandled type for val'
     def set_async(self, path, val):
         if isinstance(val, int):
             self._AsyncSetValueI(path, val)
@@ -961,14 +963,20 @@ class ziAPI(object):
             self._AsyncSetValueD(path, val)
         elif isinstance(val, basestring):
             self._AsyncSetValueB(path, val, len(val))
+        else:
+            raise TypeError, 'Unhandled type for val'
     def set_sync(self, path, val):
         if isinstance(val, int):
+            val = ziIntegerType(val)
             self._SyncSetValueI(path, byref(val))
         elif isinstance(val, float):
+            val = c_double(val)
             self._SyncSetValueD(path, byref(val))
         elif isinstance(val, basestring):
             l = c_uint(len(val))
             self._SyncSetValueB(path, val, byref(l), l)
+        else:
+            raise TypeError, 'Unhandled type for val'
 
 # asking for /dev2021/samples quits the session (disconnect)
 # In Visual studio use, Tools/Visual studio command prompt, then:
