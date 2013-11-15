@@ -12,8 +12,15 @@ from instruments_base import BaseInstrument,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
                             _decode_block_base, make_choice_list,\
                             sleep, locked_calling, ProxyMethod
+from instruments_base import ChoiceIndex as _ChoiceIndex
 from instruments_logical import FunctionDevice
 from scipy.special import gamma
+
+class ChoiceIndex(_ChoiceIndex):
+    def __call__(self, input_val):
+        return self[input_val]
+    def tostr(self, input_choice):
+        return self.index(input_choice)
 
 def _tostr_helper(val, t):
     # This function converts from pyHegel val to ZI val (on set/write)
@@ -44,17 +51,20 @@ def _fromstr_helper(valstr, t):
     return t(valstr)
 
 
+
 class ziDev(scpiDevice):
     _autoset_val_str = ''
     def __init__(self, setstr=None, getstr=None, autoget=True, str_type=None, insert_dev=True,
-                 input_sel=None, input_repeat=None, input_type='auto', input_src='main', **kwarg):
+                 input_sel='auto', input_repeat=None, input_type='auto', input_src='main', **kwarg):
         """
         input_sel can be None: then it returns the whole thing
                     otherwise it is the index to use
+                    When auto, it is None for input_src='main' and 0 otherwise
         input_repeat is an iterable that will be passed to set/getstr
                      as rpt_i
         The _tostr and _fromstr converter no longer need to convert to and from
         str, but to and from the device representation
+        insert_dev when True, inserts '/{dev}/' to the entry if input_src=='main'
 
         str_type available (pyHegel, zi):
                   None (no conversion)
@@ -67,24 +77,33 @@ class ziDev(scpiDevice):
         if ask_write_options is given, it is used as is, otherwise:
          input_type can be None, 'auto', 'int', 'double', 'byte'
               and for getstr only it can also be: 'dio', 'sample', 'dict'
-             'auto' will select according to str_type
-           it is uses as the t value for ask_write_opt options if not givent
+             'auto' will select according to str_type unless input_src is not
+              'main' in which case it will be None
+           it is used as the t value for ask_write_opt options.
          input_src selects the source of the info. It can be
              'main', 'sweep', 'record' or 'zoomFFT'
         """
+        if input_sel == 'auto':
+            if input_src == 'main':
+                input_sel = None
+            else:
+                input_sel = 0
         self._input_sel = input_sel
         self._input_repeat = input_repeat
         ask_write_opt = kwarg.pop('ask_write_opt', None)
         if ask_write_opt == None:
             t = input_type
             if t == 'auto':
-                t = {None:None, bool:'int', float:'double', int:'int', str:'byte', unicode:'byte'}[str_type]
+                if input_src == 'main':
+                    t = {None:None, bool:'int', float:'double', int:'int', str:'byte', unicode:'byte'}[str_type]
+                else:
+                    t = None
             ask_write_opt = dict(t=t, src=input_src)
         kwarg.update(ask_write_opt=ask_write_opt)
         if autoget and setstr != None:
             getstr = setstr
         insert_dev_pre = '/{{dev}}/'
-        if insert_dev:
+        if insert_dev and input_src=='main':
             if getstr:
                 getstr = insert_dev_pre+getstr
             if setstr:
@@ -133,8 +152,9 @@ class ziDev(scpiDevice):
             options['rpt_i'] = i
             cmd = command.format(**options)
             reti = self.instr.ask(cmd, **self._ask_write_opt)
+            reti = self._apply_sel(reti)
             reti = self._fromstr(reti)
-            ret.append(self._apply_sel(reti))
+            ret.append(reti)
         if self._input_repeat == None:
             return ret[0]
         return ret
@@ -322,10 +342,12 @@ class zurich_UHF(BaseInstrument):
         src, pre = self._select_src(src)
         return src.listNodes(pre+base, flags)
     def _subscribe(self, base='/{dev}/demods/*/sample', src='main'):
+        base = self._conv_command(base)
         src, pre = self._select_src(src)
         sub = getattr(src, 'subscribe')
         sub(base)
     def _unsubscribe(self, base='/{dev}/demods/*/sample', src='main'):
+        base = self._conv_command(base)
         src, pre = self._select_src(src)
         unsub = getattr(src, 'unsubscribe')
         unsub(base)
@@ -556,7 +578,15 @@ class zurich_UHF(BaseInstrument):
         self.demod_bypass_en = ziDev_ch_demod('demods/{ch}/bypass', str_type=bool, doc="Don't know what this does.")
         self.demod_osc_src = ziDev_ch_demod(getstr='demods/{ch}/oscselect', str_type=int, choices=[0,1])
         self.demod_adc_src = ziDev_ch_demod('demods/{ch}/adcselect', str_type=int, choices=range(13))
-        self.demod_rate = ziDev_ch_demod('demods/{ch}/rate', str_type=float, setget=True)
+        self.demod_rate = ziDev_ch_demod('demods/{ch}/rate', str_type=float, setget=True, doc="""
+            The rate are power of 2 fractions of the base sampling rate.
+            With the base of 1.8 GS/s, the weeb interface has a max rate of
+              1.8e9/2**7 = 14.1 MS/s
+            and a min rate of
+              1.8e9/2**30 = 1.68 S/s
+            The recommended rate is 7-10 higher rate than filter bandwidth for
+            sufficient antialiasing suppression.
+        """)
         self.demod_tc = ziDev_ch_demod('demods/{ch}/timeconstant', str_type=float, setget=True)
         self.demod_order = ziDev_ch_demod('demods/{ch}/order', str_type=int, choices=range(1,9))
         self.demod_phase = ziDev_ch_demod('demods/{ch}/phaseshift', str_type=float, setget=True)
@@ -578,10 +608,145 @@ class zurich_UHF(BaseInstrument):
         # TODO: triggers, SYSTEM/EXTCLK, EXTREFS/0, status/flags/binary
         #       auxins/0/sample, auxins/0/averaging
         #       auxouts/0-4, dios/0, scopes/0
+        self.sweep_device = ziDev('device', str_type=str, input_src='sweep')
+        self.sweep_x_start = ziDev('start', str_type=float, input_src='sweep')
+        self.sweep_x_stop = ziDev('stop', str_type=float, input_src='sweep')
+        self.sweep_x_count = ziDev('samplecount', str_type=int, input_src='sweep')
+        self.sweep_x_src_node = ziDev('gridnode', str_type=str, input_src='sweep')
+        self.sweep_x_log = ziDev('xmapping', str_type=bool, input_src='sweep')
+        self.sweep_loop_count = ziDev('loopcount', str_type=int, input_src='sweep')
+        self.sweep_endless_loop_en = ziDev('endless', str_type=bool, input_src='sweep')
+        auto_bw_ch = ChoiceIndex(['auto', 'fixed', 'manual'])
+        self.sweep_auto_bw_mode = ziDev('bandwidthcontrol', choices=auto_bw_ch, input_src='sweep')
+        self.sweep_auto_bw_fixed = ziDev('bandwidth', str_type=float, input_src='sweep')
+        self.sweep_settling_time_s = ziDev('settling/time', str_type=float, input_src='sweep')
+        self.sweep_settling_n_tc = ziDev('settling/tc', str_type=float, input_src='sweep')
+        self.sweep_averaging_count = ziDev('averaging/sample', str_type=int, input_src='sweep')
+        #self.sweep_averaging_n_tc = ziDev('averaging/tc', str_type=float, choices=[0, 5, 15, 50], input_src='sweep')
+        self.sweep_averaging_n_tc = ziDev('averaging/tc', str_type=float, input_src='sweep')
+        sweep_mode_ch = ChoiceIndex(['sequential', 'binary', 'bidirectional'])
+        self.sweep_mode = ziDev('scan', choices=sweep_mode_ch, input_src='sweep')
+
+        self.sweep_phase_unwrap_en = ziDev('phaseunwrap', str_type=bool, input_src='sweep')
+# sweeper structure
+#  sweep/fileformat
+#  sweep/filename
+#  sweep/historylength
+
         #self._devwrap('fetch', autoinit=False, trig=True)
         #self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(zurich_UHF, self)._create_devs()
+    def clear_history(self, src='sweep'):
+        """
+        empties the read buffer (the next read will be empty).
+        also, during a sweep, it restarts all loops.
+        """
+        self.write('clearhistory', 1, src=src)
+    def is_sweep_finished(self):
+        if self._zi_sweep.finished() and self._zi_sweep.progress() == 1.:
+            return True
+        return False
+    def sweep_start(self):
+        self._zi_sweep.execute()
+    def sweep_stop(self):
+        self._zi_sweep.finish()
+    def set_sweep_mode(self, start, stop, count, logsweep=False, src='oscs/0/freq', subs='all',
+                       bw='auto', loop_count=1, mode='sequential',
+                       avg_count=1, avg_n_tc=0, settle_time_s=0, settle_n_tc=15):
+        """
+        bw can be a value (fixed mode), 'auto' or None (uses the currently set timeconstant)
+        mode is 'sequential', 'binary', or 'bidirectional'
+          Note that 1 loopcount of bidirectionnal is includes twice the count
+          of points (the up and down sweep together)
+        subs is the list of demods channels to subscribe to
+        loop_count <= 0 turns on endless mode (infinite count, need to use finish to stop)
+        subs is a list of demods channel number to subscribe to (to record in the sweep result)
+              or it is 'all' to record all active channels.
+              Channels are active if they are enabled and the data rate is not 0.
+              If no channels are active, the sweep will not progress, it will stall.
+              If an active channel is subscribed to, deactivating without changing the
+              subscription will hang the sweep.
+        The total settling time in seconds is max(settle_time_s, settle_n_tc*timeconstant_s)
+        where timeconstant_s is the timeconstant in seconds for each frequency (can change with bw='auto').
+        The total averaging time in seconds is max(avg_count/rate, avg_n_tc*timeconstant_s, 1/rate).
+        (a minimum of 1 sample)
+        where rate is the demod rate for that channel.
+        In between points of the sweep, there can be an additiontion ~60 ms delay.
+
+        The usual parameter for the web interface:
+              they all use bw='auto', settle_time_s=0
+            parameter/high: settle_n_tc=15, avg_count=1, avg_n_tc=0
+            parameter/low : settle_n_tc=5,  avg_count=1, avg_n_tc=0
+            avg param/high: settle_n_tc=15, avg_count=1000, avg_n_tc=15
+            avg param/low : settle_n_tc=5,  avg_count=100,  avg_n_tc=5
+            noise/high:     settle_n_tc=50, avg_count=1000, avg_n_tc=50
+            noise/low :     settle_n_tc=15, avg_count=100,  avg_n_tc=15
+        """
+        self.sweep_device.set(self._zi_dev)
+        self.sweep_x_start.set(start)
+        self.sweep_x_stop.set(stop)
+        self.sweep_x_count.set(count)
+        self.sweep_x_src_node.set(src)
+        self.sweep_x_log.set(logsweep)
+        self.sweep_x_log.set(logsweep)
+        if bw == None:
+            self.sweep_auto_bw_mode.set('manual')
+        elif bw == 'auto':
+            self.sweep_auto_bw_mode.set('auto')
+        else:
+            self.sweep_auto_bw_mode.set('fixed')
+            self.sweep_auto_bw_fixed.set(bw)
+        if loop_count <= 0:
+            self.sweep_endless_loop_en.set(True)
+        else:
+            self.sweep_endless_loop_en.set(False)
+            self.sweep_loop_count.set(loop_count)
+        self.sweep_x_log.set(logsweep)
+        self.sweep_mode.set(mode)
+        self.sweep_averaging_count.set(avg_count)
+        self.sweep_averaging_n_tc.set(avg_n_tc)
+        self.sweep_settling_time_s.set(settle_time_s)
+        self.sweep_settling_n_tc.set(settle_n_tc)
+        for i in range(8):
+            # This will remove multiple subscribes to a particular channel
+            self._unsubscribe('/{dev}/demods/%i/sample'%i, src='sweep')
+        # This removes subscribes to * (it is not removed by above iteration)
+        self._unsubscribe('/{dev}/demods/*/sample', src='sweep')
+        if subs == 'all':
+            self._subscribe('/{dev}/demods/*/sample', src='sweep')
+        else:
+            if not isinstance(subs, (list, tuple, np.ndarray)):
+                subs = [subs]
+            for i in subs:
+                self._subscribe('/{dev}/demods/%i/sample'%i, src='sweep')
+
+# In the result data set:
+#   available: auxin0, auxin0pwr, auxin0stddev
+#              auxin1, auxin1pwr, auxin1stddev
+#              bandwidth, tc
+#              frequency, frequencystddev
+#              grid
+#              nexttimestamp, settimestamp (both in s, timestamps of set and first read)
+#              settling  (=nexttimestamp-settimestamp)
+#              timestamp (single value, in raw clock ticks: 1.8 GHz)
+#              r, rpwr, rstddev
+#              phase, phasestddev
+#              x, xpwr, xstddev
+#              y, ypwr, ystddev
+# All points are in order of start-stop, even for binary.
+#  however
+# bandwidth is enbw (related to tc)
+#  for the various stddev to not be nan, you need avg count>1
+#    for i the iterations of N averages
+#   base(avg): sum_i x_i/N
+#   pwr: sum_i (x_i**2)/N
+#   stddev: (1/N) sum_i (x_i - base)**2
+#    so stddev = sqrt(pwr - base**2)
+#  The r, rpwr and rstddev are calculated from r_i = sqrt(x_i**2 + y_i**2)
+#    not from x, xpwr and xstddev
+
+
 
 # Problems discovered:
 #  get('*') is slow and does not return sample data (because it is slow?)
