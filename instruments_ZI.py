@@ -239,6 +239,10 @@ class zurich_UHF(BaseInstrument):
         # The SRQ for this intrument does not work
         # as of version 7.2.1.0
         timeout = 500 #ms
+        # Note that deleting the _zi_daq frees up all the memory of
+        #  sweep, record, .... and renders them unusable
+        # To free up the memory of sweep, call sweep.clear() before deleting
+        # (or replacing) it.
         self._zi_daq = zi.ziDAQServer(host, port)
         self._zi_record = self._zi_daq.record(10, timeout) # 10s length
         self._zi_sweep = self._zi_daq.sweep(timeout)
@@ -616,8 +620,9 @@ class zurich_UHF(BaseInstrument):
         self.sweep_x_log = ziDev('xmapping', str_type=bool, input_src='sweep')
         self.sweep_loop_count = ziDev('loopcount', str_type=int, input_src='sweep')
         self.sweep_endless_loop_en = ziDev('endless', str_type=bool, input_src='sweep')
-        auto_bw_ch = ChoiceIndex(['auto', 'fixed', 'manual'])
-        self.sweep_auto_bw_mode = ziDev('bandwidthcontrol', choices=auto_bw_ch, input_src='sweep')
+        #auto_bw_ch = ChoiceIndex(['auto', 'fixed', 'manual'])
+        #self.sweep_auto_bw_mode = ziDev('bandwidthcontrol', choices=auto_bw_ch, input_src='sweep')
+        self.sweep_auto_bw_en = ziDev('bandwidthcontrol', str_type=bool, input_src='sweep')
         self.sweep_auto_bw_fixed = ziDev('bandwidth', str_type=float, input_src='sweep')
         self.sweep_settling_time_s = ziDev('settling/time', str_type=float, input_src='sweep')
         self.sweep_settling_n_tc = ziDev('settling/tc', str_type=float, input_src='sweep')
@@ -643,8 +648,10 @@ class zurich_UHF(BaseInstrument):
         also, during a sweep, it restarts all loops.
         """
         self.write('clearhistory', 1, src=src)
+    def sweep_progress(self):
+        return self._zi_sweep.progress()
     def is_sweep_finished(self):
-        if self._zi_sweep.finished() and self._zi_sweep.progress() == 1.:
+        if self._zi_sweep.finished() and self.sweep_progress() == 1.:
             return True
         return False
     def sweep_start(self):
@@ -656,6 +663,22 @@ class zurich_UHF(BaseInstrument):
                        avg_count=1, avg_n_tc=0, settle_time_s=0, settle_n_tc=15):
         """
         bw can be a value (fixed mode), 'auto' or None (uses the currently set timeconstant)
+           for auto the computed bandwidth (the one asked for, but the instruments rounds it
+           to another value) is the equivalent noise bandwidth and is:
+               min(df/2,  f/100**(1/n))
+                 where n is order,
+                 f is frequency, and df[1:] = diff(f), df[0]=df[1]
+               It is also bounded by the max and min available bandwidth (time constants)
+                available for the order (min tc=1.026e-7, max tc=76.35)
+               The reason for df/2 is to have independent points,
+               The reason for f/100*(1/n) is to kill the harmonics in a similar way.
+                 The H harmonic is attenuated for order n by ~100*(H*Kn)**n,
+                  where Kn is 2*pi*ENBW(tau=1, order=n)
+                  hence the attenuation for the 2nd harmonic is
+                    ~314 for order 1,  ~247 for 2, ~164 for 3, ..., =31.5 for 8 (no approximation, approx gave 3)
+                       the formula for no approximation is sqrt(1 + (F)**2)**n
+                        with F = 100**(1./n) * (H*Kn)
+               Enabling sync does not seem to change anything (at least for version 13.06 of ZI interface)
         mode is 'sequential', 'binary', or 'bidirectional'
           Note that 1 loopcount of bidirectionnal is includes twice the count
           of points (the up and down sweep together)
@@ -691,12 +714,19 @@ class zurich_UHF(BaseInstrument):
         self.sweep_x_log.set(logsweep)
         self.sweep_x_log.set(logsweep)
         if bw == None:
-            self.sweep_auto_bw_mode.set('manual')
+            #self.sweep_auto_bw_mode.set('manual')
+            #self.sweep_auto_bw_mode.set('fixed')
+            if self.sweep_auto_bw_fixed.getcache()<=0:
+                self.sweep_auto_bw_fixed.set(1)
+            self.sweep_auto_bw_en.set(False)
         elif bw == 'auto':
-            self.sweep_auto_bw_mode.set('auto')
+            #self.sweep_auto_bw_mode.set('auto')
+            self.sweep_auto_bw_fixed.set(0)
+            self.sweep_auto_bw_en.set(True)
         else:
-            self.sweep_auto_bw_mode.set('fixed')
+            #self.sweep_auto_bw_mode.set('fixed')
             self.sweep_auto_bw_fixed.set(bw)
+            self.sweep_auto_bw_en.set(True)
         if loop_count <= 0:
             self.sweep_endless_loop_en.set(True)
         else:
@@ -724,7 +754,7 @@ class zurich_UHF(BaseInstrument):
 # In the result data set:
 #   available: auxin0, auxin0pwr, auxin0stddev
 #              auxin1, auxin1pwr, auxin1stddev
-#              bandwidth, tc
+#              bandwidth, tc (for auto they are the computed ones, the ones set to, the used one are truncated)
 #              frequency, frequencystddev
 #              grid
 #              nexttimestamp, settimestamp (both in s, timestamps of set and first read)
