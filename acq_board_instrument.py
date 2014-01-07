@@ -1790,8 +1790,8 @@ You can start a server with:
         self.osc_trigger_level.set(trigger_level)
         self.osc_trig_filter.set(trig_filter)
         self.osc_slope.set(slope)
-        self.osc_trig_source(trig_source)
-        self.osc_trig_mode(trig_mode)
+        self.osc_trig_source.set(trig_source)
+        self.osc_trig_mode.set(trig_mode)
 
     @locked_calling
     def set_spectrum(self, nb_Msample='min', fft_length=1024, window='Bartlett',
