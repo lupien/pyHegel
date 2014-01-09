@@ -813,6 +813,31 @@ class zurich_UHF(BaseInstrument):
 #  100 loops, best of 3: 2.55 ms per loop
 # timeit zi.ask('/{dev}/stats/physical/digitalboard/temps/0')
 #  10 loops, best of 3: 250 ms per loop (for 13.06 and 100 ms for 13.10)
+# This is because it uses get_as_poll
+#  some are faster like '/zi' or '/{dev}/stats/cmdstream'
+#
+# za=instruments_ZI.ziAPI()
+def _time_poll(za):
+    import time
+    s = '/dev2021/demods/0/sinc'
+    to=time.time()
+    za.get_as_poll('/dev2021/demods/0/sinc')
+    done = False
+    n = 0
+    while not done:
+        n += 1
+        r=za.poll(1000)
+        if r['path'].lower() == s:
+            done = True
+    return time.time()-to,n,r
+# za.poll() # first empty the poll buffer
+# timeit _time_poll(za)
+# timeit print _time_poll(za)
+#  This is always 100 ms (version 13.10). When subscribing to something like
+#    /dev2021/demods/0/sample at 1.717 kS/s  (timeit za.poll()  returns ~25 ms)
+#  polls will return more quickly but with the information from /dev2021/demods/0/sample multiples times
+#  between the /dev2021/demods/0/sinc ones
+#
 # /dev2021/system/calib/required was not in listnodes (13.06) but is there in 13.10
 #
 #  tests:
