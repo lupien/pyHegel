@@ -676,7 +676,7 @@ You can start a server with:
         if mode == 'Hist' or mode == 'Spec' or mode == 'Osc':
             fmt.update(xaxis=True) # This is the default, will be overriden if necessary in BaseDevice.getformat
         if mode == 'Hist2d':
-            fmt.update(bin=True)
+            fmt.update(bin='.bin')
         return BaseDevice.getformat(self.fetch, **kwarg)
 
     def _fetch_filename_helper(self, filename, extra=None, newext=None):
