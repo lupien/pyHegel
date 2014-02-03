@@ -242,7 +242,7 @@ _expUnits = {-24:'y', -21:'z', -18:'a', -15:'f', -12:'p', -9:'n', -6:u'µ', -3:'
 #rc('text', usetex=True)
 #text(0,0,r'\begin{tabular}{l r@{.}l c r@{.}l l} \hline aa & 123&22&$\pm$&1&33&$\times 10^{-6}$\\ adasd & 5& 777 & \multicolumn{3}{l}{}&55 \\ \hline\hline\end{tabular}')
 
-def printResult(func, p, pe, extra={}, signif=2):
+def strResult(func, p, pe, extra={}, signif=2):
     (para, kwpara, varargs, varkw, defaults) = getVarNames(func)
     N = len(p)
     Npara = len(para) -1
@@ -285,6 +285,10 @@ def printResult(func, p, pe, extra={}, signif=2):
             s = u'{0:<{l[0]}s} {1:>{l[1]}s}.{2:<{l[2]}s} ± {3:>{l[3]}s}.{4:<{l[4]}s} ×10^ {5:>{l[5]}s}'.format(*args, **kwargs)
         ret.append(s)
     return ret
+
+def printResult(func, p, pe, extra={}, signif=2):
+    print '\n'.join(strResult(func, p, pe, extra, signif))
+
 
 def _handle_adjust(func, p0, adjust, noadjust):
     if adjust == None and noadjust == None:
@@ -342,8 +346,11 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
     The function can also have and attribute display_str that contains
     the function representation in TeX form (func.disp='$a_1 x+b x^2$')
 
-    x is the independent variable (passed to the function).
+    x is the independent variable (passed to the function). It can be any shape.
+      It can be a tuple of arrays (result from meshgrid)
     y is the dependent variable. The fit will minimize sum((func(x,..)-y)**2)
+      y and funct(x,...) need to be of the same shape and need to be arrays.
+        They can be multi-dimensional.
     p0 is a vector of the initial parameters used for the fit. It needs to be
     at least as long as all the func parameters without default values.
 
@@ -437,12 +444,13 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
         do_corr = True
     p0 = np.array(p0, dtype=float) # this allows complex indexing lik p0[[1,2,3]]
     adj = _handle_adjust(func, p0, adjust, noadjust)
-    f = lambda p, x, y, yerr: (func(x, *_adjust_merge(p, p0, adj), **extra)-y)/yerr
+    # we returned a flat vector.
+    f = lambda p, x, y, yerr: ((func(x, *_adjust_merge(p, p0, adj), **extra)-y)/yerr).reshape(-1)
     p, cov_x, infodict, mesg, ier = leastsq(f, p0[adj], args=(x, y, yerr), full_output=True, **kwarg)
     if ier not in [1, 2, 3, 4]:
         print 'Problems fitting:', mesg
     chi2 = np.sum(f(p, x, y, yerr)**2)
-    Ndof = len(x)- len(p)
+    Ndof = y.size - len(p)
     chiNorm = chi2/Ndof
     sigmaCorr = np.sqrt(chiNorm)
     if cov_x != None:
@@ -505,8 +513,7 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, fig=None, skip=False,
     plt.draw()
     if not skip:
         p, resids, pe, extras = fitcurve(func, x, y, p0, yerr=yerr, extra=extra, **kwarg)
-        res_str = printResult(func, p, pe, extra=extra)
-        print '\n'.join(res_str)
+        printResult(func, p, pe, extra=extra)
         #xx.set_ydata(func(xx, *p, **extra))
         plt.sca(ax1)
         plt.cla()
