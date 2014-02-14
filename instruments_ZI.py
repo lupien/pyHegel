@@ -728,6 +728,7 @@ class zurich_UHF(BaseInstrument):
             noise/high:     settle_n_tc=50, avg_count=1000, avg_n_tc=50
             noise/low :     settle_n_tc=15, avg_count=100,  avg_n_tc=15
         """
+        # sweep/bandwidthcontrol = 0 is still enabled if sweep/bandwidth=0
         self.sweep_device.set(self._zi_dev)
         self.sweep_x_start.set(start)
         self.sweep_x_stop.set(stop)
