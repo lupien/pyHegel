@@ -20,8 +20,8 @@ from instruments_base import visaInstrument, visaInstrumentAsync,\
 
 class agilent_rf_33522A(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('ampl1', 'freq1', 'offset1', 'phase1', 'mode1', 'out_en1', 'pulse_width1',
-                                 'ampl2', 'freq2', 'offset2', 'phase2', 'mode2', 'out_en2', 'pulse_width2', options)
+        return self._conf_helper('ampl1', 'freq1', 'offset1', 'phase1', 'mode1', 'out_en1', 'pulse_width1', 'noise_bw1',
+                                 'ampl2', 'freq2', 'offset2', 'phase2', 'mode2', 'out_en2', 'pulse_width2', 'noise_bw2', options)
     def _create_devs(self):
         # voltage unit depends on front panel/remote selection (sourc1:voltage:unit) vpp, vrms, dbm
         self.ampl1 = scpiDevice('SOUR1:VOLT', str_type=float, min=0.001, max=10)
@@ -31,6 +31,7 @@ class agilent_rf_33522A(visaInstrument):
         self.phase1 = scpiDevice('SOURce1:PHASe', str_type=float, min=-360, max=360) # in deg unless changed by unit:angle
         self.mode1 = scpiDevice('SOUR1:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
         self.out_en1 = scpiDevice('OUTPut1', str_type=bool) #OFF,0 or ON,1
+        self.noise_bw1 = scpiDevice('SOURce1:FUNCtion:NOISe:BANDwidth', str_type=float, min=0.001, max=30e6)
         self.ampl2 = scpiDevice('SOUR2:VOLT', str_type=float, min=0.001, max=10)
         self.freq2 = scpiDevice('SOUR2:FREQ', str_type=float, min=1e-6, max=30e6)
         self.pulse_width2 = scpiDevice('SOURce2:FUNCtion:PULSe:WIDTh', str_type=float, min=16e-9, max=1e6) # s
@@ -38,6 +39,7 @@ class agilent_rf_33522A(visaInstrument):
         self.offset2 = scpiDevice('SOUR2:VOLT:OFFS', str_type=float, min=-5, max=5)
         self.mode2 = scpiDevice('SOUR2:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
         self.out_en2 = scpiDevice('OUTPut2', str_type=bool) #OFF,0 or ON,1
+        self.noise_bw2 = scpiDevice('SOURce2:FUNCtion:NOISe:BANDwidth', str_type=float, min=0.001, max=30e6)
         self.alias = self.freq1
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
