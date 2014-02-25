@@ -129,7 +129,7 @@ def blueforsTlog(data, time_data, channels=[1,2,5,6], logdir='C:/BlueFors/Log-fi
     it creates the temperature logfiles in the logdir path
     data needs to have a shape (2*nch, ndata) where nch is the number of channels
     which needs to match with channels. The 2 is because the data needs to be
-    temperature than resistance.
+    temperature then resistance.
     time_data is in seconds since epoch (what record and sweep use)
     The data is always appended to the destination file.
     When sort_exist=True, file that existed before being called are sorted
