@@ -17,6 +17,9 @@ from kbint_util import sleep, _sleep_signal_context_manager, _delayed_signal_con
 
 
 def _get_lib_properties(libraryHandle):
+    import win32api
+    global _win32api
+    _win32api = win32api
     filename = win32api.GetModuleFileName(libraryHandle)
     fixedInfo = win32api.GetFileVersionInfo(filename, '\\')
     # Only pick the first lang, codepage combination
@@ -76,6 +79,14 @@ def _patch_pyvisa():
     visa.warnings.filterwarnings = filterwarnings
 
 _agilent_visa = False
+def _visa_test_agilent():
+    global _visa_lib_properties, _agilent_visa
+    _visa_lib_properties = _get_lib_properties(vpp43.visa_library()._handle)
+    if 'agilent' in _visa_lib_properties['company'].lower():
+        _agilent_visa = True
+    else:
+        _agilent_visa = False
+
 try:
     if os.name == 'nt':
         import pyvisa.vpp43 as vpp43
@@ -90,10 +101,7 @@ try:
         except WindowsError:
             print 'Unable to load visa32.dll.'
             raise ImportError
-        import win32api
-        _visa_lib_properties = _get_lib_properties(vpp43.visa_library()._handle)
-        if 'agilent' in _visa_lib_properties['company'].lower():
-            _agilent_visa = True
+        _visa_test_agilent()
     else:
         try:
             import visa
@@ -108,6 +116,23 @@ except ImportError as exc: # pyVisa not installed
     visa = None
 #can list instruments with : 	visa.get_instruments_list()
 #     or :                      visa.get_instruments_list(use_aliases=True)
+
+def _visa_reload(dllfile=r'c:\Windows\system32\agvisa32.dll'):
+    """
+    reloads the same or different visa dll.
+    For National instrument visa: r'c:\Windows\system32\visa32.dll'
+       or None
+    For Agilent (default): r'c:\Windows\system32\agvisa32.dll'
+    """
+    # we assume os.name == 'nt'
+    vpp43.visa_library.load_library(dllfile)
+    # now need to reset ResourceManager
+    try:
+        visa.resource_manager.close()
+    except visa.VisaIOError:
+        pass
+    visa.resource_manager.init()
+    _visa_test_agilent()
 
 
 _globaldict = dict() # This is set in pyHegel.py
@@ -823,7 +848,7 @@ class cls_wrapDevice(BaseDevice):
         if self._getformat != None:
             return self._getformat(self.instr, **kwarg)
         else:
-            return super(cls_wrapDevice, self).getformat(self.instr, **kwarg)
+            return super(cls_wrapDevice, self).getformat(**kwarg)
 
 def _find_global_name(obj):
     dic = _globaldict
@@ -1182,8 +1207,11 @@ def _fromstr_helper(valstr, t):
 #######################################################
 
 class scpiDevice(BaseDevice):
+    _autoset_val_str = ' {val}'
     def __init__(self,setstr=None, getstr=None, raw=False, autoinit=True, autoget=True, str_type=None,
-                 choices=None, doc='', options={}, options_lim={}, options_apply=[], options_conv={}, **kwarg):
+                 choices=None, doc='',
+                 options={}, options_lim={}, options_apply=[], options_conv={},
+                 ask_write_opt={}, **kwarg):
         """
            str_type can be float, int, None
            If choices is a subclass of ChoiceBase, then str_Type will be
@@ -1213,6 +1241,7 @@ class scpiDevice(BaseDevice):
            options_apply is a list of options that need to be set. In that order when defined.
            By default, autoinit=True is transformed to 10 (higher priority)
            unless options contains another device, then it is set to 1.
+           ask_write_options are options passed to the ask and write methods
 
         """
         if setstr == None and getstr == None:
@@ -1237,7 +1266,7 @@ class scpiDevice(BaseDevice):
                     val_present = True
                     autoget = False
             if not val_present:
-                self._setdev_p = setstr+' {val}'
+                self._setdev_p = setstr + self._autoset_val_str
         if getstr == None and autoget:
             getstr = setstr+'?'
         self._getdev_p = getstr
@@ -1245,6 +1274,7 @@ class scpiDevice(BaseDevice):
         self._options_lim = options_lim
         self._options_apply = options_apply
         self._options_conv = options_conv
+        self._ask_write_opt = ask_write_opt
         self.type = str_type
         self._raw = raw
         self._option_cache = {}
@@ -1375,7 +1405,7 @@ class scpiDevice(BaseDevice):
         options = self._combine_options(**kwarg)
         command = self._setdev_p
         command = command.format(val=val, **options)
-        self.instr.write(command)
+        self.instr.write(command, **self._ask_write_opt)
     def _getdev(self, **kwarg):
         if self._getdev_p == None:
             raise NotImplementedError, self.perror('This device does not handle _getdev')
@@ -1386,7 +1416,7 @@ class scpiDevice(BaseDevice):
             raise
         command = self._getdev_p
         command = command.format(**options)
-        ret = self.instr.ask(command, self._raw)
+        ret = self.instr.ask(command, self._raw, **self._ask_write_opt)
         return self._fromstr(ret)
     def check(self, val, **kwarg):
         #TODO handle checking of kwarg
@@ -1600,6 +1630,7 @@ class ChoiceStrings(ChoiceBase):
         s=ChoiceStrings('Aa', 'Bb', ..)
        then 'A' in s  or 'aa' in s will return True
        irrespective of capitalization.
+       if no_short=True option is given, then only the long names are allowed
        The elements need to have the following format:
           ABCdef
        where: ABC is known as the short name and
@@ -1610,17 +1641,21 @@ class ChoiceStrings(ChoiceBase):
          (short is upper, long is lower)
        Long and short name can be the same.
     """
-    def __init__(self, *values, **extrap):
-        # use **extrap because we can't have keyword arguments after *arg
-        self.quotes = extrap.pop('quotes', False)
-        if extrap != {}:
-            raise TypeError, 'ChoiceStrings only has quotes=False as keyword argument'
+    def __init__(self, *values, **kwarg):
+        # use **kwarg because we can't have keyword arguments after *arg
+        self.quotes = kwarg.pop('quotes', False)
+        no_short = kwarg.pop('no_short', False)
+        if kwarg != {}:
+            raise TypeError, 'ChoiceStrings only has quotes=False and no_short=False as keyword arguments'
         self.values = values
-        self.short = [v.translate(None, string.ascii_lowercase).lower() for v in values]
         self.long = [v.lower() for v in values]
-        # for short having '', use the long name instead
-        # this happens for a string all in lower cap.
-        self.short = [s if s!='' else l for s,l in zip(self.short, self.long)]
+        if no_short:
+            self.short = self.long
+        else:
+            self.short = [v.translate(None, string.ascii_lowercase).lower() for v in values]
+            # for short having '', use the long name instead
+            # this happens for a string all in lower cap.
+            self.short = [s if s!='' else l for s,l in zip(self.short, self.long)]
     def __contains__(self, x): # performs x in y; with y=Choice()
         xl = x.lower()
         inshort = xl in self.short
@@ -1891,7 +1926,7 @@ class ChoiceMultiple(ChoiceBase):
                 ret.append(_tostr_helper(v, fmt))
         if fromdict != {}:
             raise KeyError, 'The following keys in the dictionnary are incorrect: %r'%fromdict.keys()
-        ret = ','.join(ret)
+        ret = self.sep.join(ret)
         return ret
     def __contains__(self, x): # performs x in y; with y=Choice(). Used for check
         for k, fmt, lims in zip(self.field_names, self.fmts_type, self.fmts_lims):
@@ -1989,7 +2024,14 @@ class Dict_SubDevice(BaseDevice):
                 setget=setget, autoinit=autoinit, trig=trig, delay=delay, **kwarg)
         self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
         self._getdev_p = True # needed to enable BaseDevice get in Checking mode
-
+    def getcache(self):
+        vals = self._subdevice.getcache()
+        if vals == None:
+            ret = None
+        else:
+            ret = vals[self._sub_key]
+        self._cache = ret
+        return ret
     def _getdev(self, **kwarg):
         vals = self._subdevice.get(**kwarg)
         return vals[self._sub_key]
@@ -2009,8 +2051,6 @@ class Dict_SubDevice(BaseDevice):
         vals = vals.copy()
         vals[self._sub_key] = val
         self._subdevice.set(vals)
-
-
 
 
 

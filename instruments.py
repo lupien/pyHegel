@@ -6,6 +6,7 @@ import instruments_others
 import instruments_logical
 import instruments_agilent
 import acq_board_instrument
+import instruments_lecroy
 
 try:
     import data_translation

@@ -186,6 +186,7 @@ def reset_pyHegel():
     reload(instruments.instruments_others)
     reload(instruments.instruments_logical)
     reload(instruments.acq_board_instrument)
+    reload(instruments.instruments_lecroy)
     import types
     if isinstance(instruments.data_translation, types.ModuleType):
         reload(instruments.data_translation)
@@ -417,7 +418,7 @@ quiet_KeyboardInterrupt(True)
 #                                       it can also be a function that returns the proper list of strings
 #                                       the functions defaults to instr._current_config if available
 #          bin=False/'.npy'/'.raw'/'.png' Dump data in binary form. npy is numpy format
-#              '.ext'/...              All of the change the extension of the file except
+#              '.ext'/...              All of them change the extension of the file except
 #                                      if you use '.ext', then the original extension is kept
 #                                      All formats except numpy are straight dump
 #                                      No headers are saved in any bin formats
