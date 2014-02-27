@@ -2134,6 +2134,10 @@ class visaInstrument(BaseInstrument):
             self.visa = visa.instrument(visa_addr)
             self._lock_extra = Lock_Visa(self.visa.vi)
         self.visa.timeout = 3 # in seconds
+        self._last_write_time = time.time()
+        self._last_read_time = time.time()
+        self._write_write_wait = 0.
+        self._read_write_wait = 0.
         BaseInstrument.__init__(self)
     def __del__(self):
         #print 'Destroying '+repr(self)
@@ -2195,27 +2199,45 @@ class visaInstrument(BaseInstrument):
             else:
                 val = vpp43.VI_GPIB_REN_ADDRESS_GTL
         vpp43.gpib_control_ren(self.visa.vi, val)
+    def _do_wr_wait(self):
+        if self._last_read_time > self._last_write_time:
+            # last operation was a read
+            last_time = self._last_read_time
+            wait_time = self._read_write_wait
+        else: # last operation was a write
+            last_time = self._last_write_time
+            wait_time = self._write_write_wait
+        if wait_time == 0.:
+            return
+        cur_time = time.time()
+        delta = (last_time+wait_time) - cur_time
+        if delta >0:
+            sleep(delta)
     @locked_calling
-    def read(self):
-        return self.visa.read()
+    def read(self, raw=False):
+        if raw:
+            ret = self.visa.read_raw()
+        else:
+            ret = self.visa.read()
+        self._last_read_time = time.time()
+        return ret
     @locked_calling
     def write(self, val):
+        self._do_wr_wait()
         self.visa.write(val)
+        self._last_write_time = time.time()
     @locked_calling
     def ask(self, question, raw=False):
         """
         Does write then read.
         With raw=True, replaces read with a read_raw.
-        This is needed when dealing with binary date. The
+        This is needed when dealing with binary data. The
         base read strips newlines from the end always.
         """
         # we prevent CTRL-C from breaking between write and read using context manager
         with _delayed_signal_context_manager():
-            if raw:
-                self.visa.write(question)
-                ret = self.visa.read_raw()
-            else:
-                ret = self.visa.ask(question)
+            self.write(question)
+            ret = self.read(raw)
         return ret
     def idn(self):
         return self.ask('*idn?')

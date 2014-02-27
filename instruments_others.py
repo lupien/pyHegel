@@ -889,31 +889,19 @@ class lakeshore_370(visaInstrument):
        status_ch returns the status of ch
        fetch allows to read all channels
     """
+    def __init__(self, *arg, **kwarg):
+        super(lakeshore_370, self).__init__(*arg, **kwarg)
+        if isinstance(self.visa, visa.SerialInstrument):
+            self._write_write_wait = 0.100
+        else: # GPIB
+            self._write_write_wait = 0.050
     def init(self, full=False):
-        self._last_command_time = None
-        if full and isinstance(self.visa, visa.SerialInstrument):
-            self.visa.parity = True
-            self.visa.data_bits = 7
-            self.visa.term_chars = '\r\n'
-            self._last_command_time = time.time()
+        if full:
+            if isinstance(self.visa, visa.SerialInstrument):
+                self.visa.parity = True
+                self.visa.data_bits = 7
+                self.visa.term_chars = '\r\n'
         super(lakeshore_370, self).init(full=full)
-    @locked_calling
-    def write(self, val):
-        last = self._last_command_time
-        if last != None:
-            # we need to wait at least 50ms after last write or read
-            delta = (last+.050) - time.time()
-            if delta > 0:
-                sleep(delta)
-        super(lakeshore_370, self).write(val)
-        if last != None:
-            self._last_command_time = time.time()
-    @locked_calling
-    def read(self):
-        ret = super(lakeshore_370, self).read()
-        if self._last_command_time != None:
-            self._last_command_time = time.time()
-        return ret
     def _current_config(self, dev_obj=None, options={}):
         if dev_obj == self.fetch:
             old_ch = self.current_ch.getcache()
@@ -1041,6 +1029,7 @@ class lakeshore_370(visaInstrument):
                            ChoiceIndex({1:'current', 2:'power'}), csetup_htrrng, (float, (1, 1e5))])
         self.control_setup = scpiDevice('CSET', choices=csetup)
         self.control_setup_heater_limit = Dict_SubDevice(self.control_setup, 'heater_limit', force_default=False)
+        self.control_ramp = scpiDevice('RAMP', choices=ChoiceMultiple(['en', 'rate'], [bool, (float,(0.001, 10))]), doc="Activates the sweep mode. rate is in K/min.", setget=True)
         self.sp = scpiDevice('SETP', str_type=float)
         self.still_raw = scpiDevice('STILL', str_type=float)
         self._devwrap('enabled_list')
