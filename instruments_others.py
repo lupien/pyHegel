@@ -901,7 +901,26 @@ class lakeshore_370(visaInstrument):
                 self.visa.parity = True
                 self.visa.data_bits = 7
                 self.visa.term_chars = '\r\n'
+                self.write('*ESE 255') # needed for get_error
         super(lakeshore_370, self).init(full=full)
+    def _get_esr(self):
+        return int(self.ask('*esr?'))
+    def get_error(self):
+        esr = self._get_esr()
+        ret = ''
+        if esr&0x80:
+            ret += 'Power on. '
+        if esr&0x20:
+            ret += 'Command Error. '
+        if esr&0x10:
+            ret += 'Execution Error. '
+        if esr&0x04:
+            ret += 'Query Error (output queue full). '
+        if esr&0x01:
+            ret += 'OPC received.'
+        if ret == '':
+            ret = 'No Error.'
+        return ret
     def _current_config(self, dev_obj=None, options={}):
         if dev_obj == self.fetch:
             old_ch = self.current_ch.getcache()
@@ -922,7 +941,7 @@ class lakeshore_370(visaInstrument):
         else:
             base = self._conf_helper('current_ch', 'input_set', 'input_filter', 'input_meas')
         base += self._conf_helper('sp', 'pid', 'still_raw', 'heater_range',
-                                  'control_mode', 'control_setup', options)
+                                  'control_mode', 'control_setup', 'control_ramp', options)
         return base
     def _enabled_list_getdev(self):
         old_ch = self.current_ch.getcache()
@@ -1030,6 +1049,7 @@ class lakeshore_370(visaInstrument):
         self.control_setup = scpiDevice('CSET', choices=csetup)
         self.control_setup_heater_limit = Dict_SubDevice(self.control_setup, 'heater_limit', force_default=False)
         self.control_ramp = scpiDevice('RAMP', choices=ChoiceMultiple(['en', 'rate'], [bool, (float,(0.001, 10))]), doc="Activates the sweep mode. rate is in K/min.", setget=True)
+        self.ramp_sweeping = devChOption(getstr='RAMPST?', str_type=bool)
         self.sp = scpiDevice('SETP', str_type=float)
         self.still_raw = scpiDevice('STILL', str_type=float)
         self._devwrap('enabled_list')
