@@ -1870,6 +1870,78 @@ def make_choice_list(list_values, start_exponent, end_exponent):
     powers = np.logspace(start_exponent, end_exponent, end_exponent-start_exponent+1)
     return (powers[:,None] * np.array(list_values)).flatten()
 
+class dict_improved(OrderedDict):
+    """
+    This adds to the basic dict/OrderedDict syntax:
+        -getting/setting/deleting with numerical indexing (obj[0])
+        -getting a regular dict/OrderedDict copy (as_dict)
+        -getting/setting/deleting as attributes (obj.key)
+        -adding new elements to the dict as attribute (obj.newkey=val)
+         (could already do obj['newkey']=val)
+    """
+    def __init__(self, *arg, **kwarg):
+        #self._known_keys = []
+        super(dict_improved, self).__setattr__('_known_keys', [])
+        super(dict_improved, self).__setattr__('_dict_improved__init_complete', False)
+        # Now check the entries
+        tmp = OrderedDict(*arg, **kwarg)
+        for key in tmp.keys():
+            if not isinstance(key, basestring):
+                raise TypeError, "You can only use strings as keys."
+        # input is ok so create the object
+        super(dict_improved, self).__init__(*arg, **kwarg)
+        self._dict_improved__init_complete = True
+    def __getattribute__(self, name):
+        known = super(dict_improved, self).__getattribute__("_known_keys")
+        if name in known:
+            return self[name]
+        else:
+            return super(dict_improved, self).__getattribute__(name)
+    def __setattr__(self, name, value):
+        if name in self._known_keys or (self._dict_improved__init_complete and not hasattr(self, name)):
+            self[name] = value
+        else:
+            super(dict_improved, self).__setattr__(name, value)
+    def __delattr__(self, name):
+        if name in self._known_keys:
+            del self[name]
+        else:
+            super(dict_improved, self).__delattr__(name)
+    def __getitem__(self, key):
+        if not isinstance(key, basestring):
+            # assume we are using an integer index
+            key = self.keys()[key]
+        return super(dict_improved, self).__getitem__(key)
+    def __delitem__(self, key):
+        if not isinstance(key, basestring):
+            # assume we are using an integer index
+            key = self.keys()[key]
+        super(dict_improved, self).__delitem__(key)
+        if key in self._known_keys:
+            self._known_keys.remove(key)
+            delattr(self, key)
+    def __setitem__(self, key, value):
+        if not isinstance(key, basestring):
+            # assume we are using an integer index
+            key = self.keys()[key]
+        super(dict_improved, self).__setitem__(key, value)
+        # Now add an entry for the key, but rename a previously existing attribute
+        if key not in self._known_keys:
+            if hasattr(self, key):
+                setattr(self, key+'_orig', getattr(self, key))
+            super(dict_improved, self).__setattr__(key, 'Should never see this')
+            self._known_keys.append(key)
+    def as_dict(self, order=True):
+        """
+        Returns a copy in a regular dict (order=False)
+        or an ordered dict copy (order=True).
+        """
+        if order:
+            return OrderedDict(self)
+        else:
+            return dict(self)
+
+
 class ChoiceMultiple(ChoiceBase):
     def __init__(self, field_names, fmts=int, sep=','):
         """
