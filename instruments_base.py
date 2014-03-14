@@ -1193,8 +1193,18 @@ def _tostr_helper(val, t):
 
 def _fromstr_helper(valstr, t):
     # This function converts from the query result to a value
-    if t == bool: # it is '1' or '2'
+    if t == bool: # it is '0' or '1'
         return bool(int(valstr))
+    #if t == bool: # it is '0' or '1' or ON or OFF
+        #try:
+        #    return bool(int(valstr))
+        #except ValueError:
+        #    if valstr.upper() == 'ON':
+        #        return True
+        #    elif valstr.upper() == 'OFF':
+        #        return False
+        #    else:
+        #        raise
     if t == float or t == int:
         return t(valstr)
     if t == None or (type(t) == type and issubclass(t, basestring)):
@@ -1702,10 +1712,40 @@ class ChoiceStrings(ChoiceBase):
             values.append(self.values[i])
         return ChoiceStrings(*values, quotes=self.quotes)
 
+class ChoiceSimpleMap(ChoiceBase):
+    """
+    Given a dictionnary where keys are what is used on the instrument, and
+    the values are what are used on the python side.
+    filter, when given, is a function applied to the input from the instrument.
+    It can be used to normalize the input entries
+    """
+    def __init__(self, input_dict, filter=None):
+        self.dict = input_dict
+        self.keys = input_dict.keys()
+        self.values = input_dict.values()
+        self.filter = filter
+        if filter != None:
+            for x in self.keys:
+                if filter(x) != x:
+                    raise ValueError, "The input dict has at least one key where filter(key)!=key."
+    def __contains__(self, x):
+        return x in self.values
+    def __call__(self, input_key):
+        if self.filter != None:
+            input_key = self.filter(input_key)
+        return self.dict[input_key]
+    def tostr(self, input_choice):
+        return self.keys[self.values.index(input_choice)]
+    def __repr__(self):
+        return repr(self.values)
+
+Choice_bool_OnOff = ChoiceSimpleMap(dict(ON=True, OFF=False), filter=string.upper)
+
 class ChoiceIndex(ChoiceBase):
     """
     Initialize the class with a list of values or a dictionnary
     The instrument uses the index of a list or the key of the dictionnary
+    which needs to be integers.
     option normalize when true rounds up the float values for better
     comparison. Use it with a list created from a calculation.
     """
