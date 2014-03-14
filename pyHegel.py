@@ -21,9 +21,7 @@ from matplotlib.pylab import *
 
 #import numpy as np # this is loaded by pylab
 import os
-import glob
 import time
-import csv
 import re
 import string
 import sys
@@ -776,129 +774,20 @@ sweep = _Sweep()
 
 wait = traces.wait
 
-
-def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0):
-    f=open(filename, 'r')
-    reader = csv.reader(f)
-    X=[]
-    for line in reader:
-        try:
-            conv = map(dtype, line)
-        except ValueError:
-            # skip this line
-            continue
-        if conv != []:
-            X.append(conv)
-    X = np.array(X)
-    # following loadtxt
-    if not ndmin in [0, 1, 2]:
-        raise ValueError('Illegal value of ndmin keyword: %s' % ndmin)
-    # Tweak the size and shape of the arrays - remove extraneous dimensions
-    if X.ndim > ndmin:
-        X = np.squeeze(X)
-    # and ensure we have the minimum number of dimensions asked for
-    # - has to be in this order for the odd case ndmin=1, X.squeeze().ndim=0
-    if X.ndim < ndmin:
-        if ndmin == 1:
-            X = np.atleast_1d(X)
-        elif ndmin == 2:
-            X = np.atleast_2d(X).T
-    if unpack:
-        return X.T
-    return X
-
-#TODO add handling of title column and extracting headers
 _readfile_lastnames = []
-def readfile(filename, nojoin=False, getnames=False, csv='auto', dtype=None):
-    """
-    This function will return a numpy array containing all the data in the
-    file.
-    By default the path is joined with sweep.path (unless absolute).
-     nojoin set to True prevents this
-    filename can contain a glob (*) parameter to combine many files.
-    or be a list of files or glob. (the glob.glob function is used internally)
-    The result of a glob is sorted.
-    When reading multiple files, they need to have the same shape.
-       glob examples:
-         base_other_*.txt   (* matches any string, including empty one )
-         base_other_??.txt  (? matches a single character )
-         base_other[abc]_.txt  ([abc] matches a single character among abc
-                                [a-zA-F] matches a single character in ranges
-                                   a-z and A-F
-                                [!...] does not match any of the characters (or ranges)
-                                   in ... )
-        *, ? and [ can be escaped with a \\
-
-    For a single file, the returned array has shape (n_columns, n_rows)
-    so selecting a column in a data file is the first index dimension.
-    For multiple files, the shape is (n_columns, n_files, n_rows)
-     or (nfiles, n_rows) if the files contain only a single column
-
-    The csv option can be True, False or 'auto'. When in auto, the file extension
-    is used to detect wheter to use csv or not. When csv is used
-    the column separator is ',' and all lines not containing only numerical
-    are automatically skipped.
-
-    When dtype is given a valid type (like uint16), it means all the files will
-    be read in binary mode as containing that dtype.
-
-    If the file extension ends with .npy, it is read with np.load as a numpy
-    file.
-
-    The list of files is saved in the global variable _readfile_lastnames.
-    When the parameter getnames=True, the return value is a tuple
-    (array, filenames_list)
-    """
+def readfile(filename, nojoin=False, prepend=None, getnames=False, csv='auto', dtype=None):
     global _readfile_lastnames
-    if not isinstance(filename, (list, tuple, np.ndarray)):
-        filename = [filename]
-    filelist = []
-    for fglob in filename:
-        if not nojoin:
-            fglob = os.path.join(sweep.path.get(), fglob)
-        fl = glob.glob(fglob)
-        fl.sort()
-        filelist.extend(fl)
-    _readfile_lastnames = filelist
-    if len(filelist) == 0:
-        print 'No file found'
-        return
-    elif len(filelist) > 1:
-        print 'Found %i files'%len(filelist)
-        multi = True
-    else:
-        multi = False
-    ret = []
-    for fn in filelist:
-        if dtype != None:
-            ret.append(np.fromfile(fn, dtype=dtype))
-            continue
-        if fn.lower().endswith('.npy'):
-            ret.append(np.load(fn))
-            continue
-        if csv=='auto':
-            if fn.lower().endswith('.csv'):
-                docsv = True
-            else:
-                docsv = False
-        else:
-            docsv = csv
-        if docsv:
-            ret.append(loadtxt_csv(fn).T)
-        else:
-            ret.append(np.loadtxt(fn).T)
-    if not multi:
-        return ret[0]
-    # convert into a nice numpy array. The data is copied and made contiguous
-    ret = np.array(ret)
-    if ret.ndim == 3:
-        # we make a copy to make it a nice contiguous array
-        ret = ret.swapaxes(0,1).copy()
-    if getnames:
-        return (ret, filelist)
-    else:
-        return ret
+    if not nojoin and prepend == None:
+        prepend = sweep.path.get()
+    ret = util.readfile(filename, prepend=prepend, getnames=getnames, csv=csv, dtype=dtype)
+    _readfile_lastnames = util._readfile_lastnames
+    return ret
+readfile.__doc__ = """
+    By default the path is joined with sweep.path (unless absolute).
+    It uses prepend internally.
+    nojoin set to True prevents this. Setting prepend also overrides this.
 
+    """+util.readfile.__doc__
 
 
 
