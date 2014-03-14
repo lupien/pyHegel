@@ -243,7 +243,8 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     else:
         extra_conf = extra_conf[:] # make a copy so we can change it locally
     if setdev != None:
-        hdrs.append(setdev.getfullname())
+        dev, kwarg = _get_dev_kw(setdev)
+        hdrs.append(dev.getfullname())
         count += 1
         extra_conf.append(setdev)
     reuse_dict = {}
@@ -286,9 +287,10 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         if isinstance(x, basestring):
             f = dict(base_hdr_name='comment', base_conf=x)
         else:
-            x.force_get()
-            hdr = x.getfullname()
-            f = x.getformat()
+            dev, kwarg = _get_dev_kw(x)
+            dev.force_get()
+            hdr = dev.getfullname()
+            f = dev.getformat(**kwarg)
             f['base_conf'] = instruments_base._get_conf_header(f)
             f['base_hdr_name'] = hdr
         formats.append(f)
@@ -564,7 +566,8 @@ class _Sweep(instruments.BaseInstrument):
                   async=False, reset=False, logspace=False, updown=False):
         """
             Usage:
-                dev is the device to sweep.
+                dev is the device to sweep. For more advanced uses (devices with options),
+                      see sweep.out documentation.
                 To define sweep either
                   set start, stop and npts (then uses linspace internally
                                                        or logspace)
@@ -622,9 +625,11 @@ class _Sweep(instruments.BaseInstrument):
             stop = max(span)
             npts = len(span)
             dolinspace = False
+        dev_orig = dev
+        dev, dev_opt = _get_dev_kw(dev)
         try:
-            dev.check(start)
-            dev.check(stop)
+            dev.check(start, **dev_opt)
+            dev.check(stop, **dev_opt)
         except ValueError:
             print 'Wrong start or stop values (outside of valid range). Aborting!'
             return
@@ -675,9 +680,9 @@ class _Sweep(instruments.BaseInstrument):
             extra_conf.append(sweep.out)
         if updown==True and updown_same:
             npts = 2*npts
-        hdrs, graphsel, formats = _getheaders(dev, devs, fullpath, npts, extra_conf=extra_conf)
+        hdrs, graphsel, formats = _getheaders(dev_orig, devs, fullpath, npts, extra_conf=extra_conf)
         if fullpathrev != None:
-            hdrsrev, graphselrev, formatsrev = _getheaders(dev, devs, fullpathrev, npts, extra_conf=extra_conf)
+            hdrsrev, graphselrev, formatsrev = _getheaders(dev_orig, devs, fullpathrev, npts, extra_conf=extra_conf)
         else:
             formatsrev = formats
         # hdrs and graphsel are the same as the rev versions
@@ -727,7 +732,7 @@ class _Sweep(instruments.BaseInstrument):
                 for i,v in enumerate(cycle_span):
                     i += ioffset
                     tme = clock.get()
-                    dev.set(v) # TODO replace with move
+                    dev.set(v, **dev_opt) # TODO replace with move
                     iv = dev.getcache() # in case the instrument changed the value
                     self.execbefore(i, v, cfwd)
                     wait(self.beforewait.get())
@@ -762,7 +767,7 @@ class _Sweep(instruments.BaseInstrument):
             if graph and t.abort_enabled:
                 pass
             else:
-                dev.set(span[0]) # TODO replace with move
+                dev.set(span[0], **dev_opt) # TODO replace with move
         if graph and close_after:
             t = t.destroy()
             del t
