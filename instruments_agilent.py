@@ -7,7 +7,7 @@ import time
 
 from instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
-                            ChoiceMultiple, _repr_or_string,\
+                            ChoiceMultiple, Choice_bool_OnOff, _repr_or_string,\
                             quoted_string, quoted_list, quoted_dict,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDevSwitch,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
@@ -19,10 +19,94 @@ from instruments_base import visaInstrument, visaInstrumentAsync,\
 #######################################################
 
 class agilent_rf_33522A(visaInstrument):
+    """
+    New code should use the unumbered devices (numbered device are there for compatibility.)
+    The devices
+    """
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('ampl1', 'freq1', 'offset1', 'phase1', 'mode1', 'out_en1', 'pulse_width1', 'noise_bw1',
-                                 'ampl2', 'freq2', 'offset2', 'phase2', 'mode2', 'out_en2', 'pulse_width2', 'noise_bw2', options)
+        opts = ['opt=%s'%self.available_options]
+        opts += self._conf_helper('ref_oscillator_current_state', 'coupled_ampl_en', 'coupled_freq_en')
+        if self.coupled_freq_en.getcache():
+            opts += self._conf_helper('coupled_freq_mode')
+            if self.coupled_freq_mode.getcache().upper().startswith('OFF'):
+                opts += self._conf_helper('coupled_freq_offset')
+            else:
+                opts += self._conf_helper('coupled_freq_ratio')
+        curr_ch = self.current_ch.getcache()
+        ch = options.get('ch', None)
+        if ch != None:
+            self.current_ch.set(ch)
+        opts += self._conf_helper('current_ch', 'out_en', 'ampl', 'ampl_autorange_en', 'ampl_unit', 'offset',
+                                  'volt_limit_low', 'volt_limit_high', 'volt_limit_en', 'out_load_ohm', 'out_polarity',
+                                  'freq', 'freq_mode', 'phase', 'mode', 'noise_bw', 'pulse_width',
+                                  'mod_am_en', 'mod_am_depth_pct', 'mod_am_dssc_en', 'mod_am_src', 'mod_am_int_func', 'mod_am_int_freq',
+                                  'mod_fm_en', 'mod_phase_en')
+        self.current_ch.set(curr_ch)
+        return opts + self._conf_helper(options)
     def _create_devs(self):
+        opt = self.ask('*OPT?')
+        opt = opt.split(',')
+        if opt[0] == '010':
+            tb = 'oven'
+        else:
+            tb = 'standard'
+        if opt[1] == '002':
+            extmem = True
+        else:
+            extmem = False
+        if opt[2] == '400':
+            gpib_avail = True
+        else:
+            gpib_avail = False
+        self.available_options = {'time_base': tb}
+        self.available_options['extended_mem'] = extmem
+        self.available_options['gpib_installed'] = gpib_avail
+        self.ref_oscillator = scpiDevice('ROSCillator:SOURce', choices=ChoiceStrings('INTernal', 'EXTernal'))
+        # This is a weird one. It does not use 0 or 1 like most others. It only accepts ON or OFF
+        self.ref_oscillator_auto_en = scpiDevice('ROSCillator:SOURce:AUTO', choices=Choice_bool_OnOff)
+        self.ref_oscillator_current_state = scpiDevice(getstr='ROSCillator:SOURce:CURRent?', choices=ChoiceStrings('INTernal', 'EXTernal'))
+        # new interface
+        self.current_ch = MemoryDevice(1, min=1, max=2)
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_ch)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.coupled_ampl_en = devChOption('SOURce{ch}:VOLTage:COUPle', str_type=bool)
+        self.ampl = devChOption('SOURce{ch}:VOLTage', str_type=float, setget=True, doc="""Minimum is 1 mVpp. Maximum = 10 Vpp. See ampl_unit device for unit type (Vrms, Vpp or dBm)""")
+        self.ampl_autorange_en = devChOption('SOURce{ch}:VOLTage:RANGe:AUTO', str_type=bool, doc="When False, disables the automatic attenuator change.")
+        self.offset = devChOption('SOURce{ch}:VOLTage:OFFSet', str_type=float, setget=True, doc="""Minimum is -5 V, Maximum = 5 V (but can be smaller because of ampl).""")
+        self.ampl_unit = devChOption('SOURce{ch}:VOLTage:UNIT', choices=ChoiceStrings('VPP', 'VRMS', 'DBM'))
+        self.volt_limit_low = devChOption('SOURce{ch}:VOLTage:LIMit:LOW', str_type=float, setget=True, doc="""Output will not go below this voltage, if limit is enabled.""")
+        self.volt_limit_high = devChOption('SOURce{ch}:VOLTage:LIMit:HIGH', str_type=float, setget=True, doc="""Output will not go above this voltage, if limit is enabled.""")
+        self.volt_limit_en = devChOption('SOURce{ch}:VOLTage:LIMit:STATe', str_type=bool)
+        self.coupled_freq_en = devChOption('SOURce{ch}:FREQuency:COUPle', str_type=bool)
+        self.coupled_freq_mode = devChOption('SOURce{ch}:FREQuency:COUPle:MODE', choices=ChoiceStrings('OFFSet', 'RATio'))
+        self.coupled_freq_offset = devChOption('SOURce{ch}:FREQuency:COUPle:OFFSet', str_type=float, setget=True)
+        self.coupled_freq_ratio = devChOption('SOURce{ch}:FREQuency:COUPle:RATio', str_type=float, setget=True)
+        self.freq = devChOption('SOURce{ch}:FREQuency', str_type=float, setget=True, min=1e-6, max=30e6)
+        # TODO handle sweep and list
+        self.freq_mode = devChOption('SOURce{ch}:FREQuency:MODE', choices=ChoiceStrings('CW','LIST','SWEep','FIXed'), doc='CW and FIXED are the same. SWEep and List are not handled currently.')
+        self.phase = devChOption('SOURce{ch}:PHASe', str_type=float, setget=True, min=-360, max=360, doc='Angle in degrees')
+        self.mode = devChOption('SOURce{ch}:FUNCtion', choices=ChoiceStrings('SINusoid', 'SQUare', 'RAMP', 'PULSe', 'PRBS', 'NOISe', 'ARB', 'DC'))
+        self.noise_bw = devChOption('SOURce{ch}:FUNCtion:NOISe:BANDwidth', str_type=float, setget=True, min=0.001, max=30e6)
+        self.pulse_width = devChOption('SOURce{ch}:FUNCtion:PULSe:WIDTh', str_type=float, min=16e-9, max=1e6) # s
+        self.out_en = devChOption('OUTPut{ch}', str_type=bool)
+        self.out_load_ohm = devChOption('OUTPut{ch}:LOAD', str_type=float, setget=True, min=1, doc="max is 10 kOhm. For High impedance (INFinity) use 9.9e37")
+        self.out_polarity = devChOption('OUTPut{ch}:POLarity', choices=ChoiceStrings('NORMal', 'INVerted'))
+        # Modulations parameters  TODO  missing modulations are BPSK FSKey PWM
+        self.mod_am_en = devChOption('SOURce{ch}:AM:STATe', str_type=bool)
+        self.mod_am_depth_pct = devChOption('SOURce{ch}:AM:DEPTh', str_type=float, min=0, max=120, setget=True)
+        self.mod_am_dssc_en = devChOption('SOURce{ch}:AM:DSSC', str_type=bool, doc="DSSC = Double Sideband Suppressed Carrier")
+        self.mod_am_src = devChOption('SOURce{ch}:AM:SOURce', choices=ChoiceStrings('INTernal', 'EXTernal', 'CH1', 'CH2'), doc='External input is +- 5V')
+        self.mod_am_int_func = devChOption('SOURce{ch}:AM:INTernal:FUNCtion', choices=ChoiceStrings('SINusoid', 'SQUare', 'RAMP', 'NRAMp', 'TRIangle', 'NOISe', 'PRBS', 'ARB'))
+        self.mod_am_int_freq = devChOption('SOURce{ch}:AM:INTernal:FREQuency', str_type=float, min=1e-6, setget=True)
+
+        self.mod_fm_en = devChOption('SOURce{ch}:FM:STATe', str_type=bool)
+        self.mod_phase_en = devChOption('SOURce{ch}:PM:STATe', str_type=bool)
+
+        # Older interface
         # voltage unit depends on front panel/remote selection (sourc1:voltage:unit) vpp, vrms, dbm
         self.ampl1 = scpiDevice('SOUR1:VOLT', str_type=float, min=0.001, max=10)
         self.freq1 = scpiDevice('SOUR1:FREQ', str_type=float, min=1e-6, max=30e6)
@@ -31,7 +115,6 @@ class agilent_rf_33522A(visaInstrument):
         self.phase1 = scpiDevice('SOURce1:PHASe', str_type=float, min=-360, max=360) # in deg unless changed by unit:angle
         self.mode1 = scpiDevice('SOUR1:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
         self.out_en1 = scpiDevice('OUTPut1', str_type=bool) #OFF,0 or ON,1
-        self.noise_bw1 = scpiDevice('SOURce1:FUNCtion:NOISe:BANDwidth', str_type=float, min=0.001, max=30e6)
         self.ampl2 = scpiDevice('SOUR2:VOLT', str_type=float, min=0.001, max=10)
         self.freq2 = scpiDevice('SOUR2:FREQ', str_type=float, min=1e-6, max=30e6)
         self.pulse_width2 = scpiDevice('SOURce2:FUNCtion:PULSe:WIDTh', str_type=float, min=16e-9, max=1e6) # s
@@ -39,12 +122,16 @@ class agilent_rf_33522A(visaInstrument):
         self.offset2 = scpiDevice('SOUR2:VOLT:OFFS', str_type=float, min=-5, max=5)
         self.mode2 = scpiDevice('SOUR2:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
         self.out_en2 = scpiDevice('OUTPut2', str_type=bool) #OFF,0 or ON,1
-        self.noise_bw2 = scpiDevice('SOURce2:FUNCtion:NOISe:BANDwidth', str_type=float, min=0.001, max=30e6)
-        self.alias = self.freq1
+        self.alias = self.freq
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
     def phase_sync(self):
         self.write('PHASe:SYNChronize')
+    def phase_ref(self, ch=None):
+        if ch != None:
+            self.current_ch.set(ch)
+        ch=self.current_ch.getcache()
+        self.write('SOURce{ch}:PHASe:REFerence'.format(ch=ch))
 
 
 #######################################################
