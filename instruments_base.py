@@ -1157,6 +1157,11 @@ class BaseInstrument(object):
 
 class MemoryDevice(BaseDevice):
     def __init__(self, initval=None, **kwarg):
+        """
+        Provides _tostr and _fromstr using the choices functions if
+        choices are given. Otherwise it uses the type of initval.
+        autoinit and setget are disabled internally (they are useless for a Memory device.)
+        """
         kwarg['autoinit'] = False
         kwarg['setget'] = False
         BaseDevice.__init__(self, **kwarg)
@@ -1218,17 +1223,21 @@ def _fromstr_helper(valstr, t):
 
 class scpiDevice(BaseDevice):
     _autoset_val_str = ' {val}'
-    def __init__(self,setstr=None, getstr=None, raw=False, autoinit=True, autoget=True, str_type=None,
-                 choices=None, doc='',
+    def __init__(self,setstr=None, getstr=None, raw=False, autoinit=True, autoget=True, get_cached_init=None,
+                 str_type=None, choices=None, doc='',
                  options={}, options_lim={}, options_apply=[], options_conv={},
                  ask_write_opt={}, **kwarg):
         """
            str_type can be float, int, None
            If choices is a subclass of ChoiceBase, then str_Type will be
            set to that object if unset.
-           If only getstr is not given and autoget is true and
+           If only getstr is not given and autoget is true
            a getstr is created by appending '?' to setstr.
            If autoget is false and there is no getstr, autoinit is set to False.
+           When autoget is false, if get_cached_init is not None, then
+           the cache is used instead of get and is initialized to the value of
+           get_cached_init. You probably should initialize it during the instrument
+           init.
            raw when True will use read_raw instead of the default raw (in get)
 
            options is a list of optional parameters for get and set.
@@ -1277,8 +1286,13 @@ class scpiDevice(BaseDevice):
                     autoget = False
             if not val_present:
                 self._setdev_p = setstr + self._autoset_val_str
-        if getstr == None and autoget:
-            getstr = setstr+'?'
+        self._getdev_cache = False
+        if getstr == None:
+            if autoget:
+                getstr = setstr+'?'
+            elif get_cached_init != None:
+                self._cache = get_cached_init
+                self._getdev_cache = True
         self._getdev_p = getstr
         self._options = options
         self._options_lim = options_lim
@@ -1418,6 +1432,11 @@ class scpiDevice(BaseDevice):
         self.instr.write(command, **self._ask_write_opt)
     def _getdev(self, **kwarg):
         if self._getdev_p == None:
+            if self._getdev_cache:
+                if kwarg == {}:
+                    return self.getcache()
+                else:
+                    raise SyntaxError, self.perror('This device does not handle _getdev with optional arguments')
             raise NotImplementedError, self.perror('This device does not handle _getdev')
         try:
             options = self._combine_options(**kwarg)
@@ -1624,6 +1643,16 @@ class quoted_dict(quoted_list):
                 l.extend([k ,v])
         return super(quoted_dict,self).tostr(l)
 
+# NOTE: a choice function tostr and __call__ (fromstr)
+#       is used when not specifying the str_type to scpi_device
+#       and when it is used as an option device for scpi_device (to obtain
+#       the string replacement for the command/question)
+#       Therefore even if you override the functions (by defining str_type)
+#       they could still be used if they are within options.
+#       Therefore it is recommended to make them work all the time
+#       (this might require passing in a type during __init__)
+#       See ChoiceDevDep for example
+
 class ChoiceBase(object):
     def __call__(self, input_str):
         raise NotImplementedError, 'ChoiceBase subclass should overwrite __call__'
@@ -1745,7 +1774,8 @@ class ChoiceIndex(ChoiceBase):
     """
     Initialize the class with a list of values or a dictionnary
     The instrument uses the index of a list or the key of the dictionnary
-    which needs to be integers.
+    which needs to be integers. If you want a dictionnary with keys that
+    are strings see ChoiceSimpleMap.
     option normalize when true rounds up the float values for better
     comparison. Use it with a list created from a calculation.
     """
@@ -1771,7 +1801,8 @@ class ChoiceIndex(ChoiceBase):
         """
            This transforms 9.9999999999999991e-06 into 1e-05
            so can compare the result of a calcualtion with the theoretical one
-           v can only by a single value
+           v can only be a single value
+           Anything with +-1e-25 becomes 0.
         """
         if abs(v) < 1e-25:
             return 0.
@@ -1799,16 +1830,20 @@ class ChoiceIndex(ChoiceBase):
         return repr(self.values)
 
 class ChoiceDevDep(ChoiceBase):
-    """ This class is a wrapper around a dictionnary of lists
-        or other choices.
-        The correct list selected from the dictionnary keys, according
-        to the current value of dev.
+    """ This class selects options from a dictionnary of lists
+        or instances of ChoiceBase, based on the value of dev (match to the
+        dictionnary keys).
         The keys can be values or and object that handles 'in' testing.
         A default choice can be given with a key of None
+        sub_type is used to provide the proper from/to str converters.
+        Works the same as str_type from scpi_device.
+        if sub_type==None, it calls the to/from str of the selected value of
+        the dictionnary (which should be an instance of ChoiceBase).
     """
-    def __init__(self, dev, choices):
+    def __init__(self, dev, choices, sub_type=None):
         self.choices = choices
         self.dev = dev
+        self.sub_type = sub_type
     def _get_choice(self):
         val = self.dev.getcache()
         for k, v in self.choices.iteritems():
@@ -1817,12 +1852,16 @@ class ChoiceDevDep(ChoiceBase):
             elif val == k:
                 return v
         return self.choices.get(None, [])
-    # call and tostr will only be used if str_typ is set to this class.
-    #  This can be done if all the choices are instance of ChoiceBase
     def __call__(self, input_str):
-        return self._get_choice()(input_str)
+        if self.sub_type:
+            return _fromstr_helper(input_str, self.sub_type)
+        else:
+            return self._get_choice()(input_str)
     def tostr(self, input_choice):
-        return self._get_choice().tostr(input_choice)
+        if self.sub_type:
+            return _tostr_helper(input_choice, self.sub_type)
+        else:
+            return self._get_choice().tostr(input_choice)
     def __contains__(self, x):
         return x in self._get_choice()
     def __repr__(self):
@@ -1836,27 +1875,26 @@ class ChoiceDev(ChoiceBase):
 
      Indexing with one of the allowed values returns the value for list
      or the key/value pair for dict.
-     For a list also using a integer is allowed to pick the nth value.
+     For a list also using an integer is allowed, and it picks the nth value.
+
+     sub_type is used to provide the proper from/to str converters.
+     Works the same as str_type from scpi_device.
+     sub_type==None (default) is the same as sub_type=str (i.e. no conversion).
+     The tostr converter uses the key of the dict.
     """
     def __init__(self, dev, sub_type=None):
         self.dev = dev
         self.sub_type = sub_type
     def _get_choices(self):
         return self.dev.getcache()
-    # call and tostr will only be used if str_typ is set to this class.
-    #  This can be done if all the choices are instance of ChoiceBase
     def __call__(self, input_str):
-        if self.sub_type != None:
-            input_str = self.sub_type(input_str)
-        return input_str
+        return _fromstr_helper(input_str, self.sub_type)
     def tostr(self, input_choice):
         choices = self._get_choices()
         ch = self[input_choice]
         if isinstance(choices, dict):
             ch = ch[0]
-        if self.sub_type != None:
-            ch = self.sub_type.tostr(ch)
-        return ch
+        return _tostr_helper(ch, self.sub_type)
     def __contains__(self, x):
         choices = self._get_choices()
         if isinstance(choices, dict):
@@ -1882,8 +1920,8 @@ class ChoiceDev(ChoiceBase):
 class ChoiceDevSwitch(ChoiceDev):
     """
     Same as ChoiceDev but the value for set/check can also
-    be something other, in which case another function converts it
-    the the base format.
+    be something other (a type different than in_base_type),
+    in which case the other_conv function should convert it to the in_base_type.
     """
     def __init__(self, dev, other_conv, sub_type=None, in_base_type=basestring):
         self.other_conv = other_conv
@@ -1981,6 +2019,8 @@ class dict_improved(OrderedDict):
         else:
             return dict(self)
 
+class KeyError_Choices (KeyError):
+    pass
 
 class ChoiceMultiple(ChoiceBase):
     def __init__(self, field_names, fmts=int, sep=','):
@@ -1996,6 +2036,8 @@ class ChoiceMultiple(ChoiceBase):
         or a list/object of choices.
         Not that if you use a ChoiceBase object, you only need to specify
         it as the type. It is automatically used as a choice also.
+        If one element of a list can affect the choices for a subsequent one,
+        see ChoiceMultipleDev
         """
         self.field_names = field_names
         if not isinstance(fmts, (list, np.ndarray)):
@@ -2024,7 +2066,7 @@ class ChoiceMultiple(ChoiceBase):
                 fmt.set_current_vals(dict(zip(names, v_conv)))
             v_conv.append(_fromstr_helper(val, fmt))
             names.append(k)
-        return dict(zip(self.field_names, v_conv))
+        return dict_improved(zip(self.field_names, v_conv))
     def tostr(self, fromdict=None, **kwarg):
         # we assume check (__contains__) was called so we don't need to
         # do fmt.set_current_vals again
@@ -2048,6 +2090,8 @@ class ChoiceMultiple(ChoiceBase):
                 _general_check(x[k], lims=lims)
             except ValueError as e:
                 raise ValueError('for key %s: '%k + e.args[0], e.args[1])
+            except KeyError as e:
+                raise KeyError_Choices('key %s not found'%k)
         return True
     def __repr__(self):
         r = ''
@@ -2060,21 +2104,29 @@ class ChoiceMultiple(ChoiceBase):
         return r
 
 class ChoiceMultipleDep(ChoiceBase):
-    """ This class is a wrapper around a dictionnary of lists
-        or other choices (similar to ChoiceDevDep).
-        The correct list selected from the dictionnary keys, according
-        to the value from the multiple dict key.
-        The keys can be values or and object that handles 'in' testing.
+    """ This class selects options from a dictionnary of lists
+        or instances of ChoiceBase, based on the value of key (match to the
+        dictionnary keys). It is similar to ChoiceDevDep but selects on
+        a ChoiceMultiple element instead of a device.
+        It can only be used as a type for a ChoiceMultiple element.
+        The dictionnary keys can be values or and object that handles 'in' testing.
         A default choice can be given with a key of None
+
+        sub_type is used to provide the proper from/to str converters.
+        Works the same as str_type from scpi_device.
+        if sub_type==None, it calls the to/from str of the selected value of
+        the dictionnary (which should be an instance of ChoiceBase).
+
         Note that the dependent option currently requires the key to come before.
         i.e. if the base is {'a':1, 'B':2} then 'B' can depend on 'a' but not
         the reverse (the problem is with ChoiceMultiple __contains__, __call__
-        and tostr)
+        and tostr).
     """
-    def __init__(self, key, choices):
+    def __init__(self, key, choices, sub_type=None):
         self.choices = choices
         self.key = key
         self.all_vals = {key:None}
+        self.sub_type = sub_type
     def set_current_vals(self, all_vals):
         self.all_vals = all_vals
     def _get_choice(self):
@@ -2085,12 +2137,16 @@ class ChoiceMultipleDep(ChoiceBase):
             elif val == k:
                 return v
         return self.choices.get(None, [])
-    # call and tostr will only be used if str_typ is set to this class.
-    #  This can be done if all the choices are instance of ChoiceBase
     def __call__(self, input_str):
-        return self._get_choice()(input_str)
+        if self.sub_type:
+            return _fromstr_helper(input_str, self.sub_type)
+        else:
+            return self._get_choice()(input_str)
     def tostr(self, input_choice):
-        return self._get_choice().tostr(input_choice)
+        if self.sub_type:
+            return _tostr_helper(input_choice, self.sub_type)
+        else:
+            return self._get_choice().tostr(input_choice)
     def __contains__(self, x):
         return x in self._get_choice()
     def __repr__(self):
