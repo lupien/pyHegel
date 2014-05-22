@@ -1956,11 +1956,23 @@ class dict_improved(OrderedDict):
         -getting/setting/deleting as attributes (obj.key)
         -adding new elements to the dict as attribute (obj.newkey=val)
          (could already do obj['newkey']=val)
+    Note that it can be initialized like dict(a=1, b=2) but the order is not
+    conserved: dict_improved(a=1, b=2) is not exactly the same as
+    dict_improved(b=1, a=2). So to recreate a dict, use the output from repr_raw
+    not from str.
+    show_all method shows all the entry, one per line by default.
+    the option _freeze=True prevents adding/removing elements to the dict (defaults to False).
+    the option _allow_overwrite=True (the default) allows overwritting existing attributes
+      (the original attribute is saved as oldname_orig)
     """
     def __init__(self, *arg, **kwarg):
+        freeze = kwarg.pop('_freeze', False)
+        allow_overwrite = kwarg.pop('_allow_overwrite', True)
         #self._known_keys = []
         super(dict_improved, self).__setattr__('_known_keys', [])
         super(dict_improved, self).__setattr__('_dict_improved__init_complete', False)
+        super(dict_improved, self).__setattr__('_freeze', freeze)
+        super(dict_improved, self).__setattr__('_allow_overwrite', allow_overwrite)
         # Now check the entries
         tmp = OrderedDict(*arg, **kwarg)
         for key in tmp.keys():
@@ -1969,14 +1981,36 @@ class dict_improved(OrderedDict):
         # input is ok so create the object
         super(dict_improved, self).__init__(*arg, **kwarg)
         self._dict_improved__init_complete = True
+    def _set_freeze(self, val):
+        """
+        Change the freeze state. val is True or False
+        This works even when _allow_overwrite is True
+        """
+        super(dict_improved, self).__setattr__('_freeze', val)
     def __getattribute__(self, name):
         known = super(dict_improved, self).__getattribute__("_known_keys")
         if name in known:
             return self[name]
         else:
             return super(dict_improved, self).__getattribute__(name)
+    def _setattribute_helper(self, name):
+        # Check to see if use indexing (returns True) or the parent call (returns False)
+        if not self._dict_improved__init_complete:
+            # during init, we use parent call
+            return False
+        if name in self._known_keys:
+            return True
+        if hasattr(self, name):
+            # not in known but already exists
+            if self._freeze:
+                # This allows changing the value directly
+                return False
+            if self._allow_overwrite:
+                return True
+        # not known and does not exist
+        return True # should add it or raise an exception
     def __setattr__(self, name, value):
-        if name in self._known_keys or (self._dict_improved__init_complete and not hasattr(self, name)):
+        if self._setattribute_helper(name):
             self[name] = value
         else:
             super(dict_improved, self).__setattr__(name, value)
@@ -1994,30 +2028,61 @@ class dict_improved(OrderedDict):
         if not isinstance(key, basestring):
             # assume we are using an integer index
             key = self.keys()[key]
+        if self._freeze and key in self._known_keys:
+            raise RuntimeError, "Modifying keys of dictionnary not allowed for this object."
         super(dict_improved, self).__delitem__(key)
-        if key in self._known_keys:
-            self._known_keys.remove(key)
-            delattr(self, key)
+        self._known_keys.remove(key)
+        delattr(self, key)
     def __setitem__(self, key, value):
         if not isinstance(key, basestring):
             # assume we are using an integer index
             key = self.keys()[key]
-        super(dict_improved, self).__setitem__(key, value)
-        # Now add an entry for the key, but rename a previously existing attribute
+        if self._dict_improved__init_complete and self._freeze and key not in self._known_keys:
+            raise RuntimeError, "Modifying keys of dictionnary not allowed for this object."
         if key not in self._known_keys:
             if hasattr(self, key):
-                setattr(self, key+'_orig', getattr(self, key))
+                if not self._allow_overwrite:
+                    raise RuntimeError, "Replacing existing attributes not allowed for this object."
+                super(dict_improved, self).__setattr__(key+'_orig', getattr(self, key))
+            # add entry so tab completion sees it
             super(dict_improved, self).__setattr__(key, 'Should never see this')
             self._known_keys.append(key)
-    def as_dict(self, order=True):
+        super(dict_improved, self).__setitem__(key, value)
+    def clear(self):
+        if self._freeze:
+            raise RuntimeError, "Modifying keys of dictionnary not allowed for this object."
+        keys = self._known_keys
+        del self._known_keys[:]
+        for k in keys:
+            delattr(self, k)
+        super(dict_improved, self).clear()
+    def as_dict(self, order=False):
         """
         Returns a copy in a regular dict (order=False)
-        or an ordered dict copy (order=True).
+        or an ordered dict copy (order=True, same as copy method).
         """
         if order:
             return OrderedDict(self)
         else:
             return dict(self)
+    def show_all(self, multiline=True, show=True):
+        strs = ['%s=%r'%(k, v) for k,v in self.items()]
+        if multiline:
+            ret = '%s(\n  %s\n)'%(self.__class__.__name__, '\n  '.join(strs))
+        else:
+            ret = '%s(%s)'%(self.__class__.__name__, ', '.join(strs))
+        if show:
+            print ret
+        else:
+            return ret
+    def __repr__(self):
+        # could use numpy.get_printoptions()['threshold']
+        """ This is a simplified view of the data. Using it to recreate
+            the structure would necessarily keep the order.
+            Use the repr_raw method output for that."""
+        return self.show_all(multiline=False, show=False)
+    def repr_raw(self):
+        return super(dict_improved, self).__repr__()
 
 class KeyError_Choices (KeyError):
     pass
@@ -2066,32 +2131,32 @@ class ChoiceMultiple(ChoiceBase):
                 fmt.set_current_vals(dict(zip(names, v_conv)))
             v_conv.append(_fromstr_helper(val, fmt))
             names.append(k)
-        return dict_improved(zip(self.field_names, v_conv))
+        return dict_improved(zip(self.field_names, v_conv), _freeze=True)
     def tostr(self, fromdict=None, **kwarg):
         # we assume check (__contains__) was called so we don't need to
-        # do fmt.set_current_vals again
+        # do fmt.set_current_vals again or check validity if dictionnary keys
         if fromdict == None:
             fromdict = kwarg
-        fromdict = fromdict.copy() # don't change incomning argument
         ret = []
         for k, fmt in zip(self.field_names, self.fmts_type):
-            v = fromdict.pop(k, None)
-            if v != None:
-                ret.append(_tostr_helper(v, fmt))
-        if fromdict != {}:
-            raise KeyError, 'The following keys in the dictionnary are incorrect: %r'%fromdict.keys()
+            v = fromdict[k]
+            ret.append(_tostr_helper(v, fmt))
         ret = self.sep.join(ret)
         return ret
     def __contains__(self, x): # performs x in y; with y=Choice(). Used for check
+        x = x.copy() # make sure we don't change incoming dict
         for k, fmt, lims in zip(self.field_names, self.fmts_type, self.fmts_lims):
             try:
                 if isinstance(fmt, ChoiceMultipleDep):
                     fmt.set_current_vals(x)
-                _general_check(x[k], lims=lims)
+                val = x.pop(k) # generates KeyError if k not in x
+                _general_check(val, lims=lims)
             except ValueError as e:
                 raise ValueError('for key %s: '%k + e.args[0], e.args[1])
             except KeyError as e:
                 raise KeyError_Choices('key %s not found'%k)
+        if x != {}:
+            raise KeyError_Choices, 'The following keys in the dictionnary are incorrect: %r'%x.keys()
         return True
     def __repr__(self):
         r = ''
