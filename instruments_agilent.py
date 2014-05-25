@@ -9,7 +9,7 @@ from instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceMultiple, Choice_bool_OnOff, _repr_or_string,\
                             quoted_string, quoted_list, quoted_dict,\
-                            ChoiceStrings, ChoiceDevDep, ChoiceDevSwitch,\
+                            ChoiceStrings, ChoiceDevDep, ChoiceDev, ChoiceDevSwitch, ChoiceIndex,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
                             decode_uint16_bin, _decode_block_base, decode_float64_2col,\
                             decode_complex128, sleep, locked_calling
@@ -1420,7 +1420,7 @@ class agilent_PNAL(visaInstrumentAsync):
             names = ['real', 'imag']
         for t in traces:
             name, param = self.select_trace.choices[t]
-            basename = name+'='+param+'_'
+            basename = "%s=%s_"%(name, param)
             multi.extend( [basename+n for n in names])
         fmt = self.fetch._format
         multi = tuple(multi)
@@ -1586,7 +1586,7 @@ class agilent_PNAL(visaInstrumentAsync):
                 Select the trace using either the trace name (standard ones are 'CH1_S11_1')
                 which are unique, the trace param like 'S11' which might not be unique
                 (in which case the first one is used), or even the trace number
-                whiche are also unique.""")
+                which are also unique.""")
         def devCalcOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(trace=self.select_trace)
@@ -1957,6 +1957,294 @@ class agilent_ENA(agilent_PNAL):
             self.power_dbm_port4 = devChOption(':SOURce{ch}:POWer:PORT4', str_type=float)
         self.trig_source = scpiDevice(':TRIGger:SOURce',
                                       choices=ChoiceStrings('INTernal', 'EXTernal', 'MANual', 'BUS'))
+        self._devwrap('fetch', autoinit=False, trig=True)
+        self.readval = ReadvalDev(self.fetch)
+        # This needs to be last to complete creation
+        super(agilent_PNAL, self)._create_devs()
+
+#######################################################
+##    Agilent FieldFox network analyzer
+#######################################################
+
+class agilent_FieldFox(agilent_PNAL):
+    """
+    The output is turned off when the device is in hold state (set cont_trig off to go in hold state).
+    The instrument does not output sine waves (they are square waves, especially at lower frequencies were
+    it is high passed square waves.)
+    To use this instrument, the most useful device are probably:
+        fetch, readval
+    Some commands are available:
+        abort
+        reset_trig: to return to continuous internal trig (use this after readval, will restart
+                    the automatic refresh on the instrument display)
+        restart_averaging
+        phase_unwrap, phase_wrap, phase_flatten
+    Other useful devices:
+        channel_list
+        select_trace
+        freq_start, freq_stop
+        power_dbm_port1
+        marker_x, marker_y
+        cont_trigger
+        trig_source
+        snap_png
+        bias_en, bias_volt, bias_src_state
+
+    A lot of other commands require a selected trace (per channel)
+    The active one can be selected with the trace option or select_trace
+    If unspecified, the last one is used.
+    """
+    def init(self, full=False):
+        self.write(':format REAL,64')
+        self.write(':format:border NORMal')
+        self.reset_trig()
+        # skip agilent_PNAL, go directly to its parent.
+        super(agilent_PNAL, self).init(full=full)
+    def reset_trig(self):
+        #self.trig_source.set('INTernal')
+        self.cont_trigger.set(True)
+    @locked_calling
+    def _async_trig(self):
+        self.cont_trigger.set(False)
+        super(agilent_PNAL, self)._async_trig()
+    def _async_trig(self):
+        # similar to PNAL version
+        # Here we will assume that _async_trigger_helper ('INITiate;*OPC')
+        # does a single iteration of an average.
+        # We will just count the correct number of repeats to do (_async_detect)
+        reps = 1
+        if self.average_mode.get() in self.average_mode.choices[['sweep']]:
+            reps = self.average_count.get()
+            if reps>1:
+                self.restart_averaging()
+        else:
+            reps = 1
+        self._trig_reps_total = reps
+        self._trig_reps_current = 0
+        self.cont_trigger.set(False)
+        super(agilent_PNAL, self)._async_trig()
+    #def _async_detect(self, max_time=.5): # 0.5 s max by default
+    #    return super(agilent_PNAL, self)._async_detect(max_time)
+    def _current_config(self, dev_obj=None, options={}):
+        # These all refer to the current channel
+        # calib_en depends on trace
+        if options.has_key('trace'):
+            self.select_trace.set(options['trace'])
+        if options.has_key('mkr'):
+            self.current_mkr.set(options['mkr'])
+        extra = []
+        if dev_obj in [self.marker_x, self.marker_y]:
+            # Cannot get cache of marker_x while getting marker_x (end up getting an old cache)
+            if dev_obj == self.marker_x:
+                mxy = 'marker_y'
+            else:
+                mxy = 'marker_x'
+            extra = self._conf_helper('current_mkr', 'select_trace', 'marker_en', mxy,
+                              'marker_data_mem_sel', 'marker_format', 'trace_format')
+        if dev_obj in [self.readval, self.fetch]:
+            traces_opt = self._fetch_traces_helper(options.get('traces'))
+            traces = []
+            for t in traces_opt:
+                name, param = self.select_trace.choices[t]
+                traces.append("%s=%s"%(name,param))
+        else:
+            traces_opt = self._fetch_traces_helper(None) # get all traces
+            name, param = self.select_trace.choices[self.select_trace.getcache()]
+            traces = "%s=%s"%(name,param)
+        extra += ['selected_trace=%r'%traces]
+        base = self._conf_helper('installed_options', 'current_mode',
+                                 'bias_en', 'bias_volt', 'bias_src_state', 'bias_volt_meas', 'bias_curr_meas',
+                                 'power_mode_port1', 'power_dbm_port1',
+                                 'calib_en', 'freq_start', 'freq_stop', 'ext_ref',
+                                 'npoints', 'sweep_time',
+                                 'bandwidth', 'cont_trigger', 'trig_source',
+                                 'average_count', 'average_mode', options)
+        return extra+base
+    def restart_averaging(self):
+        command = 'SENSe:AVERage:CLEar'
+        self.write(command)
+    def _channel_list_getdev(self):
+        """ returns the list of available channels """
+        #return range(1, self.select_trace_count.getcache() +1)
+        lst = range(1, self.select_trace_count.get() +1)
+        return {k:self.trace_meas.get(trace=k) for k in lst}
+    def get_file(self, remote_file, local_file=None):
+        """
+            Obtain the file remote_file from the analyzer and save it
+            on this computer as local_file if given.
+        """
+        s = self.ask('MMEMory:DATA? "%s"'%remote_file, raw=True)
+        s = _decode_block_base(s)
+        if local_file:
+            with open(local_file, 'wb') as f:
+                f.write(s)
+        else:
+            return s
+    def _snap_png_getdev(self):
+        tmpfile_d = '[INTERNAL]:'
+        tmpfile_f = 'TempScreenGrab.png'
+        tmpfile_p = tmpfile_d + '\\' + tmpfile_f
+        prevdir = self.ask('MMEMory:CDIRectory?')
+        self.write('MMEMory:CDIRectory "%s"'%tmpfile_d)
+        self.write('MMEMory:STORe:IMAGe "%s"'%tmpfile_f)
+        self.write('MMEMory:CDIRectory %s'%prevdir)
+        ret = self.get_file(tmpfile_p)
+        self.write('MMEMory:DELete "%s"'%tmpfile_p)
+        return ret
+    def _bias_en_setdev(self, val):
+        if val:
+            self.write('SYSTem:VVS:ENABle ON')
+        else:
+            self.write('SYSTem:VVS:ENABle OFF')
+        #self._bias_en.set(val)
+    def _bias_en_getdev(self):
+        state = self.bias_src_state.get()
+        if state.lower() == 'on':
+            return True
+        return False # for OFF and Tripped
+    def _fetch_getdev(self, traces=None, unit='default', mem=False, xaxis=True):
+        """
+           options available: traces, unit, mem and xaxis
+            -traces: can be a single value or a list of values.
+                     The values are strings representing the trace or the trace number
+            -unit:   can be 'default' (real, imag)
+                       'db_deg' (db, deg) , where phase is unwrapped
+                       'cmplx'  (complexe number), Note that this cannot be written to file
+            -mem:    when True, selects the memory trace instead of the active one.
+            -xaxis:  when True(default), the first column of data is the xaxis
+        """
+        return super(agilent_FieldFox,self)._fetch_getdev(ch=None, traces=traces, unit=unit, mem=mem, xaxis=xaxis)
+    def _create_devs(self):
+        # Similar commands to ENA or PNAL but without channels
+        self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
+        self.available_modes = scpiDevice(getstr='INSTrument:CATalog?', str_type=quoted_list(sep='","'))
+        # INSTRUMENT only accepts the upper version CAT and NA (not cat or na)
+        if self.ask('INSTrument?') != '"NA"':
+            raise ValueError, "This instruments only works if the FieldFox is in NA (network analyzer) mode. Not it SA or CAT mode."
+        self.current_mode = scpiDevice('INSTrument', choices=['CAT', 'NA'], str_type=quoted_string())
+        self.ext_ref = scpiDevice(getstr='SENSe:ROSCillator:SOURce?', str_type=str)
+        self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
+       # Here we only handle the NA mode
+        # DC bias (option 309)
+        #self._bias_en = scpiDevice('SYSTem:VVS:ENABle', str_type=bool, autoget=False)
+        self._devwrap('bias_en')
+        self.bias_volt = scpiDevice('SYSTem:VVS:VOLTage', str_type=float, min=1., max=32., setget=True)
+        self.bias_volt_meas = scpiDevice(getstr='SYSTem:VVS:MVOLtage?', str_type=float)
+        self.bias_curr_meas = scpiDevice(getstr='SYSTem:VVS:CURRent?', str_type=float)
+        self.bias_src_state = scpiDevice(getstr='SYSTem:VVS?', doc="can be on, off or tripped. To clear toggle the enable.")
+        # end of Bias
+        #self.power_en = scpiDevice('SOURce:ENABle', str_type=bool)
+        self.power_dbm_port1 = scpiDevice(':SOURce:POWer', str_type=float, min=-45., max=3., setget=True, doc="""
+                       Note that the power set by this device is not leveled. The instrument can
+                       produce warnings of unlevel for high power/high frequency.
+                       If you want a leveled high power, use power_mode_port1 device with 'HIGH' instead""")
+        self.power_mode_port1 = scpiDevice('SOURce:POWer:ALC', choices=ChoiceStrings('HIGH', 'LOW', 'MAN'))
+        #tmpfile = r'"[INTERNAL]:\TempScreenGrab.png"'
+        #self.snap_png = scpiDevice(getstr='MMEMory:STORe:IMAGe %s;:MMEMory:DATA? %s;:MMEMory:DELete %s'%(tmpfile,tmpfile,tmpfile),
+        #                           raw=True, str_type=_decode_block_base, autoinit=False)
+        self._devwrap('snap_png', autoinit=False)
+        self.snap_png._format['bin']='.png'
+        self.freq_start = scpiDevice('SENSe:FREQuency:STARt', str_type=float, min=30e3, max=14e9)
+        self.freq_stop = scpiDevice('SENSe:FREQuency:STOP', str_type=float, min=30e3, max=14e9)
+        self.freq_center = scpiDevice('SENSe:FREQuency:CENTer', str_type=float, min=30e3, max=14e9)
+        self.freq_span = scpiDevice('SENSe:FREQuency:SPAN', str_type=float, min=0, max=14e9-30e3)
+        self.x_axis = scpiDevice(getstr='SENSe:FREQuency:DATA?', raw=True, str_type=decode_float64, autoinit=False)
+        self.calc_x_axis = self.x_axis # needed by fetch
+        self.npoints = scpiDevice('SENSe:SWEep:POINts', str_type=int, min=2, max=10001)
+        self.sweep_time = scpiDevice('SENSe:SWEep:TIME', str_type=float, min=0, max=100., doc='This changes the minimum sweep time, it can be longer.')
+        self.bandwidth = scpiDevice('SENSe:BWID', str_type=float, min=300, max=30e3, setget=True, doc="only certain values are available")
+        self.average_count = scpiDevice('SENSe:AVERage:COUNt', str_type=int, min=1, max=100, doc='count of 1 disables averaging')
+        self.average_mode = scpiDevice('SENSe:AVERage:MODE', choices=ChoiceStrings('POINt', 'SWEep'))
+        self.calib_en = scpiDevice('SENSe:CORRection:STATe', str_type=bool)
+        # needed by PNAL fetch
+        class sweep_type_C(object):
+            def getcache(self):
+                return 'linear'
+            choices = ChoiceStrings('LINear', 'LOGarithmic', 'POWer', 'CW', 'SEGMent', 'PHASe')
+        self.sweep_type = sweep_type_C()
+        self.select_trace_count = scpiDevice('CALCulate:PARameter:COUNt', str_type=int, min=1, max=4)
+        # select_trace needs to be set for most of the calc commands
+        self._devwrap('channel_list', autoinit=8)
+        select_trace_choices = ChoiceDev(self.channel_list, sub_type=int)
+        select_trace_choices2 = ChoiceDevDep(self.select_trace_count, {1:[1], 2:[1,2], 3:[1,2,3], 4:[1,2,3,4]})
+        # select_trace is needed by PNAL:fetch so we cannot rename it to current_trace.
+        self.select_trace = MemoryDevice(1, choices=select_trace_choices)
+        self.select_trace1 = scpiDevice('CALCulate:PARameter{val}:SELect', autoinit=8, autoget=False,
+                                        choices=select_trace_choices, doc="""
+                Select the trace using the trace number (1-4).""")
+        self.select_trace2 = scpiDevice('CALCulate:PARameter{val}:SELect', autoinit=8, autoget=False,
+                                        choices=select_trace_choices2, doc="""
+                Select the trace using the trace number (1-4).""")
+        #self.select_trace3 = scpiDevice('CALCulate:PARameter{val}:SELect', autoinit=8, str_type=int, min=1, max=4,  autoget=False,
+        #                                 doc="""Select the trace using the trace number (1-4).""")
+        #self.select_trace4 = scpiDevice('CALCulate:PARameter{val}:SELect', autoinit=False, autoget=False, get_cached_init=1,
+        #                                choices=select_trace_choices2, str_type=int)
+        def devCalcOption(*arg, **kwarg):
+            extra='CALCulate:PARameter{trace}:SELect;:'
+            if len(arg):
+                arg = list(arg) # arg was a tuple
+                arg[0] = extra+arg[0]
+            if 'getstr' in kwarg:
+                gs = extra + kwarg['getstr']
+                kwarg.update(getstr=gs)
+            options = kwarg.pop('options', {}).copy()
+            options.update(trace=self.select_trace)
+            app = kwarg.pop('options_apply', ['trace'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+
+        self.edelay_time = devCalcOption('CALCulate:CORRection:EDELay:TIME', str_type=float, doc='delay in seconds')
+        self.edelay_rel_vel = scpiDevice('SENSe:CORRection:RVELocity:COAX', str_type=float, min=0, max=1, doc='.66 = polyethylene dielectric, .7= PTFE dielectric, 1.0=Air')
+        self.edelay_length_medium = scpiDevice('SENSe:CORRection:MEDium', choices=ChoiceStrings('COAX', 'WAVeguide'))
+
+        # select_trace needs to be set for most of the calc commands
+        #calc:par:TNUMber and WNUMber don't exist for our PNAL
+        # since select_trace handles the number here we make it only a get
+        # but MNUMber could also be a set.
+        #self.select_trace_N = devCalcOption(getstr='CALCulate{ch}:PARameter:MNUMber?', str_type=int, doc='The number is from the Tr1 annotation next to the parameter nane on the PNA screen')
+        self.calc_fdata = devCalcOption(getstr='CALCulate:DATA:FDATa?', raw=True, str_type=decode_float64, autoinit=False, trig=True)
+        # the f vs s. s is complex data, includes error terms but not equation editor (Except for math?)
+        #   the f adds equation editor, trace math, {gating, phase corr (elect delay, offset, port extension), mag offset}, formating and smoothing
+        self.calc_sdata = devCalcOption(getstr='CALCulate:DATA:SDATa?', raw=True, str_type=decode_complex128, autoinit=False, trig=True)
+        self.calc_fmem = devCalcOption(getstr='CALCulate:DATA:FMEM?', raw=True, str_type=decode_float64, autoinit=False)
+        self.calc_smem = devCalcOption(getstr='CALCulate:DATA:SMEM?', raw=True, str_type=decode_complex128, autoinit=False)
+        self.current_mkr = MemoryDevice(1, min=1, max=6)
+        self.marker_coupling_en = devCalcOption('CALC:MARKer:COUPled', str_type=bool)
+        def devMkrOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mkr=self.current_mkr)
+            app = kwarg.pop('options_apply', ['trace', 'mkr'])
+            kwarg.update(options=options, options_apply=app)
+            return devCalcOption(*arg, **kwarg)
+        maker_en_choices = ChoiceStrings('OFF', 'NORM', 'DELT')
+        self.marker_en = devMkrOption('CALC:MARKer{mkr}', choices=maker_en_choices, autoinit=5)
+        def devMkrEnOption(*arg, **kwarg):
+            # This will check if the marker is currently enabled.
+            options = kwarg.pop('options', {}).copy()
+            options.update(_marker_enabled=self.marker_en)
+            options_lim = kwarg.pop('options_lim', {}).copy()
+            options_lim.update(_marker_enabled=maker_en_choices[1:])
+            kwarg.update(options=options, options_lim=options_lim)
+            return devMkrOption(*arg, **kwarg)
+        data_format = ChoiceStrings('MLOGarithmic', 'MLINear', 'SWR', 'PHASe', 'UPHase', 'SMITh', 'POLar', 'GDELay')
+        self.trace_format = devCalcOption('CALCulate:FORMat', choices=data_format) # needed when marker_format is 'DEF'
+        marker_format = ChoiceStrings('DEF', 'IMPedance', 'PHASe', 'IMAGinary', 'REAL', 'MAGPhase', 'ZMAGnitude')
+        self.marker_format = devCalcOption('CALC:MARKer:FORMat', choices=marker_format, doc="The format applies to all marker from one trace")
+        self.marker_x = devMkrOption('CALC:MARKer{mkr}:X', str_type=float, trig=True)
+        self.marker_y = devMkrEnOption(getstr='CALC:MARKer{mkr}:Y?', str_type=decode_float64, multi=['val1', 'val2'], graph=[0,1], trig=True)
+        self.marker_data_mem_sel = devMkrOption('CALC:MARKer{mkr}:TRACe', choices=ChoiceIndex(['auto', 'data', 'mem']))
+        # TODO smoothing affects marker data so does edelay ...
+
+        self.create_measurement = None
+        self.delete_measurement = None
+        #self.trace_meas = devCalcOption('CALCulate:PARameter{trace}:DEFine',
+        #                                choices=ChoiceStrings('S11', 'S12', 'S21', 'S22', 'A', 'B', 'R1', 'R2'))
+        #self.trace_meas = scpiDevice('CALCulate:PARameter{trace}:DEFine', options=dict(trace=self.select_trace), options_lim=dict(trace=(1,4)),
+        #                                choices=ChoiceStrings('S11', 'S12', 'S21', 'S22', 'A', 'B', 'R1', 'R2'))
+        self.trace_meas = scpiDevice('CALCulate:PARameter{trace}:DEFine', options=dict(trace=1), options_lim=dict(trace=(1,4)),
+                                        doc="trace always defaults to 1 and does not change select_trace.",
+                                        choices=ChoiceStrings('S11', 'S12', 'S21', 'S22', 'A', 'B', 'R1', 'R2'))
+        self.trig_source = scpiDevice('TRIGger:SOURce', choices=ChoiceStrings('INTernal', 'EXTernal'))
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation

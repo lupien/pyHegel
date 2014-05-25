@@ -55,6 +55,7 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              pna1 = (instruments.agilent_PNAL, ('USB0::0x0957::0x0118::MY49001395',)),
              ena1 = (instruments.agilent_ENA, ('USB0::2391::4873::MY49203311::0',)),
              pnax = (instruments.agilent_PNAL, ('USB0::0x0957::0x0118::MY52041560',)),
+             ff1 = (instruments.agilent_FieldFox, ('TCPIP0::A-N9916A-02987.mshome.net::inst0::INSTR',)),
              #ENA E5071C we had as a temporary loan summer 2012
              #ena1 = (instrument.agilent_ENA, ('USB0::0x0957::0x0D09::MY46213332',)),
              # scope is USB only
