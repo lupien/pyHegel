@@ -283,7 +283,6 @@ class zurich_UHF(BaseInstrument):
         else:
             return np.sqrt(2.**(1./order) -1) / (2*np.pi*tc)
     def init(self, full=False):
-        #self.write('Comm_HeaDeR OFF') #can be OFF, SHORT, LONG. OFF removes command echo and units
         super(zurich_UHF, self).init(full=full)
         if full:
             tc_to_bw = ProxyMethod(self._tc_to_enbw_3dB)
@@ -350,7 +349,8 @@ class zurich_UHF(BaseInstrument):
         if settings_only:
             flags |= (1<<3)
         src, pre = self._select_src(src)
-        return src.listNodes(pre+base, flags)
+        # The returned list is all caps (up to 14.02), but I prefer/want it lower case
+        return map(lambda s: s.lower(),  src.listNodes(pre+base, flags))
     def _subscribe(self, base='/{dev}/demods/*/sample', src='main'):
         base = self._conv_command(base)
         src, pre = self._select_src(src)
@@ -372,24 +372,28 @@ class zurich_UHF(BaseInstrument):
         Use between subscribe and poll.
         """
         self._zi_daq.flush()
-    def _flat_dict(self, in_dict):
+    def _flat_dict(self, in_dict, root=True):
         """
         this converts the get(str,False) or get for
         other than main object in a flat dict
         i.e.
           {'a':{'0':{'c':4, 'd':5}}}
             into
-          {'a/0/c':4, 'a/0/d':5}
+          {'/a/0/c':4, '/a/0/d':5} if root is True
+          {'a/0/c':4, 'a/0/d':5}   if root is False
         """
         sep = self._zi_sep
+        pre = ''
+        if root:
+            pre = sep
         out_dict = {}
         for k,v in in_dict.iteritems():
             if isinstance(v, dict):
-                v = self._flat_dict(v)
+                v = self._flat_dict(v, False)
                 for ks, vs in v.iteritems():
-                    out_dict[k+sep+ks] = vs
+                    out_dict[pre+k+sep+ks] = vs
             else:
-                out_dict[k] = v
+                out_dict[pre+k] = v
         return out_dict
     @locked_calling
     def read(self, timeout_ms=0):
@@ -452,12 +456,15 @@ class zurich_UHF(BaseInstrument):
               The default is to return the value of the only item
               of the dict, unless there is more than one item,
               then a dict is return
+            obj.ask('')
+            obj.ask('*')
             obj.ask('/dev2021/sigins')
+            obj.ask('/{dev}/sigins')
             obj.ask('/dev2021/sig*')
             obj.ask('averaging/tc', src='sweep')
             obj.ask('*', src='sweep')
-            obj.ask('/dev2021/demods/0/sample', t='sample')
-            obj.ask('/dev2021/dios/0/input', t='dio')
+            obj.ask('/{dev}/demods/0/sample', t='sample')
+            obj.ask('/{dev}/dios/0/input', t='dio')
         """
         question = self._conv_command(question)
         if t=='byte':
@@ -473,10 +480,10 @@ class zurich_UHF(BaseInstrument):
         elif t==None or t=='dict':
             src, pre = self._select_src(src)
             if pre == '':
-                ret = self._flat_dict(src.get(question))
-                #ret = src.get(question, True) # True makes it flat
+                #ret = self._flat_dict(src.get(question))
+                ret = src.get(question, True) # True makes it flat
             else:
-                ret = self._flat_dict(src.get(pre+'/'+question))
+                ret = self._flat_dict(src.get(pre+'/'+question), False)
             if t == 'dict' or len(ret) != 1:
                 return ret
             return ret.values()[0]
@@ -499,7 +506,7 @@ class zurich_UHF(BaseInstrument):
         server_fw_rev = str(self.ask('/zi/about/fwrevision')[0])
         system_devtype = self.ask('/{dev}/features/devtype')[0]
         system_serial = self.ask('/{dev}/features/serial')[0]
-        #system_code = self.ask('/{dev}/features/code')[0] # not available in vs 13.10 TODO fix that
+        #system_code = self.ask('/{dev}/features/code')[0] # not available in vs 13.10, in 14.02 it returns an empty dict after a long timeout
         system_options = self.ask('/{dev}/features/options')[0]
         system_analog_board_rev = self.ask('/{dev}/system/analogboardrevision')[0]
         system_digital_board_rev = self.ask('/{dev}/system/digitalboardrevision')[0]
@@ -510,7 +517,7 @@ class zurich_UHF(BaseInstrument):
              name=name, python_ver=python_ver, python_rev=python_rev,
              server_ver=server_ver, server_rev=server_rev, server_fw_rev=server_fw_rev,
              system_devtype=system_devtype, system_serial=system_serial,
-             #system_code=system_code, system_options=system_options,
+             #system_code=system_code,
              system_options=system_options,
              system_analog_board_rev=system_analog_board_rev, system_digital_board_rev=system_digital_board_rev,
              system_fpga_rev=system_fpga_rev, system_fw_rev=system_fw_rev)
@@ -568,7 +575,8 @@ class zurich_UHF(BaseInstrument):
         self.clockbase = ziDev(getstr='clockbase', str_type=float)
         self.fpga_core_temp = ziDev(getstr='stats/physical/fpga/temp', str_type=float)
         self.calib_required = ziDev(getstr='system/calib/required', str_type=bool)
-        self.mac_addr = ziDev('system/nics/0/mac/{rpt_i}', input_repeat=range(6), str_type=int)
+        #self.mac_addr = ziDev('system/nics/0/mac/{rpt_i}', input_repeat=range(6), str_type=int)
+        self.mac_addr = ziDev('system/nics/0/mac')
         self.current_demod = MemoryDevice(0, choices=range(8))
         self.current_osc = MemoryDevice(0, choices=range(2))
         self.current_sigins = MemoryDevice(0, choices=range(2))
@@ -588,7 +596,7 @@ class zurich_UHF(BaseInstrument):
         self.demod_freq = ziDev_ch_demod(getstr='demods/{ch}/freq', str_type=float)
         self.demod_harm = ziDev_ch_demod('demods/{ch}/harmonic', str_type=int)
         self.demod_en = ziDev_ch_demod('demods/{ch}/enable', str_type=bool)
-        self.demod_sinc_en = ziDev_ch_demod('demods/{ch}/sinc', str_type=bool)
+        #self.demod_sinc_en = ziDev_ch_demod('demods/{ch}/sinc', str_type=bool) # this makes the UHF crash with version 14.02
         self.demod_bypass_en = ziDev_ch_demod('demods/{ch}/bypass', str_type=bool, doc="Don't know what this does.")
         self.demod_osc_src = ziDev_ch_demod(getstr='demods/{ch}/oscselect', str_type=int, choices=[0,1])
         self.demod_adc_src = ziDev_ch_demod('demods/{ch}/adcselect', str_type=int, choices=range(13))
@@ -790,13 +798,12 @@ class zurich_UHF(BaseInstrument):
 # All points are in order of start-stop, even for binary.
 #  however
 # bandwidth is enbw (related to tc)
-#  for the various stddev to not be nan, you need avg count>1
+#  for the various stddev to not be nan, you need avg count>1 (>2 for 14.02)
 #    for i the iterations of N averages
 #   base(avg): sum_i x_i/N
 #   pwr: sum_i (x_i**2)/N
-#   stddev: (1/N) sum_i (x_i - base)**2
-#    so stddev = sqrt(pwr - base**2)
-#      sould probably use 1/(N-1) instead
+#   stddev: sqrt((1/(N-1)) sum_i (x_i - base)**2)  # N-1 since version 14.02, was N before
+#    so stddev = sqrt(pwr - base**2) * sqrt(N/(N-1))
 #  The r, rpwr and rstddev are calculated from r_i = sqrt(x_i**2 + y_i**2)
 #    not from x, xpwr and xstddev
 
@@ -804,19 +811,44 @@ class zurich_UHF(BaseInstrument):
 
 # Problems discovered:
 #  get('*') is slow and does not return sample data (because it is slow?, uses polling)
+#    As of version 14.02 it is fast
 #  get of subdevices does not work like get of main device (not option to flatten)
-# documentation errors: pollEvent arg2 and 3, should only have 2 arg and
-#                       description of arg3 is for arg2
-# errors in documentation ziAPI.h
-#    example description of ziAPIGetValueB talks about DIO samples...
-#    as of 13.10 that is fixed since most of the documentation as been removed
-# timeit zi.ask('/{dev}/stats/physical/digitalboard/temps/0', t='int')
+# Documentation is much improved in version 14.02
+#     pwrtemps was temps before version 14.02
+#  timeit zi.ask('/{dev}/stats/physical/digitalboard/pwrtemps/0', t='int')
 #  100 loops, best of 3: 2.55 ms per loop
-# timeit zi.ask('/{dev}/stats/physical/digitalboard/temps/0')
+#  100 loops, best of 3: 5.36 ms per loop  # version 14.02 using USB
+# timeit zi.ask('/{dev}/stats/physical/digitalboard/pwrtemps/0')
 #  10 loops, best of 3: 250 ms per loop (for 13.06 and 100 ms for 13.10)
+# 100 loops, best of 3: 9.31 ms per loop # version 14.02 using USB
 # This is because it uses get_as_poll
 #  some are faster like '/zi' or '/{dev}/stats/cmdstream'
-#
+#  as of 14.02 that is no longer the case.
+#   a bunch of values are not obtainable with get subbranches or *
+# ll = zi.list_nodes()
+# vv=zi.ask('')
+# sorted([ k for k in vv if k not in ll]) # nodes in get('') but not in list_nodes. This is an empty list.
+# sorted([ k for k in ll if k not in vv]) # nodes not in get('')
+#   there are many: /zi/about /zi/clockbase /zi/devices
+#                   {dev}/*/*/sample
+#                   {dev}/auxouts/*/value
+#                   {dev}/clockbase
+#                   {dev}/dios/0/input
+#                   {dev}/features/*
+#                   {dev}/scopes/0/wave
+#                   {dev}/sigouts/*/over
+#                   {dev}/stats
+#                   {dev}/status
+#                   {dev}/system everything except:
+#                      {dev}/system/calib/auto
+#                      {dev}/system/calib/tempthreshold
+#                      {dev}/system/calib/timeinterval
+#                      {dev}/system/compdelay/delays/*
+#                      {dev}/system/extclk
+#                      {dev}/system/extclksquare
+#                      {dev}/system/preampenable
+#                      {dev}/system/xenpakenable
+
 # za=instruments_ZI.ziAPI()
 def _time_poll(za):
     import time
@@ -832,19 +864,17 @@ def _time_poll(za):
             done = True
     return time.time()-to,n,r
 # za.poll() # first empty the poll buffer
-# timeit _time_poll(za)
-# timeit print _time_poll(za)
-#  This is always 100 ms (version 13.10). When subscribing to something like
+# timeit instruments_ZI._time_poll(za)
+# timeit print instruments_ZI._time_poll(za)
+#  This is always 100 ms (version 13.10). For version 14.02 it is now ~6 ms
+#  When subscribing to something like
 #    /dev2021/demods/0/sample at 1.717 kS/s  (timeit za.poll()  returns ~25 ms)
+#             in version 14.02 timeit za.poll(100)  returns ~ 16ms
 #  polls will return more quickly but with the information from /dev2021/demods/0/sample multiples times
 #  between the /dev2021/demods/0/sinc ones
 #
-# /dev2021/system/calib/required was not in listnodes (13.06) but is there in 13.10
-#
-#  tests:
-# set(zi.demod_en,True, ch=0)
-# set(zi.demod_rate,13.41)
-# set(zi.demod_order,3)
+#  tests: (These are unchanged for 14.02)
+# set(zi.demod_en,True, ch=0); set(zi.demod_rate,13.41); set(zi.demod_order,3)
 #   get(zi.demod_tc) # 0.0938 s (1.00 enbw, 0.865 3dB bw)
 #   first test settling time/average time is maximum of both n_tc and time
 # zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=1)
@@ -860,9 +890,11 @@ def _time_poll(za):
 #
 #  test the calculations for stddev
 # zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=2)
-# zi.run_and_wait()
-# r=zi.sweep_data(); rr=r['dev2021/demods/0/sample'][0][0]
+# zi.run_and_wait(); r=zi.sweep_data(); rr=r['/dev2021/demods/0/sample'][0][0]
 # sqrt(rr['ypwr']-rr['y']**2)/rr['ystddev'] # should be all 1.
+#   Version 14.02 is now unbiased so for avg_count=n
+# sqrt((rr['ypwr']-rr['y']**2)*n/(n-1.))/rr['ystddev'] # should be all 1.
+#   This fails for n=2 because rr['ystddev'] is NaN
 #
 #  test auto time constants
 def _calc_bw(demod_result_dict, order=3):
@@ -876,10 +908,11 @@ def _calc_bw(demod_result_dict, order=3):
     return bw
 # zi.set_sweep_mode(10e3,10e4,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1)
 # zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1)
+#  zi.run_and_wait(); r=zi.sweep_data(); rr=r['/dev2021/demods/0/sample'][0][0]
 # instruments_ZI._calc_bw(rr)/rr['bandwidth'] # should all be 1
 #  repeat with
 # zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1, logsweep=True)
-# set(zi.demod_sinc_en,True)
+# set(zi.demod_sinc_en,True)  # For 14.02 this makes the instrument crash
 # zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1) # same bandwidth calc but much slower to run
 #
 # find all available time constants
@@ -938,6 +971,7 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 #             array([  2.99000007e-08,   6.00999996e-08,   1.02592772e-07, 1.02593908e-07,   1.02595038e-07,   1.02596161e-07,  1.02597291e-07,   1.02598420e-07,   1.02599557e-07])
 #  array(instruments_ZI._find_tc(zi, 10,2000))
 #    returns:  array([  9.5443716 ,  10.90785408,  12.72582912,  15.27099514,  19.08874321, 25.45165825,  38.17748642,  76.35497284])
+# The above results have not changed for version 14.02
 #
 # From those observations the time constant is selected as:
 #      numerically, the algorithm used is Vo(i+1) = (Vi + (t-1)Voi)/t
@@ -964,19 +998,50 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 #  these give t=(v*f):   53.82, 108.18, 184.667, 184.669 ...
 # it seems to do the time constants calculation in floats instead of double
 #
-# in 13.10 get('', true) fails (was returning a flat dictionnary)
-#  also zhinst loads all the examples.
-#  and list_nodes shows FEATURES/CODE but it cannot be read
-# sweep has lots of output to the screen (can it be disabled?)
+# in 13.10 get('', True) fails (was returning a flat dictionnary), 14.02 it now works again.
+#  also zhinst loads all the examples. (still in 14.02)
+#  and list_nodes shows FEATURES/CODE but it cannot be read (in 14.02 it times out)
+# sweep has lots of output to the screen (can it be disabled?) (fixed in 14.02)
+#   can reenable it in 14.02 (also logs the info in a file with zi._zi_daq.setDebugLevel(2) (2 or below looks like what I had before))
+#    after that can disable it fully only by quitting python (to unload the ziPython.pyd). Using reload does not seem to work.
+#    and no debug value seems to work either.
 #
 # python says revision 20298, installer says 20315
+# for 14.02 it python says 23152, installer says 23225
 #
-# echoDevice does not work
-# syncSetInt takes 250 ms (with 13.06,100 ms with 13.10)
+# echoDevice does not work (still in 14.02)
+# syncSetInt takes 250 ms (with 13.06,100 ms with 13.10, It is no longer a problem with 14.02, but sync/no sync give ~6 ms)
 #  compare
 #   timeit zi.write('/dev2021/sigins/0/on', 1, t='int')
 #   timeit zi.write('/dev2021/sigins/0/on', 1, t='int', sync=False)
 # setInt followed by getInt does not return the new value, but the old one instead
+#  For 14.02 setInt seems to behave as for setInt_Sync
+# Compare
+# s='/dev2021/demods/0/enable'
+# za.set_async(s,1); print za.getI(s); time.sleep(.1); print za.getI(s)
+#   returns 1 1
+# za.set_async(s,0); print za.getI(s); time.sleep(.1); print za.getI(s)
+#   returns 1 0
+# za.set_sync(s,0); print za.getI(s); time.sleep(.1); print za.getI(s)
+#   returns 0 0
+# za.set_sync(s,1); print za.getI(s); time.sleep(.1); print za.getI(s)
+#   returns 1 1
+# za.set(s,1); print za.getI(s); time.sleep(.1); print za.getI(s)
+#   returns 1 1
+# za.set(s,0); print za.getI(s); time.sleep(.1); print za.getI(s)
+#   returns 0 0
+# timeit za.set(s,0)
+#  100 loops, best of 3: 5.63 ms per loop
+# timeit za.set_sync(s,0)
+#  100 loops, best of 3: 6.67 ms per loop
+# timeit za.set_async(s,0)
+#  10000 loops, best of 3: 23 us per loop
+#
+# Other changes from release note 14.02 but that I could not figure out:
+# in API section
+#- Sweeper: Fix for very small sweep steps
+#- Sweeper: Fix for higher harmonics at low frequencies (mHz)
+
 
 ##################################################################
 #   Direct Access to ZI C API
@@ -987,7 +1052,8 @@ import ctypes
 import weakref
 from ctypes import Structure, Union, pointer, POINTER, byref,\
                    c_int, c_longlong, c_ulonglong, c_short, c_ushort, c_uint,\
-                   c_double, c_uint32, c_uint8, c_uint16, c_int64, c_uint64,\
+                   c_double, c_float,\
+                   c_uint32, c_uint8, c_uint16, c_int64, c_uint64,\
                    c_void_p, c_char_p, c_char, c_ubyte, create_string_buffer
 c_uchar_p = c_char_p # POINTER(c_ubyte)
 c_uint8_p = c_char_p # POINTER(c_uint8)
@@ -1036,6 +1102,12 @@ class TreeChange(StructureImproved):
                 ('action', c_uint32),
                 ('name', c_char*32) ]
 
+class TreeChange_old(StructureImproved):
+    _names_cache = [] # every sub class needs to have its own cache
+    _fields_ = [('Action', c_uint32),
+                ('Name', c_char*32) ]
+
+
 # TODO: find a way to display all the *0 stuff
 class ByteArrayData(StructureImproved):
     _names_cache = [] # every sub class needs to have its own cache
@@ -1067,15 +1139,30 @@ class ByteArrayDataTS(StructureImproved):
                 ('length', c_uint32),
                 ('bytes', c_char*0) ] # c_uint8*0
 
-class ZIScopeWave(StructureImproved):
+class ZIScopeWave(StructureImproved): # Changed a lot on version 14.02
     _names_cache = [] # every sub class needs to have its own cache
-    _fields_ = [('TimeStamp', ziTimeStampType),
+    _fields_ = [('timeStamp', ziTimeStampType),
+                ('triggerTimeStamp', ziTimeStampType), # can be between samples
+                ('dt', c_double), # time between samples
                 ('dt', c_double),
-                ('ScopeChannel', c_uint),
-                ('TriggerChannel', c_uint),
-                ('BWLimit', c_uint),
-                ('Count', c_uint),
-                ('Data', c_short*0) ]
+                ('channelEnable', c_uint8*4), # bool for enabled channel
+                ('channelInput', c_uint8*4), # input source for each channel (0-1: input1-2, 2-3: trigger in1-2, 4-7:Aux out1-4, 8-9:Aux in 1-2)
+                ('triggerEnable', c_uint8), # bit0: rising edge enable, bit1: falling edge enable (enable=1)
+                ('triggerInput', c_uint8), # same as channelInput
+                ('reserved0', c_uint8*2),
+                ('channelBWLimit', c_uint8*4), # per channel, bit0: off=0, on=1, bit1-7: reserved
+                ('channelMath', c_uint8*4), # Math(averaging...) per channel, bit0-7: reserved
+                ('channelScaling', c_float*4),
+                ('sequenceNumber', c_uint32),
+                ('segmentNumber', c_uint32),
+                ('blockNumber', c_uint32), # large scope shots comes in multiple blocks that need to be concatenated
+                ('totalSamples', c_uint64),
+                ('dataTransferMode', c_uint8), # SingleTransfer = 0, BlockTransfer = 1, ContinuousTransfer = 3, FFTSingleTransfer = 4
+                ('blockMarker', c_uint8),  # bit0: 1=end marker
+                ('flags', c_uint8),
+                ('sampleFormat', c_uint8),
+                ('sampleCount', c_uint32),
+                ('Data', c_short*0) ] # Data can be int16, int32 or float
 
 class ZIPWASample(StructureImproved):
     _names_cache = [] # every sub class needs to have its own cache
@@ -1112,6 +1199,7 @@ class ziEventUnion(Union):
                 ('ByteArray', POINTER(ByteArrayData)),
                 ('ByteArrayTS', POINTER(ByteArrayDataTS)),
                 ('Tree', POINTER(TreeChange)),
+                ('Tree_old', POINTER(TreeChange_old)),
                 ('SampleDemod', POINTER(DemodSample)),
                 ('SampleAuxIn', POINTER(AuxInSample)),
                 ('SampleDIO', POINTER(DIOSample)),
@@ -1155,9 +1243,9 @@ class ziEvent(StructureImproved):
 
 
 ZIResult_enum = c_int
-ZI_INFO_SUCCESS =    0x0000
-ZI_WARNING_GENERAL = 0x4000
-ZI_ERROR_GENERAL =   0x8000
+ZI_INFO_SUCCESS    = ZI_INFO_BASE     = 0x0000
+ZI_WARNING_GENERAL = ZI_WARNING_BASE  = 0x4000
+ZI_ERROR_GENERAL   = ZI_ERROR_BASE    = 0x8000
 
 ZIAPIVersion = c_int
 #zi_api_version = {1:'ziAPIv1', 3:'ziAPIv3'}
@@ -1180,17 +1268,23 @@ zi_result_dic = {ZI_INFO_SUCCESS:'Success (no error)',
                  ZI_ERROR_GENERAL+7:'thread unable to start',
                  ZI_ERROR_GENERAL+8:'thread unable tojoin',
                  ZI_ERROR_GENERAL+9:'socket cannot init',
-                 ZI_ERROR_GENERAL+10:'socket unable to connect',
-                 ZI_ERROR_GENERAL+11:'hostname not found',
-                 ZI_ERROR_GENERAL+12:'Connection invalid',
-                 ZI_ERROR_GENERAL+13:'timed out',
-                 ZI_ERROR_GENERAL+14:'command failed internally',
-                 ZI_ERROR_GENERAL+15:'command failed in server',
-                 ZI_ERROR_GENERAL+16:'provided buffer length to short',
-                 ZI_ERROR_GENERAL+17:'unable to open or read from file',
-                 ZI_ERROR_GENERAL+18:'Duplicate entry',
-                 ZI_ERROR_GENERAL+19:'invalid attempt to change a read-only node',
-                 ZI_ERROR_GENERAL+20:'Max Error' }
+                 ZI_ERROR_GENERAL+0x0a:'socket unable to connect',
+                 ZI_ERROR_GENERAL+0x0b:'hostname not found',
+                 ZI_ERROR_GENERAL+0x0c:'Connection invalid',
+                 ZI_ERROR_GENERAL+0x0d:'timed out',
+                 ZI_ERROR_GENERAL+0x0e:'command failed internally',
+                 ZI_ERROR_GENERAL+0x0f:'command failed in server',
+                 ZI_ERROR_GENERAL+0x10:'provided buffer length to short',
+                 ZI_ERROR_GENERAL+0x11:'unable to open or read from file',
+                 ZI_ERROR_GENERAL+0x12:'Duplicate entry',
+                 ZI_ERROR_GENERAL+0x13:'invalid attempt to change a read-only node',
+                 ZI_ERROR_GENERAL+0x14:'Device not visible to server',
+                 ZI_ERROR_GENERAL+0x15:'Device already in use (by another server)',
+                 ZI_ERROR_GENERAL+0x16:'Device does not support interface',
+                 ZI_ERROR_GENERAL+0x17:'Device connection timeout',
+                 ZI_ERROR_GENERAL+0x18:'Device already connected using another interface',
+                 ZI_ERROR_GENERAL+0x19:'Device needs firmware upgrade',
+                 ZI_ERROR_GENERAL+0x1a:'Max Error' }
 
 class ziAPI(object):
     _default_host = 'localhost'
@@ -1207,6 +1301,8 @@ class ziAPI(object):
         self._makefunc('ziAPIDisconnect', [] )
         self._makefunc('ziAPIListNodes', [c_char_p, c_char_p, c_int, c_int] )
         self._makefunc('ziAPIUpdateDevices', [] )
+        self._makefunc('ziAPIConnectDevice', [c_char_p, c_char_p, c_char_p] ) # deviceSerialNum, deviceInterface(USB|1GbE), interfaceParameters
+        self._makefunc('ziAPIDisconnectDevice', [c_char_p] ) # deviceSerialNum
         self._makegetfunc('D', ziDoubleType)
         self._makegetfunc('I', ziIntegerType)
         self._makegetfunc('DemodSample', DemodSample, base='Get')
@@ -1228,14 +1324,16 @@ class ziAPI(object):
         self._makefunc('ziAPIGetValueAsPollData', [c_char_p] )
         self._makefunc('ziAPIGetError', [ZIResult_enum, POINTER(c_char_p), POINTER(c_int)], prepend_con=False)
         # skipped ReadMEMFile
-        self._makefunc('ziAPIStartWebServer', [] )
         self._makefunc('ziAPIAsyncSetDoubleData', [c_char_p, ziDoubleType] )
-        # The following 3 are missing in dll
-        #self._makefunc('ziAPIAsyncSetIntegerData', [c_char_p, ziIntegerType] )
-        #self._makefunc('ziAPIAsyncSetByteArray', [c_char_p, c_uint8_p, c_uint32] )
-        #self._makefunc('ziAPIListImplementations', [c_char_p, c_uint32], prepend_con=False )
+        self._makefunc('ziAPIAsyncSetIntegerData', [c_char_p, ziIntegerType] )
+        self._makefunc('ziAPIAsyncSetByteArray', [c_char_p, c_uint8_p, c_uint32] )
+        self._makefunc('ziAPIListImplementations', [c_char_p, c_uint32], prepend_con=False )
         self._makefunc('ziAPIConnectEx', [c_char_p, c_uint16, ZIAPIVersion, c_char_p] )
         self._makefunc('ziAPIGetConnectionAPILevel', [POINTER(ZIAPIVersion)] )
+        # SecondsTimeStamp is depracated and does not work properly
+        self._SecondsTimeStamp = self._ziDll.ziAPISecondsTimeStamp
+        self._SecondsTimeStamp.restype = c_double
+        self._SecondsTimeStamp.argtypes = [ziTimeStampType]
         self.init()
         if autoconnect:
             self.connect_ex(hostname, port)
@@ -1312,10 +1410,10 @@ class ziAPI(object):
     def connect_ex(self, hostname=_default_host, port=_default_port, version=4, implementation=None):
         self._ConnectEx(hostname, port, version, implementation)
         print 'Connected ex'
-    #def list_implementation(self):
-    #    buf = create_string_buffer(1000)
-    #    self._ziAPIListImplementations(buf, len(buf))
-    #    return buf.value.split('\n')
+    def list_implementation(self):
+        buf = create_string_buffer(1024)
+        self._ziAPIListImplementations(buf, len(buf))
+        return buf.value.split('\n')
     def get_connection_ver(self):
         ver = ZIAPIVersion()
         self._GetConnectionAPILevel(byref(ver))
@@ -1349,8 +1447,6 @@ class ziAPI(object):
         base = c_int()
         self._ziAPIGetError(result, byref(buf), byref(base))
         print 'Message:', buf.value, '\nBase:', hex(base.value)
-    def start_web_server(self):
-        self._StartWebServer()
     def set(self, path, val):
         if isinstance(val, int):
             self._SetValueI(path, val)
@@ -1382,6 +1478,15 @@ class ziAPI(object):
         else:
             raise TypeError, 'Unhandled type for val'
 
-# asking for /dev2021/samples quits the session (disconnect) for 13.06 and 13.10
 # In Visual studio use, Tools/Visual studio command prompt, then:
 #    dumpbin /EXPORTS "\Program Files\Zurich Instruments\LabOne\API\C\lib\ziAPI-win32.dll"
+#
+#        or use pefile:
+#import pefile
+#pe = pefile.PE(r"\Program Files\Zurich Instruments\LabOne\API\C\lib\ziAPI-win32.dll")
+#for x in pe.DIRECTORY_ENTRY_EXPORT.symbols:
+#   print '%5i: %s'%(x.ordinal, x.name)
+#
+#        or use cygwin objdump
+# objdump -x "\Program Files\Zurich Instruments\LabOne\API\C\lib\ziAPI-win32.dll" | less
+#    and look for The Export Tables section
