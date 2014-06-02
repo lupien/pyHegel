@@ -350,7 +350,7 @@ class zurich_UHF(BaseInstrument):
             flags |= (1<<3)
         src, pre = self._select_src(src)
         # The returned list is all caps (up to 14.02), but I prefer/want it lower case
-        return map(lambda s: s.lower(),  src.listNodes(pre+base, flags))
+        return [s.lower() for s in src.listNodes(pre+base, flags)]
     def _subscribe(self, base='/{dev}/demods/*/sample', src='main'):
         base = self._conv_command(base)
         src, pre = self._select_src(src)
@@ -414,6 +414,8 @@ class zurich_UHF(BaseInstrument):
              obj.write('/dev2021/sigins/0/on', 1, t='int')
                 t can be 'byte', 'double', 'int'
              obj.write([('/dev2021/sigins/0/on', 1), ('/dev2021/sigins/1/on', 0)])
+             obj.write('/dev2021/sigins/0/on', 1) # no recommended for device code,
+                                                  # but OK on command line
              obj.write('loopcount', 2, src='zoomFFT')
                 the 'sweepFFT/' is automatically inserted
         see _select_src for available src
@@ -440,7 +442,10 @@ class zurich_UHF(BaseInstrument):
         elif t==None:
             src, pre = self._select_src(src)
             if pre == '':
-                src.set(command)
+                if val == None:
+                    src.set(command)
+                else:
+                    src.set([(command, val)])
             else:
                 src.set(pre+'/'+command, val)
         else:
@@ -642,10 +647,10 @@ class zurich_UHF(BaseInstrument):
         self.sweep_x_log = ziDev('xmapping', str_type=bool, input_src='sweep')
         self.sweep_loop_count = ziDev('loopcount', str_type=int, input_src='sweep')
         self.sweep_endless_loop_en = ziDev('endless', str_type=bool, input_src='sweep')
-        #auto_bw_ch = ChoiceIndex(['auto', 'fixed', 'manual'])
-        #self.sweep_auto_bw_mode = ziDev('bandwidthcontrol', choices=auto_bw_ch, input_src='sweep')
-        self.sweep_auto_bw_en = ziDev('bandwidthcontrol', str_type=bool, input_src='sweep')
-        self.sweep_auto_bw_fixed = ziDev('bandwidth', str_type=float, input_src='sweep')
+        auto_bw_ch = ChoiceIndex(['manual', 'fixed', 'auto'])
+        self.sweep_auto_bw_mode = ziDev('bandwidthcontrol', choices=auto_bw_ch, input_src='sweep')
+        #self.sweep_auto_bw_en = ziDev('bandwidthcontrol', str_type=bool, input_src='sweep')
+        self.sweep_auto_bw_fixed = ziDev('bandwidth', str_type=float, input_src='sweep', min=1e-6)
         self.sweep_settling_time_s = ziDev('settling/time', str_type=float, input_src='sweep')
         self.sweep_settling_n_tc = ziDev('settling/tc', str_type=float, input_src='sweep')
         self.sweep_averaging_count = ziDev('averaging/sample', str_type=int, input_src='sweep')
@@ -692,7 +697,7 @@ class zurich_UHF(BaseInstrument):
                        avg_count=1, avg_n_tc=0, settle_time_s=0, settle_n_tc=15):
         """
         bw can be a value (fixed mode), 'auto' or None (uses the currently set timeconstant)
-           The following discussion is for version 13.06
+           The following discussion is valid for version 14.02
            for auto the computed bandwidth (the one asked for, but the instruments rounds it
            to another value) is the equivalent noise bandwidth and is:
                min(df/2,  f/100**(1/n))
@@ -708,7 +713,7 @@ class zurich_UHF(BaseInstrument):
                     ~314 for order 1,  ~247 for 2, ~164 for 3, ..., =31.5 for 8 (no approximation, approx gave 3)
                        the formula for no approximation is sqrt(1 + (F)**2)**n
                         with F = 100**(1./n) * (H*Kn)
-               Enabling sync does not seem to change anything
+               Enabling sync does not seem to change anything (crashes in 14.02)
         mode is 'sequential', 'binary', or 'bidirectional'
           Note that 1 loopcount of bidirectionnal includes twice the count
           of points (the up and down sweep together)
@@ -744,20 +749,20 @@ class zurich_UHF(BaseInstrument):
         self.sweep_x_src_node.set(src)
         self.sweep_x_log.set(logsweep)
         self.sweep_x_log.set(logsweep)
+        # In version 14.02, whenever sweep_auto_bw_fixed is 0.
+        # It goes in auto mode. This is the same
+        # behavior as before. 14.02 added auto has bw_mode=2
+        # which is auto irrespective of sweep_auto_bw_fixed value.
         if bw == None:
-            #self.sweep_auto_bw_mode.set('manual')
-            #self.sweep_auto_bw_mode.set('fixed')
+            self.sweep_auto_bw_mode.set('manual')
             if self.sweep_auto_bw_fixed.getcache()<=0:
                 self.sweep_auto_bw_fixed.set(1)
-            self.sweep_auto_bw_en.set(False)
         elif bw == 'auto':
-            #self.sweep_auto_bw_mode.set('auto')
-            self.sweep_auto_bw_fixed.set(0)
-            self.sweep_auto_bw_en.set(True)
+            self.sweep_auto_bw_mode.set('auto')
         else:
-            #self.sweep_auto_bw_mode.set('fixed')
+            self.sweep_auto_bw_mode.set('fixed')
+            # bw needs to be >0 (checked in device). =0 means auto in 14.02
             self.sweep_auto_bw_fixed.set(bw)
-            self.sweep_auto_bw_en.set(True)
         if loop_count <= 0:
             self.sweep_endless_loop_en.set(True)
         else:
