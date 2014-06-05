@@ -361,11 +361,11 @@ class zurich_UHF(BaseInstrument):
         src, pre = self._select_src(src)
         unsub = getattr(src, 'unsubscribe')
         unsub(base)
-    def echo_dev(self):
-        """
-        It is suppose to wait until all buffers are flushed.
-        """
-        self._zi_daq.echoDevice(self._zi_dev)
+    #def echo_dev(self):
+    #    """
+    #    It is suppose to wait until all buffers are flushed.
+    #    """
+    #    self._zi_daq.echoDevice(self._zi_dev)
     def flush(self):
         """
         Flush data in socket connection and API buffers.
@@ -511,7 +511,7 @@ class zurich_UHF(BaseInstrument):
         server_fw_rev = str(self.ask('/zi/about/fwrevision')[0])
         system_devtype = self.ask('/{dev}/features/devtype')[0]
         system_serial = self.ask('/{dev}/features/serial')[0]
-        #system_code = self.ask('/{dev}/features/code')[0] # not available in vs 13.10, in 14.02 it returns an empty dict after a long timeout
+        #system_code = self.ask('/{dev}/features/code')[0] # not available in vs 13.10, in 14.02 it returns an empty dict after a long timeout. It is a write only node.
         system_options = self.ask('/{dev}/features/options')[0]
         system_analog_board_rev = self.ask('/{dev}/system/analogboardrevision')[0]
         system_digital_board_rev = self.ask('/{dev}/system/digitalboardrevision')[0]
@@ -831,9 +831,13 @@ class zurich_UHF(BaseInstrument):
 #  as of 14.02 that is no longer the case.
 #   a bunch of values are not obtainable with get subbranches or *
 # ll = zi.list_nodes()
+# llso = zi.list_nodes(settings_only=True)
 # vv=zi.ask('')
 # sorted([ k for k in vv if k not in ll]) # nodes in get('') but not in list_nodes. This is an empty list.
+# sorted([ k for k in vv if k not in llso]) # nodes in get('') but not in setting only list_nodes. This is an empty list.
+# sorted([ k for k in llso if k not in vv]) # setting only nodes not in get(''). this is an empty list.
 # sorted([ k for k in ll if k not in vv]) # nodes not in get('')
+# sorted([ k for k in ll if k not in llso]) # nodes that are not settings only (they are stream, read only), same as above
 #   there are many: /zi/about /zi/clockbase /zi/devices
 #                   {dev}/*/*/sample
 #                   {dev}/auxouts/*/value
@@ -853,6 +857,10 @@ class zurich_UHF(BaseInstrument):
 #                      {dev}/system/extclksquare
 #                      {dev}/system/preampenable
 #                      {dev}/system/xenpakenable
+# nodes not identified as settings only: {dev}/system/
+#                         jumbo
+#                         nics ...
+#                         porttcp portudp
 
 # za=instruments_ZI.ziAPI()
 def _time_poll(za):
@@ -1005,16 +1013,16 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 #
 # in 13.10 get('', True) fails (was returning a flat dictionnary), 14.02 it now works again.
 #  also zhinst loads all the examples. (still in 14.02)
-#  and list_nodes shows FEATURES/CODE but it cannot be read (in 14.02 it times out)
+#  and list_nodes shows FEATURES/CODE but it cannot be read (in 14.02 it times out). It is a write only node.
 # sweep has lots of output to the screen (can it be disabled?) (fixed in 14.02)
 #   can reenable it in 14.02 (also logs the info in a file with zi._zi_daq.setDebugLevel(2) (2 or below looks like what I had before))
 #    after that can disable it fully only by quitting python (to unload the ziPython.pyd). Using reload does not seem to work.
 #    and no debug value seems to work either.
 #
-# python says revision 20298, installer says 20315
+# python says revision 20298, installer says 20315 (installer revision is head revision. installer>python is normal)
 # for 14.02 it python says 23152, installer says 23225
 #
-# echoDevice does not work (still in 14.02)
+# echoDevice does not work (still in 14.02). It is for HF2 instruments not of UHF.
 # syncSetInt takes 250 ms (with 13.06,100 ms with 13.10, It is no longer a problem with 14.02, but sync/no sync give ~6 ms)
 #  compare
 #   timeit zi.write('/dev2021/sigins/0/on', 1, t='int')
