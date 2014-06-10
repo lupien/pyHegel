@@ -248,7 +248,7 @@ class zurich_UHF(BaseInstrument):
         # (or replacing) it.
         # TODO get version 4 to work (it adds timestamps to many commands
         #                             so dictionnary get like in idn need to change)
-        APIlevel = 1 # 1 or 4 for version 13.10
+        APIlevel = 4 # 1 or 4 for version 14.02
         self._zi_daq = zi.ziDAQServer(host, port, APIlevel)
         self._zi_record = self._zi_daq.record(10, timeout) # 10s length
         self._zi_sweep = self._zi_daq.sweep(timeout)
@@ -451,7 +451,7 @@ class zurich_UHF(BaseInstrument):
         else:
             raise ValueError, 'Invalid value for t=%r'%t
     @locked_calling
-    def ask(self, question, src='main', t=None):
+    def ask(self, question, src='main', t=None, strip_timestamp=True):
         """
         use like:
             obj.ask('/dev2021/sigins/0/on', t='int')
@@ -461,6 +461,9 @@ class zurich_UHF(BaseInstrument):
               The default is to return the value of the only item
               of the dict, unless there is more than one item,
               then a dict is return
+              strip_timestamp when True, checks if entries are dict with
+              timestamp and valies and only return the value (make APIlevel=4
+              return similar results to APIlevel=1)
             obj.ask('')
             obj.ask('*')
             obj.ask('/dev2021/sigins')
@@ -487,6 +490,10 @@ class zurich_UHF(BaseInstrument):
             if pre == '':
                 #ret = self._flat_dict(src.get(question))
                 ret = src.get(question, True) # True makes it flat
+                if strip_timestamp:
+                    for k,v in ret.items():
+                        if isinstance(v, dict) and len(v) == 2 and 'timestamp' in v:
+                            ret[k] = v['value']
             else:
                 ret = self._flat_dict(src.get(pre+'/'+question), False)
             if t == 'dict' or len(ret) != 1:
