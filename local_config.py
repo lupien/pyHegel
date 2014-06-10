@@ -62,7 +62,8 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              s500 = (instruments.infiniiVision_3000, ('USB0::2391::6050::MY51135769::INSTR',)),
              s200 = (instruments.infiniiVision_3000, ('USB0::0x0957::0x1796::MY51135849',)),
              # lecroy scope using TCPIP, using an alias
-             lecr = (instruments.lecroy_wavemaster, ('lecroy',)),
+             #lecr = (instruments.lecroy_wavemaster, ('lecroy',)),
+             lecr = (instruments.lecroy_wavemaster, ('TCPIP0::LCRY0829N67924.mshome.net::inst0::INSTR',)),
              # acq board
              acq1 = (instruments.Acq_Board_Instrument, ('127.0.0.1', 50000)),
              acq2 = (instruments.Acq_Board_Instrument, ('127.0.0.1', 50001)),
