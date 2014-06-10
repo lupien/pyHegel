@@ -1396,6 +1396,7 @@ class agilent_PNAL(visaInstrumentAsync):
         xaxis = kwarg.get('xaxis', True)
         ch = kwarg.get('ch', None)
         traces = kwarg.get('traces', None)
+        cook = kwarg.get('cook', False)
         if ch != None:
             self.current_channel.set(ch)
         traces = self._fetch_traces_helper(traces)
@@ -1414,7 +1415,9 @@ class agilent_PNAL(visaInstrumentAsync):
         else:
             multi = []
         # we don't handle cmplx because it cannot be saved anyway so no header or graph
-        if unit == 'db_deg':
+        if cook:
+            names = ['cook_val']
+        elif unit == 'db_deg':
             names = ['dB', 'deg']
         else:
             names = ['real', 'imag']
@@ -1436,7 +1439,7 @@ class agilent_PNAL(visaInstrumentAsync):
         else: # traces == None
             traces = ch_list.keys()
         return traces
-    def _fetch_getdev(self, ch=None, traces=None, unit='default', mem=False, xaxis=True):
+    def _fetch_getdev(self, ch=None, traces=None, unit='default', mem=False, xaxis=True, cook=False):
         """
            options available: traces, unit, mem and xaxis
             -traces: can be a single value or a list of values.
@@ -1446,13 +1449,24 @@ class agilent_PNAL(visaInstrumentAsync):
                        'cmplx'  (complexe number), Note that this cannot be written to file
             -mem:    when True, selects the memory trace instead of the active one.
             -xaxis:  when True(default), the first column of data is the xaxis
+            -cook:   when True (default is False) returns the values from the display format
+                     They include the possible effects from trace math(edelay, transforms, gating...)
+                     as well as smoothing. When this is selected, unit has no effect.
+                     Note that not all the necessary settings are saved in the file headers.
+                     Also it will NOT work when the format is complex (Smith, Polar ...)
         """
         if ch != None:
             self.current_channel.set(ch)
         traces = self._fetch_traces_helper(traces)
-        getdata = self.calc_sdata
+        if cook:
+            getdata = self.calc_fdata
+        else:
+            getdata = self.calc_sdata
         if mem:
-            getdata = self.calc_smem
+            if cook:
+                getdata = self.calc_fmem
+            else:
+                getdata = self.calc_smem
         if xaxis:
             # get the x axis of the first trace selected
             self.select_trace.set(traces[0])
@@ -1461,7 +1475,13 @@ class agilent_PNAL(visaInstrumentAsync):
             ret = []
         for t in traces:
             v = getdata.get(trace=t)
-            if unit == 'db_deg':
+            if cook:
+                # Here we assume v is the proper length, which is not the
+                # case with Smith and Polar format which returns complex numbers
+                # (so v is twice as long)
+                # TODO handle those complex formats
+                ret.append(v)
+            elif unit == 'db_deg':
                 r = 20.*np.log10(np.abs(v))
                 theta = np.angle(v, deg=True)
                 theta = self.phase_unwrap(theta)
@@ -1516,16 +1536,21 @@ class agilent_PNAL(visaInstrumentAsync):
                 mxy = 'marker_y'
             else:
                 mxy = 'marker_x'
-            extra = self._conf_helper('current_mkr', 'marker_format', 'marker_trac_func', 'marker_trac_en',
+            extra = self._conf_helper('current_mkr', 'marker_format', 'trace_format', 'marker_trac_func', 'marker_trac_en',
                               mxy, 'marker_discrete_en', 'marker_target')
+        cook = False
         if dev_obj in [self.readval, self.fetch]:
+            cook = options.get('cook', False)
             traces_opt = self._fetch_traces_helper(options.get('traces'))
             cal = []
             traces = []
+            fmts = []
             for t in traces_opt:
                 cal.append(self.calib_en.get(trace=t))
                 name, param = self.select_trace.choices[t]
                 traces.append(name+'='+param)
+                if cook:
+                    fmts.append(self.trace_format.get())
         elif dev_obj == self.snap_png:
             traces = cal='Unknown'
         else:
@@ -1534,6 +1559,8 @@ class agilent_PNAL(visaInstrumentAsync):
             name, param = self.select_trace.choices[t]
             traces = name+'='+param
         extra += ['calib_en=%r'%cal, 'selected_trace=%r'%traces]
+        if cook:
+            extra += ['trace_format=%r'%fmts]
         base = self._conf_helper('current_channel', 'freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
                                  'power_en', 'power_couple',
                                  'power_slope', 'power_slope_en',
@@ -1602,6 +1629,8 @@ class agilent_PNAL(visaInstrumentAsync):
         self.edelay_length_unit = devCalcOption('CALC{ch}:CORR:EDEL:UNIT', choices=ChoiceStrings('METer', 'FEET', 'INCH'))
         self.edelay_length_medium = devCalcOption('CALC{ch}:CORR:EDEL:MEDium', choices=ChoiceStrings('COAX', 'WAVEguide'))
         self.edelay_time = devCalcOption('CALC{ch}:CORR:EDEL', str_type=float, min=-10, max=10, doc='Set delay in seconds')
+        data_format = ChoiceStrings('MLINear', 'MLOGarithmic', 'PHASe', 'UPHase', 'IMAGinary', 'REAL', 'POLar', 'SMITh', 'SADMittance', 'SWR', 'GDELay', 'KELVin', 'FAHRenheit', 'CELSius')
+        self.trace_format = devCalcOption('CALCulate{ch}:FORMat', choices=data_format) # needed when marker_format is 'DEF'
         self.calib_en = devCalcOption('CALC{ch}:CORR', str_type=bool)
         self.snap_png = scpiDevice(getstr='HCOPy:SDUMp:DATA:FORMat PNG;:HCOPy:SDUMp:DATA?', raw=True, str_type=_decode_block_base, autoinit=False)
         self.snap_png._format['bin']='.png'
@@ -1801,19 +1830,26 @@ class agilent_ENA(agilent_PNAL):
                 mxy = 'marker_y'
             else:
                 mxy = 'marker_x'
-            extra = self._conf_helper('current_mkr', 'marker_trac_func', 'marker_trac_en', mxy,
+            extra = self._conf_helper('current_mkr', 'marker_trac_func', 'trace_format', 'marker_trac_en', mxy,
                               'marker_discrete_en', 'marker_target')
+        cook = False
         if dev_obj in [self.readval, self.fetch]:
+            cook = options.get('cook', False)
             traces_opt = self._fetch_traces_helper(options.get('traces'))
             traces = []
+            fmts = []
             for t in traces_opt:
                 name, param = self.select_trace.choices[t]
                 traces.append(name+'='+param)
+                if cook:
+                    fmts.append(self.trace_format.get())
         else:
             traces_opt = self._fetch_traces_helper(None) # get all traces
             name, param = self.select_trace.choices[self.select_trace.getcache()]
             traces = name+'='+param
         extra += ['selected_trace=%r'%traces]
+        if cook:
+            extra += ['trace_format=%r'%fmts]
         if self._is_E5071C:
             base = self._conf_helper('current_channel',
                                  'calib_en', 'freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
@@ -1896,6 +1932,8 @@ class agilent_ENA(agilent_PNAL):
             return devChOption(*arg, **kwarg)
         # select_trace needs to be set for most of the calc commands
         self.trace_meas = devCalcOption('CALCulate{ch}:PARameter{trace}:DEFine')
+        data_format = ChoiceStrings('MLINear', 'MLOGarithmic', 'PHASe', 'UPHase', 'PPHase', 'IMAGinary', 'REAL', 'POLar', 'PLINear', 'PLOGarithmic', 'SMITh', 'SADMittance', 'SLINear', 'SCOMplex', 'SLOGarithmic', 'SWR', 'GDELay')
+        self.trace_format = devCalcOption('CALCulate{ch}:FORMat', choices=data_format) # needed when marker_format is 'DEF'
         self.calib_en = devChOption('SENSe{ch}:CORRection:STATe', str_type=bool)
         self.cont_trigger = devChOption('INITiate{ch}:CONTinuous', str_type=bool)
         self.bandwidth = devChOption('SENSe{ch}:BANDwidth', str_type=float, setget=True) # can obtain min max
@@ -2039,19 +2077,26 @@ class agilent_FieldFox(agilent_PNAL):
                 mxy = 'marker_y'
             else:
                 mxy = 'marker_x'
-            extra = self._conf_helper('current_mkr', 'select_trace', 'marker_en', mxy,
+            extra = self._conf_helper('current_mkr', 'marker_en', mxy,
                               'marker_data_mem_sel', 'marker_format', 'trace_format')
+        cook = False
         if dev_obj in [self.readval, self.fetch]:
+            cook = options.get('cook', False)
             traces_opt = self._fetch_traces_helper(options.get('traces'))
             traces = []
+            fmts = []
             for t in traces_opt:
                 name, param = self.select_trace.choices[t]
                 traces.append("%s=%s"%(name,param))
+                if cook:
+                    fmts.append(self.trace_format.get())
         else:
             traces_opt = self._fetch_traces_helper(None) # get all traces
             name, param = self.select_trace.choices[self.select_trace.getcache()]
             traces = "%s=%s"%(name,param)
         extra += ['selected_trace=%r'%traces]
+        if cook:
+            extra += ['trace_format=%r'%fmts]
         base = self._conf_helper('installed_options', 'current_mode',
                                  'bias_en', 'bias_volt', 'bias_src_state', 'bias_volt_meas', 'bias_curr_meas',
                                  'power_mode_port1', 'power_dbm_port1',
