@@ -2,8 +2,10 @@
 # vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 
 import numpy as np
-import zhinst.ziPython as zi
-import zhinst.utils as ziu
+#import zhinst.ziPython as zi
+#import zhinst.utils as ziu
+zi = None
+ziu = None
 
 from instruments_base import BaseInstrument,\
                             BaseDevice, scpiDevice, InvalidAutoArgument,\
@@ -239,6 +241,9 @@ class zurich_UHF(BaseInstrument):
         """
         By default will use the first zi device available.
         """
+        global zi, ziu
+        import zhinst.ziPython as zi
+        import zhinst.utils as ziu
         # The SRQ for this intrument does not work
         # as of version 7.2.1.0
         timeout = 500 #ms
