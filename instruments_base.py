@@ -1049,7 +1049,10 @@ class BaseInstrument(object):
                 val = repr(devname)
                 devname = 'options'
             else:
-                val = _repr_or_string(getattr(self, devname).getcache())
+                try:
+                    val = _repr_or_string(getattr(self, devname).getcache())
+                except AttributeError:
+                    val = _repr_or_string(getattr(self, devname)())
             ret.append('%s=%s'%(devname, val))
         return ret
     def read(self):
@@ -1118,6 +1121,12 @@ class BaseInstrument(object):
             ret += s+" = "+repr(val)+"\n"
         np.set_printoptions(**poptions)
         return ret
+    def idn(self):
+        """
+        This method should return a string that uniquely identify the instrument.
+        For scpi it is often: <company name>,<model number>,<serial number>,<firmware revision>
+        """
+        return "Undefined identification"
     def _info(self):
         return self.find_global_name(), self.__class__.__name__, id(self)
     def __repr__(self):
