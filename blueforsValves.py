@@ -325,7 +325,7 @@ import os
 # We can use that to identify which one it is.
 
 bluefors_serial = {'0158748E':'BF0312-03',
-                   '015572FC':'BF0312-02'}
+                   '015873C4':'BF0312-02'}
 def get_bluefors_sn():
     lst = get_all_usb() # defined below
     for v,p,s in lst:
