@@ -251,8 +251,6 @@ class zurich_UHF(BaseInstrument):
         #  sweep, record, .... and renders them unusable
         # To free up the memory of sweep, call sweep.clear() before deleting
         # (or replacing) it.
-        # TODO get version 4 to work (it adds timestamps to many commands
-        #                             so dictionnary get like in idn need to change)
         APIlevel = 4 # 1 or 4 for version 14.02
         self._zi_daq = zi.ziDAQServer(host, port, APIlevel)
         self._zi_record = self._zi_daq.record(10, timeout) # 10s length
@@ -1075,8 +1073,9 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 
 import ctypes
 import weakref
-from ctypes import Structure, Union, pointer, POINTER, byref,\
-                   c_int, c_longlong, c_ulonglong, c_short, c_ushort, c_uint,\
+from numpy.ctypeslib import as_array
+from ctypes import Structure, Union, POINTER, byref, sizeof, addressof, resize,\
+                   c_int, c_int16, c_int32, c_short, c_ushort, c_uint,\
                    c_double, c_float,\
                    c_uint32, c_uint8, c_uint16, c_int64, c_uint64,\
                    c_void_p, c_char_p, c_char, c_ubyte, create_string_buffer
@@ -1085,6 +1084,16 @@ c_uint8_p = c_char_p # POINTER(c_uint8)
 c_uint32_p = POINTER(c_uint32)
 
 from instruments_lecroy import StructureImproved
+
+try:
+    warnings
+    #print "We are reloading this module, no need to add the filter again"
+except NameError:
+    import warnings
+    # The RE are done with match (they have to match from the start of the string)
+    # This filters a warning when using ctypeslib as_array on a ctypes array.
+    #  http://stackoverflow.com/questions/4964101/pep-3118-warning-when-using-ctypes-array-as-numpy-array
+    warnings.filterwarnings('ignore', 'Item size computed from the PEP 3118 buffer format string does not match the actual item size.', RuntimeWarning, r'numpy\.ctypeslib')
 
 ziDoubleType = c_double
 ziIntegerType = c_int64
@@ -1097,7 +1106,6 @@ MAX_EVENT_SIZE = 0x400000
 #MAX_BINDATA_SIZE = 0x10000
 
 class DemodSample(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_ = [('timeStamp', ziTimeStampType),
                 ('x', c_double),
                 ('y', c_double),
@@ -1109,96 +1117,250 @@ class DemodSample(StructureImproved):
                 ('auxIn1', c_double) ]
 
 class AuxInSample(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_ = [('timeStamp', ziTimeStampType),
                 ('ch0', c_double),
                 ('ch1', c_double) ]
 
 class DIOSample(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_ = [('timeStamp', ziTimeStampType),
                 ('bits', c_uint32),
                 ('reserved', c_uint32) ]
 
 TREE_ACTION = {0:'removed', 1:'add', 2:'change'}
 class TreeChange(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_ = [('timeStamp', ziTimeStampType),
                 ('action', c_uint32),
                 ('name', c_char*32) ]
 
 class TreeChange_old(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_ = [('Action', c_uint32),
                 ('Name', c_char*32) ]
 
 
-# TODO: find a way to display all the *0 stuff
-class ByteArrayData(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
+# ctypes in Python 2.6.2 at least has a bug that prevents
+# subclassing arrays unless _length_ and _type_ are redefined
+# create a metaclass to automatically do that transformation
+_ctypes_array_metabase = (c_uint8*4).__class__
+class _ctypes_array_metabase_fix(_ctypes_array_metabase):
+    def __new__(mcls, name, bases, d):
+        d['_length_'] = bases[0]._length_
+        d['_type_'] = bases[0]._type_
+        return super(_ctypes_array_metabase_fix, mcls).__new__(mcls, name, bases, d)
+
+# TODO Fix the ctypes.sizeof instruction which returns the base size, not the
+# augmented size of the structure. I am not sure if it is possible
+class StructureImproved_extend(StructureImproved):
+    """
+    Adds to StructImproved a way to extend the last entry.
+    a _mask_ variable containing (src, dst), both strings
+    while replace access to src with calls to _dst_get, and assignment to src
+    with calls to _dst_set. This can be useful for structure that have a last
+    of variable length.
+    If _mask_ is just a string, it replaces that entry with
+    _mask_default_set, _mask_default_get.
+    They both use the string in _mask_lengthvar to access a size variable for
+    the mask attribute
+    They also use the type in _mask_basetype as the base type of the array.
+    And the use the _mask_get_conv to convert from the new proper ctype structure
+    to something else. By default the function tries to return a numpy array,
+    unless the basetype is c_char, in which case it returns the type as is.
+    By default c_char arrays are return with .value (zero terminated string), to have them
+    return .raw, set attribute _mask_char_raw to True
+    It will also make the set_data_size method work (assuming the variable to replace is the last one)
+    You can return the unmakes variable as _maskname_raw for a masked variable called maskname
+    """
+    _mask_ = (None, '')
+    _mask_lengthvar = ''
+    _mask_basetype = c_ubyte
+    _mask_char_raw = False
+    @staticmethod
+    def _normalize_mask(mask):
+        if isinstance(mask, basestring):
+            mask = (mask, 'mask_default')
+        return mask
+    def __setattr__(self, name, value):
+        mask = self._normalize_mask(self._mask_)
+        if name == mask[0]:
+            getattr(self, '_'+mask[1]+'_set')(value)
+        else:
+            super(StructureImproved_extend, self).__setattr__(name, value)
+    def __getattribute__(self, name):
+        mask = super(StructureImproved_extend, self).__getattribute__('_mask_')
+        normalize = super(StructureImproved_extend, self).__getattribute__('_normalize_mask')
+        mask = normalize(mask)
+        if name == mask[0]:
+            name = '_'+mask[1]+'_get'
+            return super(StructureImproved_extend, self).__getattribute__(name)()
+        elif name == '_'+mask[0]+'_raw':
+            return super(StructureImproved_extend, self).__getattribute__(mask[0])
+        else:
+            return super(StructureImproved_extend, self).__getattribute__(name)
+    def _mask_get_offset(self):
+        mask = self._normalize_mask(self._mask_)
+        return getattr(self.__class__, mask[0]).offset
+    def _mask_get_count(self):
+        # returns the number of elements, used for resize and newtype
+        return getattr(self, self._mask_lengthvar)
+    def _mask_get_conv(self, cdata):
+        # This should return an object that can be assigned to
+        cnt = self._mask_get_count()
+        if self._mask_basetype == c_char:
+            return cdata
+        if cnt > 0:
+            # this can produce the warning we filter above (about PEP 3118)
+            return as_array(cdata)
+        else:
+            return cdata
+    def set_data_size(self, n):
+        """
+        Use this instead of changing the count directly. It will properly resize
+        the structure.
+        It assumes the variable to mask is the last element of the structure.
+        """
+        mask = self._normalize_mask(self._mask_)
+        if mask[1] != 'mask_default':
+            raise NotImplementedError('This function is only implemented when using the default mask. Subclasses should overwrite this.')
+        setattr(self, self._mask_lengthvar, n)
+        offset = self._mask_get_offset()
+        cnt = self._mask_get_count()
+        t = self._mask_basetype
+        newsize = offset + cnt * sizeof(t)
+        minsize = sizeof(self)
+        newsize = max(minsize, newsize)
+        resize(self, newsize)
+    def _mask_default_get(self):
+        #print 'Get called'
+        cnt = self._mask_get_count()
+        #cnt = min(cnt, 1024*1024)
+        newtype = self._mask_basetype * cnt
+        if self._mask_basetype == c_char:
+            # we now deal with character arrays.
+            if self._mask_char_raw:
+                # define a new class that shows the raw data when displayed with repr
+                newtype = _ctypes_array_metabase_fix('tmp_array_class', (newtype,), dict(__repr__= lambda s: repr(s.raw)))
+            else:
+                # define a new class that shows the value data when displayed with repr
+                newtype = _ctypes_array_metabase_fix('tmp_array_class', (newtype,), dict(__repr__= lambda s: repr(s.value)))
+        offset = self._mask_get_offset()
+        cdata = newtype.from_address(addressof(self) + offset)
+        return self._mask_get_conv(cdata)
+    def _mask_default_set(self, val):
+        #print 'set called'
+        self._mask_default_get()[:] = val
+
+class ByteArrayData(StructureImproved_extend):
     _fields_ = [('length', c_uint32),
                 ('bytes', c_char*0) ] # c_uint8*0
+    _mask_ = 'bytes'
+    _mask_basetype = c_char
+    _mask_lengthvar = 'length'
+    _mask_char_raw = True
 
-class ScopeWave(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
+
+class ScopeWave_old(StructureImproved_extend):
     _fields_ = [('dt', c_double),
                 ('ScopeChannel', c_uint),
                 ('TriggerChannel', c_uint),
                 ('BWLimit', c_uint),
                 ('Count', c_uint),
                 ('Data', c_short*0) ]
+    _mask_ = 'Data'
+    _mask_basetype = c_short
+    _mask_lengthvar = 'Count'
 
 class ziDoubleTypeTS(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_ = [('timeStamp', ziTimeStampType),
                 ('value', ziDoubleType) ]
 
 class ziIntegerTypeTS(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_ = [('timeStamp', ziTimeStampType),
                 ('value', ziIntegerType) ]
 
-class ByteArrayDataTS(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
+class ByteArrayDataTS(StructureImproved_extend):
     _fields_ = [('timeStamp', ziTimeStampType),
                 ('length', c_uint32),
                 ('bytes', c_char*0) ] # c_uint8*0
+    _mask_ = 'bytes'
+    _mask_basetype = c_char
+    _mask_lengthvar = 'length'
+    _mask_char_raw = True
 
-class ZIScopeWave(StructureImproved): # Changed a lot on version 14.02
-    _names_cache = [] # every sub class needs to have its own cache
+
+# These will display the data instead of the class name
+class c_uint8x4(c_uint8*4):
+    __metaclass__ = _ctypes_array_metabase_fix
+    def __repr__(self):
+        return repr(self[:])
+
+class c_floatx4(c_float*4):
+    __metaclass__ = _ctypes_array_metabase_fix
+    def __repr__(self):
+        return repr(self[:])
+
+class ScopeWave(StructureImproved_extend): # Changed a lot on version 14.02
     _fields_ = [('timeStamp', ziTimeStampType),
                 ('triggerTimeStamp', ziTimeStampType), # can be between samples
                 ('dt', c_double), # time between samples
-                ('dt', c_double),
-                ('channelEnable', c_uint8*4), # bool for enabled channel
-                ('channelInput', c_uint8*4), # input source for each channel (0-1: input1-2, 2-3: trigger in1-2, 4-7:Aux out1-4, 8-9:Aux in 1-2)
+                ('channelEnable', c_uint8x4), # bool for enabled channel
+                ('channelInput', c_uint8x4), # input source for each channel (0-1: input1-2, 2-3: trigger in1-2, 4-7:Aux out1-4, 8-9:Aux in 1-2)
                 ('triggerEnable', c_uint8), # bit0: rising edge enable, bit1: falling edge enable (enable=1)
                 ('triggerInput', c_uint8), # same as channelInput
                 ('reserved0', c_uint8*2),
-                ('channelBWLimit', c_uint8*4), # per channel, bit0: off=0, on=1, bit1-7: reserved
-                ('channelMath', c_uint8*4), # Math(averaging...) per channel, bit0-7: reserved
-                ('channelScaling', c_float*4),
+                ('channelBWLimit', c_uint8x4), # per channel, bit0: off=0, on=1, bit1-7: reserved
+                ('channelMath', c_uint8x4), # Math(averaging...) per channel, bit0-7: reserved
+                ('channelScaling', c_floatx4),
                 ('sequenceNumber', c_uint32),
                 ('segmentNumber', c_uint32),
                 ('blockNumber', c_uint32), # large scope shots comes in multiple blocks that need to be concatenated
                 ('totalSamples', c_uint64),
                 ('dataTransferMode', c_uint8), # SingleTransfer = 0, BlockTransfer = 1, ContinuousTransfer = 3, FFTSingleTransfer = 4
                 ('blockMarker', c_uint8),  # bit0: 1=end marker
-                ('flags', c_uint8),
-                ('sampleFormat', c_uint8),
-                ('sampleCount', c_uint32),
+                ('flags', c_uint8),  # bit0: data lost detected(samples are 0), bit1: missed trigger, bit2: Transfer failure (corrupted data)
+                ('sampleFormat', c_uint8), # 0=int16, 1=int32, 2=float, 4=int16interleaved, 5=int32interleaved, 6=float interleaved
+                ('sampleCount', c_uint32), # number of samples in one channel, the same in the others
                 ('Data', c_short*0) ] # Data can be int16, int32 or float
+    _mask_ = 'Data'
+    #_mask_basetype = c_short
+    _mask_lengthvar = 'sampleCount'
+    # Warning: you need to set channel_Enable and sampleFormat appropriately before calling set_data_size
+    #  set_data_size adjusts sampleCount directly but also reserves space according to that
+    #  and sampleFormat and channelEnable
+    @property
+    def _mask_basetype(self):
+        fmt = self.sampleFormat & 3
+        types = [c_int16, c_int32, c_float]
+        return types[fmt]
+    def _get_nch(self):
+        nch = 0
+        for i in range(4):
+            if self.channelEnable[i]:
+                nch += 1
+        return nch
+    def _mask_get_count(self):
+        nch = self._get_nch()
+        return self.sampleCount * nch
+    def _mask_get_conv(self, cdata):
+        newd = super(ScopeWave, self)._mask_get_conv(cdata)
+        if isinstance(newd, np.ndarray):
+            nch = self._get_nch()
+            if nch > 1:
+                # TODO figure out the data structure for interleaved or not
+                #   I have not been able to produce data with nch>1 (14.02). So not checked.
+                if self.sampleFormat & 4: #interleaved
+                    newd.shape=(-1, nch)
+                else:
+                    newd.shape=(nch, -1)
+        return newd
 
-class ZIPWASample(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
+
+class PWASample(StructureImproved):
     _fields_ = [('binPhase', c_double),
                 ('x', c_double),
                 ('y', c_double),
                 ('countBin', c_uint32),
                 ('reserved', c_uint32) ]
 
-class ZIPWAWave(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
+class PWAWave(StructureImproved_extend):
     _fields_ = [('timeStamp', ziTimeStampType),
                 ('sampleCount', c_uint64),
                 ('inputSelect', c_uint32),
@@ -1211,8 +1373,18 @@ class ZIPWAWave(StructureImproved):
                 ('overflow', c_uint8), #bit0: data accumulator overflow, bit1: counter at limit, bit7: invalid (missing frames), other bits are reserved
                 ('commensurable', c_uint8),
                 ('reservedUInt', c_uint32),
-                ('data', ZIPWASample*0) ]
-
+                ('data', PWASample*0) ]
+    _mask_ = 'data'
+    _mask_basetype = PWASample
+    _mask_lengthvar = 'sampleCount'
+    def _mask_get_conv(self, cdata):
+        # This should return an object that can be assigned to
+        cnt = self._mask_get_count()
+        if cnt > 0:
+            dt = [('binPhase', np.double), ('x', np.double), ('y', np.double), ('countBin', np.int32), ('reserved',np.int32)]
+            return np.frombuffer(cdata, dtype=dt).view(np.recarray)
+        else:
+            return cdata
 
 # These point to the first element of DATA with the correct type.
 class ziEventUnion(Union):
@@ -1228,9 +1400,9 @@ class ziEventUnion(Union):
                 ('SampleDemod', POINTER(DemodSample)),
                 ('SampleAuxIn', POINTER(AuxInSample)),
                 ('SampleDIO', POINTER(DIOSample)),
-                ('ScopeWave', POINTER(ZIScopeWave)),
-                ('ScopeWave_old', POINTER(ScopeWave)),
-                ('pwaWave', POINTER(ZIPWAWave)) ]
+                ('ScopeWave', POINTER(ScopeWave)),
+                ('ScopeWave_old', POINTER(ScopeWave_old)),
+                ('pwaWave', POINTER(PWAWave)) ]
 
 ziAPIDataType_vals = {0:'None', 1:'Double', 2:'Integer', 3:'SampleDemod', 4:'ScopeWave_old',
                  5:'SampleAuxIn', 6:'SampleDIO', 7:'ByteArray', 16:'Tree_old',
@@ -1238,23 +1410,40 @@ ziAPIDataType_vals = {0:'None', 1:'Double', 2:'Integer', 3:'SampleDemod', 4:'Sco
                  8:'pwaWave'}
 
 class ziEvent(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_ = [('valueType', ziAPIDataType),
                 ('count', c_uint32),
                 ('path', c_char*MAX_PATH_LEN), # c_uint8*MAX_PATH_LEN
                 ('value', ziEventUnion),
                 ('data', c_char*MAX_EVENT_SIZE) ] # c_uint8*MAX_EVENT_SIZE
+    def _init_pointer(self):
+        """
+        Use this for testing. It properly initializes the value union pointers.
+        """
+        self.value.Void = addressof(self) + ziEvent.data.offset
+    def get_union(self):
+        """
+        This returns the correct pointer. You can acces the data
+        with the contents method or by indexing [0], [1] (when count>0)
+        """
+        if self.count == 0 or self.valueType == 0:
+            return None
+        return getattr(self.value, ziAPIDataType_vals[self.valueType])
+    @property
+    def first_data(self):
+        data = self.get_union()
+        if data != None:
+            return data.contents
     def __repr__(self):
         if self.count == 0:
             return 'ziEvent(None)'
-        data = getattr(self.value, ziAPIDataType_vals[self.valueType])
+        data = self.get_union()
         return "zevent('%s', count=%i, data0=%r)"%(self.path, self.count, data.contents)
     def show_all(self, multiline=True, show=True):
         if self.count == 0:
             strs = ['None']
         else:
             strs = ['Path=%s'%self.path,'Count=%i'%self.count]
-            data = getattr(self.value, ziAPIDataType_vals[self.valueType])
+            data = self.get_union()
             for i in range(self.count):
                 strs.append('data_%i=%r'%(i, data[i]))
         if multiline:
@@ -1318,7 +1507,7 @@ class ziAPI(object):
         self._last_result = 0
         self._ziDll = ctypes.CDLL('/Program Files/Zurich Instruments/LabOne/API/C/lib/ziAPI-win32.dll')
         self._conn = ziConnection()
-        # skipped ziAPIAllocateEventEx
+        # skipped ziAPIAllocateEventEx: example do no use it, they say to free it but not how. Is it just malloc?
         self._makefunc('ziAPIInit', [POINTER(ziConnection)],  prepend_con=False)
         self._makefunc('ziAPIDestroy', [] )
         self._makefunc('ziAPIGetRevision', [POINTER(c_uint)], prepend_con=False )

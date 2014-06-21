@@ -261,6 +261,13 @@ IST? IST? Individual STatus reads the current state of IEEE 488.
 
 # get structure with print osc.ask('TeMPLate?')
 
+class _StructureImprovedMeta(Structure.__class__):
+    # Using this metaclass will add a separate cache to each new subclass
+    def __init__(cls, name, bases, d):
+        super(_StructureImprovedMeta, cls).__init__(name, bases, d)
+        cls._names_cache = [] # every sub class needs to have its own cache
+
+
 class StructureImproved(Structure):
     """
     This adds to the way Structure works (structure elements are
@@ -272,8 +279,12 @@ class StructureImproved(Structure):
     -can print a more readable version of the structure
     Note that it can be initialized with positional arguments or keyword arguments.
     And changed later with update.
+    You probably cannot subclass this structure (self._fields_ then only contains
+    a fraction of the names.)
     """
-    _names_cache = [] # every sub class needs to have its own cache
+    # TODO fix the problem of not being able to subclass (_fields_ does not habe all names)
+    __metaclass__ = _StructureImprovedMeta
+    _names_cache = [] # This gets overwritten but metaclass so that all subclass have their own list
     def _get_names(self):
         if self._names_cache == []:
             self._names_cache.extend([n for n,t in self._fields_])
@@ -316,7 +327,6 @@ class StructureImproved(Structure):
             return ret
 
 class time_stamp(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_=[("seconds", c_double),
               ("minutes", c_int8),
               ("hours", c_int8),
@@ -330,7 +340,6 @@ class time_stamp(StructureImproved):
                                               self.minutes, self.seconds)
 
 class WAVEDESC(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _pack_ = 2
     _fields_ = [("DESCRIPTOR_NAME", c_char*16),
               ("TEMPLATE_NAME", c_char*16),
@@ -393,16 +402,13 @@ class WAVEDESC(StructureImproved):
         return [(name, getattr(self,name)) for name, t in self._fields_]
 
 class USERTEXT(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_ = [("TEXT", c_char*160)]
 
 class TRIGTIME(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_ = [("TRIGGER_TIME", c_double),
               ("TRIGGER_OFFSET", c_double)]
 
 class RISTIME(StructureImproved):
-    _names_cache = [] # every sub class needs to have its own cache
     _fields_ = [("RIS_OFFSET", c_double)]
 
 # The structure has an int which is the 0 based index into the following lists
