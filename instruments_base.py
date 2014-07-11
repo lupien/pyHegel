@@ -282,6 +282,8 @@ def _write_dev(val, filename, format=format, first=False):
         #  because of .T
         if bin == '.npy':
             np.save(f, val)
+        elif bin =='.npz':
+            np.savez_compressed(f,val)
         elif bin:
             if isinstance(val, basestring):
                 f.write(val)
