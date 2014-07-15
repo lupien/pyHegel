@@ -18,6 +18,28 @@ from instruments_base import ChoiceIndex as _ChoiceIndex
 from instruments_logical import FunctionDevice
 from scipy.special import gamma
 
+def _get_zi_python_version(dev=None, host='localhost', port=8004):
+    if dev == None:
+        dev = zi.ziDAQServer(host, port, 1)
+    python_ver = dev.version()
+    python_rev = dev.revision()
+    return python_ver, python_rev
+
+_error_connection_invalid = 'ZIAPIException with status code: 32780. Connection invalid'
+def _check_zi_python_version(*arg, **kwarg):
+    try:
+        python_ver, python_rev = _get_zi_python_version(*arg, **kwarg)
+    except RuntimeError as e:
+        if e.message == _error_connection_invalid:
+            # We get this when the server does not accept the connection because the client is too old
+            python_ver, python_rev = '0.0', 0
+        else:
+            raise
+    python_ver = [int(v) for v in python_ver.split('.')]
+    if python_ver[0] < 14 or python_ver[1] < 02 or python_rev < 23152:
+        # installer 23225 provdes python revision 23152
+        raise RuntimeError("The ziPython is to old. Install at least ziPython2.7_ucs2-14.02.23225-win32.exe")
+
 class ChoiceIndex(_ChoiceIndex):
     def __call__(self, input_val):
         return self[input_val]
@@ -252,7 +274,19 @@ class zurich_UHF(BaseInstrument):
         # To free up the memory of sweep, call sweep.clear() before deleting
         # (or replacing) it.
         APIlevel = 4 # 1 or 4 for version 14.02
-        self._zi_daq = zi.ziDAQServer(host, port, APIlevel)
+        try:
+            self._zi_daq = zi.ziDAQServer(host, port, APIlevel)
+        except RuntimeError as e:
+            if e.message == _error_connection_invalid:
+                # we are probably using the wrong version, check that.
+                _check_zi_python_version(host=host, port=port)
+            if e.message == 'ZIAPIException with status code: 32778. Unable to connect socket':
+                raise RuntimeError('Unable to connect to server. Either you have the wrong host/port '
+                                   'or the server is not running. On Windows you need to start (from start menu): '
+                                   'Zurich Instrument/LabOne Servers/LabOne Data Server UHF (make sure that at least '
+                                   'the DATA server runs. The WEB can run but it is not used from python.)')
+            raise
+        _check_zi_python_version(self._zi_daq)
         self._zi_record = self._zi_daq.record(10, timeout) # 10s length
         self._zi_sweep = self._zi_daq.sweep(timeout)
         self._zi_zoomFFT = self._zi_daq.zoomFFT(timeout)
@@ -513,8 +547,8 @@ class zurich_UHF(BaseInstrument):
         return timestamp/self.clockbase.getcache()
     def idn(self):
         name = 'Zurich Instrument'
-        python_ver = self._zi_daq.version()
-        python_rev = str(self._zi_daq.revision())
+        python_ver, python_rev = _get_zi_python_version(self._zi_daq)
+        python_rev = str(python_rev)
         server_ver = self.ask('/zi/about/version')[0]
         #server_rev = self.ask('/zi/about/revision')[0]
         server_rev = self.ask('/zi/about/revision', t='int')
