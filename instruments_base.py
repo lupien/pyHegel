@@ -283,7 +283,7 @@ def _write_dev(val, filename, format=format, first=False):
         if bin == '.npy':
             np.save(f, val)
         elif bin =='.npz':
-            np.savez_compressed(f,val)
+            np.savez_compressed(f, val)
         elif bin:
             if isinstance(val, basestring):
                 f.write(val)

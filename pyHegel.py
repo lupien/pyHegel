@@ -418,7 +418,8 @@ quiet_KeyboardInterrupt(True)
 #          header=['line1', 'line2']  Stuff to dump at head of new file
 #                                       it can also be a function that returns the proper list of strings
 #                                       the functions defaults to instr._current_config if available
-#          bin=False/'.npy'/'.raw'/'.png' Dump data in binary form. npy is numpy format
+#          bin=False/'.npy'/'.npz'    Dump data in binary form.
+#              '.raw'/'.png'           .npy is numpy format, .npz is from numpy.savez_compressed
 #              '.ext'/...              All of them change the extension of the file except
 #                                      if you use '.ext', then the original extension is kept
 #                                      All formats except numpy are straight dump
@@ -512,6 +513,7 @@ class _Sweep(instruments.BaseInstrument):
           bin:    To overwrite filesave format/extension can be
                   any extension like '.bin' or false to save as text.
                   with '.npy', it is saved in npy format
+                  with '.npz', it is saved using numpy.savez_compressed
     """)
     path = instruments.MemoryDevice('')
     graph = instruments.MemoryDevice(True)
