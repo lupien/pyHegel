@@ -258,6 +258,9 @@ class zurich_UHF(BaseInstrument):
      To use this instrument, the most useful devices are probably:
        fetch
        readval
+     Important methods are:
+       set_lia_mode
+       set_sweep_mode
     """
     def __init__(self, zi_dev=None, host='localhost', port=8004):
         """
@@ -301,6 +304,7 @@ class zurich_UHF(BaseInstrument):
         elif zi_dev not in self._zi_devs:
             raise ValueError, 'Device "%s" is not available'%zi_dev
         self._zi_dev = zi_dev
+        self._current_mode = 'lia'
         super(zurich_UHF, self).__init__()
     def _tc_to_enbw_3dB(self, tc=None, order=None, enbw=True):
         """
@@ -571,6 +575,14 @@ class zurich_UHF(BaseInstrument):
              system_analog_board_rev=system_analog_board_rev, system_digital_board_rev=system_digital_board_rev,
              system_fpga_rev=system_fpga_rev, system_fw_rev=system_fw_rev)
 
+    def find_all_active_channels(self):
+        current_ch = self.current_demod.getcache()
+        channels_en = []
+        for ch in range(8):
+            if self.demod_en.get(ch=ch):
+                channels_en.append(ch)
+        self.current_demod.set(current_ch)
+        return channels_en
     def _fetch_ch_helper(self, ch):
         if ch==None:
             ch = self.find_all_active_channels()
@@ -578,44 +590,75 @@ class zurich_UHF(BaseInstrument):
             ch = [ch]
         return ch
     def _fetch_getformat(self, **kwarg):
-        xaxis = kwarg.get('xaxis', True)
-        ch = kwarg.get('ch', None)
-        ch = self._fetch_ch_helper(ch)
-        if xaxis:
-            multi = ['time(s)']
-        else:
+        if self._current_mode == 'lia':
+            ch = kwarg.get('ch', None)
+            ch = self._fetch_ch_helper(ch)
+            vals = kwarg.get('vals', ['x', 'y'])
             multi = []
+            for c in ch:
+                for v in vals:
+                    multi.append('ch%i_%s'%(c,v))
+            fmt = self.fetch._format
+            fmt.update(multi=multi)
+        elif self._current_mode == 'sweep':
+            multi = []
+            multi = tuple(multi)
+            fmt = self.fetch._format
+            fmt.update(multi=multi)
+        else:
+            pass
         for c in ch:
             multi.append('ch_%s'%c)
-        fmt = self.fetch._format
-        multi = tuple(multi)
-        fmt.update(multi=multi, graph=[], xaxis=xaxis)
         return BaseDevice.getformat(self.fetch, **kwarg)
-    def _fetch_getdev(self, ch=None, xaxis=True, raw=False):
+    def _fetch_pick_help(self, d, vals):
+        ret = []
+        for v in vals:
+            x = d['x'][0]
+            y = d['x'][0]
+            z = x + 1j*y
+            if v == 'r':
+                ret.append(np.abs(z))
+            elif v == 'deg':
+                ret.append(np.angle(z, deg=True))
+            else:
+                ret.append(d[v][0])
+        return ret
+    def _fetch_getdev(self, ch=None, xaxis=True, raw=False, vals=['x', 'y']):
         """
            Options available: ch, xaxis
             -ch:    a single value or a list of values for the channels to capture
-                    a value of None selects all the active ones from C1 to C4.
-                    If obtaining more than one channels, they should have the same xaxis
-            -xaxis: Set to True (default) to return the timebase as the first colum
-            -raw: Set to true to return the vertical values as raw integers, otherwise
-                  they are converted floats
+                    a value of None selects all the active ones from 0-7.
+                    in sweep mode this does nothing
+            -xaxis: Set to True (default) to return the sweep variable (freq) as the first column
+                    in sweep mode.
+            -vals:  is a list of strings of elements to return.
+                    The strings can be 'auxin0', 'auxin1', 'dio', 'frequency'
+                    'phase', 'timestamp', 'trigger', 'x', 'y'
+                    'r', 'deg' for lia mode
+                    Note that 'phase' is not the angle from x,y (use deg for that)
+                    but instead is the phase of the ref at the point in time
         """
-        # TODO handle complex ffts...
-        ch = self._fetch_ch_helper(ch)
-        ret = []
-        first = True
-        for c in ch:
-            data = self.data.get(ch=c)
-            header = data.header
-            if xaxis and first:
-                first = False
-                ret = [header.HORIZ_INTERVAL*np.arange(header.WAVE_ARRAY_COUNT) + header.HORIZ_OFFSET]
-            if raw:
-                y = data.data1
-            else:
-                y = data.data1*header.VERTICAL_GAIN - header.VERTICAL_OFFSET
-            ret.append(y)
+        # the demod sample phase is related to timestamp, the following should return almost a constant
+        #    I get the constant to vary over 8e-5
+        # z=get(zi.demod_data); tzo = z['timestamp']
+        # while True:
+        #    z=get(zi.demod_data); t=zi.timestamp_to_s(z['timestamp']-tzo)
+        #    print ((2*pi*t*z['frequency'] - z['phase'] + 2*pi)%(2*pi))[0]
+        if self._current_mode == 'lia':
+            channels = self._fetch_ch_helper(ch)
+            current_ch = self.current_demod.getcache()
+            ret = []
+            for ch in channels:
+                d = self.demod_data.get(ch=ch)
+                ret.append(self._fetch_pick_help(d, vals))
+            self.current_demod.set(current_ch)
+        elif self._current_mode == 'sweep':
+            ret = []
+            if xaxis:
+                pass
+            ret.append(None)
+        else:
+            raise RuntimeError('invalid mode selected. Should be lia or sweep.')
         ret = np.asarray(ret)
         if ret.shape[0]==1:
             ret=ret[0]
@@ -709,8 +752,9 @@ class zurich_UHF(BaseInstrument):
 #  sweep/filename
 #  sweep/historylength
 
-        #self._devwrap('fetch', autoinit=False, trig=True)
-        #self.readval = ReadvalDev(self.fetch)
+        self._devwrap('fetch', autoinit=False, trig=True)
+        self.readval = ReadvalDev(self.fetch)
+        self.alias = self.readval
         # This needs to be last to complete creation
         super(zurich_UHF, self)._create_devs()
     def clear_history(self, src='sweep'):
@@ -730,12 +774,21 @@ class zurich_UHF(BaseInstrument):
     def sweep_stop(self):
         self._zi_sweep.finish()
     def run_and_wait(self):
-        self.sweep_start()
-        while not self.is_sweep_finished():
-            pass
+        if self._current_mode == 'sweep':
+            self.sweep_start()
+            while not self.is_sweep_finished():
+                pass
+        else:
+            sleep(self.async_delay.getcache())
     def sweep_data(self):
         """ Call after running a sweep """
         return self._flat_dict(self._zi_sweep.read())
+    def set_lia_mode(self):
+        """
+        Goes to LIA mode.
+        see also set_sweep_mode
+        """
+        self._current_mode = 'lia'
     def set_sweep_mode(self, start, stop, count, logsweep=False, src='oscs/0/freq', subs='all',
                        bw='auto', loop_count=1, mode='sequential',
                        avg_count=1, avg_n_tc=0, settle_time_s=0, settle_n_tc=15):
@@ -830,6 +883,7 @@ class zurich_UHF(BaseInstrument):
                 subs = [subs]
             for i in subs:
                 self._subscribe('/{dev}/demods/%i/sample'%i, src='sweep')
+        self._current_mode = 'sweep'
 
 # In the result data set:
 #   available: auxin0, auxin0pwr, auxin0stddev
