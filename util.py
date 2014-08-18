@@ -11,6 +11,8 @@ This module contains many utilities:
     savefig_set_enable
     savefig_enabled
     merge_all
+    print_file
+    list_printers
     blueforsTlog
     sort_file
 Note that savefig is initially disabled.
@@ -18,6 +20,8 @@ Note that savefig is initially disabled.
 
 import time
 import os
+import os.path
+import subprocess
 import numpy as np
 
 try:
@@ -227,6 +231,60 @@ def savefig(filename, *args, **kwarg):
         return
     pylab.savefig(filename, *args, **kwarg)
     _savefig_list.append(filename)
+
+#########################################################
+# Tools to handle printing
+#########################################################
+def _is_windows():
+    return os.name == 'nt'
+
+_default_printer = None
+def _get_default_printer():
+    if _is_windows():
+        import win32print
+        default = win32print.GetDefaultPrinter()
+    else:
+        s = subprocess.check_output(['lpstat', '-d'])
+        default = s.rstrip().rsplit(' ', 2)[-1]
+    return default
+
+def print_file(filename, printer=None):
+    """
+    prints filename using printer. When printer is None, it uses
+    _default_printer. If _default_printer is None (default), it will
+    use the system default printer (see list_printers)
+    """
+    default = _get_default_printer()
+    if printer == None:
+        if _default_printer != None:
+            printer = _default_printer
+        else:
+            printer = default
+    if _is_windows():
+        import win32api
+        # the function does not always handle paths with / properly so clean it first
+        # and make it absolute to be sure
+        filename = os.path.realpath(filename)
+        win32api.ShellExecute(0, 'print', filename, '/d:"%s"'%printer, None, 0)
+    else:
+        subprocess.check_call(['lp', '-d', printer, filename])
+
+def list_printers():
+    """
+    prints the default system printer and
+    lists the available printers (local and connected for windows)
+    """
+    default = _get_default_printer()
+    print 'System default printer is: %r'%default
+    if _is_windows():
+        import win32print
+        plist = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL|win32print.PRINTER_ENUM_CONNECTIONS, None, 4)
+        plist = [p['pPrinterName'] for p in plist]
+    else:
+        alls = subprocess.check_output(['lpstat', '-a'])
+        plist = [s.split(' ', 2)[0] for s in alls.rstrip().split('\n')]
+    return plist
+
 
 #########################################################
 # Convert to BlueFors Tlog format
