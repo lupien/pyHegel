@@ -101,6 +101,7 @@ def help_pyHegel():
         snap
         scope
         _process_filename
+        use_sweep_path
         make_dir
         readfile
         iprint
@@ -298,7 +299,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
 def _dev_filename(root, dev_name, npts, reuse, append=False):
     if root==None:
         name = time.strftime('%Y%m%d-%H%M%S.txt')
-        root=os.path.join(sweep.path.get(), name)
+        root = use_sweep_path(name)
     if npts == None:
         maxn = 99999
     else:
@@ -659,7 +660,7 @@ class _Sweep(instruments.BaseInstrument):
         fullpathrev = None
         fwd = True
         if filename != None:
-            basepath = os.path.join(sweep.path.get(), filename)
+            basepath = use_sweep_path(filename)
             if updown == True:
                 basepath = self._fn_insert_updown(basepath)
             ind = 0
@@ -777,6 +778,14 @@ sweep = _Sweep()
 
 wait = traces.wait
 
+def use_sweep_path(filename):
+    """
+    This functions transforms the filename using sweep.path if necessary
+    like the default transformation used in get(filename), readfile, sweep, record...
+    """
+    filename = os.path.join(sweep.path.get(), filename)
+    return filename
+
 _readfile_lastnames = []
 def readfile(filename, nojoin=False, prepend=None, getnames=False, csv='auto', dtype=None):
     global _readfile_lastnames
@@ -890,7 +899,7 @@ class _Snap(object):
         if out == None:
             raise ValueError, 'Snap. No devices set for out'
         if filename != None:
-            filename = os.path.join(sweep.path.get(), filename)
+            filename = use_sweep_path(filename)
             filename, unique_i = _process_filename(filename)
         if filename == None:
             filename = self.filename
@@ -956,7 +965,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     t = traces.Trace(time_mode=True)
     fullpath = None
     if filename != None:
-        fullpath = os.path.join(sweep.path.get(), filename)
+        fullpath = use_sweep_path(filename)
         fullpath, unique_i = _process_filename(fullpath)
         filename = os.path.basename(fullpath)
     if title == None:
@@ -1160,7 +1169,7 @@ def get(dev, filename=None, **kwarg):
     dev, kwarg = _get_dev_kw(dev, **kwarg)
     if filename != None:
         dev.force_get()
-        filename = os.path.join(sweep.path.get(), filename)
+        filename = use_sweep_path(filename)
         filename, unique_i = _process_filename(filename)
         kwarg.update(filename=filename)
     return dev.get(**kwarg)
