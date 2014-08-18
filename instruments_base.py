@@ -2155,11 +2155,12 @@ class ChoiceMultiple(ChoiceBase):
         ret = self.sep.join(ret)
         return ret
     def __contains__(self, x): # performs x in y; with y=Choice(). Used for check
+        xorig = x
         x = x.copy() # make sure we don't change incoming dict
         for k, fmt, lims in zip(self.field_names, self.fmts_type, self.fmts_lims):
             try:
                 if isinstance(fmt, ChoiceMultipleDep):
-                    fmt.set_current_vals(x)
+                    fmt.set_current_vals(xorig)
                 val = x.pop(k) # generates KeyError if k not in x
                 _general_check(val, lims=lims)
             except ValueError as e:
