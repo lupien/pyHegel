@@ -1,6 +1,19 @@
 # -*- coding: utf-8 -*-
 # vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 
+# answers obtained on phone in july 2014
+#  next version might use msi for python install (option of distutils)
+#  Juerg said set-sync--get is the safest (better than set--get). Other option
+#    would be to subscribe to the changes.
+#  time-constants in sweep (real vs calculated value).
+#    Discussed it. The conversion could be done on client side, but that requires making
+#    sure the algorithm is the same everywhere in all details. He has a similar problem
+#    with frequency when sync will be enabled (limits the number of frequency usable)
+#    Also from email (23062014): Extracting the real timeconstant is some effort.
+#      It should be done asynchronous as we otherwise diminish the sweeper speed
+#      significantly. I will put it in out ticket system. It is however not clear
+#      when I can offer a solution.
+
 import numpy as np
 #import zhinst.ziPython as zi
 #import zhinst.utils as ziu
@@ -640,6 +653,9 @@ class zurich_UHF(BaseInstrument):
         """
         # the demod sample phase is related to timestamp, the following should return almost a constant
         #    I get the constant to vary over 8e-5
+        #    From Juerg email of Jul 18, 2014, this is because:
+        #     "the number of bits transferred for the oscillator phase (16bit) is low."
+        #     frequency is a 48 bit value. The oscillator phase is only useful for syncronisation
         # z=get(zi.demod_data); tzo = z['timestamp']
         # while True:
         #    z=get(zi.demod_data); t=zi.timestamp_to_s(z['timestamp']-tzo)
@@ -720,7 +736,7 @@ class zurich_UHF(BaseInstrument):
         self.sigouts_autorange_en = ziDev_ch_sigouts('sigouts/{ch}/autorange', str_type=bool)
         self.sigouts_output_clipped = ziDev_ch_sigouts(getstr='sigouts/{ch}/over', str_type=bool)
         # There is also amplitudes/7, enables/3, enables/7, syncfallings/3 and /7, syncrisings/3 and /7
-        #   TODO find out what those are
+        #   Without the multi-frequency (MF) option signal output 1 (2) is connected to demod3 (7) see Juerg 22012014
         self.sigouts_ampl_Vp = ziDev_ch_sigouts(getstr='sigouts/{ch}/amplitudes/3', str_type=bool, doc='Amplitude A of sin wave (it goes from -A to +A without an offset')
         # TODO: triggers, SYSTEM(/EXTCLK), EXTREFS, status stats
         #       conn, inputpwas, outputpwas
@@ -850,6 +866,8 @@ class zurich_UHF(BaseInstrument):
         # It goes in auto mode. This is the same
         # behavior as before. 14.02 added auto has bw_mode=2
         # which is auto irrespective of sweep_auto_bw_fixed value.
+        # The old behavior was not change to keep backwards compatibility (Juerg 23062014)
+        #  Documentations errors should be fixed.
         if bw == None:
             self.sweep_auto_bw_mode.set('manual')
             if self.sweep_auto_bw_fixed.getcache()<=0:
@@ -916,6 +934,7 @@ class zurich_UHF(BaseInstrument):
 #  get('*') is slow and does not return sample data (because it is slow?, uses polling)
 #    As of version 14.02 it is fast
 #  get of subdevices does not work like get of main device (not option to flatten)
+#   should be changed in next version (Juerg 23062014)
 # Documentation is much improved in version 14.02
 #     pwrtemps was temps before version 14.02
 #  timeit zi.ask('/{dev}/stats/physical/digitalboard/pwrtemps/0', t='int')
@@ -959,6 +978,7 @@ class zurich_UHF(BaseInstrument):
 #                         jumbo
 #                         nics ...
 #                         porttcp portudp
+#  These might be more properly documented in next version (Juerg 23062014)
 
 # za=instruments_ZI.ziAPI()
 def _time_poll(za):
@@ -1006,6 +1026,7 @@ def _time_poll(za):
 #   Version 14.02 is now unbiased so for avg_count=n
 # sqrt((rr['ypwr']-rr['y']**2)*n/(n-1.))/rr['ystddev'] # should be all 1.
 #   This fails for n=2 because rr['ystddev'] is NaN
+#   It should be fixed in next version (Juerg 23062014) and return a real number when n=2
 #
 #  test auto time constants
 def _calc_bw(demod_result_dict, order=3):
@@ -1024,6 +1045,12 @@ def _calc_bw(demod_result_dict, order=3):
 #  repeat with
 # zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1, logsweep=True)
 # set(zi.demod_sinc_en,True)  # For 14.02 this makes the instrument crash
+#    sinc filter is not enabled yet (Juerg 23062014):
+#      We're currently working on a fix on
+#      the firmware. The next step is then support on the sweeper. This is
+#      needed as the sinc filter does only support discrete frequency values.
+#      The filter itself should be working in the next release. The sweeper
+#      support may take longer.
 # zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1) # same bandwidth calc but much slower to run
 #
 # find all available time constants
@@ -1115,18 +1142,27 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 # sweep has lots of output to the screen (can it be disabled?) (fixed in 14.02)
 #   can reenable it in 14.02 (also logs the info in a file with zi._zi_daq.setDebugLevel(2) (2 or below looks like what I had before))
 #    after that can disable it fully only by quitting python (to unload the ziPython.pyd). Using reload does not seem to work.
-#    and no debug value seems to work either.
+#    and no debug value seems to work either (confirmed by Juerg 23062014 that there is no way
+#    to redisable it)
 #
 # python says revision 20298, installer says 20315 (installer revision is head revision. installer>python is normal)
 # for 14.02 it python says 23152, installer says 23225
 #
-# echoDevice does not work (still in 14.02). It is for HF2 instruments not of UHF.
+# echoDevice does not work (still in 14.02). It is for HF2 instruments not for UHF.
+#   better documention awaits changes to properly handle synchronisation on all platforms (Juerg 23062014)
 # syncSetInt takes 250 ms (with 13.06,100 ms with 13.10, It is no longer a problem with 14.02, but sync/no sync give ~6 ms)
 #  compare
 #   timeit zi.write('/dev2021/sigins/0/on', 1, t='int')
 #   timeit zi.write('/dev2021/sigins/0/on', 1, t='int', sync=False)
 # setInt followed by getInt does not return the new value, but the old one instead
 #  For 14.02 setInt seems to behave as for setInt_Sync
+#   This is a bugfix (Juerg 23062014) and is as intended. The difference:
+#    a syncSet command will block until the value
+#    was set on the device, whereas a set command will immediately return as
+#    soon as the data server got the command.
+#    However sync-set does not help to synchronize between sessions or with streaming (subscribe)
+#    Suggest to add 100 ms if there is a need to make sure streaming data comes after change
+#    A futur sync-set might do this stream sync correctly.
 # Compare
 # s='/dev2021/demods/0/enable'
 # za.set_async(s,1); print za.getI(s); time.sleep(.1); print za.getI(s)
@@ -1151,7 +1187,18 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 # Other changes from release note 14.02 but that I could not figure out:
 # in API section
 #- Sweeper: Fix for very small sweep steps
+#   Juerg 23062014 answer:
+#    For small sweep steps the frequency epsilon for comparison was too big
+#    for UHF devices. As consequence the sweeper did not wait for the proper
+#    settling time and started immediately recording the statistics. The
+#    issue could be observed by using very small sweep steps (mHz). It can be
+#    observed by setting a large settling time constant factor. Also binary
+#    sweeps help to provoke the problem. This issue is fixed by 14.02.
 #- Sweeper: Fix for higher harmonics at low frequencies (mHz)
+#   Juerg 23062014 answer:
+#    The order was not used for the frequency matching. As consequence, for
+#    low frequencies the sweeper was waiting forever as it was never
+#    detecting the target frequency.
 
 
 ##################################################################
@@ -1632,7 +1679,7 @@ class ziAPI(object):
         self._makefunc('ziAPIListImplementations', [c_char_p, c_uint32], prepend_con=False )
         self._makefunc('ziAPIConnectEx', [c_char_p, c_uint16, ZIAPIVersion, c_char_p] )
         self._makefunc('ziAPIGetConnectionAPILevel', [POINTER(ZIAPIVersion)] )
-        # SecondsTimeStamp is depracated and does not work properly
+        # SecondsTimeStamp is depracated and does not work properly for UHF, used for HF2
         self._SecondsTimeStamp = self._ziDll.ziAPISecondsTimeStamp
         self._SecondsTimeStamp.restype = c_double
         self._SecondsTimeStamp.argtypes = [ziTimeStampType]
