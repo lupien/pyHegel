@@ -597,7 +597,8 @@ class BaseDevice(object):
         The sets and check have one positional parameter, which is the value.
         They can have multiple keyword parameters
     """
-    def __init__(self, autoinit=True, doc='', setget=False,
+    def __init__(self, autoinit=True, doc='', setget=False, allow_kw_as_dict=False,
+                  allow_missing_dict=False,
                   min=None, max=None, choices=None, multi=False, graph=True,
                   trig=False, delay=False, redir_async=None):
         # instr and name updated by instrument's _create_devs
@@ -608,6 +609,10 @@ class BaseDevice(object):
         # setget makes us get the value after setting it
         #  this is usefull for instruments that could change the value
         #  under us.
+        # allow_kw_as_dict allows the conversion of kw to a dict. There needs to be
+        # a choices.field_names list of values (like with ChoiceMultiple)
+        # allow_missing_dict, will fill the missing elements of dict with values
+        #  from a get
         self.instr = None
         self.name = 'foo'
         self._cache = None
@@ -622,6 +627,8 @@ class BaseDevice(object):
         self.min = min
         self.max = max
         self.choices = choices
+        self._allow_kw_as_dict = allow_kw_as_dict
+        self._allow_missing_dict = allow_missing_dict
         self._doc = doc
         # obj is used by _get_conf_header and _write_dev
         self._format = dict(file=False, multi=multi, xaxis=None, graph=graph,
@@ -658,8 +665,24 @@ class BaseDevice(object):
     # for cache consistency
     #    get should return the same thing set uses
     @locked_calling_dev
-    def set(self, val, **kwarg):
-        self.check(val, **kwarg)
+    def set(self, val=None, **kwarg):
+        if val == None:
+            if self._allow_kw_as_dict:
+                val = dict()
+                for k in kwarg.keys():
+                    if k in self.choices.field_names:
+                        val[k] = kwarg.pop(k)
+            else:
+                raise RuntimeError(self.perror('set requires a value.'))
+        try:
+            self.check(val, **kwarg)
+        except KeyError_Choices:
+            if not self._allow_missing_dict:
+                raise
+            old_val = self.get(**kwarg)
+            old_val.update(val)
+            val = old_val
+            self.check(val, **kwarg)
         if not CHECKING:
             self._setdev(val, **kwarg)
             if self._setget:
@@ -2168,7 +2191,7 @@ class ChoiceMultiple(ChoiceBase):
             except KeyError as e:
                 raise KeyError_Choices('key %s not found'%k)
         if x != {}:
-            raise KeyError_Choices, 'The following keys in the dictionnary are incorrect: %r'%x.keys()
+            raise KeyError_Choices('The following keys in the dictionnary are incorrect: %r'%x.keys())
         return True
     def __repr__(self):
         r = ''

@@ -335,7 +335,9 @@ def _readall(devs, formats, i, async=None):
             val = dev.get(**kwarg)
         if val == None:
             val = i
-        if isinstance(val, (list, tuple, np.ndarray)):
+        if isinstance(val, (list, tuple, np.ndarray, dict)):
+            if isinstance(val, dict):
+                val = val.values()
             if isinstance(fmt['multi'], list):
                 ret.extend(val)
             else:
@@ -804,7 +806,7 @@ readfile.__doc__ = """
 
 
 ###  set overides set builtin function
-def set(dev, value, **kwarg):
+def set(dev, value=None, **kwarg):
     """
        Change the value of device dev (or the alias for an instrument).
        The options for the device are listed as keyword arguments (**kwarg).

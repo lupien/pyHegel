@@ -1002,23 +1002,24 @@ class lakeshore_370(visaInstrument):
                                #16(4)=R. OVER, 32(5)=R. UNDER, 64(6)=T. OVER, 128(7)=T. UNDER
                                # 000 = valid
         tempco = ChoiceIndex({1:'negative', 2:'positive'})
-        self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}',
+        self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}', allow_kw_as_dict=True, allow_missing_dict=True,
                                      choices=ChoiceMultiple(['enabled', 'dwell', 'pause', 'curvno', 'tempco'],
                                                        [bool, (int, (1, 200)), (int, (3, 200)), (int, (0, 20)), tempco]))
-        self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
+        self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}', allow_kw_as_dict=True, allow_missing_dict=True,
                                       choices=ChoiceMultiple(['filter_en', 'settle_time', 'window'], [bool, (int, (1, 200)), (int, (1, 80))]))
         res_ranges = ChoiceIndex(make_choice_list([2, 6.32], -3, 7), offset=1, normalize=True)
         cur_ranges = ChoiceIndex(make_choice_list([1, 3.16], -12, -2), offset=1, normalize=True)
         volt_ranges = ChoiceIndex(make_choice_list([2, 6.32], -6, -1), offset=1, normalize=True)
         curvolt_ranges = ChoiceMultipleDep('exc_mode', {'voltage':volt_ranges, 'current':cur_ranges})
-        self.input_meas = devChOption('RDGRNG {ch},{val}', 'RDGRNG? {ch}',
+        self.input_meas = devChOption('RDGRNG {ch},{val}', 'RDGRNG? {ch}', allow_kw_as_dict=True, allow_missing_dict=True,
                                      choices=ChoiceMultiple(['exc_mode', 'exc_range', 'range', 'autorange_en', 'excitation_disabled'],
                                                        [ChoiceIndex(['voltage', 'current']), curvolt_ranges, res_ranges, bool, bool]))
         # scan returns the channel currently being read
         #  it is the channel that flashes, not necessarily the one after scan on the
         #  display (they differ when temperature control is enabled, the instrument goes back
         #  to the control channel after all readings. This command follows that.)
-        self.scan = scpiDevice('SCAN', choices=ChoiceMultiple(['ch', 'autoscan_en'], [int, bool]))
+        self.scan = scpiDevice('SCAN', allow_kw_as_dict=True, allow_missing_dict=True,
+                               choices=ChoiceMultiple(['ch', 'autoscan_en'], [int, bool]))
         #self.current_loop = MemoryDevice(1, choices=[1, 2])
         #def devLoopOption(*arg, **kwarg):
         #    options = kwarg.pop('options', {}).copy()
@@ -1027,7 +1028,8 @@ class lakeshore_370(visaInstrument):
         #    kwarg.update(options=options, options_apply=app)
         #    return scpiDevice(*arg, **kwarg)
         #self.pid = scpiDevice('PID', choices=ChoiceMultiple(['P', 'I', 'D'], float))
-        self.pid = scpiDevice('PID', choices=ChoiceMultiple(['P', 'I', 'D'], [(float, (0.001, 1000)), (float,(0, 10000)), (float, (0, 2500))]))
+        pid_ch = ChoiceMultiple(['P', 'I', 'D'], [(float, (0.001, 1000)), (float,(0, 10000)), (float, (0, 2500))])
+        self.pid = scpiDevice('PID', allow_kw_as_dict=True, allow_missing_dict=True, choices=pid_ch, multi=pid_ch.field_names, doc="You can use as set(tc3.pid, P=21)")
         self.pid_P = Dict_SubDevice(self.pid, 'P', force_default=False)
         self.pid_I = Dict_SubDevice(self.pid, 'I', force_default=False)
         self.pid_D = Dict_SubDevice(self.pid, 'D', force_default=False)
@@ -1046,9 +1048,10 @@ class lakeshore_370(visaInstrument):
                            'heater_limit', 'heater_Ohms'],
                           [(int, (1, 16)), bool, ChoiceIndex({1:'kelvin', 2:'ohm'}), (int, (1, 255)),
                            ChoiceIndex({1:'current', 2:'power'}), csetup_htrrng, (float, (1, 1e5))])
-        self.control_setup = scpiDevice('CSET', choices=csetup)
+        self.control_setup = scpiDevice('CSET', choices=csetup, allow_kw_as_dict=True, allow_missing_dict=True)
         self.control_setup_heater_limit = Dict_SubDevice(self.control_setup, 'heater_limit', force_default=False)
-        self.control_ramp = scpiDevice('RAMP', choices=ChoiceMultiple(['en', 'rate'], [bool, (float,(0.001, 10))]), doc="Activates the sweep mode. rate is in K/min.", setget=True)
+        self.control_ramp = scpiDevice('RAMP', allow_kw_as_dict=True, allow_missing_dict=True,
+                                       choices=ChoiceMultiple(['en', 'rate'], [bool, (float,(0.001, 10))]), doc="Activates the sweep mode. rate is in K/min.", setget=True)
         self.ramp_sweeping = devChOption(getstr='RAMPST?', str_type=bool)
         self.sp = scpiDevice('SETP', str_type=float)
         self.still_raw = scpiDevice('STILL', str_type=float)
