@@ -1986,6 +1986,8 @@ class dict_improved(OrderedDict):
     """
     This adds to the basic dict/OrderedDict syntax:
         -getting/setting/deleting with numerical indexing (obj[0])
+                or with slices obj[1:3] or with list of index
+                obj[[2,1,3]]. can also use list of keys (obj[['key1', 'key2']])
         -getting a regular dict/OrderedDict copy (as_dict)
         -getting/setting/deleting as attributes (obj.key)
         -adding new elements to the dict as attribute (obj.newkey=val)
@@ -2054,23 +2056,43 @@ class dict_improved(OrderedDict):
         else:
             super(dict_improved, self).__delattr__(name)
     def __getitem__(self, key):
+        if isinstance(key, list):
+            return [self[k] for k in key]
         if not isinstance(key, basestring):
             # assume we are using an integer index
             key = self.keys()[key]
+            if isinstance(key, list): # it was a slice
+                return self[key]
         return super(dict_improved, self).__getitem__(key)
     def __delitem__(self, key):
+        if isinstance(key, list):
+            for k in key:
+                del self[k]
+            return
         if not isinstance(key, basestring):
             # assume we are using an integer index
             key = self.keys()[key]
+            if isinstance(key, list): # it was a slice
+                del self[key]
+                return
         if self._freeze and key in self._known_keys:
             raise RuntimeError, "Modifying keys of dictionnary not allowed for this object."
         super(dict_improved, self).__delitem__(key)
         self._known_keys.remove(key)
         delattr(self, key)
     def __setitem__(self, key, value):
+        if isinstance(key, list):
+            if len(key) != len(value):
+                raise RuntimeError('keys and values are not the same length.')
+            for k,v in zip(key, value):
+                self[k] = v
+            return
         if not isinstance(key, basestring):
             # assume we are using an integer index
             key = self.keys()[key]
+            if isinstance(key, list): # it was a slice
+                self[key] = value
+                return
         if self._dict_improved__init_complete and self._freeze and key not in self._known_keys:
             raise RuntimeError, "Modifying keys of dictionnary not allowed for this object."
         if key not in self._known_keys:
