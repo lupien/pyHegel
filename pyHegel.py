@@ -860,8 +860,8 @@ class _Snap(object):
         self.async = False
         self.cycle = 0
         self.formats = None
-        self._locking_instrument = instruments_base.Lock_Instruments()
-        self._locking_extra = instruments_base.Lock_Extra()
+        self._lock_instrument = instruments_base.Lock_Instruments()
+        self._lock_extra = instruments_base.Lock_Extra()
     @instruments_base.locked_calling
     def __call__(self, out=None, filename=None, async=None, append=True):
         """
