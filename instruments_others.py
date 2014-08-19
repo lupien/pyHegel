@@ -998,6 +998,15 @@ class lakeshore_370(visaInstrument):
             ret.append(self.s.get())
         self.current_ch.set(old_ch)
         return ret
+    def _htr_getdev(self):
+        """Always in W, using control_setup heater_Ohms if necessary."""
+        csetup = self.control_setup.getcache()
+        htr = self.htr_raw.get()
+        if csetup.output_display == 'power':
+            return htr
+        else:
+            rng = self.heater_range.get()
+            return (htr/100.*rng)**2 * csetup.heater_Ohms
     def _create_devs(self):
         ch_opt_sel = range(1, 17)
         self.current_ch = MemoryDevice(1, choices=ch_opt_sel)
@@ -1044,7 +1053,9 @@ class lakeshore_370(visaInstrument):
         self.pid_P = Dict_SubDevice(self.pid, 'P', force_default=False)
         self.pid_I = Dict_SubDevice(self.pid, 'I', force_default=False)
         self.pid_D = Dict_SubDevice(self.pid, 'D', force_default=False)
-        self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in % or in W
+        self.htr_raw = scpiDevice(getstr='HTR?', str_type=float,
+                                  doc='heater output in % of Imax or in W depending on control_setup output_display option')
+        self._devwrap('htr')
         cmodes = ChoiceIndex({1:'pid', 2:'zone', 3:'open_loop', 4:'off'})
         self.control_mode = scpiDevice('CMODE', choices=cmodes)
         # heater range of 0 means off
