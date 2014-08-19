@@ -888,6 +888,17 @@ class lakeshore_370(visaInstrument):
        which defaults to current_ch
        status_ch returns the status of ch
        fetch allows to read all channels
+
+       Notes about T control:
+           - the htr values is either in W (assuming the resistance is correctly
+           programmed) or % of current full scale. Therefore we have
+           W = ((%/100)*Ifullscale)**2 * Rheater
+           - The feedback formula is:
+               Iheater = Imax * P * [e + I integral(e dt) + D de/dt]
+               with e = 2*log10(Rmeas/Rsetpoint)
+                 at least for sensors calibrated as log scale
+           - Therefore increasing currrent scale by x3.16 (power by x10)
+             would require decreasing P by x3.16
     """
     def __init__(self, *arg, **kwarg):
         super(lakeshore_370, self).__init__(*arg, **kwarg)
