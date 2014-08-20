@@ -951,7 +951,7 @@ class lakeshore_370(visaInstrument):
                     'input_filter=%r'%in_filter, 'input_meas=%r'%in_meas]
         else:
             base = self._conf_helper('current_ch', 'input_set', 'input_filter', 'input_meas')
-        base += self._conf_helper('sp', 'pid', 'still_raw', 'heater_range',
+        base += self._conf_helper('sp', 'pid', 'manual_out_raw', 'still_raw', 'heater_range',
                                   'control_mode', 'control_setup', 'control_ramp', options)
         return base
     def _enabled_list_getdev(self):
@@ -1053,6 +1053,8 @@ class lakeshore_370(visaInstrument):
         self.pid_P = Dict_SubDevice(self.pid, 'P', force_default=False)
         self.pid_I = Dict_SubDevice(self.pid, 'I', force_default=False)
         self.pid_D = Dict_SubDevice(self.pid, 'D', force_default=False)
+        self.manual_out_raw = scpiDevice('MOUT', str_type=float,
+                                  doc='manual heater output in % of Imax or in W depending on control_setup output_display option')
         self.htr_raw = scpiDevice(getstr='HTR?', str_type=float,
                                   doc='heater output in % of Imax or in W depending on control_setup output_display option')
         self._devwrap('htr')
