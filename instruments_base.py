@@ -4,6 +4,8 @@
 import numpy as np
 import string
 import functools
+import ctypes
+import hashlib
 import os
 import signal
 import time
@@ -41,7 +43,6 @@ def _get_lib_properties(libraryHandle):
 # either close this application or call with stop=True and
 # with the same period setting as the previous (stop=False) call.
 def _faster_timer(stop=False, period='min'):
-    import ctypes
     lib = ctypes.windll.winmm
     if period == 'min':
         dat_struct = (ctypes.c_uint*2)()
@@ -2403,6 +2404,55 @@ class Lock_Visa(object):
 ##    VISA Instrument
 #######################################################
 
+class _SharedStructure(object):
+    """
+    This shares a single ctype object across multiple processes.
+    Access it with the data attribute.
+    If the data attribute has members, accessing it directly on this object will be forwared
+    to the data object.
+    Should only use this if the memory access are protected with locks (between process).
+    Visa can do that (otherwise have a look at multiprocessing.synchronize._multiprocessing.SemLock)
+    """
+    def __init__(self, somectype, tagname):
+        import mmap
+        self._tagname = tagname
+        counter_type = ctypes.c_int32
+        counter_size = ctypes.sizeof(ctypes.c_int32)
+        size = counter_size + ctypes.sizeof(somectype)
+        if os.name != 'nt':
+            raise NotImplementedError('_SharedStructure is not implemented on this operating system')
+        # TODO tagname is windows specific, on linux need shm_open, ftruncate mmap and
+        self.buffer = mmap.mmap(-1, size, tagname=tagname)
+        self._counter = counter_type.from_buffer(self.buffer, 0)
+        self.data = somectype.from_buffer(self.buffer, counter_size)
+        self._add_count()
+        print 'There are now %i users of %r'%(self._get_count(), tagname)
+    def __getattr__(self, name):
+        return getattr(self.data, name)
+    def __setattr__(self, name, value):
+        try:
+            data = object.__getattribute__(self, 'data')
+            if hasattr(data, name):
+                setattr(self.data, name, value)
+                return
+        except AttributeError:
+            pass
+        object.__setattr__(self, name, value)
+    def _get_count(self):
+        return self._counter.value
+    def _add_count(self):
+        self._counter.value += 1
+    def _dec_count(self):
+        self._counter.value -= 1
+    def __del__(self):
+        self._dec_count()
+        print 'Cleaned up mmap, counter now %i'%self._get_count()
+        self.buffer.close()
+
+class _LastTime(ctypes.Structure):
+    _fields_ = [('write_time', ctypes.c_double),
+                ('read_time', ctypes.c_double)]
+
 class visaInstrument(BaseInstrument):
     """
         Open visa instrument with a visa address.
@@ -2424,8 +2474,8 @@ class visaInstrument(BaseInstrument):
             self.visa = visa.instrument(visa_addr)
             self._lock_extra = Lock_Visa(self.visa.vi)
         self.visa.timeout = 3 # in seconds
-        self._last_write_time = time.time()
-        self._last_read_time = time.time()
+        to = time.time()
+        self._last_rw_time = _LastTime(to, to) # When wait time are not 0, it will be replaced
         self._write_write_wait = 0.
         self._read_write_wait = 0.
         BaseInstrument.__init__(self)
@@ -2434,12 +2484,10 @@ class visaInstrument(BaseInstrument):
         # no need to call vpp43.close(self.visa.vi)
         # because self.visa does that when it is deleted
         super(visaInstrument, self).__del__()
-    #######
-    ## Could implement some locking here ....
-    ## for read, write, ask
-    #######
+    @locked_calling
     def read_status_byte(self):
         return vpp43.read_stb(self.visa.vi)
+    @locked_calling
     def control_remotelocal(self, remote=False, local_lockout=False, all=False):
         """
         For all=True:
@@ -2490,15 +2538,22 @@ class visaInstrument(BaseInstrument):
                 val = vpp43.VI_GPIB_REN_ADDRESS_GTL
         vpp43.gpib_control_ren(self.visa.vi, val)
     def _do_wr_wait(self):
-        if self._last_read_time > self._last_write_time:
+        if self._last_rw_time.read_time > self._last_rw_time.write_time:
             # last operation was a read
-            last_time = self._last_read_time
+            last_time = self._last_rw_time.read_time
             wait_time = self._read_write_wait
         else: # last operation was a write
-            last_time = self._last_write_time
+            last_time = self._last_rw_time.write_time
             wait_time = self._write_write_wait
         if wait_time == 0.:
             return
+        if not isinstance(self._last_rw_time, _SharedStructure):
+            # The timeout needs to work across process, So we now share the last time values
+            tagname = 'pyHegel-' + self.__class__.__name__ + '-' + hashlib.sha1(self.visa_addr).hexdigest()
+            old = self._last_rw_time
+            self._last_rw_time = _SharedStructure(_LastTime, tagname)
+            self._last_rw_time.read_time = old.read_time
+            self._last_rw_time.write_time = old.write_time
         cur_time = time.time()
         delta = (last_time+wait_time) - cur_time
         if delta >0:
@@ -2509,13 +2564,13 @@ class visaInstrument(BaseInstrument):
             ret = self.visa.read_raw()
         else:
             ret = self.visa.read()
-        self._last_read_time = time.time()
+        self._last_rw_time.read_time = time.time()
         return ret
     @locked_calling
     def write(self, val):
         self._do_wr_wait()
         self.visa.write(val)
-        self._last_write_time = time.time()
+        self._last_rw_time.write_time = time.time()
     @locked_calling
     def ask(self, question, raw=False):
         """
