@@ -15,6 +15,8 @@ from instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync
                             make_choice_list,\
                             decode_float64, visa, locked_calling
 
+from instruments_logical import FunctionDevice
+
 #######################################################
 ##    Yokogawa source
 #######################################################
@@ -883,6 +885,7 @@ class lakeshore_370(visaInstrument):
            status_ch
            current_ch
            pid
+           still
            still_raw
        s and t return the sensor(Ohm) or kelvin value of a certain channel
        which defaults to current_ch
@@ -900,8 +903,16 @@ class lakeshore_370(visaInstrument):
            - Therefore increasing currrent scale by x3.16 (power by x10)
              would require decreasing P by x3.16
     """
-    def __init__(self, *arg, **kwarg):
-        super(lakeshore_370, self).__init__(*arg, **kwarg)
+    def __init__(self, visa_addr, still_res=120., still_full_res=136.4, **kwarg):
+        """
+        still_res is the still heater resistance
+        still_full_res is the still heater resistance with the wire resistance
+                       included (the 2 wire resistance seen from outside the fridge)
+        They are both used fot the still device
+        """
+        self._still_res = still_res
+        self._still_full_res = still_full_res
+        super(lakeshore_370, self).__init__(visa_addr, **kwarg)
         if isinstance(self.visa, visa.SerialInstrument):
             self._write_write_wait = 0.100
         else: # GPIB
@@ -918,6 +929,12 @@ class lakeshore_370(visaInstrument):
                 self.write('*ESE 255') # needed for get_error
                 self.write('*sre 4') # neede for _data_valid
         super(lakeshore_370, self).init(full=full)
+        if full:
+            Rfull = self._still_full_res
+            Rhtr = self._still_res
+            htr_from_raw = lambda x:  (x/10./Rfull)**2 * Rhtr*1e3 # x is % of 10V scale so x/10 is volt
+            htr_to_raw = lambda p:    np.sqrt(p*1e-3/Rhtr)*Rfull*10.  # p is in mW
+            self.still = FunctionDevice(self.still_raw, htr_from_raw, htr_to_raw, quiet_del=True, doc='still power in mW')
     def _get_esr(self):
         return int(self.ask('*esr?'))
     def get_error(self):
