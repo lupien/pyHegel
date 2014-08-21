@@ -61,11 +61,13 @@ class LogicalDevice(BaseDevice):
        be True or False. For Basedevs it can be a list of True or False.
        force_get always forces all subdevice unless it is overriden.
 
+       The quiet_del option prevents the destructor from printing.
+
        To pass extra parameters to basedev or basedevs, you can often just list them for
        set, get, check and they will be passed on (default _combine_kwarg) or
        you can use option kw with a dict (basedev) or a list of dict (basedevs).
     """
-    def __init__(self, basedev=None, basedevs=None, autoget='all', doc='', setget=None, autoinit=None, **kwarg):
+    def __init__(self, basedev=None, basedevs=None, autoget='all', doc='', quiet_del=False, setget=None, autoinit=None, **kwarg):
         # use either basedev (single one) or basedevs, multiple devices
         #   in the latter _basedev = _basedevs[0]
         # can also leave both blank
@@ -111,6 +113,7 @@ class LogicalDevice(BaseDevice):
             kwarg['autoinit'] = autoinit
         if setget != None:
             kwarg['setget'] = setget
+        self._quiet_del = quiet_del
         super(LogicalDevice, self).__init__(doc=doc, trig=True, **kwarg)
         self.instr = _LogicalInstrument(self)
         fmt = self._format
@@ -124,7 +127,8 @@ class LogicalDevice(BaseDevice):
         fmt['obj'] = weakref.proxy(self)
         self.name = self.__class__.__name__ # this should not be used
     def __del__(self):
-        print 'Deleting logical device:', self
+        if not self._quiet_del:
+            print 'Deleting logical device:', self
     def _autoget_normalize(self, autoget):
         if autoget == 'all':
             if self._basedevs:
