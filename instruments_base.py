@@ -2486,7 +2486,12 @@ class visaInstrument(BaseInstrument):
         super(visaInstrument, self).__del__()
     @locked_calling
     def read_status_byte(self):
-        return vpp43.read_stb(self.visa.vi)
+        # since on serial visa does the *stb? request for us
+        # might as well be explicit and therefore handle the rw_wait properly
+        if isinstance(self.visa, visa.SerialInstrument):
+            return int(self.ask('*stb?'))
+        else:
+            return vpp43.read_stb(self.visa.vi)
     @locked_calling
     def control_remotelocal(self, remote=False, local_lockout=False, all=False):
         """
