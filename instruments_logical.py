@@ -603,15 +603,17 @@ class Average(LogicalDevice):
        It returns the averaged values followed by the std deviations and the number
        of samples used.
     """
-    def __init__(self, basedev, filter_time=5., repeat_time=.1, doc='', **extrak):
+    def __init__(self, basedev, filter_time=5., repeat_time=.1, show_repeats=False, doc='', **extrak):
         """
         filter_time is the length of time to filer in seconds
         repeat_time is the minimum time between readings of the instrument.
                     There will always be at least a 20 ms wait
+        show_repeats will count the number of repeats and print them
         """
         super(type(self), self).__init__(basedev=basedev, doc=doc, multi=['avg', 'std'], autoget=False, **extrak)
         self._filter_time = filter_time
         self._repeat_time = repeat_time
+        self._show_repeats = show_repeats
     def getformat(self, **kwarg):
         kwarg_base = kwarg
         kwarg, foo = self._combine_kwarg(kwarg)
@@ -643,6 +645,13 @@ class Average(LogicalDevice):
             vals.append(self._basedev.get(**kwarg))
             now = time.time()
         vals = np.array(vals)
+        if self._show_repeats:
+            diff = np.diff(vals, axis=0)
+            w = np.where( np.abs(diff) < 1e-10)[-1]
+            if len(w) == 0:
+                print 'Number of repeats: None'
+            else:
+                print 'Number of repeats: ', np.bincount(w, minlength=vals.shape[-1])
         avg = vals.mean(axis=0)
         std = vals.std(axis=0, ddof=1)
         N = vals.shape[0]
