@@ -117,10 +117,11 @@ class LogicalDevice(BaseDevice):
         if not fmt['header'] and hasattr(self, '_current_config'):
             conf = ProxyMethod(self._current_config)
             fmt['header'] = conf
-        # Remove the reference to self. This allows del to work
-        # Not a problem since our _current_config method already
-        # knows self.
-        fmt['obj'] = None
+        # This reference could be used in _current_config (but we already know
+        # who we are) and also in _write_dev which can be called from
+        # get filename so we cannot just remove it but we must handle it
+        # so we can delete this object properly.
+        fmt['obj'] = weakref.proxy(self)
         self.name = self.__class__.__name__ # this should not be used
     def __del__(self):
         print 'Deleting logical device:', self
@@ -148,10 +149,10 @@ class LogicalDevice(BaseDevice):
         return ('{name}: '+error_str).format(**dic)
     def _get_auto_list(self, kwarg={}, autoget=None, op='get'):
         kwarg = kwarg.copy() # just to be safe. It is probably unecessary.
+        kwarg_clean = kwarg.copy() # This will be returned if there is no autoget, we just pass all the kwarg including the kw
         kw = kwarg.pop('kw', None)
         devs=[]
         kwargs=[]
-        kwarg_clean = {}
         if autoget == None:
             autoget = self._autoget
         autoget = self._autoget_normalize(autoget)
@@ -614,10 +615,15 @@ class Average(LogicalDevice):
         self._filter_time = filter_time
         self._repeat_time = repeat_time
         self._show_repeats = show_repeats
+    #def _combine_kwarg(self, kwarg_dict, base=None, op='get'):
+    #    # the base kwarg_clean is made empty and it is used in the call to _getdev
+    #    # here we want the parameters to propagate to _getdev
+    #    base_kwarg, kwarg_clean = super(Average, self)._combine_kwarg(kwarg_dict, base, op)
+    #    return base_kwarg, base_kwarg
     def getformat(self, **kwarg):
-        kwarg_base = kwarg
-        kwarg, foo = self._combine_kwarg(kwarg)
-        base_format = self._basedev.getformat(**kwarg)
+        gl, foo = self._get_auto_list(kwarg, autoget='all', op='get')
+        dev, base_kwarg  = gl[0]
+        base_format = dev.getformat(**base_kwarg)
         base_multi = base_format['multi']
         base_graph = base_format['graph']
         fmt = self._format
@@ -627,14 +633,15 @@ class Average(LogicalDevice):
             multi = ['avg', 'std']
         multi += ['N']
         fmt.update(multi=multi, graph=base_graph)
-        return super(Average, self).getformat(**kwarg_base)
+        return super(Average, self).getformat(**kwarg)
     def _current_config(self, dev_obj=None, options={}):
         head = ['Average:: %r, filter_time=%r, repeat_time=%r'%(self._basedev, self._filter_time, self._repeat_time)]
         return self._current_config_addbase(head, options=options)
     def _getdev(self, **kwarg):
-        kwarg, foo = self._combine_kwarg(kwarg)
+        gl, foo = self._get_auto_list(kwarg, autoget='all', op='get')
+        dev, base_kwarg  = gl[0]
         to = time.time()
-        vals = [self._basedev.get(**kwarg)]
+        vals = [dev.get(**base_kwarg)]
         last = to
         now = to
         while now - to < self._filter_time:
@@ -642,7 +649,7 @@ class Average(LogicalDevice):
             dt = max(dt, 0.020) # sleep at least 20 ms
             wait(dt)
             last = time.time() # do it here so we remove the time it takes to do the gets
-            vals.append(self._basedev.get(**kwarg))
+            vals.append(dev.get(**base_kwarg))
             now = time.time()
         vals = np.array(vals)
         if self._show_repeats:
