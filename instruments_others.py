@@ -13,7 +13,7 @@ from instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list,\
-                            decode_float64, visa, sleep, locked_calling
+                            decode_float64, visa, locked_calling
 
 #######################################################
 ##    Yokogawa source
@@ -906,6 +906,9 @@ class lakeshore_370(visaInstrument):
             self._write_write_wait = 0.100
         else: # GPIB
             self._write_write_wait = 0.050
+        self._data_valid_last_ch = 0
+        self._data_valid_last_t = 0.
+        self._data_valid_last_start = 0., [0, False]
     def init(self, full=False):
         if full:
             if isinstance(self.visa, visa.SerialInstrument):
@@ -913,6 +916,7 @@ class lakeshore_370(visaInstrument):
                 self.visa.data_bits = 7
                 self.visa.term_chars = '\r\n'
                 self.write('*ESE 255') # needed for get_error
+                self.write('*sre 4') # neede for _data_valid
         super(lakeshore_370, self).init(full=full)
     def _get_esr(self):
         return int(self.ask('*esr?'))
@@ -980,22 +984,113 @@ class lakeshore_370(visaInstrument):
         fmt = self.fetch._format
         fmt.update(multi=multi, graph=graph)
         return BaseDevice.getformat(self.fetch, **kwarg)
-    def _fetch_getdev(self, ch=None):
+    def _data_valid_start(self):
+        """ returns channel and autoscan_en """
+        result = self.ask('*cls;scan?').split(',')
+        ret = int(result[0]), bool(int(result[1]))
+        self._data_valid_last_start = time.time(), ret
+        return ret
+    def _data_valid(self):
+        """
+        waits until we have valid data
+        returns the current scan channel when done
+        """
+        # only way to clear the status when using serial
+        # and it is faster to also ask a question
+        to = time.time()
+        if to - self._data_valid_last_start[0] < 0.01:
+            # nothing has changed since last call so speedup by reusing result
+            start_ch, foo = self._data_valid_last_start[1]
+        else:
+            start_ch, foo = self._data_valid_start()
+        if to-self._data_valid_last_t < 1. and self._data_valid_last_ch == start_ch:
+            # we should still be having good data, skip the wait
+            self._data_valid_last_t = to
+            return start_ch
+        while not self.read_status_byte()&4:
+            traces.wait(.02)
+        scan = self.scan.get()
+        tf = time.time()
+        if tf-to > 1.: # we waited after a channel change
+            ch = scan.ch
+        else:  # the channel is the same or it got changed just after our wait.
+            ch = start_ch
+        self._data_valid_last_t = tf
+        self._data_valid_last_ch = ch
+        return ch
+    def _fetch_getdev(self, ch=None, lastval=False, wait_new=False):
         """
         Optional parameter:
             ch: To select which channels to read. Default to all the enabled
                 ones. Otherwise ch=4 selects only channel 4 and
                 ch=[3,5] selects channels 3 and 5.
+          lastval: When enabled, and when scanning, waits and picks the last value
+                   read from that channel before switching
+          wait_new: only returns values the are fresh. If a channel is never scanned
+                    it will hang
+        lastval and wait_new do something only when scanning is enabled.
+        You can enable both at the same time.
 
         For each channels, two values are returned. The tempereture in Kelvin
         and the sensor value in Ohm.
         """
         old_ch = self.current_ch.getcache()
         ch = self._fetch_helper(ch)
-        ret = []
-        for c in ch:
-            ret.append(self.t.get(ch=c))
-            ret.append(self.s.get())
+        ret = [None] * len(ch)*2
+        ich = list(enumerate(ch)) # this makes a list of (i,c)
+        # for lastval only:
+        # We assume the scanning is slower than getting all the values
+        # so we first get all channel except the active one starting with
+        # the next scan channel (in case we are about to switch), since
+        # the first seconds after a channel change returns the previous value
+        if lastval or wait_new:
+            # use _data_valid_start here because it can save some time over
+            # self.scan.get()
+            start_scan_ch, autoscan_en = self._data_valid_start()
+            #scan = self.scan.get()
+            if not autoscan_en:
+                lastval = False
+                wait_new = False
+            else:
+                if wait_new:
+                    # this sorts the channel and rotates all the ones including
+                    # start_scan_ch to be done first.
+                    def sortkey(x):
+                        c=x[1]
+                        if c >= start_scan_ch:
+                            c -= 100
+                        return c
+                else: # lastval only
+                    # this sorts the channel and rotates all the ones above
+                    # start_scan_ch to be done first.
+                    def sortkey(x):
+                        c=x[1]
+                        if c > start_scan_ch:
+                            c -= 100
+                        return c
+                ich = sorted(ich, key=sortkey)
+        skip = False
+        for i, c in ich:
+            if wait_new and lastval:
+                while self.scan.get().ch == c: # we wait until the channel changes
+                    traces.wait(.2)
+            elif wait_new: # only
+                while self._data_valid() != c: # we want valid data for this channel
+                    traces.wait(.2)
+            elif lastval and c == start_scan_ch: # lastval only
+                skip = i, c
+                continue
+            ret[i*2] = self.t.get(ch=c)
+            ret[i*2+1] = self.s.get()
+        if skip and lastval:
+            while True:
+                scan = self.scan.get()
+                if scan.ch != start_scan_ch:
+                    break
+                traces.wait(.1)
+            i, c = skip
+            ret[i*2] = self.t.get(ch=c)
+            ret[i*2+1] = self.s.get()
         self.current_ch.set(old_ch)
         return ret
     def _htr_getdev(self):
