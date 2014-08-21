@@ -2403,7 +2403,7 @@ class Lock_Visa(object):
 #######################################################
 ##    VISA Instrument
 #######################################################
-
+_SharedStructure_debug = False
 class _SharedStructure(object):
     """
     This shares a single ctype object across multiple processes.
@@ -2426,7 +2426,8 @@ class _SharedStructure(object):
         self._counter = counter_type.from_buffer(self.buffer, 0)
         self.data = somectype.from_buffer(self.buffer, counter_size)
         self._add_count()
-        print 'There are now %i users of %r'%(self._get_count(), tagname)
+        if _SharedStructure_debug:
+            print 'There are now %i users of %r'%(self._get_count(), tagname)
     def __getattr__(self, name):
         return getattr(self.data, name)
     def __setattr__(self, name, value):
@@ -2446,7 +2447,8 @@ class _SharedStructure(object):
         self._counter.value -= 1
     def __del__(self):
         self._dec_count()
-        print 'Cleaned up mmap, counter now %i'%self._get_count()
+        if _SharedStructure_debug:
+            print 'Cleaned up mmap, counter now %i'%self._get_count()
         self.buffer.close()
 
 class _LastTime(ctypes.Structure):
