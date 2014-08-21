@@ -902,6 +902,23 @@ class lakeshore_370(visaInstrument):
                  at least for sensors calibrated as log scale
            - Therefore increasing currrent scale by x3.16 (power by x10)
              would require decreasing P by x3.16
+       Notes about timing:
+           - takes 10 readings / s, has a 200 ms hardware input filter
+           - the digital filter is a linear average
+           - Hardware settling time is about 1s, 2-3s for range change
+             (scan channel change)
+           - Time to a stable reading after channel change:
+               max(hardware_settling, pause) + digital_filter
+             so if pause it too small, it will take hardware settling time
+             to get first reading used for the filter. Otherwise it will be
+             the pause time (pause and hardware settling don't add)
+           - When under PID control:
+               The control channel is measured between all the other channels
+               (toggles between control channel and non control channels).
+               channel switch time is the same but the dwell times are changed
+               about 5s for control and 1s for others (non-control).
+               These are fixed (see  Manual 4.11.8.1 Reading Sequence p 4-23)
+               There does not seem to be a way to change these dwell times.
     """
     def __init__(self, visa_addr, still_res=120., still_full_res=136.4, **kwarg):
         """
@@ -972,7 +989,7 @@ class lakeshore_370(visaInstrument):
                     'input_filter=%r'%in_filter, 'input_meas=%r'%in_meas]
         else:
             base = self._conf_helper('current_ch', 'input_set', 'input_filter', 'input_meas')
-        base += self._conf_helper('sp', 'pid', 'manual_out_raw', 'still_raw', 'heater_range',
+        base += self._conf_helper('sp', 'pid', 'manual_out_raw', 'still', 'heater_range',
                                   'control_mode', 'control_setup', 'control_ramp', options)
         return base
     def _enabled_list_getdev(self):
@@ -1053,50 +1070,55 @@ class lakeshore_370(visaInstrument):
         """
         old_ch = self.current_ch.getcache()
         ch = self._fetch_helper(ch)
-        ret = [None] * len(ch)*2
+        nmeas = len(ch) # the number of measures to do
+        ret = [None] * nmeas*2
         ich = list(enumerate(ch)) # this makes a list of (i,c)
+        ch2i = {c:i for i,c in ich} # maps channel # to index
         # for lastval only:
         # We assume the scanning is slower than getting all the values
-        # so we first get all channel except the active one starting with
-        # the next scan channel (in case we are about to switch), since
-        # the first seconds after a channel change returns the previous value
+        # so we first get all channel except the active one.
+        # This should be ok since the first seconds after a channel change
+        # returns the previous value and the sequence order is not too critical
+        # since we have seconds to read all other channels
         if lastval or wait_new:
             # use _data_valid_start here because it can save some time over
             # self.scan.get()
             start_scan_ch, autoscan_en = self._data_valid_start()
-            #scan = self.scan.get()
+            current_ch = start_scan_ch
             if not autoscan_en:
                 lastval = False
                 wait_new = False
-            else:
-                if wait_new:
-                    # this sorts the channel and rotates all the ones including
-                    # start_scan_ch to be done first.
-                    def sortkey(x):
-                        c=x[1]
-                        if c >= start_scan_ch:
-                            c -= 100
-                        return c
-                else: # lastval only
-                    # this sorts the channel and rotates all the ones above
-                    # start_scan_ch to be done first.
-                    def sortkey(x):
-                        c=x[1]
-                        if c > start_scan_ch:
-                            c -= 100
-                        return c
-                ich = sorted(ich, key=sortkey)
         skip = False
-        for i, c in ich:
+        indx = 0
+        while nmeas != 0:
             if wait_new and lastval:
-                while self.scan.get().ch == c: # we wait until the channel changes
+                while self.scan.get().ch == current_ch: # we wait until the channel changes
                     traces.wait(.2)
+                if current_ch not in ch2i:
+                    current_ch = self.scan.getcache().ch
+                    continue
+                i, c = ch2i[current_ch], current_ch
+                current_ch = self.scan.getcache().ch
+                # In PID control we will repeat the control channel multiple times
+                # So check that. We will return the last one only
+                if ret[i*2] == None:
+                    nmeas -= 1
             elif wait_new: # only
-                while self._data_valid() != c: # we want valid data for this channel
-                    traces.wait(.2)
-            elif lastval and c == start_scan_ch: # lastval only
-                skip = i, c
-                continue
+                while True:
+                    current_ch = self._data_valid()
+                    if current_ch not in ch2i: # we want valid data for this channel
+                        traces.wait(.5)
+                    else:
+                        i, c = ch2i.pop(current_ch), current_ch
+                        nmeas -= 1
+                        break
+            else: # lastval only or nothing
+                i, c = ich[indx]
+                indx += 1
+                nmeas -= 1
+                if lastval and c == start_scan_ch:
+                    skip = True
+                    continue
             ret[i*2] = self.t.get(ch=c)
             ret[i*2+1] = self.s.get()
         if skip and lastval:
@@ -1105,8 +1127,8 @@ class lakeshore_370(visaInstrument):
                 if scan.ch != start_scan_ch:
                     break
                 traces.wait(.1)
-            i, c = skip
-            ret[i*2] = self.t.get(ch=c)
+            i = ch2i[start_scan_ch]
+            ret[i*2] = self.t.get(ch=start_scan_ch)
             ret[i*2+1] = self.s.get()
         self.current_ch.set(old_ch)
         return ret
