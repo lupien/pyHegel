@@ -33,7 +33,7 @@ from instruments_others import yokogawa_gs200,\
 
 from instruments_logical import LogicalDevice, ScalingDevice, FunctionDevice,\
                                 LimitDevice, CopyDevice, ExecuteDevice,\
-                                RThetaDevice, PickSome
+                                RThetaDevice, PickSome, Average
 
 from instruments_agilent import agilent_rf_33522A, agilent_PowerMeter,\
                                 agilent_rf_PSG, agilent_rf_MXG,\

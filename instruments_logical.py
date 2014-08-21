@@ -6,9 +6,11 @@ import subprocess
 import numpy as np
 from scipy.optimize import brentq as brentq_rootsolver
 import weakref
+import time
 
 from instruments_base import BaseDevice, BaseInstrument, ProxyMethod,\
                         _find_global_name, _get_conf_header, locked_calling_dev
+from traces import wait
 
 def _asDevice(dev):
     if isinstance(dev, BaseInstrument):
@@ -567,3 +569,63 @@ class PickSome(LogicalDevice):
     def _getdev(self):
         raw = self._cached_data[0]
         return raw[self._selector]
+
+#######################################################
+##    Logical average device
+#######################################################
+
+class Average(LogicalDevice):
+    """
+       This class provides a wrapper around one device for reading only.
+       It provides an averaged value over a certain interval.
+       It returns the averaged values followed by the std deviations and the number
+       of samples used.
+    """
+    def __init__(self, basedev, filter_time=5., repeat_time=.1, doc='', **extrak):
+        """
+        filter_time is the length of time to filer in seconds
+        repeat_time is the minimum time between readings of the instrument.
+                    There will always be at least a 20 ms wait
+        """
+        super(type(self), self).__init__(basedev=basedev, doc=doc, multi=['avg', 'std'], autoget=False, **extrak)
+        self._filter_time = filter_time
+        self._repeat_time = repeat_time
+    def getformat(self, **kwarg):
+        kwarg_base = kwarg
+        kwarg, foo = self._combine_kwarg(kwarg)
+        base_format = self._basedev.getformat(**kwarg)
+        base_multi = base_format['multi']
+        base_graph = base_format['graph']
+        fmt = self._format
+        if isinstance(base_multi, list):
+            multi = [s+'avg' for s in base_multi] + [s+'std' for s in base_multi]
+        else:
+            multi = ['avg', 'std']
+        multi += ['N']
+        fmt.update(multi=multi, graph=base_graph)
+        return super(Average, self).getformat(**kwarg_base)
+    def _current_config(self, dev_obj=None, options={}):
+        head = ['Average:: %r, filter_time=%r, repeat_time=%r'%(self._basedev, self._filter_time, self._repeat_time)]
+        return self._current_config_addbase(head, options=options)
+    def _getdev(self, **kwarg):
+        kwarg, foo = self._combine_kwarg(kwarg)
+        to = time.time()
+        vals = [self._basedev.get(**kwarg)]
+        last = to
+        now = to
+        while now - to < self._filter_time:
+            dt = self._repeat_time - (now-last)
+            dt = max(dt, 0.020) # sleep at least 20 ms
+            wait(dt)
+            last = time.time() # do it here so we remove the time it takes to do the gets
+            vals.append(self._basedev.get(**kwarg))
+            now = time.time()
+        vals = np.array(vals)
+        avg = vals.mean(axis=0)
+        std = vals.std(axis=0, ddof=1)
+        N = vals.shape[0]
+        if avg.ndim == 0:
+            ret = [avg, std, N]
+        else:
+            ret = list(avg)+list(std)
+        return ret + [N]
