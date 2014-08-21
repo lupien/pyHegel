@@ -301,6 +301,7 @@ class FunctionDevice(LogicalDevice):
        to_raw is either a function (the inverse of from_raw).
         or it is the interval of possible raw values
         that is used for the function inversion (scipy.optimize.brent)
+       To check the functions match properly use check_funcs method
     """
     def __init__(self, basedev, from_raw, to_raw=[-1e12, 1e12], doc='', **extrak):
         self.from_raw = from_raw
@@ -335,6 +336,27 @@ class FunctionDevice(LogicalDevice):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='check')
         raw = self.to_raw(val)
         basedev.check(raw, **base_kwarg)
+    def check_funcs(self, start_or_list, stop=None, npoints=None, ret=False):
+        """
+        Either give a list of point or specify  start, stop and npoints
+        These are for the raw values
+        When ret is True, it will return points, roundtrip, conv
+        where points is the initial list, roundtrip is the list passing
+        throught the from/to conversion and conv is the intermediate (from)
+        result.
+        """
+        if isinstance(start_or_list, (list, np.ndarray)):
+            points = np.array(start_or_list)
+        else:
+            points = np.linspace(start_or_list, stop, npoints)
+        maxpt = np.abs(points).max()
+        conv = np.array([self.from_raw(p) for p in points])
+        roundtrip = np.array([self.to_raw(p) for p in conv])
+        diff = np.abs(roundtrip - points)
+        print 'Largest absolute difference:', diff.max()
+        print 'Largest relative difference:', (diff/maxpt).max()
+        if ret:
+            return points, roundtrip, conv
 
 
 #######################################################
