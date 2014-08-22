@@ -59,6 +59,9 @@ class LogicalDevice(BaseDevice):
        autoget can be 'all', then all basedev or basedevs are get automatically in get and
        getasync. (use self._cached_data in logical _getdev). For a single basedev in can
        be True or False. For Basedevs it can be a list of True or False.
+       When autoget is False, we assume the user will perform the get himself so we bypass
+       basedev handling in get and getasync (for async this probably only makes sense for devices
+       that don't habe an async mode.)
        force_get always forces all subdevice unless it is overriden.
 
        The quiet_del option prevents the destructor from printing.
@@ -67,7 +70,8 @@ class LogicalDevice(BaseDevice):
        set, get, check and they will be passed on (default _combine_kwarg) or
        you can use option kw with a dict (basedev) or a list of dict (basedevs).
     """
-    def __init__(self, basedev=None, basedevs=None, autoget='all', doc='', quiet_del=False, setget=None, autoinit=None, **kwarg):
+    def __init__(self, basedev=None, basedevs=None, autoget='all', doc='',
+                 quiet_del=False, setget=None, autoinit=None, **kwarg):
         # use either basedev (single one) or basedevs, multiple devices
         #   in the latter _basedev = _basedevs[0]
         # can also leave both blank
@@ -160,7 +164,9 @@ class LogicalDevice(BaseDevice):
         if autoget == None:
             autoget = self._autoget
         autoget = self._autoget_normalize(autoget)
-        if not self._basedevs and self._basedev != None:
+        if autoget == False:
+            pass
+        elif not self._basedevs and self._basedev != None:
             if autoget:
                 devs = [self._basedev]
                 base_kwarg, kwarg_clean = self._combine_kwarg(kwarg, self._basedev_kwarg, op)
@@ -194,6 +200,9 @@ class LogicalDevice(BaseDevice):
         super(LogicalDevice, self).force_get()
     @locked_calling_dev
     def get(self, **kwarg):
+        if self._autoget == False:
+            # we bypass the handling below
+            return super(LogicalDevice, self).get(**kwarg)
         # when not doing async, get all basedevs
         # when doing async, the basedevs are obtained automatically
         task = getattr(self.instr, '_async_task', None) # tasks are deleted when async is done
@@ -212,7 +221,7 @@ class LogicalDevice(BaseDevice):
         return True # No need to wait
     def getasync(self, async, **kwarg):
         gl, kwarg = self._get_auto_list(kwarg)
-        if async == 3:
+        if async == 3 and self._autoget != False:
             self._cached_data = []
             for dev, base_kwarg in gl:
                 self._cached_data.append(dev.getasync(async, **base_kwarg))
@@ -607,6 +616,9 @@ class Average(LogicalDevice):
        It provides an averaged value over a certain interval.
        It returns the averaged values followed by the std deviations and the number
        of samples used.
+       Even in async mode the basedev is called directly multiple times by the get function.
+       To use other functions of the basedev it should not lock them out.
+       The basedev is not set itself in async mode.
     """
     def __init__(self, basedev, filter_time=5., repeat_time=.1, show_repeats=False, doc='', **extrak):
         """
