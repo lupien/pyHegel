@@ -1018,8 +1018,15 @@ class lakeshore_370(visaInstrument):
         fmt = self.fetch._format
         fmt.update(multi=multi, graph=graph)
         return BaseDevice.getformat(self.fetch, **kwarg)
+    @locked_calling
     def _data_valid_start(self):
         """ returns channel and autoscan_en """
+        to = time.time()
+        if to - self._data_valid_last_start[0] < 0.02:
+            # nothing has changed since last call so speedup by reusing result
+            return self._data_valid_last_start[1]
+        # the only way to clear the status when using serial is with *cls
+        # and it is faster to also ask a question (less wait time later)
         result = self.ask('*cls;scan?').split(',')
         ret = int(result[0]), bool(int(result[1]))
         self._data_valid_last_start = time.time(), ret
@@ -1029,28 +1036,24 @@ class lakeshore_370(visaInstrument):
         waits until we have valid data
         returns the current scan channel when done
         """
-        # only way to clear the status when using serial
-        # and it is faster to also ask a question
-        to = time.time()
-        if to - self._data_valid_last_start[0] < 0.01:
-            # nothing has changed since last call so speedup by reusing result
-            start_ch, foo = self._data_valid_last_start[1]
-        else:
+        with self._lock_instrument: # protect object variables
+            to = time.time()
             start_ch, foo = self._data_valid_start()
-        if to-self._data_valid_last_t < 1. and self._data_valid_last_ch == start_ch:
-            # we should still be having good data, skip the wait
-            self._data_valid_last_t = to
-            return start_ch
+            if to-self._data_valid_last_t < 1. and self._data_valid_last_ch == start_ch:
+                # we should still be having good data, skip the wait
+                self._data_valid_last_t = to
+                return start_ch
         while not self.read_status_byte()&4:
             traces.wait(.02)
-        scan = self.scan.get()
+        after_ch, foo = self._data_valid_start()
         tf = time.time()
         if tf-to > 1.: # we waited after a channel change
-            ch = scan.ch
+            ch = after_ch
         else:  # the channel is the same or it got changed just after our wait.
             ch = start_ch
-        self._data_valid_last_t = tf
-        self._data_valid_last_ch = ch
+        with self._lock_instrument: # protect object variables
+            self._data_valid_last_t = tf
+            self._data_valid_last_ch = ch
         return ch
     def _fetch_getdev(self, ch=None, lastval=False, wait_new=False):
         """
@@ -1088,17 +1091,30 @@ class lakeshore_370(visaInstrument):
             if not autoscan_en:
                 lastval = False
                 wait_new = False
+        if lastval or wait_new:
+            # They both introduce delays so we unlock to allow other threads
+            # to use this device. The reset of the code has been checked to
+            # be thread safe
+            # TODO better unlockin/locking: This way, if the code is interrupted
+            #             by KeyboardInterrupt it will produce an unlocking
+            #             error in the previous with handler (the re-acquire)
+            #             is not performed.
+            self._lock_release()
         skip = False
         indx = 0
         while nmeas != 0:
             if wait_new and lastval:
-                while self.scan.get().ch == current_ch: # we wait until the channel changes
-                    traces.wait(.2)
+                while True:
+                    ch, foo = self._data_valid_start()
+                    if ch == current_ch: # we wait until the channel changes
+                        traces.wait(.2)
+                    else:
+                        break
                 if current_ch not in ch2i:
-                    current_ch = self.scan.getcache().ch
+                    current_ch = ch
                     continue
                 i, c = ch2i[current_ch], current_ch
-                current_ch = self.scan.getcache().ch
+                current_ch = ch
                 # In PID control we will repeat the control channel multiple times
                 # So check that. We will return the last one only
                 if ret[i*2] == None:
@@ -1120,16 +1136,19 @@ class lakeshore_370(visaInstrument):
                     skip = True
                     continue
             ret[i*2] = self.t.get(ch=c)
-            ret[i*2+1] = self.s.get()
+            ret[i*2+1] = self.s.get(ch=c) # repeating channels means we don't need the lock
         if skip and lastval:
             while True:
-                scan = self.scan.get()
-                if scan.ch != start_scan_ch:
+                ch, foo = self._data_valid_start()
+                if ch != start_scan_ch:
                     break
                 traces.wait(.1)
             i = ch2i[start_scan_ch]
             ret[i*2] = self.t.get(ch=start_scan_ch)
-            ret[i*2+1] = self.s.get()
+            ret[i*2+1] = self.s.get(ch=start_scan_ch)
+        if lastval or wait_new:
+            # we need to reacquire the lock before leaving
+            self._lock_acquire()
         self.current_ch.set(old_ch)
         return ret
     def _htr_getdev(self):
