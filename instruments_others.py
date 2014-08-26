@@ -946,12 +946,6 @@ class lakeshore_370(visaInstrument):
                 self.write('*ESE 255') # needed for get_error
                 self.write('*sre 4') # neede for _data_valid
         super(lakeshore_370, self).init(full=full)
-        if full:
-            Rfull = self._still_full_res
-            Rhtr = self._still_res
-            htr_from_raw = lambda x:  (x/10./Rfull)**2 * Rhtr*1e3 # x is % of 10V scale so x/10 is volt
-            htr_to_raw = lambda p:    np.sqrt(p*1e-3/Rhtr)*Rfull*10.  # p is in mW
-            self.still = FunctionDevice(self.still_raw, htr_from_raw, htr_to_raw, quiet_del=True, doc='still power in mW')
     def _get_esr(self):
         return int(self.ask('*esr?'))
     def get_error(self):
@@ -1235,6 +1229,13 @@ class lakeshore_370(visaInstrument):
         self._devwrap('enabled_list')
         self._devwrap('fetch', autoinit=False)
         self.alias = self.fetch
+
+        Rfull = self._still_full_res
+        Rhtr = self._still_res
+        htr_from_raw = lambda x:  (x/10./Rfull)**2 * Rhtr*1e3 # x is % of 10V scale so x/10 is volt
+        htr_to_raw = lambda p:    np.sqrt(p*1e-3/Rhtr)*Rfull*10.  # p is in mW
+        self.still = FunctionDevice(self.still_raw, htr_from_raw, htr_to_raw, quiet_del=True, doc='still power in mW')
+
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
