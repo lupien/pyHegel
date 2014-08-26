@@ -108,9 +108,6 @@ class LogicalDevice(BaseDevice):
         self._basedevs_kwarg = basedevs_kwarg
         self._cached_data = []
         self._autoget = self._autoget_normalize(autoget)
-        # TODO fix the problem here
-        #doc = self.__doc__+doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev, basedevs)
-        #doc = doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev_orig, basedevs_orig)
         if basedev:
             if autoinit == None:
                 autoinit = basedev._autoinit
