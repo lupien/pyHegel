@@ -64,7 +64,10 @@ class LogicalDevice(BaseDevice):
        that don't habe an async mode.)
        force_get always forces all subdevice unless it is overriden.
 
-       The quiet_del option prevents the destructor from printing.
+       The quiet_del option prevents the destructor from printing. Useful when within an instrument.
+       To include a device within an instrument, do it within _create_devs, so it gets
+       to know instrument.device name. _create_devs_helper(once=True) does not work
+       for logical device.
 
        To pass extra parameters to basedev or basedevs, you can often just list them for
        set, get, check and they will be passed on (default _combine_kwarg) or
@@ -119,7 +122,8 @@ class LogicalDevice(BaseDevice):
             kwarg['setget'] = setget
         self._quiet_del = quiet_del
         super(LogicalDevice, self).__init__(doc=doc, trig=True, **kwarg)
-        self.instr = _LogicalInstrument(self)
+        self._instr_internal = _LogicalInstrument(self)
+        self._instr_parent = None
         fmt = self._format
         if not fmt['header'] and hasattr(self, '_current_config'):
             conf = ProxyMethod(self._current_config)
@@ -133,6 +137,16 @@ class LogicalDevice(BaseDevice):
     def __del__(self):
         if not self._quiet_del:
             print 'Deleting logical device:', self
+    # These override the behavior when put in an instrument _create_devs is called
+    # _create_devs changes self.instr, self.name and self._format['header'] if not set
+    # since self._format['header'] should already be set, and self.name is not
+    # use by default for Logical device, we only need to protect instr
+    @property
+    def instr(self):
+        return self._instr_internal
+    @instr.setter
+    def instr(self, val):
+        self._instr_parent = val
     def _autoget_normalize(self, autoget):
         if autoget == 'all':
             if self._basedevs:
@@ -143,12 +157,18 @@ class LogicalDevice(BaseDevice):
     def _getclassname(self):
         return self.__class__.__name__
     def getfullname(self):
+        if self._instr_parent:
+            # we have a parent, behave differently
+            return self._instr_parent.header.getcache()+'.'+self.name
         gn, cn, p = self._info()
         return gn
     def __repr__(self):
         gn, cn, p = self._info()
         return '<device "%s" (class "%s" at 0x%08x)>'%(gn, cn, p)
     def find_global_name(self):
+        if self._instr_parent:
+            # we have a parent, behave differently
+            return self._instr_parent.find_global_name()+'.'+self.name
         return _find_global_name(self)
     def _info(self):
         return self.find_global_name(), self._getclassname(), id(self)
