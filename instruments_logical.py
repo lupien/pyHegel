@@ -79,8 +79,8 @@ class LogicalDevice(BaseDevice):
         #   in the latter _basedev = _basedevs[0]
         # can also leave both blank
         # autoinit defaults to the one from _basedev
-        basedev_orig = basedev
-        basedevs_orig = basedevs
+        self._basedev_orig = basedev
+        self._basedevs_orig = basedevs
         basedev_kwarg={}
         if basedev != None:
             if isinstance(basedev, tuple):
@@ -110,7 +110,7 @@ class LogicalDevice(BaseDevice):
         self._autoget = self._autoget_normalize(autoget)
         # TODO fix the problem here
         #doc = self.__doc__+doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev, basedevs)
-        doc = doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev_orig, basedevs_orig)
+        #doc = doc+'\nbasedev=%r\nbasedevs=%r\n'%(basedev_orig, basedevs_orig)
         if basedev:
             if autoinit == None:
                 autoinit = basedev._autoinit
@@ -137,6 +137,10 @@ class LogicalDevice(BaseDevice):
     def __del__(self):
         if not self._quiet_del:
             print 'Deleting logical device:', self
+    def _get_docstring(self, added=''):
+        added += '\nbasedev=%r\nbasedevs=%r\n'%(self._basedev_orig, self._basedevs_orig)
+        return super(LogicalDevice, self)._get_docstring(added=added)
+
     # These override the behavior when put in an instrument _create_devs is called
     # _create_devs changes self.instr, self.name and self._format['header'] if not set
     # since self._format['header'] should already be set, and self.name is not
