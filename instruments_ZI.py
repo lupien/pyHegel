@@ -336,14 +336,6 @@ class zurich_UHF(BaseInstrument):
             return (1./(2*np.pi*tc)) * np.sqrt(np.pi)*gamma(order-0.5)/(2*gamma(order))
         else:
             return np.sqrt(2.**(1./order) -1) / (2*np.pi*tc)
-    def init(self, full=False):
-        super(zurich_UHF, self).init(full=full)
-        if full:
-            tc_to_bw = ProxyMethod(self._tc_to_enbw_3dB)
-            func1 = lambda v: tc_to_bw(v, enbw=False)
-            self.demod_bw3db = FunctionDevice(self.demod_tc, func1, func1)
-            func2 = lambda v: tc_to_bw(v)
-            self.demod_enbw = FunctionDevice(self.demod_tc, func2, func2)
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('memory_size', 'trig_coupling', options)
     def _conv_command(self, comm):
@@ -771,6 +763,13 @@ class zurich_UHF(BaseInstrument):
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         self.alias = self.readval
+
+        tc_to_bw = ProxyMethod(self._tc_to_enbw_3dB)
+        func1 = lambda v: tc_to_bw(v, enbw=False)
+        self.demod_bw3db = FunctionDevice(self.demod_tc, func1, func1)
+        func2 = lambda v: tc_to_bw(v)
+        self.demod_enbw = FunctionDevice(self.demod_tc, func2, func2)
+
         # This needs to be last to complete creation
         super(zurich_UHF, self)._create_devs()
     def clear_history(self, src='sweep'):
