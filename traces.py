@@ -693,7 +693,7 @@ class Sleeper(QtGui.QWidget):
         self.bar.setMaximum(1000)
         self.pause_button = QtGui.QPushButton('Pause')
         self.pause_button.setCheckable(True)
-        self.skip_button = QtGui.QPushButton('End Pause Now')
+        self.skip_button = QtGui.QPushButton('End Sleep Now')
         self.elapsed = QtGui.QLabel('0 min')
         self.sleep_length = QtGui.QDoubleSpinBox()
         self.sleep_length.setRange(0.01, 60*24*2) # 2 days max
@@ -739,9 +739,11 @@ class Sleeper(QtGui.QWidget):
         event.accept()
     def update_elapsed(self):
         full = self.sleep_length.value()*60. # in seconds
-        val = time.time() - self.start_time - self.pause_length
+        now = time.time()
+        start = self.start_time + self.pause_length
+        val = now - start
         if self.pause_button.isChecked():
-            val -= time.time()-self.pause_start
+            val = self.pause_start - start
         elif val>full:
             self.close()
         self.elapsed.setText('%.2f min'%max((val/60.),0))
@@ -760,12 +762,13 @@ class Sleeper(QtGui.QWidget):
         self.update_elapsed()
         self.show()
     def pause(self, checked):
+        now = time.time()
         if checked:
-            self.pause_start = time.time()
+            self.pause_start = now
             self.update_timer.stop()
             self.update_elapsed()
         else:
-            self.pause_length += time.time()-self.pause_start
+            self.pause_length += now-self.pause_start
             self.update_elapsed()
             self.update_timer.start()
 
