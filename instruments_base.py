@@ -1340,7 +1340,7 @@ class scpiDevice(BaseDevice):
     def _get_docstring(self, added=''):
         # we don't include options starting with _
         if len(self._options) > 0:
-            added = '---------- Optional Parameters\n'
+            added += '---------- Optional Parameters\n'
             for optname, optval in self._options.iteritems():
                 basedev = False
                 if isinstance(optval, BaseDevice):
