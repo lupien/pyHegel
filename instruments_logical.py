@@ -704,3 +704,56 @@ class Average(LogicalDevice):
         else:
             ret = list(avg)+list(std)
         return ret + [N]
+
+
+#######################################################
+##    Logical wrap device
+#######################################################
+
+class FunctionWrap(LogicalDevice):
+    """
+       This class provides a wrapper around functions.
+       It is an easy way to turn a function into a device (to use in sweep/record)
+    """
+    def __init__(self, setfunc=None, getfunc=None, checkfunc=None, getformatfunc=None, use_ret_as_cache=False, doc='', **extrak):
+        """
+        Define at least one of setfunc or getfunc.
+        checkfunc is called by a set. If not specified, the default one is used (can handle
+        choices or min/max).
+        getformatfunc can be defined if necessary. There is a default one.
+        use_ret_as_cache: will use the return value from set as the cached value.
+        """
+        super(type(self), self).__init__(doc=doc, autoget=False, **extrak)
+        self._setdev_p = setfunc
+        self._getdev_p = getfunc
+        self._checkfunc = checkfunc
+        self._use_ret = use_ret_as_cache
+        self._last_setfunc_ret = None
+        self._getformatfunc = getformatfunc
+    def _current_config(self, dev_obj=None, options={}):
+        head = ['FunctionWrap:: set=%r, get=%r, check=%r, getformat=%r, user_ret_as_cache=%r'%(
+                self._setfunc, self._getfunc, self._checkfunc, self._getformatfunc, self._use_ret)]
+        return self._current_config_addbase(head, options=options)
+    def _getdev(self, **kwarg):
+        if not self._getdev_p:
+            raise NotImplementedError('This FunctionWrap device does not have a getfunc')
+        return self._getdev_p(**kwarg)
+    @locked_calling_dev
+    def set(self, val, **kwarg):
+        super(FunctionWrap, self).set(val, **kwarg)
+        if self._use_ret:
+            self.setcache(self._last_setfunc_ret)
+    def _setdev(self, val, **kwarg):
+        if not self._setdev_p:
+            raise NotImplementedError('This FunctionWrap device does not have a setfunc')
+        self._last_setfunc_ret = self._setdev_p(val, **kwarg)
+    def check(self, val, **kwarg):
+        if not self._checkfunc:
+            super(FunctionWrap, self).check(val, **kwarg)
+        else:
+            self._checkfunc(val, **kwarg)
+    def getformat(self, **kwarg):
+        if not self._getformatfunc:
+            super(FunctionWrap, self).getformat(**kwarg)
+        else:
+            self._getformatfunc(**kwarg)
