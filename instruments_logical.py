@@ -301,6 +301,8 @@ class ScalingDevice(LogicalDevice):
         super(type(self), self).__init__(basedev=basedev, doc=doc, **extrak)
         self._format['multi'] = ['scale', 'raw']
         self._format['graph'] = [0]
+        self._setdev_p = True
+        self._getdev_p = True
     def _current_config(self, dev_obj=None, options={}):
         head = ['Scaling:: fact=%r offset=%r basedev=%s'%(self._scale, self._offset, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
@@ -347,6 +349,8 @@ class FunctionDevice(LogicalDevice):
         super(type(self), self).__init__(basedev=basedev, doc=doc, **extrak)
         self._format['multi'] = ['conv', 'raw']
         self._format['graph'] = [0]
+        self._setdev_p = True
+        self._getdev_p = True
     def _current_config(self, dev_obj=None, options={}):
         head = ['Func Convert:: basedev=%s'%(self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
@@ -465,6 +469,8 @@ class CopyDevice(LogicalDevice):
         autoget=[False]*len(basedevs)
         autoget[0]=True
         super(CopyDevice, self).__init__(basedevs=basedevs, autoget=autoget, doc=doc, **extrak)
+        self._setdev_p = True
+        self._getdev_p = True
     def _current_config(self, dev_obj=None, options={}):
         head = ['Copy:: %r'%(self._basedevs)]
         return self._current_config_addbase(head, options=options)
@@ -525,6 +531,7 @@ class ExecuteDevice(LogicalDevice):
         if multi != None:
             self._format['multi'] = multi
             self._format['graph'] = range(len(multi))
+        self._getdev_p = True
     def getformat(self, **kwarg):
         ((basedev, base_kwarg),), kwarg_clean = self._get_auto_list(kwarg)
         basefmt = basedev.getformat(**base_kwarg)
@@ -581,6 +588,7 @@ class RThetaDevice(LogicalDevice):
         self._yoffset = yoffset
         self._format['multi'] = ['R', 'ThetaDeg', 'raw_x', 'raw_y']
         self._format['graph'] = [0,1]
+        self._getdev_p = True
     def _current_config(self, dev_obj=None, options={}):
         head = ['R_Theta_Device:: %r, xoffset=%g, yoffset=%g'%(self._basedevs, self._xoffset, self._yoffset)]
         return self._current_config_addbase(head, options=options)
@@ -620,6 +628,7 @@ class PickSome(LogicalDevice):
             multi = ['base-%i'%i for i in range(multi)]
         super(type(self), self).__init__(basedev=basedev, doc=doc, multi=multi, **extrak)
         self._selector = selector
+        self._getdev_p = True
     def _current_config(self, dev_obj=None, options={}):
         head = ['PickSome:: %r, selector=%r'%(self._basedev, self._selector)]
         return self._current_config_addbase(head, options=options)
@@ -652,6 +661,7 @@ class Average(LogicalDevice):
         self._filter_time = filter_time
         self._repeat_time = repeat_time
         self._show_repeats = show_repeats
+        self._getdev_p = True
     #def _combine_kwarg(self, kwarg_dict, base=None, op='get'):
     #    # the base kwarg_clean is made empty and it is used in the call to _getdev
     #    # here we want the parameters to propagate to _getdev
