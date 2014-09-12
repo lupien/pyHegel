@@ -1,0 +1,18 @@
+Main TODO list:
+- properly handle run_and_wait (readval) for lockin
+- finish lecroy and Zurich
+- Create a python analysis template
+- Make check function work
+- add extra_conf to get, filename=''
+- acq_histo2d,
+      -make simpler (automate) the calculation of redirect on log scale
+      -return proper xy-axis
+      -allow renormalized fetch
+      -make it work with scope (or scope2d see JOS)
+
+
+
+
+Agilent IO Libraries Service
+ Error 1923. Service Agilent PXI Resource Manager
+  Agilent LXI Mdns Responder failed to start
