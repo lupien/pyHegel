@@ -346,6 +346,7 @@ class Acq_Board_Instrument(visaInstrument):
         set_spectrum
         set_network_analyzer
         set_correlation, set_autocorrelation, set_auto_and_corr
+        set_random_generator
         set_custom
     You can set the clock_source/sampling_rate with any of them or you can
     use set_clock_source. It needs to be done at least once.
@@ -422,8 +423,11 @@ You can start a server with:
             self._max_Msample = 4294959104    #2*32-8192 (8192=2**13)
             self._min_hist_Msample = 512
             self._min_corr_Msample = 512
+            self._min_rg_Msample = 512
             self._default_hist_Msample = 8192
             self._default_corr_Msample = 8192
+            self._default_rg_Msample = 8192
+            self._max_rg_Msample = 8192
             self._min_acq_Msample = 32
             self._max_acq_Msample = 8192
             self._min_net_Msample = 32
@@ -437,8 +441,11 @@ You can start a server with:
             self._max_Msample = 2147479552 # (2**32-8192)/2
             self._min_hist_Msample = 256
             self._min_corr_Msample = 256
+            self._min_rg_Msample = 256
             self._default_hist_Msample = 4096
             self._default_corr_Msample = 4096
+            self._default_rg_Msample = 4096
+            self._max_rg_Msample = 4096
             self._min_acq_Msample = 16
             self._max_acq_Msample = 4096
             self._min_net_Msample = 16
@@ -452,8 +459,11 @@ You can start a server with:
             self._max_Msample = 2147479552 # (2**32-8192)/2
             self._min_hist_Msample = 256
             self._min_corr_Msample = 256
+            self._min_rg_Msample = 256
             self._default_hist_Msample = 4096
             self._default_corr_Msample = 4096
+            self._default_rg_Msample = 4096
+            self._max_rg_Msample = 4096
             self._min_acq_Msample = 16
             self._max_acq_Msample = 4096
             self._min_net_Msample = 16
@@ -648,6 +658,8 @@ You can start a server with:
             #    fmt.update(file=True)
             #fmt.update(bin='.npy')
             fmt.update(file=True)
+        if mode == 'RandGen':
+            fmt.update(file=True)
         if mode == 'Corr':
             ch = kwarg.get('ch')
             ch = self._fetch_get_ch_corr(ch)
@@ -709,7 +721,7 @@ You can start a server with:
                        In local mode, the saving will be done by data acquisition server
                         (so filename location should be accessible by it)
                        In remote mode, the saving is done by python but only
-                       for Acq mode (in a streaming way, to avoid memory problems).
+                       for Acq and RandGen mode (in a streaming way, to avoid memory problems).
                        Otherwise it is discarded.
                        local/remote is selected by format_location device
                        For multiple channels, the filename is modified to include
@@ -754,6 +766,8 @@ You can start a server with:
                        colorbar()
                        # Make color represent log (add 1 to prevent log10(0) -inf)
                        imshow(log10(v.T+1), interpolation='nearest', origin='lower')
+              RandGen: returns a sequence of random bytes (uint8). The bits should be distributed
+                       uniformly. The length is shorter than the nb_Msample.
 
                For all the following, ch can select which channels to return
                To select one channel: ch=1 or ch=[1]
@@ -852,6 +866,20 @@ You can start a server with:
                 return self.convert_bin2v(ret)
             else:
                 return ret
+
+        if mode == 'RandGen':
+            self.fetch._event_flag.clear()
+            if location == 'Remote' and filename != None:
+                self.fetch._dump_file = open(filename, 'wb')
+                self.fetch._last_filename = filename
+            s = 'DATA:RANDGEN:DATA?'+filestr
+            self.write(s)
+            wait_on_event(self.fetch._event_flag, check_state=self)
+            if self.fetch._dump_file != None:
+                self.fetch._dump_file.close()
+            if self.fetch._rcv_val == None:
+                return None
+            return np.fromstring(self.fetch._rcv_val, np.ubyte)
 
         if mode == 'Hist':
             self.fetch._event_flag.clear()
@@ -1199,7 +1227,7 @@ You can start a server with:
         #device member
     def _create_devs(self):
         # choices string and number
-        op_mode_str = ['Null', 'Acq', 'Corr', 'Cust', 'Hist', 'Net', 'Osc', 'Spec', 'Hist2d']
+        op_mode_str = ['Null', 'Acq', 'Corr', 'Cust', 'Hist', 'Net', 'Osc', 'Spec', 'Hist2d', 'RandGen']
         clock_source_str = ['Internal', 'External', 'USB']
         chan_mode_str = ['Single','Dual']
         osc_slope_str = ['Rising','Falling']
@@ -1302,6 +1330,11 @@ You can start a server with:
         self.net_ch2_imag = acq_device(getstr = 'DATA:NET:CH2_IMAG?',str_type = float, autoinit=False, trig=True)
         self.net_att = acq_device(getstr = 'DATA:NET:ATT?',str_type = float, autoinit=False, trig=True)
         self.net_phase_diff = acq_device(getstr = 'DATA:NET:PHASE_DIFF?',str_type = float, autoinit=False, trig=True)
+
+        # random generator result
+        self.rg_c1 = acq_device(getstr = 'DATA:RANDGEN:C1?', str_type = float, autoinit=False, trig=True)
+        self.rg_c2 = acq_device(getstr = 'DATA:RANDGEN:C2?', str_type = float, autoinit=False, trig=True)
+        self.rg_frac = acq_device(getstr = 'DATA:RANDGEN:FRAC?', str_type = float, autoinit=False, trig=True)
 
         self._devwrap('fetch', autoinit=False, trig=True)
         self.fetch._event_flag = FastEvent()
@@ -1522,7 +1555,7 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the number of samples used for histogram (either a value,
+        nb_Msample: set the number of samples used for histogram (either a value,
                     'min' or 'default')
         chan_nb:    select the channel to acquire for the histogram,
                     either 1(default) or 2
@@ -1575,7 +1608,7 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the number of samples used for histogram (either a value,
+        nb_Msample: set the number of samples used for histogram (either a value,
                     'min' or 'default')
         It does not handle decimation
         """
@@ -1604,7 +1637,7 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the total number of samples used (either a value,
+        nb_Msample: set the total number of samples used (either a value,
                     'min' or 'default')
                     This number includes both channels.
         """
@@ -1635,7 +1668,7 @@ You can start a server with:
 
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the total number of samples used (either a value,
+        nb_Msample: set the total number of samples used (either a value,
                     'min' or 'default')
                     This number includes both channels, if both are read.
         autocorr_single_chan: When True, only one channel is read and analyzed
@@ -1677,7 +1710,7 @@ You can start a server with:
         See tau_vec to set a vector of time displacement between x and y.
         Set sampling_rate anc clock_source, or reuse the previous ones by
         default (see set_clock_source).
-        nb_MSample: set the total number of samples used (either a value,
+        nb_Msample: set the total number of samples used (either a value,
                     'min' or 'default')
                     This number includes both channels.
         autocorr_single_chan: When True, only one channel is analyzed for
@@ -1727,7 +1760,7 @@ You can start a server with:
         Set sampling_rate and clock_source, or reuse the previous ones by
         default (see set_clock_source).
         signal_freq: initial value for net_signal_freq
-        nb_MSample: set the total number of samples used (uses min by default)
+        nb_Msample: set the total number of samples used (uses min by default)
                     This number includes both channels.
         nb_harm:  the number of harmonics to analyze, defaults to 1.
         lock_in_square: when True, squares the signal before doing the lock-in
@@ -1799,7 +1832,7 @@ You can start a server with:
         """
         Activates the spectrum analyzer mode (FFT).
 
-        nb_MSample: set the total number of samples used (uses min by default)
+        nb_Msample: set the total number of samples used (uses min by default)
                     This number includes both channels, if both are read.
         fft_length: The number of points used for calculating the FFT.
                     Needs to be a power of 2. defaults to 1024
@@ -1848,6 +1881,37 @@ You can start a server with:
         self.fft_window.set(window)
 
     @locked_calling
+    def set_random_generator(self, nb_Msample='default', chan_nb=1, sampling_rate=None, clock_source=None):
+        """
+        This takes the nb_Msample from single channel chan_nv and compresses it
+        into a shorted sequence of bytes with very good random properties (as long
+        as data source is somewhat random.) It currently uses and von Neumann algorithm
+        to remove any bias from the data.
+        It is currently only implemented for 8bit card and returns about 1/32 the
+        length of nb_Msample used.
+        nb_Msample: set the number of samples used for histogram (either a value,
+                    'min' or 'default' which is max)
+        chan_nb:    select the channel to acquire for the histogram,
+                    either 1(default) or 2
+        Get data from fetch (readval) or from custom_result1-4
+
+        Set sampling_rate and clock_source, or reuse the previous ones by
+        default (see set_clock_source).
+        """
+        self.op_mode.set('RandGen')
+        if nb_Msample=='default':
+            nb_Msample = self._default_rg_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        elif nb_Msample=='min':
+            nb_Msample = self._min_rg_Msample
+            print 'Using ', nb_Msample, 'nb_Msample'
+        self.set_clock_source(sampling_rate, clock_source)
+        self.nb_Msample.set(nb_Msample)
+        self.chan_mode.set('Single')
+        self.chan_nb.set(chan_nb)
+        self._set_mode_defaults()
+
+    @locked_calling
     def set_custom(self, cust_user_lib, cust_param1, cust_param2, cust_param3, cust_param4,
                    nb_Msample='min',  chan_mode='Single', chan_nb=1, sampling_rate=None, clock_source=None):
         """
@@ -1855,7 +1919,7 @@ You can start a server with:
 
         cust_user_lib: the dll file to load into the acquisition server program
         cust_param1-4: the parameters passed to the custom code. All are floats.
-        nb_MSample: set the total number of samples used (uses min by default)
+        nb_Msample: set the total number of samples used (uses min by default)
                     This number includes both channels, if both are read.
         chan_mode: Either 'Single' (default) or 'Dual'.
                    In dual, both channels are read.
@@ -1920,14 +1984,6 @@ You can start a server with:
 
         # TODO clean up use of 256, 4096 ...
         if self.op_mode.getcache() == 'Hist' and self.board_type in ['ADC14', 'ADC16']:
-            quotien = float(self.nb_Msample.getcache())/256
-            frac,entier = math.modf(quotien)
-            if frac != 0.0:
-                new_nb_Msample = int(math.ceil(quotien))*256
-                if new_nb_Msample > self._max_Msample:
-                    new_nb_Msample = self._max_Msample
-                self.nb_Msample.set(new_nb_Msample)
-                raise ValueError, 'Warning nb_Msample must be a multiple of 256 in Hist ADC14-ADC16, value corrected to nearest possible value : ' + str(new_nb_Msample)
             decimation = self.decimation.getcache()
             if decimation != 1 and decimation % 2 ==1:
                 raise ValueError, 'Decimation can only be 1 or a multiple of 2 for Hist ADC14-ADC16'
@@ -1936,9 +1992,14 @@ You can start a server with:
             decimation = self.decimation.getcache()
             if decimation != 1 and decimation != 2 and decimation % 4 != 0:
                 raise ValueError, 'Decimation can only be 1, 2 or a multiple of 4 for Hist ADC8'
-        
-        
-        if self.op_mode.getcache() == 'Corr' and self.board_type in ['ADC14', 'ADC16']:
+
+        if self.op_mode.getcache() == 'RandGen':
+            if self.nb_Msample.getcache() > self._max_rg_Msample:
+                new_nb_Msample = self._max_rg_Msample
+                self.nb_Msample.set(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be smaller than %i in RandGen, value corrected to maximum'%new_nb_Msample
+
+        if self.op_mode.getcache() in ['Hist', 'Corr', 'Hist2d', 'RandGen'] and self.board_type in ['ADC14', 'ADC16']:
             quotien = float(self.nb_Msample.getcache())/256
             frac,entier = math.modf(quotien)
             if frac != 0.0:
@@ -1946,10 +2007,9 @@ You can start a server with:
                 if new_nb_Msample > self._max_Msample:
                     new_nb_Msample = self._max_Msample
                 self.nb_Msample.set(new_nb_Msample)
-                raise ValueError, 'Warning nb_Msample must be a multiple of 256 in Corr ADC14-ADC16, value corrected to nearest possible value : ' + str(new_nb_Msample)
+                raise ValueError, 'Warning nb_Msample must be a multiple of 256 in %s ADC14-ADC16, value corrected to nearest possible value : '%self.op_mode.getcache() + str(new_nb_Msample)
 
-
-        if (self.op_mode.getcache() == 'Hist' or self.op_mode.getcache() == 'Corr') and self.board_type == 'ADC8':
+        if self.op_mode.getcache() in ['Hist', 'Corr', 'Hist2d', 'RandGen'] and self.board_type == 'ADC8':
             quotien = float(self.nb_Msample.getcache())/512
             frac,entier = math.modf(quotien)
             if frac != 0.0:
@@ -1957,9 +2017,8 @@ You can start a server with:
                 if new_nb_Msample > self._max_Msample:
                     new_nb_Msample = self._max_Msample
                 self.nb_Msample.set(new_nb_Msample)
-                raise ValueError, 'Warning nb_Msample must be a multiple of 512 in Hist or Corr ADC8, value corrected to nearest possible value : ' + str(new_nb_Msample)
-        
-        
+                raise ValueError, 'Warning nb_Msample must be a multiple of 512 in %s ADC8, value corrected to nearest possible value : '%self.op_mode.getcache() + str(new_nb_Msample)
+
         if self.op_mode.getcache() == 'Net':
             if self.nb_Msample.getcache() < self._min_net_Msample:
                 new_nb_Msample = self._min_net_Msample
