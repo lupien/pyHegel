@@ -458,7 +458,6 @@ def _write_conf(f, formats, extra_base=None, **kwarg):
 #       could save in 2 files but display on same trace
 #       Add a way to put a comment in the headers
 
-_sweep_lastnames = []
 class _Sweep(instruments.BaseInstrument):
     # This MemoryDevice will be shared among different instances
     # So there should only be one instance of this class
@@ -562,6 +561,7 @@ class _Sweep(instruments.BaseInstrument):
         return out
     def init(self, full=False):
         self._sweep_trace_num = 0
+        self._lastnames = []
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('before', 'after', 'beforewait')
     def __repr__(self):
@@ -597,7 +597,7 @@ class _Sweep(instruments.BaseInstrument):
                            to the next value
                       The filename, when relative (does not start with / or \)
                       is always combined with the path device.
-                      The global variable _sweep_lastnames is a list of the last
+                      The global variable sweep._lastnames is a list of the last
                       filenames used.
                 rate: unused
                 close_after: automatically closes the figure after the sweep when True
@@ -624,7 +624,6 @@ class _Sweep(instruments.BaseInstrument):
                         If it is -1, only do the reverse sweep. Filename is not changed by default.
             SEE ALSO the sweep devices: before, after, beforewait, graph.
         """
-        global _sweep_lastnames
         dolinspace = True
         if isinstance(start, (list, np.ndarray)):
             span = np.asarray(start)
@@ -665,7 +664,7 @@ class _Sweep(instruments.BaseInstrument):
         fullpath = None
         fullpathrev = None
         fwd = True
-        _sweep_lastnames = []
+        self._lastnames = []
         if filename != None:
             basepath = use_sweep_path(filename)
             if updown == True:
@@ -676,12 +675,12 @@ class _Sweep(instruments.BaseInstrument):
                 fwd = False
             now = time.time()
             fullpath, unique_i = _process_filename(basepath, now=now, start=start, stop=stop, npts=npts, updown=updown_str[ind])
-            _sweep_lastnames.append(fullpath)
+            self._lastnames.append(fullpath)
             if updown == True and not updown_same:
                 ni = self.next_file_i.getcache()-1
                 fullpathrev, unique_i = _process_filename(basepath, now=now, next_i=ni, start_i=unique_i, search=False,
                                                 start=start, stop=stop, npts=npts, updown=updown_str[1])
-                _sweep_lastnames.append(fullpathrev)
+                self._lastnames.append(fullpathrev)
             filename = os.path.basename(fullpath)
         if extra_conf == None:
             extra_conf = [sweep.out]
