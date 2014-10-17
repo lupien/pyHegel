@@ -1375,7 +1375,7 @@ class BNC_rf_845(visaInstrument):
         self.freq_stop = scpiDevice('FREQuency:STOP', str_type=float, min=minfreq, max=maxfreq)
         self.freq_step = scpiDevice(getstr='FREQuency:STEP?', str_type=float)
         #self.freq_steplog = scpiDevice(getstr='FREQuency:STEP:LOGarithmic?', str_type=float) # This is in the manual but does not seem to work
-        self.sweep_nbpoints = scpiDevice('SWEep:POINt', str_type=int, min=2, max=65535) # manual says points but that does not work, use point instead
+        self.sweep_nbpoints = scpiDevice('SWEep:POINts', str_type=int, min=2, max=65535)
         self.sweep_progress = scpiDevice(getstr='SWEep:PROGress?', str_type=float) # manual says proggress but is wrong
         self.sweep_type = scpiDevice('SWEep:SPACing', choices=ChoiceStrings('LINear', 'LOGarithmic'))
         self.sweep_dwell_s = scpiDevice('SWEep:DWELl', str_type=float)
