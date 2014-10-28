@@ -10,9 +10,9 @@ import traces
 
 from instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
-                            ChoiceBase, ChoiceMultiple, ChoiceMultipleDep,\
+                            ChoiceBase, ChoiceMultiple, ChoiceMultipleDep, ChoiceSimpleMap,\
                             ChoiceStrings, ChoiceIndex,\
-                            make_choice_list,\
+                            make_choice_list, dict_improved, _fromstr_helper,\
                             decode_float64, visa, locked_calling
 
 from instruments_logical import FunctionDevice
@@ -1402,6 +1402,171 @@ class BNC_rf_845(visaInstrument):
         Sets the current output phase as a zero reference.
         """
         self.write('PHASe:REFerence')
+
+
+#######################################################
+##    Scientific Magnetics Magnet Controller SMC120-10ECS
+#######################################################
+
+def _parse_magnet_return(s, conv):
+    """
+    s is the input string
+    conv is a list of tuples (start symbol, name, type)
+    """
+    names = []
+    vals = []
+    for symb, name, t in conv[::-1]:
+        if symb=='last':
+            vals.append(_fromstr_helper(s[-1], t))
+            s = s[:-1]
+        else:
+            sp = s.rsplit(symb, 1)
+            vals.append(_fromstr_helper(sp[1], t))
+            s = sp[0]
+        names.append(name)
+    if s != "":
+        raise RuntimeError('There is some leftovers (%s) in the string'%s)
+    return dict_improved(zip(names[::-1], vals[::-1]))
+
+class MagnetController_SMC(visaInstrument):
+    """
+    This controls a Scientific Magnetics Magnet Controller SMC120-10ECS
+    Usefull device:
+        field
+        rawIV
+    Important, either leave the instrument in Tesla or at least
+    do not change the calibration (it is read during init.)
+    This only handles serial address connections (like ASRL1)
+    Important: To changes values like display Unit, the instrument needs to be
+    in remote (press remote button).
+    """
+    def __init__(self, address):
+        vpp43 = visa.vpp43
+        super(MagnetController_SMC, self).__init__(address, parity=vpp43.VI_ASRL_PAR_NONE,
+                                            baud_rate=9600, data_bits=8, stop_bits=2, term_chars='\r\n')
+    def init(self, full=False):
+        if full == True:
+            if isinstance(self.visa, visa.SerialInstrument):
+                vpp43 = visa.vpp43
+                vpp43.set_attribute(self.visa.vi, vpp43.VI_ATTR_ASRL_FLOW_CNTRL, vpp43.VI_ASRL_FLOW_XON_XOFF)
+        super(MagnetController_SMC, self).init(full=full)
+        self._magnet_cal_T_per_A = self.operating_parameters.get()['calibTpA']
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('field', 'current_status', 'setpoints', 'status', 'operating_parameters', options)
+    def _field_internal(self):
+        s=self.ask('N')
+        try:
+            d = _parse_magnet_return(s, [('F', 'field', float), ('V', 'volt', float),
+                                         ('R', 'target', ChoiceIndex(['zero', 'lower','upper'])),
+                                          ('last', 'ramptype', ChoiceSimpleMap(dict(A='current_limit', V='volt_limit')))])
+            field = d.field
+        except IndexError:
+            d = _parse_magnet_return(s, [('I', 'current', float), ('V', 'volt', float),
+                                     ('R', 'target', ChoiceIndex(['zero', 'lower','upper'])),
+                                     ('last', 'ramptype', ChoiceSimpleMap(dict(A='current_limit', V='volt_limit')))])
+            field = d.current * self._magnet_cal_T_per_A
+        return field, d
+    def _field_getdev(self):
+        field, d = self._field_internal()
+        return field
+    def _current_status_getdev(self):
+        # Note that G,N returns the live output, while only J returns the persistent current (this is different than
+        #  what the manual says.)
+        s=self.ask('G')
+        d = _parse_magnet_return(s, [('I', 'current', float), ('V', 'volt', float),
+                                     ('R', 'target', ChoiceIndex(['zero', 'lower','upper'])),
+                                     ('last', 'ramptype', ChoiceSimpleMap(dict(A='current_limit', V='volt_limit')))])
+        return d
+    def _rawIV_getdev(self):
+        d = self._current_status_getdev()
+        return d.current, d.volt
+    def _operating_parameters_setdev(self, value):
+        for k,v in value.iteritems():
+            if k == 'rate':
+                self.write('A%.5f'%v)
+            elif k == 'Tunit':
+                 self.write('T%i'%v)
+            elif k == 'reverse':
+                 self.write('D%i'%v)
+            else:
+                raise NotImplementedError('Changing %s is not implememented'%k)
+    def _operating_parameters_getdev(self):
+        s = self.ask('O')
+        return _parse_magnet_return(s, [('A', 'rate', float), ('D', 'reverse', bool),
+                                        ('T', 'Tunit', bool), ('B', 'lockout', bool),
+                                        ('W', 'Htr_current', float), ('C', 'calibTpA', float)])
+    def _setpoints_setdev(self, values, Tunit='default'):
+        if Tunit != None:
+            self.write('%T%i'%Tunit)
+        for k,v in value.iteritems():
+            if k == 'upper':
+                self.write('U%f'%v)
+            elif k == 'lower':
+                 self.write('L%f'%v)
+            elif k == 'voltLim':
+                 self.write('Y%f'%v)
+            else:
+                raise NotImplementedError('Changing %s is not implememented'%k)
+    def _setpoints_getdev(self, Tunit='default'):
+        s = self.ask('S')
+        d = _parse_magnet_return(s, [ ('T', 'Tunit', bool), ('U', 'upper', float), ('L', 'lower', float),
+                                     ('Y', 'voltLim', float)])
+        if Tunit != 'default' and Tunit != d['Tunit']:
+            if Tunit:
+                f = self._magnet_cal_T_per_A
+            else:
+                f = 1./self._magnet_cal_T_per_A
+            d['upper'] *= f
+            d['lower'] *= f
+            d['Tunit'] = Tunit
+        return d
+    def persistent_force(self):
+        """
+        This is very dangerous. It is currently disabled.
+        """
+        #self.write('H2')
+        pass
+    def persistent_forget(self):
+        """
+        This is dangerous. It is currently disabled.
+        """
+        #self.write('H9')
+        pass
+    def _status_setdev(self, value):
+        for k,v in value.iteritems():
+            if k == 'target':
+                ch=ChoiceIndex(['zero', 'lower','upper'])
+                self.write('R%s'%ch.tostr(v))
+            elif k == 'pause':
+                self.write('P%i'%v)
+            elif k == 'persistent':
+                # note that persistent could be True(1), False(0), see also persistent_force and forget
+                self.write('H%i'%v)
+            else:
+                raise NotImplementedError('Changing %s is not implememented'%k)
+    def _status_getdev(self):
+        s = self.ask('K')
+        d= _parse_magnet_return(s, [('R', 'target', ChoiceIndex(['zero', 'lower','upper'])),
+                                    ('M', 'rampstate', ChoiceIndex(['ramping', 'unknown', 'at_target'])),
+                                    ('P', 'pause', bool), ('X', 'trip', ChoiceIndex(['off', 'on_inactive', 'on_active', 'off_active', 'on_auto_inactive', 'on_auto_active'])),
+                                    ('H', 'persistent', bool), ('Z', 'foo', float),
+                                    ('E', 'error', int), ('Q', 'trip_point', float)])
+        # Note that the value of M is not properly described in manual. At least it does not match
+        # what I observe (0=ramping, 2=at target, 1 is not seen)
+        # at target is shown when control has reached the value. The actual outputs gets there a little bit later
+        d.pop('foo')
+        return d
+    def _create_devs(self):
+        self._devwrap('field', doc='units are Tesla')
+        self._devwrap('operating_parameters', setget=True, doc="rate in A/s depending on units")
+        self._devwrap('setpoints', setget=True, doc="Tunit can be True,False or 'default' in which case it is the instrument units")
+        self._devwrap('status', setget=True)
+        self._devwrap('current_status')
+        self._devwrap('rawIV')
+        self.rawIV._format['multi'] = ['current', 'volt']
+        self.alias = self.field
+        # This needs to be last to complete creation
+        super(MagnetController_SMC, self)._create_devs()
 
 
 #######################################################
