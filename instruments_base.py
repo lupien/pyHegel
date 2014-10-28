@@ -2466,14 +2466,14 @@ class visaInstrument(BaseInstrument):
           'USB0::0x0957::0x0118::MY49001395::0::INSTR'
           'USB::0x0957::0x0118::MY49001395'
     """
-    def __init__(self, visa_addr):
+    def __init__(self, visa_addr, **kwarg):
         # need to initialize visa before calling BaseInstrument init
         # which might require access to device
         if type(visa_addr)==int:
             visa_addr= 'GPIB0::%i::INSTR'%visa_addr
         self.visa_addr = visa_addr
         if not CHECKING:
-            self.visa = visa.instrument(visa_addr)
+            self.visa = visa.instrument(visa_addr, **kwarg)
             self._lock_extra = Lock_Visa(self.visa.vi)
         self.visa.timeout = 3 # in seconds
         to = time.time()
