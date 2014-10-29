@@ -568,7 +568,7 @@ class _Sweep(instruments.BaseInstrument):
         return '<sweep instrument>'
     def __call__(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
                   close_after=False, title=None, out=None, extra_conf=None,
-                  async=False, reset=False, logspace=False, updown=False):
+                  async=False, reset=False, logspace=False, updown=False, first_wait=None):
         """
             Usage:
                 dev is the device to sweep. For more advanced uses (devices with options),
@@ -624,6 +624,10 @@ class _Sweep(instruments.BaseInstrument):
                 updown: When True, the sweep will be done twice, the second being in reverse.
                         The way the data is saved depends on the updown device.
                         If it is -1, only do the reverse sweep. Filename is not changed by default.
+                first_wait: when set to a value is an extra wait time in seconds that is added
+                            after setting the first value. Use it when the first value produces
+                            a large change that can temporarily overload some instruments
+                            like lock-ins.
             SEE ALSO the sweep devices: before, after, beforewait, graph.
         """
         dolinspace = True
@@ -748,6 +752,8 @@ class _Sweep(instruments.BaseInstrument):
                     iv = dev.getcache() # in case the instrument changed the value
                     self.execbefore(i, v, cfwd)
                     wait(self.beforewait.get())
+                    if i == 0 and cfwd and first_wait != None:
+                        wait(first_wait)
                     if async:
                         vals = _readall_async(devs, cformats, i)
                     else:
