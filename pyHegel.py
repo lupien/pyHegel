@@ -614,7 +614,9 @@ class _Sweep(instruments.BaseInstrument):
                 async: When True, enables async mode (waiting on devices is done in
                         parallel instead of consecutivelly.) This saves time.
                 reset: After the sweep is completed, the dev is returned to the
-                       first value in the sweep list.
+                       first value in the sweep list if set to True. If a value is given it
+                       is set to that value. When False (default) or None the last value of
+                       the sweep is kept.
                 logspace: When true, the npts between start and stop are separated
                            exponentially (so it for a nice linear spacing on a log scale)
                           It uses np.logspace internally but start and stop stay the
@@ -773,11 +775,16 @@ class _Sweep(instruments.BaseInstrument):
                 frev.close()
         if graph and t.abort_enabled:
             raise KeyboardInterrupt('Aborted sweep')
-        if reset: # return to first value
+        if isinstance(reset, bool):
+            if reset:
+                reset = span[0] # return to first value
+            else:
+                reset = None
+        if reset != None:
             if graph and t.abort_enabled:
                 pass
             else:
-                dev.set(span[0], **dev_opt) # TODO replace with move
+                dev.set(reset, **dev_opt)
         if graph and close_after:
             t = t.destroy()
             del t
