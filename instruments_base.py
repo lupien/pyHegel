@@ -666,14 +666,21 @@ class BaseDevice(object):
     # for cache consistency
     #    get should return the same thing set uses
     @locked_calling_dev
-    def set(self, val=None, **kwarg):
-        if val == None:
-            if self._allow_kw_as_dict:
+    def set(self, *val, **kwarg):
+        nval = len(val)
+        if nval == 1:
+            val = val[0]
+        elif nval == 0:
+            val = None
+        else:
+            raise RuntimeError(self.perror('set can only have one positional parameter'))
+        if self._allow_kw_as_dict:
+            if val == None:
                 val = dict()
                 for k in kwarg.keys():
                     if k in self.choices.field_names:
                         val[k] = kwarg.pop(k)
-            else:
+        elif nval == 0: # this permits to set a value to None
                 raise RuntimeError(self.perror('set requires a value.'))
         try:
             self.check(val, **kwarg)

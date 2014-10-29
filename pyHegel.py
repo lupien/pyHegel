@@ -825,7 +825,7 @@ readfile.__doc__ = """
 
 
 ###  set overides set builtin function
-def set(dev, value=None, **kwarg):
+def set(dev, *value, **kwarg):
     """
        Change the value of device dev (or the alias for an instrument).
        The options for the device are listed as keyword arguments (**kwarg).
@@ -837,7 +837,7 @@ def set(dev, value=None, **kwarg):
        Note that dev can also be a tuple like in sweep.out
     """
     dev, kwarg = _get_dev_kw(dev, **kwarg)
-    dev.set(value, **kwarg)
+    dev.set(*value, **kwarg)
 
 def move(dev, value, rate):
     """
