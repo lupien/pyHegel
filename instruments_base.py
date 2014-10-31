@@ -2427,9 +2427,13 @@ class _SharedStructure(object):
         counter_size = ctypes.sizeof(ctypes.c_int32)
         size = counter_size + ctypes.sizeof(somectype)
         if os.name != 'nt':
-            raise NotImplementedError('_SharedStructure is not implemented on this operating system')
-        # TODO tagname is windows specific, on linux need shm_open, ftruncate mmap and
-        self.buffer = mmap.mmap(-1, size, tagname=tagname)
+            # we assume posix like. on linux need python-posix_ipc package (fedora)
+            import posix_ipc
+            self._shared_obj = posix_ipc.SharedMemory(tagname, posix_ipc.O_CREAT, size=size)
+            self.buffer = mmap.mmap(self._shared_obj.fd, size)
+            self._shared_obj.close_fd()
+        else: # for windows
+            self.buffer = mmap.mmap(-1, size, tagname=tagname)
         self._counter = counter_type.from_buffer(self.buffer, 0)
         self.data = somectype.from_buffer(self.buffer, counter_size)
         self._add_count()
@@ -2454,9 +2458,12 @@ class _SharedStructure(object):
         self._counter.value -= 1
     def __del__(self):
         self._dec_count()
+        count = self._get_count()
         if _SharedStructure_debug:
             print 'Cleaned up mmap, counter now %i'%self._get_count()
         self.buffer.close()
+        if count == 0 and os.name != 'nt':
+            self._shared_obj.unlink()
 
 class _LastTime(ctypes.Structure):
     _fields_ = [('write_time', ctypes.c_double),
