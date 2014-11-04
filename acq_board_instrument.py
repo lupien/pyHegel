@@ -1193,19 +1193,19 @@ You can start a server with:
         if i != None and append:
             raise ValueError, 'Choose either i or append, not both'
 
-    def _hist_cs_getformat(self, filename=None, c=[1,2,3,4,5], **kwarg):
+    def _hist_cs_getformat(self, filename=None, c=[1,2,3,4,5,6], **kwarg):
         if not isinstance(c, (list, tuple, set, np.ndarray)):
             c=[c]
         c=sorted(set(c)) # removes duplicates, and sort
-        if min(c)<1 or max(c)>5:
-            raise ValueError, 'Selector out of range, should be 1-5'
+        if min(c)<1 or max(c)>6:
+            raise ValueError, 'Selector out of range, should be 1-6'
         fmt = self.hist_cs._format
         headers = [ 'c%i'%i for i in c]
         fmt.update(multi=headers, graph=range(len(headers)))
         return BaseDevice.getformat(self.hist_cs, c=c, **kwarg)
-    def _hist_cs_getdev(self, c=[1,2,3,4,5]):
+    def _hist_cs_getdev(self, c=[1,2,3,4,5,6]):
         """
-           hist_cs has optionnal parameter c=[1,2,3,4,5]
+           hist_cs has optionnal parameter c=[1,2,3,4,5,6]
            It specifies which of the cumulants to obtain and returns
            a list of the selected ones. By default, all are selected.
         """
@@ -1222,6 +1222,8 @@ You can start a server with:
             ret.append(self.hist_c4.get())
         if 5 in c:
             ret.append(self.hist_c5.get())
+        if 6 in c:
+            ret.append(self.hist_c6.get())
         return ret
 
         #device member
@@ -1305,6 +1307,7 @@ You can start a server with:
         self.hist_c3 = acq_device(getstr = 'DATA:HIST:C3?', str_type = float, autoinit=False, trig=True)
         self.hist_c4 = acq_device(getstr = 'DATA:HIST:C4?', str_type = float, autoinit=False, trig=True)
         self.hist_c5 = acq_device(getstr = 'DATA:HIST:C5?', str_type = float, autoinit=False, trig=True)
+        self.hist_c6 = acq_device(getstr = 'DATA:HIST:C6?', str_type = float, autoinit=False, trig=True)
         self._devwrap('hist_cs', autoinit=False, trig=True)
         
         # custom result
@@ -2208,7 +2211,7 @@ class HistoSmooth(object):
         return np.array([x, h/self.corr_binwidth])
 
     def calc_cum(self, data, xscale=None, corrected=True):
-        """ This functions calculates cumulants up to 5
+        """ This functions calculates cumulants up to 6
         data can have multiple columns.
              With only one column, it is the histogram
              With multiple columns, the first has dimension of 2 (x-axis, histogram)
@@ -2245,7 +2248,9 @@ class HistoSmooth(object):
         c3 = np.sum((x-c1x)**3 *norm_h, axis=-1)
         cent_moment4 = np.sum((x-c1x)**4 *norm_h, axis=-1)
         cent_moment5 = np.sum((x-c1x)**5 *norm_h, axis=-1)
+        cent_moment6 = np.sum((x-c1x)**6 *norm_h, axis=-1)
         c4 = cent_moment4 - 3.*c2**2
         c5 = cent_moment5 - 10.*c2*c3
-        return np.array([c1, c2, c3, c4, c5])
+        c6 = cent_moment6 - 15*cent_moment4*c2 - 10*c3**2 + 30*c2**3
+        return np.array([c1, c2, c3, c4, c5, c6])
 
