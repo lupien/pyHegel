@@ -2500,14 +2500,18 @@ class visaInstrument(BaseInstrument):
         # no need to call vpp43.close(self.visa.vi)
         # because self.visa does that when it is deleted
         super(visaInstrument, self).__del__()
-    @locked_calling
+    # Do NOT enable locked_calling for read_status_byte, otherwise we get a hang
+    # when instrument is on gpib using agilent visa. But do use lock visa
+    # otherwise read_stb could fail because of lock held in another thread/process
+    #@locked_calling
     def read_status_byte(self):
         # since on serial visa does the *stb? request for us
         # might as well be explicit and therefore handle the rw_wait properly
         if isinstance(self.visa, visa.SerialInstrument):
             return int(self.ask('*stb?'))
         else:
-            return vpp43.read_stb(self.visa.vi)
+            with self._lock_extra:
+                return vpp43.read_stb(self.visa.vi)
     @locked_calling
     def control_remotelocal(self, remote=False, local_lockout=False, all=False):
         """
@@ -2639,7 +2643,7 @@ class visaInstrument(BaseInstrument):
 
 class visaInstrumentAsync(visaInstrument):
     def __init__(self, visa_addr, poll=False):
-        # poll can nbe True (for always polling) 'not_gpib' for polling for lan and usb but
+        # poll can be True (for always polling) 'not_gpib' for polling for lan and usb but
         # use the regular technique for gpib
         # the _async_sre_flag should match an entry somewhere (like in init)
         self._async_sre_flag = 0x20 #=32 which is standard event status byte (contains OPC)
@@ -2695,7 +2699,7 @@ class visaInstrumentAsync(visaInstrument):
         # if the SRQ line is still active, another call to the handler will occur
         # after a short delay (30 ms I think) everytime a read_status_byte is done
         # on the bus (and SRQ is still active).
-        # For agilent visa, the SRQ status is queried every 30ms. So the
+        # For agilent visa, the SRQ status is queried every 30ms. So
         # you we might have to wait that time after the hardware signal is active
         # before this handler is called.
         status = self.read_status_byte()
@@ -2729,7 +2733,7 @@ class visaInstrumentAsync(visaInstrument):
         elif self._RQS_status == -1:
             ev_type = context = None
             try:
-                # On National Instrument (NI) visa this seems wait an extra 12 ms after the
+                # On National Instrument (NI) visa this seems to wait an extra 12 ms after the
                 # SRQ is turned on.
                 # Also the timeout actually used seems to be 16*ceil(max_time*1000/16) in ms.
                 ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, int(max_time*1000))
