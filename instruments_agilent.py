@@ -262,7 +262,8 @@ class agilent_rf_PSG(visaInstrument):
                                  'output_blanking_en', 'output_blanking_auto_en',
                                  'freq_mode', 'freq_cw', 'freq_start', 'freq_stop',
                                  'freq_multiplier', 'freq_offset', 'freq_offset_en', 'freq_reference', 'freq_reference_en',
-                                 'phase', 'mod_en', 'mod_am_en', 'mod_fm_en', 'mod_phase_en', 'mod_pulse_en', options)
+                                 'phase', 'mod_en', 'mod_am_en', 'mod_fm_en', 'mod_phase_en', 'mod_pulse_en'
+                                 'mod_am_freq', 'mod_am_shape', 'mod_am_depth','mod_am_noise_type', options)
     def _create_devs(self):
         self.installed_options = scpiDevice(getstr='*OPT?')
         self.oscillator_source = scpiDevice(getstr=':ROSCillator:SOURce?', str_type=str)
@@ -309,6 +310,10 @@ class agilent_rf_PSG(visaInstrument):
         # TODO handle the marker stuff
         self.mod_en = scpiDevice(':OUTPut:MODulation:STATe', str_type=bool)
         self.mod_am_en = scpiDevice(':AM:STATe', str_type=bool)
+        self.mod_am_freq = scpiDevice(':AM:INTernal:FREQuency', str_type=float, min=0.5, max = 1e6, setget=True, doc="Frequency of the modulation. From 0 to 1MHz if mod_am_shape is 'sine'; 0 to 100KHz else.")
+        self.mod_am_depth = scpiDevice(':AM:DEPTh:LINear', str_type=float, min=0, max = 100, setget=True, doc='Modulation depth in percent')
+        self.mod_am_shape = scpiDevice(':AM:INTernal:FUNCtion:SHAPe', choices=ChoiceStrings('SINE', 'SQUare', 'TRIangle', 'NOISe'), doc="Shape of the modulation")
+        self.mod_am_noise_type = scpiDevice(':AM:INTernal:FUNCtion:NOISE', choices=ChoiceStrings('GAUSsian','UNIForm'), doc="The noise profile used if mod_am_shape is set to 'noise'")
         self.mod_fm_en = scpiDevice(':FM:STATe', str_type=bool)
         self.mod_phase_en = scpiDevice(':PM:STATe', str_type=bool)
         self.mod_pulse_en = scpiDevice(':PULM:STATe', str_type=bool)
