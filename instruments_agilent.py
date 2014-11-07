@@ -262,7 +262,7 @@ class agilent_rf_PSG(visaInstrument):
                                  'output_blanking_en', 'output_blanking_auto_en',
                                  'freq_mode', 'freq_cw', 'freq_start', 'freq_stop',
                                  'freq_multiplier', 'freq_offset', 'freq_offset_en', 'freq_reference', 'freq_reference_en',
-                                 'phase', 'mod_en', 'mod_am_en', 'mod_fm_en', 'mod_phase_en', 'mod_pulse_en'
+                                 'phase', 'mod_en', 'mod_am_en', 'mod_fm_en', 'mod_phase_en', 'mod_pulse_en',
                                  'mod_am_freq', 'mod_am_shape', 'mod_am_depth','mod_am_noise_type', options)
     def _create_devs(self):
         self.installed_options = scpiDevice(getstr='*OPT?')
