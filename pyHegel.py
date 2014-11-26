@@ -808,12 +808,16 @@ def use_sweep_path(filename):
     return filename
 
 _readfile_lastnames = []
-def readfile(filename, nojoin=False, prepend=None, getnames=False, csv='auto', dtype=None):
-    global _readfile_lastnames
+_readfile_lastheaders = []
+_readfile_lasttitles = []
+def readfile(filename, nojoin=False, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None):
+    global _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
     if not nojoin and prepend == None:
         prepend = sweep.path.get()
-    ret = util.readfile(filename, prepend=prepend, getnames=getnames, csv=csv, dtype=dtype)
+    ret = util.readfile(filename, prepend=prepend, getnames=getnames, getheaders=getheaders, csv=csv, dtype=dtype)
     _readfile_lastnames = util._readfile_lastnames
+    _readfile_lastheaders = util._readfile_lastheaders
+    _readfile_lasttitles = util._readfile_lasttitles
     return ret
 readfile.__doc__ = """
     By default the path is joined with sweep.path (unless absolute).

@@ -65,9 +65,10 @@ def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0):
         return X.T
     return X
 
-#TODO add handling of title column and extracting headers
 _readfile_lastnames = []
-def readfile(filename, prepend=None, getnames=False, csv='auto', dtype=None):
+_readfile_lastheaders = []
+_readfile_lasttitles = []
+def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -105,8 +106,16 @@ def readfile(filename, prepend=None, getnames=False, csv='auto', dtype=None):
     The list of files is saved in the global variable _readfile_lastnames.
     When the parameter getnames=True, the return value is a tuple
     (array, filenames_list)
+    The headers of the FIRST file are saved in the global variable _readfile_lastheaders.
+    The headers are recognized has lines starting with #
+    The last header is probably the title line (_readfile_lastheaders[-1]) and is parsed into
+    _readfile_lasttitles (assuming columns are separated by tabs)
+    When the parameter getheaders=True, the return value is a tuple
+    (array, titles_list, headers_list)
+    If both getheaders and getnames are True, the the return value is a tuple
+    (array, filenames_list, titles_list, headers_list)
     """
-    global _readfile_lastnames
+    global _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
     if not isinstance(filename, (list, tuple, np.ndarray)):
         filename = [filename]
     filelist = []
@@ -125,6 +134,19 @@ def readfile(filename, prepend=None, getnames=False, csv='auto', dtype=None):
         multi = True
     else:
         multi = False
+    hdrs = []
+    titles = []
+    if dtype == None: # binary files don't have headers
+        with open(filelist[0], 'rU') as f: # only the first file
+            while True:
+                line = f.readline()
+                if line[0] != '#':
+                    break
+                hdrs.append(line)
+        if len(hdrs): # at least one line, we use the last one, strip start # and end newline
+            titles = hdrs[-1][1:-1].split('\t')
+    _readfile_lastheaders = hdrs
+    _readfile_lasttitles = titles
     ret = []
     for fn in filelist:
         if dtype != None:
@@ -145,14 +167,19 @@ def readfile(filename, prepend=None, getnames=False, csv='auto', dtype=None):
         else:
             ret.append(np.loadtxt(fn).T)
     if not multi:
-        return ret[0]
-    # convert into a nice numpy array. The data is copied and made contiguous
-    ret = np.array(ret)
+        ret = ret[0]
+    else:
+        # convert into a nice numpy array. The data is copied and made contiguous
+        ret = np.array(ret)
     if ret.ndim == 3:
         # we make a copy to make it a nice contiguous array
         ret = ret.swapaxes(0,1).copy()
-    if getnames:
+    if getnames and getheaders:
+        return (ret, filelist, titles, hdrs)
+    elif getnames:
         return (ret, filelist)
+    elif getheaders:
+        return (ret, titles, hdrs)
     else:
         return ret
 
