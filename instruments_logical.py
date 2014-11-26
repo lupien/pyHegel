@@ -56,12 +56,15 @@ class LogicalDevice(BaseDevice):
        Need to overwrite force_get method, _current_config
        And may be change getformat
 
+       User either basedev (a single device) or basedevs (a list of devices), not both.
+       It could also be neither. For subclasses with basedevs, basedev is then basedevs[0]
+
        autoget can be 'all', then all basedev or basedevs are get automatically in get and
        getasync. (use self._cached_data in logical _getdev). For a single basedev in can
        be True or False. For Basedevs it can be a list of True or False.
        When autoget is False, we assume the user will perform the get himself so we bypass
        basedev handling in get and getasync (for async this probably only makes sense for devices
-       that don't habe an async mode.)
+       that don't have an async mode.)
        force_get always forces all subdevice unless it is overriden.
 
        The quiet_del option prevents the destructor from printing. Useful when within an instrument.
@@ -89,6 +92,8 @@ class LogicalDevice(BaseDevice):
             basedev = _asDevice(basedev) # deal with instr.alias
         basedevs_kwarg=[]
         if basedevs != None:
+            if basedev != None:
+                print 'You should not use basedev and basedevs at the same time. basedev is now basedevs[0]'
             basedevs = basedevs[:] # make a copy of the list so we don't change the original
             for i, dev in enumerate(basedevs):
                 if isinstance(dev, tuple):
@@ -185,7 +190,7 @@ class LogicalDevice(BaseDevice):
         if autoget == None:
             autoget = self._autoget
         autoget = self._autoget_normalize(autoget)
-        if autoget == False:
+        if autoget == False or (self._basedevs == None and self._basedev == None):
             pass
         elif not self._basedevs and self._basedev != None:
             if autoget:
@@ -725,15 +730,18 @@ class FunctionWrap(LogicalDevice):
        This class provides a wrapper around functions.
        It is an easy way to turn a function into a device (to use in sweep/record)
     """
-    def __init__(self, setfunc=None, getfunc=None, checkfunc=None, getformatfunc=None, use_ret_as_cache=False, doc='', **extrak):
+    def __init__(self, setfunc=None, getfunc=None, checkfunc=None, getformatfunc=None, use_ret_as_cache=False, basedev=None, basedevs=None, autoget=False, doc='', **extrak):
         """
         Define at least one of setfunc or getfunc.
         checkfunc is called by a set. If not specified, the default one is used (can handle
         choices or min/max).
         getformatfunc can be defined if necessary. There is a default one.
         use_ret_as_cache: will use the return value from set as the cached value.
+        If you define a basedev or a basedevs list, those devices are included in the
+        file headers. They are not read by default (autoget=False). If autoget is is set to 'all'
+        then the getfunc function can use getcache on the basedev(s) devices; otherwise it needs to use get.
         """
-        super(type(self), self).__init__(doc=doc, autoget=False, **extrak)
+        super(type(self), self).__init__(doc=doc, basedev=basedev, basedevs=basedevs, autoget=autoget, **extrak)
         self._setdev_p = setfunc
         self._getdev_p = getfunc
         self._checkfunc = checkfunc
@@ -742,7 +750,7 @@ class FunctionWrap(LogicalDevice):
         self._getformatfunc = getformatfunc
     def _current_config(self, dev_obj=None, options={}):
         head = ['FunctionWrap:: set=%r, get=%r, check=%r, getformat=%r, user_ret_as_cache=%r'%(
-                self._setfunc, self._getfunc, self._checkfunc, self._getformatfunc, self._use_ret)]
+                self._setdev_p, self._getdev_p, self._checkfunc, self._getformatfunc, self._use_ret)]
         return self._current_config_addbase(head, options=options)
     def _getdev(self, **kwarg):
         if not self._getdev_p:
@@ -764,6 +772,7 @@ class FunctionWrap(LogicalDevice):
             self._checkfunc(val, **kwarg)
     def getformat(self, **kwarg):
         if not self._getformatfunc:
-            super(FunctionWrap, self).getformat(**kwarg)
+            return super(FunctionWrap, self).getformat(**kwarg)
         else:
-            self._getformatfunc(**kwarg)
+            return self._getformatfunc(**kwarg)
+
