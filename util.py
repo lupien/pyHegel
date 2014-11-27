@@ -128,7 +128,7 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
         fl = glob.glob(fglob)
         fl.sort()
         filelist.extend(fl)
-    _readfile_lastnames = filelist
+    _readfile_lastnames[:] = filelist
     if len(filelist) == 0:
         print 'No file found'
         return
@@ -148,8 +148,8 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
                 hdrs.append(line)
         if len(hdrs): # at least one line, we use the last one, strip start # and end newline
             titles = hdrs[-1][1:-1].split('\t')
-    _readfile_lastheaders = hdrs
-    _readfile_lasttitles = titles
+    _readfile_lastheaders[:] = hdrs
+    _readfile_lasttitles[:] = titles
     ret = []
     for fn in filelist:
         if dtype != None:
