@@ -36,17 +36,20 @@ import csv
 ##################################################
 
 def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0):
-    f=open(filename, 'r')
-    reader = csv.reader(f)
     X=[]
-    for line in reader:
-        try:
-            conv = map(dtype, line)
-        except ValueError:
-            # skip this line
-            continue
-        if conv != []:
-            X.append(conv)
+    # The docs says to use mode 'rb' but if the file uses mac termination it will fail
+    # (should be rare). So instead use 'rU' (the parser can always deal with newline)
+    # see http://bugs.python.org/issue8387
+    with open(filename, 'rU') as f:
+        reader = csv.reader(f)
+        for line in reader:
+            try:
+                conv = map(dtype, line)
+            except ValueError:
+                # skip this line
+                continue
+            if conv != []:
+                X.append(conv)
     X = np.array(X)
     # following loadtxt
     if not ndmin in [0, 1, 2]:
@@ -379,11 +382,11 @@ def blueforsTlog(data, time_data, channels=[1,2,5,6], logdir='C:/BlueFors/Log-fi
                 if ex:
                     exfn = fullname
                 print 'appending to ', fullname, '(exist=%s)'%ex
-                f = open(fullname, 'a')
+                f = open(fullname, 'ab') # use binary access to properly terminate lines
                 prevfile[i] = (fn, f, exfn)
             else:
                 f = pv[1]
-            f.write(s+'\n')
+            f.write(s+'\r\n') # use windows line termination always.
     for fn, f, ex in prevfile:
         f.close()
         if ex:
@@ -397,10 +400,25 @@ def sort_file(filename, uniq=True, cleanup=False):
            duplicates are kept
     cleanup=True will remove the .bak file when the script completes (False by default)
     """
-    f=open(filename)
     lines=[]
-    with open(filename) as f:
+    # we try to keep the line termination of the files, irrespective of OS
+    term = None
+    with open(filename, 'rU') as f:
         lines = f.readlines()
+        term = f.newlines
+    if term == None:
+        term = os.linesep
+    if isinstance(term, tuple):
+        # there is no time order in the tuple
+        # now pick termination of first line
+        with open(filename, 'rb') as f:
+            line = f.read(len(lines[0])+1)
+        if line[-2:] == '\r\n':
+            term = '\r\n'
+        else:
+            term = line[-2]
+    if term != '\n':
+        lines = [l.replace('\n', term) for l in lines]
     if uniq:
         lines = sorted(set(lines))
     else:
@@ -410,7 +428,7 @@ def sort_file(filename, uniq=True, cleanup=False):
         # windows does not rename if the file already exists, so delete
         os.remove(backup)
     os.rename(filename, backup)
-    with open(filename, 'w') as f:
+    with open(filename, 'wb') as f:
         f.writelines(lines)
     if cleanup:
         os.remove(backup)
@@ -424,7 +442,7 @@ def read_bluefors(filename):
     To have them converted use read_blueforsRTF or read_blueforsGauges
     """
     ret = []
-    with open(filename) as f:
+    with open(filename, 'rU') as f:
         for line in f:
             #   print line
             splits = line.lstrip(' ').split(',')
