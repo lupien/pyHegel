@@ -693,6 +693,7 @@ class _Sweep(instruments.BaseInstrument):
         elif not isinstance(extra_conf, list):
             extra_conf = [extra_conf, sweep.out]
         else:
+            extra_conf = extra_conf[:] # make a copy so we don't change the user parameters
             extra_conf.append(sweep.out)
         if updown==True and updown_same:
             npts = 2*npts
