@@ -37,25 +37,6 @@ def _get_lib_properties(libraryHandle):
                 product=product, version=version, fileversion=fileversion,
                 comments=comments, descr=descr, filename=filename)
 
-# On windows 7 this allows a better time resolution
-# The default seems to be 10 ms. With this I can get 1 ms
-# To return the resolution back to the default,
-# either close this application or call with stop=True and
-# with the same period setting as the previous (stop=False) call.
-def _faster_timer(stop=False, period='min'):
-    lib = ctypes.windll.winmm
-    if period == 'min':
-        dat_struct = (ctypes.c_uint*2)()
-        lib.timeGetDevCaps(dat_struct, ctypes.sizeof(dat_struct))
-        period = dat_struct[0]
-        print 'Using minimal period of ', period, ' ms'
-    if stop:
-        ret = lib.timeEndPeriod(period)
-    else:
-        ret = lib.timeBeginPeriod(period)
-    if ret != 0:
-        print 'Error(%i) in setting period'%ret
-
 def _patch_pyvisa():
     """ This functions applies a patch to pyvisa
         to allow visa read to work in multi threads
@@ -115,8 +96,6 @@ except ImportError as exc: # pyVisa not installed
     print 'Error importing visa. You will have reduced functionality.'
     # give a dummy visa to handle imports
     visa = None
-#can list instruments with : 	visa.get_instruments_list()
-#     or :                      visa.get_instruments_list(use_aliases=True)
 
 def _visa_reload(dllfile=r'c:\Windows\system32\agvisa32.dll'):
     """
@@ -135,8 +114,11 @@ def _visa_reload(dllfile=r'c:\Windows\system32\agvisa32.dll'):
     visa.resource_manager.init()
     _visa_test_agilent()
 
+try:
+    _globaldict # keep the previous values (when reloading this file)
+except NameError:
+    _globaldict = {} # This is set in pyHegel _init_pyHegel_globals (from pyHegel_cmds)
 
-_globaldict = dict() # This is set in pyHegel.py
 CHECKING = False
 
 ###################
@@ -160,6 +142,8 @@ class ProxyMethod(object):
 ##    find_all_instruments function (for VISA)
 #######################################################
 
+#can list instruments with : 	visa.get_instruments_list()
+#     or :                      visa.get_instruments_list(use_aliases=True)
 # Based on visa.get_instruments_list
 def find_all_instruments(use_aliases=True):
     """Get a list of all connected devices.
