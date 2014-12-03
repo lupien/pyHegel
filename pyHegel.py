@@ -81,7 +81,7 @@ except:
 
 from pyHegel_cmds import *
 
-_init_pyHegel_globals(globals())
+_init_pyHegel_globals()
 
 quiet_KeyboardInterrupt(True)
 

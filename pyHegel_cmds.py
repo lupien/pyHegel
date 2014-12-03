@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 #
-# Programme principale pour remplacer Hegel
+# All the commands used in pyHegel
 #
 
 import ctypes
@@ -50,13 +50,23 @@ except NameError:
     _globaldict = {}
     instruments_base._globaldict = _globaldict
 
-def _init_pyHegel_globals(g):
+def _init_pyHegel_globals(g=None):
     """ Call this from main interactive module as
           _init_pyHegel_globals(globals())
+        or simply
+          _init_pyHegel_globals()
+        which will do the same (it uses the calling frame globals).
         It is necessary for load to modify the correct environment and
         for instruments_base to find the proper names.
     """
     global _globaldict
+    if g == None:
+        from inspect import currentframe
+        frame = currentframe()
+        try:
+            g = frame.f_back.f_globals
+        finally:
+            del frame # this is to break cyclic references, see inspect doc
     _globaldict = g
     instruments_base._globaldict = g
 
