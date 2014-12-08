@@ -181,7 +181,7 @@ if __name__ == "__main__":
             except IOError as exc:
                 print 'The timeout inner exception is IOError ', exc.errno
             except KeyboardInterrupt:
-                print 'The timeout inner exception is KeyboardError'
+                print 'The timeout inner exception is KeyboardInterrupt'
             except:
                 exc_type, exc_val, exc_traceback = sys.exc_info()
                 print 'The timeout inner exception is ', exc_type, ' with value', exc_val
