@@ -198,7 +198,7 @@ def quiet_KeyboardInterrupt(quiet=True):
     """
     try:
         ip = _globaldict['get_ipython']() # starting with ipython 0.11
-    except NameError:
+    except KeyError:
         ip = _globaldict['_ip'] # for ipython 0.10
     if quiet:
         ip.set_custom_exc((KeyboardInterrupt,), _quiet_KeyboardInterrupt_Handler)
