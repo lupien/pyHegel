@@ -181,11 +181,8 @@ def reset_pyHegel():
     reload(local_config)
     reload(util)
     reload(sys.modules['pyHegel_cmds'])
-    try:
-        execfile(_sys_path_modified[0], _globaldict)
-    except NameError:
-        execfile('pyHegel.py', _globaldict)
-
+    pyHegelExec_path = os.path.join(os.path.dirname(__file__), 'pyHegel.py')
+    execfile(pyHegelExec_path, _globaldict)
 
 
 def _quiet_KeyboardInterrupt_Handler(self, exc_type, exc_value, traceback, tb_offset=None):
