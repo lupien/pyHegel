@@ -1,4 +1,4 @@
-    # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 #
 # python-matplotlib-0.99.1.2-4.fc13.i686 QT backend is missing many
