@@ -1,86 +1,118 @@
-#!/usr/bin/ipython -i
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
 #
-# Programme principale pour remplacer Hegel
-#
+# Main program to start pyHegel
+#  It replaces the older C version of Hegel
 
-# In pythonxy version 2.7.2.0
-#  The xy profiles imports numpy, scipy and from numpy *
-#  It also sets the logging into ~\.xy
-# Also the ipython pylab mode imports numpy, numpy as np
-#  matplotlib, matplotlib.pylab as pylab and matplotlib.pyplot as plt
+# You should start this script directly.
+# It is possible to load it in ipython, however, fix_scipy is not applied
+# so CTRL-C will end the program. (applying the fix would prevent program ending
+# but time.sleep would still be unbreakable because ipython already loaded the time
+# module).
+# Under ipython, you need to use run -i, otherwise load does not add instruments
+# in the correct global environment.
+# if you need to access the commands in a script/import use: import pyHegel_cmds
 
-# We do it here again. ipython -pylab should have loaded it but
-# in some situation it is disabled (option  -nopylab_import_all)
-#  This imports: numpy *, numpy.fft *, numpy.random *, numpy.linalg *,
-#                matplotlb.pyplot *, matplotlib.pyplot as plt, numpy as np
-#                numpy.ma as ma
-from matplotlib.pylab import *
-# could also be from pylab import *
+def fix_scipy():
+    """ This fixes a problem with scipy 0.14.0-7 from python(x,y) 2.7.6.1
+        which uses the intel fortran compiler which changes the Interrupt handler.
+        This makes import scipy.special, scipy.optimize exit python when ctrl-C is pressed.
+        see: http://stackoverflow.com/questions/15457786/ctrl-c-crashes-python-after-importing-scipy-stats
+             https://github.com/scipy/scipy/pull/3880
+    """
+    import os
+    if os.name == 'nt':
+        import scipy_fortran_fix
 
-#import numpy as np # this is loaded by pylab
-import os
-import time
-import sys
-
-# If you start this from within ipython, you need to
-# use run -i otherwise the global variable are not set properly
-# so the load commands will not add instrument in the user environment
-
-def _update_sys_path():
-    # This will handle calling of the script in the following ways:
-    #  python -i ./some/partial/path/pyHegel.py
-    #  ipython ./some/partial/path/pyHegel.py
-    #  ipython -i ./some/partial/path/pyHegel.py # in linux
-    #    in ipython
-    #     run ./some/partial/path/pyHegel
-    #     run -i ./some/partial/path/pyHegel
-    # But will not handle calling it this way
-    #  execfile('./some/partial/path/pyHegel.py') # we assume that if execfile is used, that path is already set.
-    #       actually if the variable _execfile_name exists (the user needs to define it), we use that
-    #  from pyHegel import *   # for this to work, the path is already set
-    if __name__ != '__main__':
-        # importing pyHegel or execfile from a module
-        return
-    # Initialize assuming the python filename is the last argument.
-    try:
-        partial_path = _execfile_name
-    except NameError:
-        partial_path = sys.argv[-1] # for execfile this is left over from calling environment (can be empty)
-    # Now check to see if it is another argument.
-    for a in sys.argv:
-        if a.lower().endswith('pyhegel.py'):
-            partial_path = a
-            break
-    # cwd = os.getcwd()
-    # partial_path = __file__ # This fails on windows for ipython ./some/partial/path/pyHegel
-    # Make it a full path. (only already a full path when run under ipython -i in linux)
-    full_exec_path = os.path.abspath(partial_path)
-    # sys.path[0] for the running script is set properly, but it is not passed
-    #  to the ipython session (same effect for run)
-    full_path = os.path.dirname(full_exec_path)
-    # ipython adds to sys.path the path to the executable when running a script
-    # but strips it before returning control to the use (whether it is starting
-    # from os command line or using run).
-    # So we always insert a copy of the fullpath even if it is already there, because
-    # ipython tends to remove one from the list after running a script
-    # and this function will probably be executed only once.
-    if full_path not in sys.path:
-        sys.path.insert(1, full_path) # Insert after element 0
-    else:
-        sys.path.insert(2, full_path) # Insert after element 1, which is '' for ipython, element 0 is executable path that is stripped.
-    return (full_exec_path, full_path)
-
-try:
-    _sys_path_modified  # already updated path.
-except:
-    _sys_path_modified = _update_sys_path()
-
+start_code = """
+get_ipython().run_line_magic('pylab', 'qt')
+import scipy
+import scipy.constants
+import scipy.constants as C
 
 from pyHegel_cmds import *
-
 _init_pyHegel_globals()
-
 quiet_KeyboardInterrupt(True)
+"""
 
+# Note that importing pyHegel_cmds works if this script is executed from the python
+# command line because it then adds this script directory to the import paths.
+# Therefore it will probably not work if you start it under python and try
+# to load the file with execfile(). It might work partially if you start it while
+# the current working directory is the code one.
+
+try:
+    get_ipython # if this does not produce a NameError, we are running in an ipyhton shell
+    # we usually get here because of a reset_pyHegel
+    exec(start_code)
+except NameError:
+    # need to fix before importing IPython (which imports time...)
+    fix_scipy()
+    import IPython
+
+    IPython.start_ipython(argv=['--matplotlib=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
+    #IPython.start_ipython(argv=['--pylab=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
+    # qt and qt4 are both Qt4Agg
+    #TerminalIPythonApp.exec_lines is inherited from InteractiveShellApp.exec_lines
+
+"""
+Informations
+we could use --pylab instead of --matplotlib, but I choose --matplotlib for better control
+see the help of %pylab to see what it does. The code is in IPython.core.pylabtools.import_pylab
+and it protects the result of %who from being contamianted by all those imports
+The code is called from core.interactiveshell.enable_pylab()
+which is called from core.magics.pylab pylab
+and core.shellapp.InteractiveShellApp.init_gui_pylab
+
+"from pylab import *" and "from matplotlib.pylab import *" are the same.
+They "import numpy as np" and also "from numpy import *" and then
+"from matplotlib.pyplot import *" and "import matplotlib.pyplot as plt" as well as
+many other numpy and matplotlib sections.
+
+We used the xy profile which executed (after starting pylab)
+    import numpy
+    import scipy
+    from numpy import *
+Then it started dated logger in .xy directory, but multiple terminal would merge into
+the same file.
+So the import_pylab ends up also loading numpy and  doing "from numpy import *"
+after importing pylab. So it is the same as before except for scipy and logging.
+
+Changes from IPython 2.1 vs 0.10
+*   -pylab used to only "from matplotlib.pylab import *" not numpy but pylab did import numpy internally and still does
+    It did not have %pylab or %matplotlib macros
+    Now -pylab is deprecated. Use --pylab instead or %pylab interactivelly (well ipython
+    recommends to use matplotlib and only import what is required)
+    --pylab now also adds figsize, display and getfigs to the environment
+*   autocall is now disabled by default (it used to be enabled.)
+*   omit__names went from 0 (none) to 2 (omit names staring with _ whe using tab)
+*   CTRL-L went from doing possible-completions to clear-screen
+*   there is no longer a message cmdline option, nor a log option
+*   the pylab imports do about the same things.
+*   The configuration used to be loaded this way:
+     The defaults are initialized in IPython/ipmaker.py
+     rc files are loaded before executing the ipy_someprofile_conf.py
+     ipythonrc-PROF or simply ipythonrc if not present or not using a profile
+     ipy_system_conf
+     ipy_profile_PROF (if rc file was not loaded only else ipy_profile_none)
+     ipy_user_conf
+    In our case the config loaded was $USER/_ipython/ipythonrc.ini (which is the same as the default IPython/UserConfig/ipythonrc) then
+    IPython/Extensions/ipy_profile_xy.py (which executed xy.startup.run()) then
+    $USER/_ipython/ipy_user_conf.py (which was the same as the default IPython/UserConfig/ipy_user_conf.py)
+    Above, when I compare default settings, it is with respect to the result of those files.
+*   CTRL-C behavior has changed
+     pressing it does not save the current line (it was a bug when ipython was running the Qt handler)
+     when Qt is running, it requires pressing it twice, otherwise you return to editing the line.
+*   The history is saved in a database file, connected to the sessions and after each commands
+    so badly ending a session (closing the window) will no longer loose the history.
+    To read old history, use
+       %history -l 100
+       #read last session
+       %history ~1/0-~/0
+       %history ~10/1-~0/1000
+    Therefore logging is no longer necessary. But can use %history -f some file
+    or %logstart ...
+*   The -i option to ipython did not change anything. It would always go into interactive mode.
+*   the banner was shown after the external script was loaded
+"""

@@ -16,3 +16,23 @@ Main TODO list:
 Agilent IO Libraries Service
  Error 1923. Service Agilent PXI Resource Manager
   Agilent LXI Mdns Responder failed to start
+
+Related to update to newer ipython
+-handle new pyVisa
+-deal with defaults
+   traces: matplotlib timezone
+      to get the default one see: https://github.com/regebro/tzlocal
+   import of national instrument visa or agilent one.
+-Handle optional command line argument (like a file to execute) in pyHegel.py
+-Report fixes to matplotlib website
+  qt4 backend has added most keys (except backspace. But it is still behind gtk)
+  key_press_handler has not changed (still does not reorder overlayed axes so you can't
+  see the x,y values except for the last axes.)
+-Understand new Qt handler
+-Check behavior of CTRL-C with Qt, pyHegel and command line
+-write a script to create the shortcuts, setup the configuration files
+-adjust selection mode of pyHegel window.
+
+When updating to newer version:
+  erase c:\Codes\console_c.xml
+  replace desktop pyHegel_cmd with newer one.

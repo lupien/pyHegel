@@ -33,7 +33,7 @@
 		<transparency type="0" active_alpha="255" inactive_alpha="255" r="0" g="0" b="0"/>
 	</appearance>
 	<behavior>
-		<copy_paste copy_on_select="1" clear_on_copy="1" no_wrap="1" trim_spaces="1" copy_newline_char="0"/>
+		<copy_paste copy_on_select="1" clear_on_copy="1" no_wrap="1" trim_spaces="1" copy_newline_char="0" sensitive_copy="1"/>
 		<scroll page_scroll_rows="0"/>
 		<tab_highlight flashes="3" stay_highligted="1"/>
 	</behavior>
@@ -91,7 +91,7 @@
 	</mouse>
 	<tabs>
 		<tab title="pyHegel" icon="C:\Program Files (x86)\pythonxy\icons\consolexy.ico" use_default_icon="0">
-			<console shell="C:\Python27\Scripts\ipython.bat -pylab -p xy -nopylab_import_all -editor SciTE.exe C:\Codes\pyHegel\pyHegel.py" init_dir="C:\Codes\pyHegel" run_as_user="0" user=""/>
+			<console shell="cmd.exe /c C:\Codes\pyHegel\pyHegel.py" init_dir="C:\Codes\pyHegel" run_as_user="0" user=""/>
 			<cursor style="1" r="255" g="128" b="0"/>
 			<background type="0" r="0" g="0" b="0">
 				<image file="" relative="0" extend="0" position="0">
@@ -99,35 +99,8 @@
 				</image>
 			</background>
 		</tab>
-		<tab title="IPython (Qt)" icon="C:\Program Files (x86)\pythonxy\icons\qt.ico" use_default_icon="0">
-			<console shell="cmd.exe /k ipython -q4thread -editor SciTE.exe" init_dir="" run_as_user="0" user=""/>
-			<cursor style="1" r="194" g="234" b="82"/>
-			<background type="0" r="0" g="0" b="0">
-				<image file="" relative="0" extend="0" position="0">
-					<tint opacity="0" r="0" g="0" b="0"/>
-				</image>
-			</background>
-		</tab>
-		<tab title="IPython (wxPython)" icon="C:\Program Files (x86)\pythonxy\icons\pythoncmd.ico" use_default_icon="0">
-			<console shell="cmd.exe /k ipython -wthread -editor SciTE.exe" init_dir="" run_as_user="0" user=""/>
-			<cursor style="1" r="255" g="201" b="52"/>
-			<background type="0" r="0" g="0" b="0">
-				<image file="" relative="0" extend="0" position="0">
-					<tint opacity="0" r="0" g="0" b="0"/>
-				</image>
-			</background>
-		</tab>
-		<tab title="IPython (mlab)" icon="C:\Program Files (x86)\pythonxy\icons\pythoncmd.ico" use_default_icon="0">
-			<console shell="cmd.exe /k ipython -wthread -p mlab -editor SciTE.exe" init_dir="" run_as_user="0" user=""/>
-			<cursor style="1" r="255" g="201" b="52"/>
-			<background type="0" r="0" g="0" b="0">
-				<image file="" relative="0" extend="0" position="0">
-					<tint opacity="0" r="0" g="0" b="0"/>
-				</image>
-			</background>
-		</tab>
 		<tab title="IPython (sh)" icon="C:\Program Files (x86)\pythonxy\console\ipythonsh.ico" use_default_icon="0">
-			<console shell="cmd.exe /k ipython -q4thread -p sh -editor SciTE.exe" init_dir="" run_as_user="0" user=""/>
+			<console shell="cmd.exe /c ipython --profile=pysh --TerminalInteractiveShell.editor=scite" init_dir="" run_as_user="0" user=""/>
 			<cursor style="1" r="1" g="111" b="229"/>
 			<background type="0" r="0" g="0" b="0">
 				<image file="" relative="0" extend="0" position="0">
@@ -135,8 +108,17 @@
 				</image>
 			</background>
 		</tab>
+		<tab title="IPython (Qt)" icon="C:\Program Files (x86)\pythonxy\icons\qt.ico" use_default_icon="0">
+			<console shell="cmd.exe /c ipython --pylab=qt --TerminalInteractiveShell.editor=scite" init_dir="" run_as_user="0" user=""/>
+			<cursor style="1" r="194" g="234" b="82"/>
+			<background type="0" r="0" g="0" b="0">
+				<image file="" relative="0" extend="0" position="0">
+					<tint opacity="0" r="0" g="0" b="0"/>
+				</image>
+			</background>
+		</tab>
 		<tab title="Python" icon="C:\Program Files (x86)\pythonxy\icons\pythoncmd.ico" use_default_icon="0">
-			<console shell="cmd.exe /k python" init_dir="" run_as_user="0" user=""/>
+			<console shell="cmd.exe /c python" init_dir="" run_as_user="0" user=""/>
 			<cursor style="11" r="170" g="168" b="85"/>
 			<background type="0" r="0" g="0" b="0">
 				<image file="" relative="0" extend="0" position="0">
@@ -147,15 +129,6 @@
 		<tab title="Command Window" icon="C:\Program Files (x86)\pythonxy\console\cmd.ico" use_default_icon="0">
 			<console shell="cmd.exe" init_dir="" run_as_user="0" user=""/>
 			<cursor style="1" r="128" g="128" b="128"/>
-			<background type="0" r="0" g="0" b="0">
-				<image file="" relative="0" extend="0" position="0">
-					<tint opacity="0" r="0" g="0" b="0"/>
-				</image>
-			</background>
-		</tab>
-		<tab title="Console" use_default_icon="0">
-			<console shell="" init_dir="" run_as_user="0" user=""/>
-			<cursor style="0" r="255" g="255" b="255"/>
 			<background type="0" r="0" g="0" b="0">
 				<image file="" relative="0" extend="0" position="0">
 					<tint opacity="0" r="0" g="0" b="0"/>
