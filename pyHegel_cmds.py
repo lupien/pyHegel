@@ -1342,9 +1342,9 @@ def batch(batchfile):
          unless the names ends with a .ipy
     """
     try:
-        execfile(batchfile)
+        execfile(batchfile, _globaldict)
     except IOError:
-        execfile(batchfile+'.py')
+        execfile(batchfile+'.py', _globaldict)
 
 def sleep(sec):
     """
