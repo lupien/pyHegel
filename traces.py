@@ -88,14 +88,17 @@ def wait(sec):
                 return
             _sleep(min(.1, dif))
 
-FigureCanvas.keyvald.update({QtCore.Qt.Key_Left:'left',
-        QtCore.Qt.Key_Right:'right',
-        QtCore.Qt.Key_Up:'up',
-        QtCore.Qt.Key_Down:'down',
-        QtCore.Qt.Key_Escape:'escape',
-        QtCore.Qt.Key_Home:'home',
-        QtCore.Qt.Key_End:'end',
-        QtCore.Qt.Key_Backspace:'backspace'})
+try:
+    FigureCanvas.keyvald.update({QtCore.Qt.Key_Left:'left',
+            QtCore.Qt.Key_Right:'right',
+            QtCore.Qt.Key_Up:'up',
+            QtCore.Qt.Key_Down:'down',
+            QtCore.Qt.Key_Escape:'escape',
+            QtCore.Qt.Key_Home:'home',
+            QtCore.Qt.Key_End:'end',
+            QtCore.Qt.Key_Backspace:'backspace'})
+except AttributeError: # matplotlib 1.4.2 includes all these keys already
+    pass          # in matplotlib.backends.backend_qt5.SPECIAL_KEYS
 
 def get_last_trace():
     return _figlist[-1]
