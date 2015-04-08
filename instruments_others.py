@@ -870,6 +870,127 @@ class lakeshore_340(visaInstrument):
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
+#######################################################
+##    Lakeshore 224 Temperature monitor
+#######################################################
+class quoted_name(object):
+    def __call__(self, read_str):
+        # the instruments returns a 15 character string with spaces if unused
+        return read_str.rstrip()
+    def tostr(self, input_str):
+        if '"' in input_str:
+            raise ValueError, 'The given string already contains a quote :":'
+        return '"'+input_str[:15]+'"'
+
+class lakeshore_224(lakeshore_340):
+    """
+       Temperature monitor
+       Useful device:
+           s
+           t
+           fetch
+           status_ch
+           current_ch
+       s and t return the sensor or kelvin value of a certain channel
+       which defaults to current_ch
+       status_ch returns the status of ch
+       fetch allows to read all channels (which is the alias)
+    """
+    def _current_config(self, dev_obj=None, options={}):
+        if dev_obj == self.fetch:
+            old_ch = self.current_ch.getcache()
+            ch = options.get('ch', None)
+            ch = self._fetch_helper(ch)
+            ch_list = []
+            in_set = []
+            in_crv = []
+            in_type = []
+            in_diode = []
+            for c in ch:
+                ch_list.append(c)
+                in_crv.append(self.input_crv.get(ch=c))
+                in_type.append(self.input_type.get())
+                in_diode.append(self.input_diode_current.get())
+            self.current_ch.set(old_ch)
+            base = ['current_ch=%r'%ch_list, 'input_crv=%r'%in_crv, 'input_type=%r'%in_type, 'input_diode_current=%r'%in_diode]
+        else:
+            base = self._conf_helper('current_ch', 'input_crv', 'input_type', 'input_diode_current')
+        base += self._conf_helper(options)
+        return base
+    def _enabled_list_getdev(self):
+        old_ch = self.current_ch.getcache()
+        ret = []
+        for c in self.current_ch.choices:
+            d = self.input_type.get(ch=c)
+            if d['type'] != 'disabled':
+                ret.append(c)
+        self.current_ch.set(old_ch)
+        return ret
+    def _get_esr(self):
+        return int(self.ask('*esr?'))
+    def get_error(self):
+        esr = self._get_esr()
+        ret = ''
+        if esr&0x80:
+            ret += 'Power on. '
+        if esr&0x20:
+            ret += 'Command Error. '
+        if esr&0x10:
+            ret += 'Execution Error. '
+        if esr&0x04:
+            ret += 'Query Error (output queue full). '
+        if esr&0x01:
+            ret += 'OPC received.'
+        if ret == '':
+            ret = 'No Error.'
+        return ret
+    def _create_devs(self):
+        ch_opt_sel = ['A', 'B', 'C1', 'C2', 'C3', 'C4', 'C5', 'D1', 'D2', 'D3', 'D4', 'D5']
+        self.current_ch = MemoryDevice('A', choices=ch_opt_sel)
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_ch)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.t = devChOption(getstr='KRDG? {ch}', str_type=float, doc='Return the temperature in Kelvin for the selected sensor(ch)')
+        self.s = devChOption(getstr='SRDG? {ch}', str_type=float, doc='Return the sensor value in Ohm, V(diode), mV (thermocouple), nF (for capacitance)  for the selected sensor(ch)')
+        self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=invalid, 16(4)=temp underrange,
+                               #32(5)=temp overrange, 64(6)=sensor under (<0), 128(7)=sensor overrange
+                               # 000 = valid
+        self.input_crv = devChOption('INCRV {ch},{val}', 'INCRV? {ch}', str_type=int)
+        intypes = ChoiceIndex({0:'disabled', 1:'diode', 2:'PTC_RTD', 3:'NTC_RTD'})
+        units = ChoiceIndex({1:'Kelvin', 2:'Celsius', 3:'Sensor'})
+        ranges_disabled = ChoiceIndex({0:0})
+        ranges_diode = ChoiceIndex({0:2.5, 1:10}) # V
+        ranges_PTC = ChoiceIndex(make_choice_list([1, 3], 1, 4)[:-1], normalize=True) # Ohm
+        ranges_NTC = ChoiceIndex(make_choice_list([1, 3], 1, 5)[:-1], normalize=True) # Ohm
+        type_ranges = ChoiceMultipleDep('type', {'disabled':ranges_disabled, 'diode':ranges_diode, 'PTC_RTD':ranges_PTC, 'NTC_RTD':ranges_NTC})
+        self.input_type = devChOption('INTYPE {ch},{val}', 'INTYPE? {ch}',
+                                      allow_kw_as_dict=True, allow_missing_dict=True,
+                                      choices=ChoiceMultiple(['type', 'autorange_en', 'range', 'compensation_en', 'units'], [intypes, bool, type_ranges, bool, units]))
+        self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
+                                      allow_kw_as_dict=True, allow_missing_dict=True,
+                                      choices=ChoiceMultiple(['filter_en', 'n_points', 'window'], [bool, int, int]))
+        self.input_diode_current = devChOption('DIOCUR {ch},{val}', 'DIOCUR? {ch}', choices=ChoiceIndex({0:10e-6, 1:1e-3}), doc=
+                """Only valid when input is a diode type. Options are in Amps.
+                   Default of instrument is 10 uA (used after every change of sensor type).""")
+        self.input_name = devChOption('INNAME {ch},{val}', 'INNAME? {ch}', str_type=quoted_name())
+        self._devwrap('enabled_list')
+        self._devwrap('fetch', autoinit=False)
+        self.alias = self.fetch
+        # This needs to be last to complete creation
+        super(lakeshore_340, self)._create_devs()
+    def disable_ch(self, ch):
+        """
+        This method set a channel to disabled.
+        Note that the settings of the channel are lost. To reenable use
+          input_type with at least options autorange_en (PTC, NTC), range (allways, any value is allowed if autorange is enabled)
+                     compensation_en (PTC, NTC)
+          input_crv
+          input_diode_current (for diodes if want 1 mA)
+        """
+        self.input_type.set(ch=ch, type='disabled', range=0)
 
 #######################################################
 ##    Lakeshore 370 Temperature controller
