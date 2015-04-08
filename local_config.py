@@ -78,6 +78,7 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              dt1 = (instruments.DataTranslation, ()),
              # Agilent attenuator
              att1 = (instruments.agilent_rf_Attenuator, ('USB0::0x0957::0x4C18::MY52200101',)),
+             att2 = (instruments.agilent_rf_Attenuator, ('USB0::0x0957::0x4C18::MY52200128',)),
              # Power meters
              epm1 = (instruments.agilent_PowerMeter, ('USB0::0x0957::0x5418::MY52290056',)),
              # Arbitratry waveform generator
