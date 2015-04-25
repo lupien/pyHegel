@@ -25,7 +25,13 @@ import subprocess
 import numpy as np
 
 try:
-    from pyPdf import PdfFileWriter, PdfFileReader
+    try:
+        from PyPDF2 import PdfFileWriter, PdfFileReader
+        # TODO with PyPDF2 we could use the PyPDF2.PdfFileMerger
+        #      instead of Reader-Writer combo.
+        #      see: http://www.blog.pythonlibrary.org/2012/07/11/pypdf2-the-new-fork-of-pypdf/
+    except ImportError:
+        from pyPdf import PdfFileWriter, PdfFileReader
     pyPdf_loaded = True
 except ImportError:
     pyPdf_loaded = False
@@ -198,7 +204,7 @@ def merge_pdf(filelist, outname):
       !/cygwin/bin/pdftk file1.pdf file2.pdf file3.pdf cat output file123.pdf
     """
     if not pyPdf_loaded:
-        raise ImportError, 'Missing pyPdf package. You need to install that.'
+        raise ImportError, 'Missing PyPDF2 or pyPdf package. You need to install one of them.'
     output = PdfFileWriter()
     in_files = []
     for f in filelist:
