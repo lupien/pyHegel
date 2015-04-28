@@ -20,25 +20,28 @@ version = "1.4"
 
 _agilent_visa = False
 
+# TODO read/write and redirect_instr handling of delete
+
 try:
     import pyvisa
     try:
         import pyvisa.vpp43 as vpp43
+        import pyvisa.vpp43_constants as constants
+        import pyvisa.visa_exceptions as VisaIOError
+        visa = None  # to be replaced during get_resource_manager
+        old_interface = True
     except ImportError:
         # vppp43 is not present in new interface
         old_interface = False
         version = pyvisa.__version__
-
+        import pyvisa.constants as constants
+        from pyvisa import VisaIOError
 
 except ImportError as exc:
-    print 'Error importing pyVisa (not installed). You will have reduced functionality.'
     # give a dummy visa to handle imports
     pyvisa = None
+    print 'Error importing pyVisa (not installed). You will have reduced functionality.'
 
-
-##################################
-# routines needed for pyvisa < 1.5
-##################################
 
 def _get_lib_properties(libraryHandle):
     import win32api
@@ -58,6 +61,25 @@ def _get_lib_properties(libraryHandle):
     return dict(fixed=fixedInfo, lang=lang, codepage=codepage, company=company,
                 product=product, version=version, fileversion=fileversion,
                 comments=comments, descr=descr, filename=filename)
+
+def _visa_test_agilent(handle=None):
+    global _visa_lib_properties, _agilent_visa
+    if _os.name != 'nt':
+        _agilent_visa = False
+        return _agilent_visa
+    if handle is None:
+        handle = vpp43.visa_library()._handle
+    _visa_lib_properties = _get_lib_properties(handle)
+    if 'agilent' in _visa_lib_properties['company'].lower():
+        _agilent_visa = True
+    else:
+        _agilent_visa = False
+    return _agilent_visa
+
+
+##################################
+# routines needed for pyvisa < 1.5
+##################################
 
 def _patch_pyvisa():
     """ This functions applies a patch to pyvisa
@@ -82,100 +104,63 @@ def _patch_pyvisa():
     visa.warnings.filterwarnings_orig = visa.warnings.filterwarnings
     visa.warnings.filterwarnings = filterwarnings
 
-def _visa_test_agilent(handle=None):
-    global _visa_lib_properties, _agilent_visa
-    if _os.name != 'nt':
-        _agilent_visa = False
-        return _agilent_visa
-    if handle is None:
-        handle = vpp43.visa_library()._handle
-    _visa_lib_properties = _get_lib_properties(handle)
-    if 'agilent' in _visa_lib_properties['company'].lower():
-        _agilent_visa = True
-    else:
-        _agilent_visa = False
-    return _agilent_visa
-
-try:
-    if pyvisa and old_interface:
-        # on windonws only, obey the try_agilent_first. If selected it will override
-        # even a choice in .pyvisarc.
-        #if _os.name == 'nt' and vpp43.visa_library._VisaLibrary__lib == None and try_agilent_first:
-        if _os.name == 'nt' and try_agilent_first:
-            try:
-                vpp43.visa_library.load_library(agilent_path)
-            except WindowsError: 
-                print 'Unable to load Agilent visa library. Will try the default one (National Instruments?).'
+def _old_load_visa(path):
+    """
+    if path==None: obeys the try_agilent_first. If try_agilent_first is True
+                   it overrides even a choice in .pyvisarc
+    if path='': only load the default library, does not follow try_agilent_first
+                but listens to .pyvisarc
+    for any other path, load it.
+    On windows the usual path for 32bits can be
+        For National instrument: r'c:\Windows\system32\visa32.dll'
+        For Agilent: r'c:\Windows\system32\agvisa32.dll'
+          (That is for agilent and NI installed at the same time)
+    """
+    old_close = vpp43.visa_library().viClose
+    if _os.name == 'nt' and path is None and try_agilent_first:
         try:
-            # By loading pyvisa.visa, we initialize the resource manager which will load
-            # the default visa if not already loaded
-            import pyvisa.visa as visa
-        except WindowsError:
-            print 'Unable to load visa32.dll.'
-            raise ImportError
-        except OSError as exc: # on linux if can't find visa library
-            print '\nError loading visa library:', exc
-            raise ImportError
-        if _os.name == 'nt':
-            _visa_test_agilent()
-        _patch_pyvisa()
-except ImportError as exc: # problem loading binray visa library
-    print 'Error importing visa. You will have reduced functionality.'
-    pyvisa = None
-
-if pyvisa:
-    if old_interface:
-        import pyvisa.vpp43_constants as constants
-        from pyvisa.visa import VisaIOError
-    else:
-        import pyvisa.constants as constants
-        from pyvisa import VisaIOError
-
-
-try:
-    if _os.name == 'nt':
-        import pyvisa.vpp43 as vpp43
-        try:
-            # First try the agilent Library.
-            # You can later check with: vpp43.visa_library()
-            vpp43.visa_library.load_library(r"c:\Windows\system32\agvisa32.dll")
-        except WindowsError:
+            vpp43.visa_library.load_library(agilent_path)
+        except WindowsError: 
             print 'Unable to load Agilent visa library. Will try the default one (National Instruments?).'
+    if path is None:
+        path = ''
+    if path == '':
         try:
-            import pyvisa.visa as visa
-        except WindowsError:
-            print 'Unable to load visa32.dll.'
-            raise ImportError
-        _visa_test_agilent()
-    else:
-        try:
-            import pyvisa.visa as visa
-            vpp43 = visa.vpp43
-        except OSError as exc:
-            print '\nError loading visa library:', exc
-            raise ImportError
-    _patch_pyvisa()
-except ImportError as exc: # pyVisa not installed
-    print 'Error importing visa. You will have reduced functionality.'
-    # give a dummy visa to handle imports
-    visa = None
-
-def _visa_reload(dllfile=r'c:\Windows\system32\agvisa32.dll'):
-    """
-    reloads the same or different visa dll.
-    For National instrument visa: r'c:\Windows\system32\visa32.dll'
-       or None
-    For Agilent (default): r'c:\Windows\system32\agvisa32.dll'
-    """
-    # we assume _os.name == 'nt'
-    vpp43.visa_library.load_library(dllfile)
-    # now need to reset ResourceManager
+            path = pyvisa._visa_library_path
+        except AttributeError:
+            path = None
     try:
-        visa.resource_manager.close()
-    except visa.VisaIOError:
-        pass
-    visa.resource_manager.init()
-    _visa_test_agilent()
+        vpp43.visa_library.load_library(path)
+    except WindowsError:
+        if path is None:
+            error = 'Unable to load default visa32.dll.'
+        else:
+            error = 'Unable to load %s'%path
+        raise ImportError(error)
+    except OSError as exc: # on linux if can't find visa library
+        raise ImportError('\nError loading visa library: %s'%exc)
+    # When pyvisa.visa is imported for the first time, it initializes the
+    # resource manager (which would load a default library if it is not loaded yet)
+    # Here we have loaded the library.
+    global visa
+    import pyvisa.visa as visa
+
+    # Now, if necessary, we reinitialize the resource manager
+    try:
+        visa.resource_manager.resource_name
+    except visa.VisaIOError: # resource manager session is wrong.
+        try:
+            visa.resource_manager.close()
+        except visa.VisaIOError:
+            pass
+        visa.resource_manager.init()
+
+    _patch_pyvisa()
+    
+
+####################################################################
+# Redirection class
+####################################################################
 
 class redirect_instr(object):
     def __init__(self, instr_instance):
@@ -193,6 +178,10 @@ class redirect_instr(object):
             super(old_Instrument, self).__delattr__(self, name)
         else:
             delattr(self.instr, name)
+
+####################################################################
+# Instruments wrapper classes
+####################################################################
 
 class old_Instrument(redirect_instr):
     def is_serial(self):
@@ -259,43 +248,85 @@ class new_Instrument(redirect_instr):
             self.visalib.viGpibControlREN(self.session, mode)
 
 
+####################################################################
+# Resource_manager wrapper classes
+####################################################################
+
+def _get_resource_info_helper(self, resource_name):
+    normalized = alias_if_exists = None
+    try:
+        _, _, _, normalized, alias_if_exists = self.resource_info(resource_name)
+    except AttributeError:
+        pass
+    return normalized, alias_if_exists
+
+def _get_instrument_list(self, use_aliases=True):
+    # same as old pyvisa 1.4 version of get_instrument_list except with 
+    # a separated and fixed (memory leak) first part (self.list_resources)
+    # and a second part modified for bad visa implementations
+    rsrcs = self.list_resources()
+    # Phase two: If available and use_aliases is True, substitute the alias.
+    # Otherwise, truncate the "::INSTR".
+    result = []
+    for resource_name in rsrcs:
+        # For agilent visa version 16.2.15823.0 (at least), the serial number (for USB)
+        # is converted to lower in the library, but the instrument really uses
+        # the upper one for the extended resources so without this upper
+        # it fails to find the alias.
+        # Howerver, this is a hack because if a serial number really uses lower case
+        # then this will prevent the match
+        # It used to work ok with agilent io 16.0.14518.0 and 16.1.14827.0
+        # Agilent also does not normalize the entries properly (it likes decimal instead of hexadecimal)
+        # National instruments (MAX) 5.1.0f0 for usb does not accept the extra ::0  (interface number)
+        # that it returns as normalized, and it requires the values to be in hexadecimal.
+        #  The open function is a lot less sensitive on both.
+        #  according to specs, the comparison should be case insensitive.
+        # So lets try a few different ones
+        normalized1, alias_if_exists1 = self.resource_info(resource_name)
+        normalized2, alias_if_exists2 = self.resource_info(resource_name.upper())
+        if alias_if_exists1:
+            normalized, alias_if_exists = normalized1, alias_if_exists1
+        elif alias_if_exists2:
+            normalized, alias_if_exists = normalized2, alias_if_exists2
+        else:
+            normalized, alias_if_exists = normalized1, None
+        if alias_if_exists and use_aliases:
+            result.append(alias_if_exists)
+        else:
+            result.append(normalized[:-7])
+    return result
 
 class old_resource_manager(object):
     def __init__(self):
+        """
+        Note that loading a new resource_manager will break a previous one if it used
+        a different dll. It is not possible to use 2 different dlls at the same time
+        with pyvisa <1.5.
+        """
         self._is_agilent = None
-    # The same as visa.get_instruments_list except for the close
-    def list_resources(self, use_aliases=True):
+        _old_load_visa(path)
+    # The same as the first part of visa.get_instruments_list except for the close
+    def list_resources(self, query='?*::INSTR'):
         resource_names = []
         find_list, return_counter, instrument_description = \
-            vpp43.find_resources(visa.resource_manager.session, "?*::INSTR")
+            vpp43.find_resources(visa.resource_manager.session, query)
         resource_names.append(instrument_description)
         for i in xrange(return_counter - 1):
             resource_names.append(vpp43.find_next(find_list))
         vpp43.close(find_list)
-        # Phase two: If available and use_aliases is True, substitute the alias.
-        # Otherwise, truncate the "::INSTR".
-        result = []
-        for resource_name in resource_names:
-            resource_name = resource_name.upper()
-            try:
-                _, _, _, _, alias_if_exists = \
-                 vpp43.parse_resource_extended(visa.resource_manager.session,
-                                               resource_name)
-            except AttributeError:
-                alias_if_exists = None
-            if alias_if_exists and use_aliases:
-                result.append(alias_if_exists)
-            else:
-                result.append(resource_name[:-7])
-        return result
+        return resource_names
     def resource_info(self, session, resource_name):
-        """ unpack to: interface_type, interface_board_number, resource_class, resource_name alias """
+        """ unpacks to: interface_type, interface_board_number, resource_class, resource_name alias,
+            alias is returned as None when it is empty
+        """
         return vpp43.parse_resource_extended(visa.resource_manager.session,
                                                resource_name)
+
+    get_instrument_list = _get_instrument_list
+
     def open_resource(self, resource_name, **kwargs):
         instr = visa.instrument(resource_name, **kwargs)
-        
-        return instr
+        return old_Instrument(instr)
     def is_agilent(self):
         if self._is_agilent is None:
             try:
@@ -303,30 +334,31 @@ class old_resource_manager(object):
             except AttributeError:
                 self._is_agilent = False
         return self._is_agilent
-        
+
 
 class new_WrapResourceManager(redirect_instr):
     def __init__(self):
         super(new_WrapResourceManager, self).__init__()
         self._is_agilent = None
-    # The same as the original ResourceManager one (1.6.1) except for the close statement
-    def list_resources(self, query='?*::INSTR'):
-        """Returns a tuple of all connected devices matching query.
-
-        :param query: regular expression used to match devices.
-        """
-
-        lib = self.visalib
-
-        resources = []
-        find_list, return_counter, instrument_description, err = lib.find_resources(self.session, query)
-        resources.append(instrument_description)
-        for i in range(return_counter - 1):
-            resources.append(lib.find_next(find_list)[0])
+    if version in ['1.5', '1.6', '1.6.1', '1.6.2', '1.6.3']:
+        # The same as the original ResourceManager one (1.6.1) except for the close statement
+        def list_resources(self, query='?*::INSTR'):
+            """Returns a tuple of all connected devices matching query.
     
-        lib.close(find_list)
-
-        return tuple(resource for resource in resources)
+            :param query: regular expression used to match devices.
+            """
+    
+            lib = self.visalib
+    
+            resources = []
+            find_list, return_counter, instrument_description, err = lib.find_resources(self.session, query)
+            resources.append(instrument_description)
+            for i in range(return_counter - 1):
+                resources.append(lib.find_next(find_list)[0])
+        
+            lib.close(find_list)
+    
+            return tuple(resource for resource in resources)
     def is_agilent(self):
         if self._is_agilent is None:
             try:
@@ -334,7 +366,16 @@ class new_WrapResourceManager(redirect_instr):
             except AttributeError:
                 self._is_agilent = False
         return self._is_agilent
+    def open_resource(self, resource_name, **kwargs):
+        instr = self.instr.open_resource(resource_name, **kwargs)
+        return new_Instrument(instr)
 
+    get_instrument_list = _get_instrument_list
+
+
+####################################################################
+# Resource_manager factory
+####################################################################
 
 def _clean_up_registry(path):
     if version in ['1.5', '1.6', '1.6.1', '1.6.2', '1.6.3']:
@@ -343,24 +384,35 @@ def _clean_up_registry(path):
             if t[1] == path:
                 del registry[t]
 
-
 def get_resource_manager(path=None):
+    """
+    if path==None: obeys the try_agilent_first.
+    if path='': only load the default library, does not follow try_agilent_first
+    for any other path, load it.
+    In case of problem it raises ImportError
+    Note that for pyvisa<1.5 only one dll can be loaded at the same time. Loading
+    a new one kills the previous one (resource_manager will no longer work.)
+    """
+    if pyvisa is None:
+        return None
     if old_interface:
+        # The next line can produce ImportError
         return old_resource_manager(path)
     else:
-        if path == None:
-            path = ''
-        if _os.name == 'nt' and try_agilent_first:
+        if _os.name == 'nt' and path is None and try_agilent_first:
             try:
                 return new_WrapResourceManager(pyvisa.ResourceManager(agilent_path))
-            except pyvisa.errors.LibraryError:
+            except (pyvisa.errors.LibraryError, UnicodeDecodeError):
+                # for UnicodeDecodeError see: https://github.com/hgrecco/pyvisa/issues/136
                 print 'Unable to load Agilent visa library. Will try the default one (National Instruments?).'
                 _clean_up_registry(agilent_path)
-            except UnicodeDecodeError:
-                # see https://github.com/hgrecco/pyvisa/issues/136
-                print 'Unable to load Agilent visa library. Will try the default one (National Instruments?).'
-                _clean_up_registry(agilent_path)
+        if path is None:
+            path = ''
+        try:
             return new_WrapResourceManager(pyvisa.ResourceManager(path))
+        except (pyvisa.errors.LibraryError, UnicodeDecodeError) as exc:
+            raise ImportError('Unable to load backend: %s'%exc)
+
 
 
 # read, read_raw and write have changed
