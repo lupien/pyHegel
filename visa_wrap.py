@@ -564,7 +564,8 @@ def get_resource_manager(path=None):
             path = ''
         try:
             return new_WrapResourceManager(pyvisa.ResourceManager(path))
-        except (pyvisa.errors.LibraryError, UnicodeDecodeError) as exc:
+        except (pyvisa.errors.LibraryError, UnicodeDecodeError, OSError) as exc:
+            # We get OSError when no libraries are found
             raise ImportError('Unable to load backend: %s'%exc)
 
 
