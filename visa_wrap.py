@@ -13,6 +13,7 @@ Created on Wed Apr 08 15:42:32 2015
 import threading as _threading
 import warnings as _warnings
 import os as _os
+from ctypes import byref as _byref
 
 try_agilent_first = True
 agilent_path = r"c:\Windows\system32\agvisa32.dll"
@@ -288,6 +289,7 @@ class old_Instrument(redirect_instr):
         # returns the converted user_handle
         return vpp43.install_handler(self.vi, event_type, handler, user_handle)
     def uninstall_visa_handler(self, event_type, handler, user_handle):
+        # does not work with user_handle None
         # user_handle is the converted user_handle
         vpp43.uninstall_handler(self.vi, event_type, handler, user_handle)
     def enable_event(self, event_type, mechanism):
@@ -327,7 +329,16 @@ class new_Instrument(redirect_instr):
                     break
             else:
                 raise pyvisa.errors.UnknownHandler(event_type, handler, user_handle)
-            self.visalib.uninstall_handler(event_type, element[2], user_handle)
+            try:
+                # check if we are using the ctwrapper default backend
+                self.visalib.viUninstallHandler
+            except AttributeError:
+                self.visalib.uninstall_handler(event_type, element[2], user_handle)
+            else:
+                pyvisa.ctwrapper.functions.set_user_handle_type(self.visalib, user_handle)
+                if user_handle is not None:
+                        user_handle = _byref(user_handle)
+                self.visalib.viUninstallHandler(self.session, event_type, element[2], user_handle)
         else:
             self.visalib.uninstall_visa_handler(self.session, event_type, handler, user_handle)
     if version in ['1.5', '1.6', '1.6.1', '1.6.2', '1.6.3']:
