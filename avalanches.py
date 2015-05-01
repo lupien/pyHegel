@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Thu Jan 19 17:21:20 2012
 
-@author: reuletlab
-"""
+# Created on Thu Jan 19 17:21:20 2012
+# 
 
 import os
 import glob

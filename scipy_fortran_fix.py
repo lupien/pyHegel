@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
-# vim: set autoindent shiftwidth=4 softtabstop=4 expandtab:
-"""
-Created on Thu Dec 18 15:30:07 2014
 
-@author: Christian Lupien
-From https://github.com/scipy/scipy/pull/3880
-"""
+# KeyboardInterrupt fixes from:
+#   https://github.com/scipy/scipy/pull/3880
+# by Christian Lupien (2014-12-18)
 
 # prevent interference with KeyboardInterrupt on Windows
 # due to Fortran libraries

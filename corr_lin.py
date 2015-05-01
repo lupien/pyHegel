@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
-Éditeur de Spyder
 
-Ce script temporaire est sauvegardé ici :
-C:\Users\zads2401\.spyder2\.temp.py
-"""
+# created by Sergey Zadvornov
 
 def fCorrS(AmpSinPP, OffsetDC):
     Nbit = 14

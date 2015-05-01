@@ -1,0 +1,22 @@
+pyHegel Changelog
+=================
+
+1.0.0 (unreleased)
+------------------
+
+- First showing on github
+- Updated to also handle pyVisa > 1.4
+- Requires ipython >1.0
+- Tested with python(x,y) 2.7.6.1 (ipython 2.1.0-6,  pyvisa 1.4, numpy 1.8.1-6, scipy 0.14.0-7, matplotlib 1.3.1-4)
+          and python(x,y) 2.7.9.0 (ipython 2.3.1-9,  pyvisa 1.6.1-3, numpy 1.8.2-7, scipy 0.14.0-7, matplotlib 1.4.2-6)
+
+0.8.0 (2014-12-22)
+------------------
+
+- Internal release before split to 1.0
+- Last version to handle python(x,y) 2.7.2.0 (ipython 0.10.2,  pyvisa 1.3, numpy 1.6.1, scipy 0.9.0.1, matplotlib 1.0.1)
+
+0.0.0 (2011-11-10)
+------------------
+- start of development
+
