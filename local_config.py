@@ -36,6 +36,7 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              tc1 = (instruments.lakeshore_322, (12,)),
              tc2 = (instruments.lakeshore_340, (12,)),
              tc3 = (instruments.lakeshore_370, ('ASRL4', 120., 136.4)),
+             tm1 = (instruments.lakeshore_224, (12,)),
              gen1 = (instruments.agilent_rf_33522A, (10,)),
              gen2 = (instruments.agilent_rf_33522A, (14,)),
              gen5 = (instruments.agilent_rf_33522A, ('USB0::0x0957::0x2307::MY50005306',)),
@@ -78,6 +79,7 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              dt1 = (instruments.DataTranslation, ()),
              # Agilent attenuator
              att1 = (instruments.agilent_rf_Attenuator, ('USB0::0x0957::0x4C18::MY52200101',)),
+             att2 = (instruments.agilent_rf_Attenuator, ('USB0::0x0957::0x4C18::MY52200128',)),
              # Power meters
              epm1 = (instruments.agilent_PowerMeter, ('USB0::0x0957::0x5418::MY52290056',)),
              # Arbitratry waveform generator
