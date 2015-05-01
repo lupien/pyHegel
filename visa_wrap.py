@@ -296,6 +296,8 @@ class old_Instrument(redirect_instr):
         vpp43.enable_event(self.vi, event_type, mechanism)
     def disable_event(self, event_type, mechanism):
         vpp43.disable_event(self.vi, event_type, mechanism)
+    def discard_events(self, event_type, mechanism):
+        vpp43.discard_events(self.vi, event_type, mechanism)
     def control_ren(self, mode):
         vpp43.gpib_control_ren(self.vi, mode)
     # read_raw is ok
@@ -346,6 +348,8 @@ class new_Instrument(redirect_instr):
             self.visalib.enable_event(self.session, event_type, mechanism)
         def disable_event(self, event_type, mechanism):
             self.visalib.disable_event(self.session, event_type, mechanism)
+        def discard_events(self, event_type, mechanism):
+            self.visalib.discard_events(self.session, event_type, mechanism)
         @property
         def read_termination(self):
             return self.instr.read_termination
