@@ -456,7 +456,7 @@ class old_resource_manager(object):
             resource_names.append(vpp43.find_next(find_list))
         vpp43.close(find_list)
         return resource_names
-    def resource_info(self, session, resource_name):
+    def resource_info(self, resource_name):
         """ unpacks to: interface_type, interface_board_number, resource_class, resource_name alias,
             alias is returned as None when it is empty
         """
