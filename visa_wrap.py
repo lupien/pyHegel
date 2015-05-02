@@ -31,6 +31,7 @@ import threading as _threading
 import warnings as _warnings
 import os as _os
 from ctypes import byref as _byref
+from math import isinf as _isinf
 
 try_agilent_first = True
 agilent_path = r"c:\Windows\system32\agvisa32.dll"
@@ -39,12 +40,35 @@ version = "1.4"
 
 _agilent_visa = False
 
+def _add_enum_equivalent_old():
+        class Parity(object):
+            none = constants.VI_ASRL_PAR_NONE
+            odd = constants.VI_ASRL_PAR_ODD
+            even = constants.VI_ASRL_PAR_EVEN
+            mark = constants.VI_ASRL_PAR_MARK
+            space = constants.VI_ASRL_PAR_SPACE
+        constants.Parity = Parity
+        class StopBits(object):
+            one = 1.
+            one_and_a_half = 1.5
+            two = 2.0
+        constants.StopBits = StopBits
+        class SerialTermination(object):
+            none = constants.VI_ASRL_END_NONE
+            last_bit = constants.VI_ASRL_END_LAST_BIT
+            termination_char = constants.VI_ASRL_END_TERMCHAR
+            termination_break = constants.VI_ASRL_END_BREAK
+        constants.SerialTermination = SerialTermination
+
 
 try:
     import pyvisa
     try:
         import pyvisa.vpp43 as vpp43
         import pyvisa.vpp43_constants as constants
+        _add_enum_equivalent_old()
+        # Use these instead of the VI_ASRL constants for the code to
+        # work in both pyvisa 1.4 and 1.6
         import pyvisa.visa_exceptions as VisaIOError
         visa = None  # to be replaced during get_resource_manager
         old_interface = True
@@ -103,26 +127,26 @@ def _patch_pyvisa():
     """ This functions applies a patch to pyvisa
         to allow visa read to work in multi threads
     """
-    import pyvisa.visa as visa
     if hasattr(visa, "_removefilter_orig"):
         #print 'Skipping patch: already applied'
         return
     #print 'Installing pyvisa patch'
-    visa.warnings._filters_lock_pyvisa = _threading.Lock()
+    # we change visa.warnings (the same as _warnings)
+    _warnings._filters_lock_pyvisa = _threading.Lock()
     def removefilter(*arg, **kwarg):
         #print 'Doing remove filter %r, %r'%(arg, kwarg)
-        with visa.warnings._filters_lock_pyvisa:
+        with _warnings._filters_lock_pyvisa:
             visa._removefilter_orig(*arg, **kwarg)
     def filterwarnings(*arg, **kwarg):
         #print 'Doing filter warnings %r, %r'%(arg, kwarg)
-        with visa.warnings._filters_lock_pyvisa:
-            visa.warnings.filterwarnings_orig(*arg, **kwarg)
+        with _warnings._filters_lock_pyvisa:
+            _warnings.filterwarnings_orig(*arg, **kwarg)
     visa._removefilter_orig = visa._removefilter
     visa._removefilter = removefilter
-    visa.warnings.filterwarnings_orig = visa.warnings.filterwarnings
-    visa.warnings.filterwarnings = filterwarnings
+    _warnings.filterwarnings_orig = _warnings.filterwarnings
+    _warnings.filterwarnings = filterwarnings
 
-def _old_load_visa(path):
+def _old_load_visa(path=None):
     """
     if path==None: obeys the try_agilent_first. If try_agilent_first is True
                    it overrides even a choice in .pyvisarc
@@ -138,28 +162,32 @@ def _old_load_visa(path):
         old_close = vpp43.visa_library().viClose
     else:
         old_close = None
+    loaded = False
     if _os.name == 'nt' and path is None and try_agilent_first:
         try:
             vpp43.visa_library.load_library(agilent_path)
         except WindowsError: 
             print 'Unable to load Agilent visa library. Will try the default one (National Instruments?).'
-    if path is None:
-        path = ''
-    if path == '':
-        try:
-            path = pyvisa._visa_library_path
-        except AttributeError:
-            path = None
-    try:
-        vpp43.visa_library.load_library(path)
-    except WindowsError:
-        if path is None:
-            error = 'Unable to load default visa32.dll.'
         else:
-            error = 'Unable to load %s'%path
-        raise ImportError(error)
-    except OSError as exc: # on linux if can't find visa library
-        raise ImportError('\nError loading visa library: %s'%exc)
+            loaded = True
+    if not loaded:
+        if path is None:
+            path = ''
+        if path == '':
+            try:
+                path = pyvisa._visa_library_path
+            except AttributeError:
+                path = None
+        try:
+            vpp43.visa_library.load_library(path)
+        except WindowsError:
+            if path is None:
+                error = 'Unable to load default visa32.dll.'
+            else:
+                error = 'Unable to load %s'%path
+            raise ImportError(error)
+        except OSError as exc: # on linux if can't find visa library
+            raise ImportError('\nError loading visa library: %s'%exc)
     # When pyvisa.visa is imported for the first time, it initializes the
     # resource manager (which would load a default library if it is not loaded yet)
     # Here we have loaded the library.
@@ -177,6 +205,7 @@ def _old_load_visa(path):
         visa.resource_manager.init()
 
     _patch_pyvisa()
+    _visa_test_agilent()
     
 
 ####################################################################
@@ -265,24 +294,51 @@ class old_Instrument(redirect_instr):
     _read_termination = None
     _write_termination = CR + LF
     def __init__(self, instr_instance, **kwargs):
-        super(self, old_Instrument).__init__(instr_instance)
+        super(old_Instrument, self).__init__(instr_instance)
         for k,v in kwargs.items():
             setattr(self, k, v)
+    # Make timeout handling, the same as new version (use ms)
+    # The old version is bases on seconds
+    # Also note that the timeout used could depend on the visa library and the
+    # device. gpib libraries only allow a limited set of values
+    #   0, 10us, 30us, 100us, 300us,... 1s, 3s, 10s, ..., 1000s
+    # it usually rounds up. NI returns the round up value, agilent does not.
+    # The old code used to default to 5s, the new code to 2s (visa default timeout)
+    # instrument_base.visaInstrument sets it to 3,
+    # so I change the default to match the new one.
+    @property
+    def timeout(self):
+        try:
+            return int(self.instr.timeout*1000)
+        except NameError:
+            return float('+inf')
+    @timeout.setter
+    def timeout(self, value):
+        if value is None or _isinf(value):
+            del self.timeout
+        else:
+            self.instr.timeout = value/1000.
+    @timeout.deleter
+    def timeout(self):
+        # first set a timeout to prevent NameError exception
+        self.instr.timeout = 0
+        del self.instr.timeout
     @property
     def read_termination(self):
         return self._read_termination
     @read_termination.setter
     def read_termination(self, value):
+        # This changes the hardware read termination
         if value:
             last_char = value[-1:]
             if last_char in value[:-1]:
                 raise ValueError("ambiguous ending in termination characters")
-            # This changes the hardware read termination
-            if value is None:
-                # This is needed for serial because  VI_ATTR_TERMCHAR can also be used by VI_ATTR_ASRL_END_IN
-                # so return it to the default value
-                self.term_chars = self.LF
             self.term_chars = value
+        else: # value is None
+            # This is needed for serial because  VI_ATTR_TERMCHAR can also be used by VI_ATTR_ASRL_END_IN
+            # so return it to the default value
+            self.term_chars = self.LF
+            self.term_chars = None
         self._read_termination = value
     @property
     def write_termination(self):
@@ -299,9 +355,12 @@ class old_Instrument(redirect_instr):
     def set_visa_attribute(self, attr, state):
         vpp43.set_attribute(self.vi, attr, state)
     def lock(self, lock_type, timeout_ms):
-        vpp43.lock(self.vi, lock_type, timeout_ms*1000)
+        """
+        timeout_ms is in ms or can be constants.VI_TMO_IMMEDIATE or constants.VI_TMO_INFINITE
+        """
+        vpp43.lock(self.vi, lock_type, timeout_ms)
     def unlock(self):
-        vpp43.lock(self.vi)
+        vpp43.unlock(self.vi)
     def install_visa_handler(self, event_type, handler, user_handle):
         # returns the converted user_handle
         return vpp43.install_handler(self.vi, event_type, handler, user_handle)
@@ -317,6 +376,18 @@ class old_Instrument(redirect_instr):
         vpp43.discard_events(self.vi, event_type, mechanism)
     def control_ren(self, mode):
         vpp43.gpib_control_ren(self.vi, mode)
+    def read_stb(self):
+        return vpp43.read_stb(self.vi)
+    @property
+    def stb(self):
+        return self.read_stb()
+    def read_raw_n(self, size):
+        try:
+            _warnings.filterwarnings("ignore", "VI_SUCCESS_MAX_CNT")
+            ret = vpp43.read(self.vi, size)
+        finally:
+            visa._removefilter("ignore", "VI_SUCCESS_MAX_CNT")
+        return ret
     # read_raw is ok
     def write_raw(self, message):
         vpp43.write(self.vi, message)
@@ -332,7 +403,10 @@ class new_Instrument(redirect_instr):
         # VI_TRIG_SW is the default
         #self.set_attribute(constants.VI_ATTR_TRIG_ID, constants.VI_TRIG_SW) # probably uncessary but the code was like that
         self.assert_trigger()
-    def lock(self, lock_type, timeout_ms): # timeout in ms
+    def lock(self, lock_type, timeout_ms):
+        """
+        timeout_ms is in ms or can be constants.VI_TMO_IMMEDIATE or constants.VI_TMO_INFINITE
+        """
         self.visalib.lock(self.session, lock_type, timeout_ms)
     def install_visa_handler(self, event_type, handler, user_handle):
         # returns the converted user_handle
@@ -385,6 +459,9 @@ class new_Instrument(redirect_instr):
     #read_raw, write_raw are ok
     write = _write_helper
     read = _read_helper
+    def read_raw_n(self, size):
+        with self.ignore_warning(constants.VI_SUCCESS_MAX_CNT):
+            return self.visalib.read(self.session, size)
 
 
 
@@ -470,16 +547,15 @@ class old_resource_manager(object):
             # does not map to
             raise ValueError('term_chars is not permitted in open_resource')
         kwargs_after = {}
-        for k in ['read_termination', 'write_termination']:
+        for k in ['read_termination', 'write_termination', 'timeout']:
             if kwargs.has_key(k):
                 kwargs_after[k] = kwargs.pop(k)
         instr = visa.instrument(resource_name, **kwargs)
-        if instr.is_serial():
+        if isinstance(instr, visa.SerialInstrument):
             # serials was setting term_chars to CR
             # change it to same defaults as new code (which is the general default)
-            if kwargs_after == {}:
-                instr.read_termination = None
-                instr.write_termination = instr.CR+instr.LF
+            kwargs_after.setdefault('read_termination', old_Instrument._read_termination)
+        kwargs_after.setdefault('timeout', 2000)
         return old_Instrument(instr, **kwargs_after)
     def is_agilent(self):
         if self._is_agilent is None:
@@ -488,7 +564,9 @@ class old_resource_manager(object):
             except AttributeError:
                 self._is_agilent = False
         return self._is_agilent
-
+    @property
+    def visalib(self):
+        return vpp43.visa_library()
 
 class new_WrapResourceManager(redirect_instr):
     def __init__(self, new_rsrc_manager):
