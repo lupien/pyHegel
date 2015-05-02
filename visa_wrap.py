@@ -354,11 +354,11 @@ class old_Instrument(redirect_instr):
         return vpp43.get_attribute(self.vi, attr)
     def set_visa_attribute(self, attr, state):
         vpp43.set_attribute(self.vi, attr, state)
-    def lock(self, lock_type, timeout_ms):
+    def lock_excl(self, timeout_ms):
         """
         timeout_ms is in ms or can be constants.VI_TMO_IMMEDIATE or constants.VI_TMO_INFINITE
         """
-        vpp43.lock(self.vi, lock_type, timeout_ms)
+        vpp43.lock(self.vi, constants.VI_EXCLUSIVE_LOCK, timeout_ms)
     def unlock(self):
         vpp43.unlock(self.vi)
     def install_visa_handler(self, event_type, handler, user_handle):
@@ -403,11 +403,6 @@ class new_Instrument(redirect_instr):
         # VI_TRIG_SW is the default
         #self.set_attribute(constants.VI_ATTR_TRIG_ID, constants.VI_TRIG_SW) # probably uncessary but the code was like that
         self.assert_trigger()
-    def lock(self, lock_type, timeout_ms):
-        """
-        timeout_ms is in ms or can be constants.VI_TMO_IMMEDIATE or constants.VI_TMO_INFINITE
-        """
-        self.visalib.lock(self.session, lock_type, timeout_ms)
     def install_visa_handler(self, event_type, handler, user_handle):
         # returns the converted user_handle
         return self.visalib.install_visa_handler(self.session, event_type, handler, user_handle)
@@ -435,6 +430,11 @@ class new_Instrument(redirect_instr):
         else:
             self.visalib.uninstall_visa_handler(self.session, event_type, handler, user_handle)
     if version in ['1.5', '1.6', '1.6.1', '1.6.2', '1.6.3']:
+        def lock_excl(self, timeout_ms):
+            """
+            timeout_ms is in ms or can be constants.VI_TMO_IMMEDIATE or constants.VI_TMO_INFINITE
+            """
+            self.visalib.lock(self.session, constants.VI_EXCLUSIVE_LOCK, timeout_ms)
         def enable_event(self, event_type, mechanism):
             self.visalib.enable_event(self.session, event_type, mechanism)
         def disable_event(self, event_type, mechanism):
@@ -729,6 +729,11 @@ in instruments_others:
 """
    opening multiple times a serial instrument, works if all opened operation are on the same
    visalib (either NI or agilent, but not on both)
+   
+   Opening the same GPIB instrument on two visalib at the same time is possible.
+   A locked instrument on one interface will interfer with commands of the other visalib
+   but does not affect the locks (the locks are per visalib it seems, but access to the gpib
+   driver seems to be affected by the lock). The result: DON'T DO THAT.
 
    As for event/handlers
      agilent allows the use of both at the same time, NI does not.
