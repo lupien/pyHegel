@@ -461,7 +461,7 @@ class new_Instrument(redirect_instr):
     read = _read_helper
     def read_raw_n(self, size):
         with self.ignore_warning(constants.VI_SUCCESS_MAX_CNT):
-            return self.visalib.read(self.session, size)
+            return self.visalib.read(self.session, size)[0]
 
 
 
