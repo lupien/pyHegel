@@ -726,14 +726,25 @@ in instruments_others:
        self.visa.data_bits = 7
        self.visa.term_chars = '\r\n'
 """
+# TODO: test of cross visa driver locks
+#              should also check the LAN.
+#       test event/handlers (QUEUE and HDNLR at same time, any combination allowed)
+#       test gpib RQS and read status byte handling
+
 """
    opening multiple times a serial instrument, works if all opened operation are on the same
    visalib (either NI or agilent, but not on both)
    
    Opening the same GPIB instrument on two visalib at the same time is possible.
-   A locked instrument on one interface will interfer with commands of the other visalib
-   but does not affect the locks (the locks are per visalib it seems, but access to the gpib
-   driver seems to be affected by the lock). The result: DON'T DO THAT.
+   A locked_exclusive instrument on NI does a hardware lock which interferes with
+   usage of the device on the agilent visa. This does not happen for shared lock, nor
+   for any locks on agilent. The lock themselves don't interface (you can lock on both
+   visa lib at the same time, but using the agilent will be broken).
+
+   USB device can also be shared and none of the locks on different implementation interfere with
+   each other.
+
+   So the main consequence: DO NOT USE BOTH IMPLEMENTATION AT THE SAME TIME
 
    As for event/handlers
      agilent allows the use of both at the same time, NI does not.
