@@ -37,102 +37,19 @@ from collections import OrderedDict  # this is a subclass of dict
 from PyQt4 import QtGui, QtCore
 from kbint_util import sleep, _sleep_signal_context_manager, _delayed_signal_context_manager
 
+import visa_wrap
 
-def _get_lib_properties(libraryHandle):
-    import win32api
-    global _win32api
-    _win32api = win32api
-    filename = win32api.GetModuleFileName(libraryHandle)
-    fixedInfo = win32api.GetFileVersionInfo(filename, '\\')
-    # Only pick the first lang, codepage combination
-    lang, codepage = win32api.GetFileVersionInfo(filename, r'\VarFileInfo\Translation')[0]
-    base = '\\StringFileInfo\\%04X%04X\\'%(lang, codepage)
-    company = win32api.GetFileVersionInfo(filename, base+'CompanyName')
-    product = win32api.GetFileVersionInfo(filename, base+'ProductName')
-    version = win32api.GetFileVersionInfo(filename, base+'ProductVersion')
-    fileversion = win32api.GetFileVersionInfo(filename, base+'FileVersion')
-    comments = win32api.GetFileVersionInfo(filename, base+'Comments')
-    descr = win32api.GetFileVersionInfo(filename, base+'FileDescription')
-    return dict(fixed=fixedInfo, lang=lang, codepage=codepage, company=company,
-                product=product, version=version, fileversion=fileversion,
-                comments=comments, descr=descr, filename=filename)
+rsrc_mngr = None
 
-def _patch_pyvisa():
-    """ This functions applies a patch to pyvisa
-        to allow visa read to work in multi threads
-    """
-    import pyvisa.visa as visa
-    if hasattr(visa, "_removefilter_orig"):
-        #print 'Skipping patch: already applied'
-        return
-    #print 'Installing pyvisa patch'
-    visa.warnings._filters_lock_pyvisa = threading.Lock()
-    def removefilter(*arg, **kwarg):
-        #print 'Doing remove filter %r, %r'%(arg, kwarg)
-        with visa.warnings._filters_lock_pyvisa:
-            visa._removefilter_orig(*arg, **kwarg)
-    def filterwarnings(*arg, **kwarg):
-        #print 'Doing filter warnings %r, %r'%(arg, kwarg)
-        with visa.warnings._filters_lock_pyvisa:
-            visa.warnings.filterwarnings_orig(*arg, **kwarg)
-    visa._removefilter_orig = visa._removefilter
-    visa._removefilter = removefilter
-    visa.warnings.filterwarnings_orig = visa.warnings.filterwarnings
-    visa.warnings.filterwarnings = filterwarnings
-
-_agilent_visa = False
-def _visa_test_agilent():
-    global _visa_lib_properties, _agilent_visa
-    _visa_lib_properties = _get_lib_properties(vpp43.visa_library()._handle)
-    if 'agilent' in _visa_lib_properties['company'].lower():
-        _agilent_visa = True
-    else:
-        _agilent_visa = False
+def _load_resource_manager(path=None):
+    global rsrc_mngr
+    rsrc_mngr = None
+    rsrc_mngr = visa_wrap.get_resource_manager(path)
 
 try:
-    if os.name == 'nt':
-        import pyvisa.vpp43 as vpp43
-        try:
-            # First try the agilent Library.
-            # You can later check with: vpp43.visa_library()
-            vpp43.visa_library.load_library(r"c:\Windows\system32\agvisa32.dll")
-        except WindowsError:
-            print 'Unable to load Agilent visa library. Will try the default one (National Instruments?).'
-        try:
-            import visa
-        except WindowsError:
-            print 'Unable to load visa32.dll.'
-            raise ImportError
-        _visa_test_agilent()
-    else:
-        try:
-            import visa
-            vpp43 = visa.vpp43
-        except OSError as exc:
-            print '\nError loading visa library:', exc
-            raise ImportError
-    _patch_pyvisa()
-except ImportError as exc: # pyVisa not installed
-    print 'Error importing visa. You will have reduced functionality.'
-    # give a dummy visa to handle imports
-    visa = None
-
-def _visa_reload(dllfile=r'c:\Windows\system32\agvisa32.dll'):
-    """
-    reloads the same or different visa dll.
-    For National instrument visa: r'c:\Windows\system32\visa32.dll'
-       or None
-    For Agilent (default): r'c:\Windows\system32\agvisa32.dll'
-    """
-    # we assume os.name == 'nt'
-    vpp43.visa_library.load_library(dllfile)
-    # now need to reset ResourceManager
-    try:
-        visa.resource_manager.close()
-    except visa.VisaIOError:
-        pass
-    visa.resource_manager.init()
-    _visa_test_agilent()
+    _load_resource_manager()
+except ImportError as exc:
+    print 'Error loading visa resource manager. You will have reduced functionality.'
 
 try:
     _globaldict # keep the previous values (when reloading this file)
@@ -177,34 +94,7 @@ def find_all_instruments(use_aliases=True):
     used to open each of them.
 
     """
-    # Modifications from visa.get_instruments_list:
-    #    close the find_list
-    #    use upper because otherwise agilent IO 16.2.15823.0 can't find the alias
-    #    because it changes the case of serial number to lower.
-    # Phase I: Get all standard resource names (no aliases here)
-    resource_names = []
-    find_list, return_counter, instrument_description = \
-        vpp43.find_resources(visa.resource_manager.session, "?*::INSTR")
-    resource_names.append(instrument_description)
-    for i in xrange(return_counter - 1):
-        resource_names.append(vpp43.find_next(find_list))
-    vpp43.close(find_list)
-    # Phase two: If available and use_aliases is True, substitute the alias.
-    # Otherwise, truncate the "::INSTR".
-    result = []
-    for resource_name in resource_names:
-        resource_name = resource_name.upper()
-        try:
-            _, _, _, _, alias_if_exists = \
-             vpp43.parse_resource_extended(visa.resource_manager.session,
-                                           resource_name)
-        except AttributeError:
-            alias_if_exists = None
-        if alias_if_exists and use_aliases:
-            result.append(alias_if_exists)
-        else:
-            result.append(resource_name[:-7])
-    return result
+    return rsrc_mngr.get_instrument_list(use_aliases)
 
 def _repr_or_string(val):
     if isinstance(val, basestring):
@@ -2374,9 +2264,9 @@ class Lock_Visa(object):
         """
         timeout = max(int(timeout/1e-3),1) # convert from seconds to milliseconds
         try:
-            vpp43.lock(self._vi, vpp43.VI_EXCLUSIVE_LOCK, timeout)
-        except vpp43.VisaIOError as exc:
-            if exc.error_code == vpp43.VI_ERROR_TMO:
+            self._vi.lock_excl(timeout)
+        except visa_wrap.VisaIOError as exc:
+            if exc.error_code == visa_wrap.constants.VI_ERROR_TMO:
                 return False
             else:
                 raise
@@ -2385,7 +2275,7 @@ class Lock_Visa(object):
             self._count += 1
             return True
     def release(self):
-        vpp43.unlock(self._vi) # could produce VI_ERROR_SESN_NLOCKED
+        self._vi.unlock() # could produce VI_ERROR_SESN_NLOCKED
         self._count -= 1
     def acquire(self):
         return wait_on_event(self._visa_lock)
@@ -2401,8 +2291,8 @@ class Lock_Visa(object):
             while True:
                 self.release()
                 n += 1
-        except vpp43.VisaIOError as exc:
-            if exc.error_code != vpp43.VI_ERROR_SESN_NLOCKED:
+        except visa_wrap.VisaIOError as exc:
+            if exc.error_code != visa_wrap.constants.VI_ERROR_SESN_NLOCKED:
                 raise
         if n:
             print 'Released Visa lock', n, 'time(s) (expected %i releases)'%expect
@@ -2491,9 +2381,10 @@ class visaInstrument(BaseInstrument):
             visa_addr= 'GPIB0::%i::INSTR'%visa_addr
         self.visa_addr = visa_addr
         if not CHECKING:
-            self.visa = visa.instrument(visa_addr, **kwarg)
-            self._lock_extra = Lock_Visa(self.visa.vi)
-        self.visa.timeout = 3 # in seconds
+            self.visa = rsrc_mngr.open_resource(visa_addr, **kwarg)
+            self._lock_extra = Lock_Visa(self.visa)
+        #self.visa.timeout = 3 # in seconds
+        self.set_timeout = 3 # in seconds
         to = time.time()
         self._last_rw_time = _LastTime(to, to) # When wait time are not 0, it will be replaced
         self._write_write_wait = 0.
@@ -2501,7 +2392,7 @@ class visaInstrument(BaseInstrument):
         BaseInstrument.__init__(self)
     def __del__(self):
         #print 'Destroying '+repr(self)
-        # no need to call vpp43.close(self.visa.vi)
+        # no need to call self.visa.close()
         # because self.visa does that when it is deleted
         super(visaInstrument, self).__del__()
     # Do NOT enable locked_calling for read_status_byte, otherwise we get a hang
@@ -2511,11 +2402,11 @@ class visaInstrument(BaseInstrument):
     def read_status_byte(self):
         # since on serial visa does the *stb? request for us
         # might as well be explicit and therefore handle the rw_wait properly
-        if isinstance(self.visa, visa.SerialInstrument):
+        if self.visa.is_serial():
             return int(self.ask('*stb?'))
         else:
             with self._lock_extra:
-                return vpp43.read_stb(self.visa.vi)
+                return self.visa.read_stb()
     @locked_calling
     def control_remotelocal(self, remote=False, local_lockout=False, all=False):
         """
@@ -2550,22 +2441,22 @@ class visaInstrument(BaseInstrument):
         #   VI_GPIB_REN_ASSERT_LLO : lockout only (no addressing)
         if all:
             if remote:
-                val = vpp43.VI_GPIB_REN_ASSERT
+                val = visa_wrap.constants.VI_GPIB_REN_ASSERT
             else:
-                val = vpp43.VI_GPIB_REN_DEASSERT
+                val = visa_wrap.constants.VI_GPIB_REN_DEASSERT
         elif local_lockout:
             if remote:
-                val = vpp43.VI_GPIB_REN_ASSERT_ADDRESS_LLO
+                val = visa_wrap.constants.VI_GPIB_REN_ASSERT_ADDRESS_LLO
             else:
-                val = vpp43.VI_GPIB_REN_DEASSERT_GTL
-                vpp43.gpib_control_ren(self.visa.vi, val)
-                val = vpp43.VI_GPIB_REN_ASSERT
+                val = visa_wrap.constants.VI_GPIB_REN_DEASSERT_GTL
+                self.visa.gpib_control_ren(self.visa.vi, val)
+                val = visa_wrap.constants.VI_GPIB_REN_ASSERT
         else:
             if remote:
-                val = vpp43.VI_GPIB_REN_ASSERT_ADDRESS
+                val = visa_wrap.constants.VI_GPIB_REN_ASSERT_ADDRESS
             else:
-                val = vpp43.VI_GPIB_REN_ADDRESS_GTL
-        vpp43.gpib_control_ren(self.visa.vi, val)
+                val = visa_wrap.constants.VI_GPIB_REN_ADDRESS_GTL
+        self.visa.gpib_control_ren(self.visa.vi, val)
     def _do_wr_wait(self):
         if self._last_rw_time.read_time > self._last_rw_time.write_time:
             # last operation was a read
@@ -2626,10 +2517,17 @@ class visaInstrument(BaseInstrument):
         self.visa.clear()
     @property
     def set_timeout(self):
-        return self.visa.timeout
+        timeout_ms = self.visa.timeout
+        if timeout_ms is None:
+            return None
+        else:
+            return timeout_ms/1000. # return in seconds
     @set_timeout.setter
     def set_timeout(self, seconds):
-        self.visa.timeout = seconds
+        if seconds is None:
+            self.visa.timeout = None
+        else:
+            self.visa.timeout = int(seconds*1000.)
     def get_error(self):
         return self.ask('SYSTem:ERRor?')
     def _info(self):
@@ -2645,6 +2543,7 @@ class visaInstrument(BaseInstrument):
 ##    VISA Async Instrument
 #######################################################
 
+
 class visaInstrumentAsync(visaInstrument):
     def __init__(self, visa_addr, poll=False):
         # poll can be True (for always polling) 'not_gpib' for polling for lan and usb but
@@ -2655,8 +2554,8 @@ class visaInstrumentAsync(visaInstrument):
         self._async_last_status_time = 0
         self._async_last_esr = 0
         super(visaInstrumentAsync, self).__init__(visa_addr)
-        is_gpib = vpp43.get_attribute(self.visa.vi, vpp43.VI_ATTR_INTF_TYPE) == vpp43.VI_INTF_GPIB
-        is_agilent = _agilent_visa
+        is_gpib = self.visa.is_gpib()
+        is_agilent = rsrc_mngr.is_agilent()
         self._async_polling = False
         if poll == True or (poll == 'not_gpib' and not is_gpib):
             self._async_polling = True
@@ -2673,23 +2572,20 @@ class visaInstrumentAsync(visaInstrument):
             self._proxy_handler = ProxyMethod(self._RQS_handler)
             # _handler_userval is the ctype object representing the user value (0 here)
             # It is needed for uninstall
-            self._handler_userval = vpp43.install_handler(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+            self._handler_userval = self.visa.install_handler(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                   self._proxy_handler, 0)
-            vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
-                               vpp43.VI_HNDLR)
-            # This is needed because pyvisa enables it by default
-            vpp43.disable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
-                               vpp43.VI_QUEUE)
+            self.visa.enable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+                               visa_wrap.constants.VI_HNDLR)
         else:
             # NI does not allow the use of VI_HANDLR for gpib
             self._RQS_status = -1
-            vpp43.enable_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
-                               vpp43.VI_QUEUE)
+            self.visa.enable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+                               visa_wrap.constants.VI_QUEUE)
     def __del__(self):
         if self._RQS_status != -1:
-            # only necessary to keep vpp43.handlers list in sync
+            # only necessary to keep handlers list in sync
             # the actual handler is removed when the visa is deleted (vi closed)
-            vpp43.uninstall_handler(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ,
+            self.visa.uninstall_handler(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                   self._proxy_handler, self._handler_userval)
         super(visaInstrumentAsync, self).__del__()
     def init(self, full=False):
@@ -2720,7 +2616,7 @@ class visaInstrumentAsync(visaInstrument):
             sleep(0.01) # give some time for other handlers to run
             self._RQS_done.set()
             #print 'Got it', vi
-        return vpp43.VI_SUCCESS
+        return visa_wrap.constants.VI_SUCCESS
     def _get_esr(self):
         return int(self.ask('*esr?'))
     def  _async_detect_poll_func(self):
@@ -2735,21 +2631,18 @@ class visaInstrumentAsync(visaInstrument):
             if _retry_wait(self._async_detect_poll_func, max_time, delay=0.05):
                 return True
         elif self._RQS_status == -1:
-            ev_type = context = None
-            try:
-                # On National Instrument (NI) visa this seems to wait an extra 12 ms after the
-                # SRQ is turned on.
-                # Also the timeout actually used seems to be 16*ceil(max_time*1000/16) in ms.
-                ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, int(max_time*1000))
-            except visa.VisaIOError, e:
-                if e.error_code != vpp43.VI_ERROR_TMO:
-                    raise
-            if context != None:
+            # On National Instrument (NI) visa this seems to wait an extra 12 ms after the
+            # SRQ is turned on.
+            # Also the timeout actually used seems to be 16*ceil(max_time*1000/16) in ms.
+            wait_resp = self.visa.wait_on_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+                                                int(max_time*1000), capture_timeout=True)
+            # context in wait_resp will be closed automatically
+            #if wait_resp.context != None:
+            if not wait_resp.timed_out:
                 # only reset event flag. We know the bit that is set already (OPC)
                 self._async_last_esr = self._get_esr()
                 # only reset SRQ flag. We know the bit that is set already
                 self._async_last_status = self.read_status_byte()
-                vpp43.close(context)
                 return True
         else:
             if self._RQS_done.wait(max_time):
@@ -2789,13 +2682,12 @@ class visaInstrumentAsync(visaInstrument):
             self._RQS_status = 0
             self._RQS_done.clear()
         else:
+            # could use self.visa.discard_events(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+            #                                    visa_wrap.constans.VI_QUEUE)
             n = 0
             try:
                 while True:
-                    ev_type = context = None
-                    ev_type, context = vpp43.wait_on_event(self.visa.vi, vpp43.VI_EVENT_SERVICE_REQ, 0)
-                    if context != None:
-                        vpp43.close(context)
+                    self.visa.wait_on_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ, 0)
                     n += 1
             except:
                 pass

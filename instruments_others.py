@@ -33,7 +33,7 @@ from instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep, ChoiceSimpleMap,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list, dict_improved, _fromstr_helper,\
-                            decode_float64, visa, locked_calling
+                            decode_float64, visa_wrap, locked_calling
 
 from instruments_logical import FunctionDevice
 
@@ -372,10 +372,11 @@ class sr780_analyzer(visaInstrumentAsync):
             #self._async_use_delay = False
             self._async_trig_time = 0
             self._async_delay_check = True
-            self.visa.term_chars='\n'
+            self.visa.write_termination = '\n'
+            #self.visa.term_chars='\n'
             # The above turned on detection of termchar on read. This is not good for
             # raw reads so turn it off.
-            visa.vpp43.set_attribute(self.visa.vi, visa.VI_ATTR_TERMCHAR_EN, visa.VI_FALSE)
+            # visa.vpp43.set_attribute(self.visa.vi, visa.VI_ATTR_TERMCHAR_EN, visa.VI_FALSE)
             self.write('OUTX 0') # Force interface to be on GPIB, in case it is not anymore (problem with dump function)
     def _get_async(self, async, obj, delay=False, trig=False, **kwarg):
         ret = super(sr780_analyzer, self)._get_async(async,  obj, delay=delay, trig=trig, **kwarg)
@@ -632,12 +633,12 @@ class sr780_analyzer(visaInstrumentAsync):
         if ps:
             self.write('POUT 1;PDST 3;PCIC 0;PLTP 1;PLOT')
             while r[-11:] != '%%Trailer\r\n':
-                r += visa.vpp43.read(self.visa.vi, 1)
+                r += self.visa.read_raw_n(1)
         else:
             self.write('POUT 0;PDST 3;PCIC 0;PRTP 4;PSCR %d;PRNT'%area_sel[area])
             try:
                 while True:
-                    r += visa.vpp43.read(self.visa.vi, 1)
+                    r += self.visa.read_raw_n(1)
             except visa.VisaIOError:
                 pass
         self.write('OUTX 0') # return to gpib interface
@@ -1071,7 +1072,7 @@ class lakeshore_370(visaInstrument):
         self._still_res = still_res
         self._still_full_res = still_full_res
         super(lakeshore_370, self).__init__(visa_addr, **kwarg)
-        if isinstance(self.visa, visa.SerialInstrument):
+        if self.visa.is_serial():
             self._write_write_wait = 0.100
         else: # GPIB
             self._write_write_wait = 0.050
@@ -1080,10 +1081,10 @@ class lakeshore_370(visaInstrument):
         self._data_valid_last_start = 0., [0, False]
     def init(self, full=False):
         if full:
-            if isinstance(self.visa, visa.SerialInstrument):
-                self.visa.parity = True
+            if self.visa.is_serial():
+                self.visa.parity = visa_wrap.constants.Parity.odd
                 self.visa.data_bits = 7
-                self.visa.term_chars = '\r\n'
+                #self.visa.term_chars = '\r\n'
                 self.write('*ESE 255') # needed for get_error
                 self.write('*sre 4') # neede for _data_valid
         super(lakeshore_370, self).init(full=full)
@@ -1582,14 +1583,13 @@ class MagnetController_SMC(visaInstrument):
     in remote (press remote button).
     """
     def __init__(self, address):
-        vpp43 = visa.vpp43
-        super(MagnetController_SMC, self).__init__(address, parity=vpp43.VI_ASRL_PAR_NONE,
-                                            baud_rate=9600, data_bits=8, stop_bits=2, term_chars='\r\n')
+        super(MagnetController_SMC, self).__init__(address, parity=visa_wrap.constants.Parity.none,
+                                            baud_rate=9600, data_bits=8, stop_bits=2)
     def init(self, full=False):
         if full == True:
-            if isinstance(self.visa, visa.SerialInstrument):
-                vpp43 = visa.vpp43
-                vpp43.set_attribute(self.visa.vi, vpp43.VI_ATTR_ASRL_FLOW_CNTRL, vpp43.VI_ASRL_FLOW_XON_XOFF)
+            if self.visa.is_serial():
+                cnst = visa_wrap.constants
+                self.visa.set_visa_attribute(cnst.VI_ATTR_ASRL_FLOW_CNTRL, cnst.VI_ASRL_FLOW_XON_XOFF)
         super(MagnetController_SMC, self).init(full=full)
         self._magnet_cal_T_per_A = self.operating_parameters.get()['calibTpA']
     def _current_config(self, dev_obj=None, options={}):
