@@ -287,6 +287,22 @@ def _read_helper(self, termination='default'):
     termination = self.read_termination if termination == 'default' else termination
     return _strip_termination(self.read_raw(), termination)
 
+class WaitResponse(object):
+    """Class used in return of wait_on_event. It properly closes the context upon delete.
+    """
+    def __init__(self, event_type, context, ret, visalib, timed_out=False):
+        self.event_type = event_type
+        self.context = context
+        self.ret = ret
+        self._visalib = visalib
+        self.timed_out = timed_out
+    def __del__(self):
+        if self.context != None:
+            self._visalib.close(self.context)
+
+
+# Important: do not use wait_for_srq
+#            it enables constants.VI_EVENT_SERVICE_REQ, constants.VI_QUEUE
 
 class old_Instrument(redirect_instr):
     CR = '\r'
@@ -297,6 +313,14 @@ class old_Instrument(redirect_instr):
         super(old_Instrument, self).__init__(instr_instance)
         for k,v in kwargs.items():
             setattr(self, k, v)
+        if self.is_gpib():
+            # The old library enables this automatically. We turn it off here
+            # to match the behavior of the new library
+            # The reason to enable it early was probably to make
+            #  wait_for_srq work even if the first time it is called the SRQ has
+            # already occured.
+            # But with it enabled, it can prevent VI_HDNLR from working (for NI visa)
+            self.disable_event(constants.VI_EVENT_SERVICE_REQ, constants.VI_QUEUE)
     # Make timeout handling, the same as new version (use ms)
     # The old version is bases on seconds
     # Also note that the timeout used could depend on the visa library and the
@@ -347,9 +371,11 @@ class old_Instrument(redirect_instr):
     def write_termination(self, value):
         self._write_termination = value
     def is_serial(self):
-        return isinstance(self.instr, visa.SerialInstrument)
+        return self.get_visa_attribute(constants.VI_ATTR_INTF_TYPE) == constants.VI_INTF_ASRL
+        #return isinstance(self.instr, visa.SerialInstrument)
     def is_gpib(self):
-        return isinstance(self.instr, visa.GpibInstrument)
+        return self.get_visa_attribute(constants.VI_ATTR_INTF_TYPE) == constants.VI_INTF_GPIB
+        #return isinstance(self.instr, visa.GpibInstrument)
     def get_visa_attribute(self, attr):
         return vpp43.get_attribute(self.vi, attr)
     def set_visa_attribute(self, attr, state):
@@ -374,6 +400,20 @@ class old_Instrument(redirect_instr):
         vpp43.disable_event(self.vi, event_type, mechanism)
     def discard_events(self, event_type, mechanism):
         vpp43.discard_events(self.vi, event_type, mechanism)
+    def wait_on_event(self, in_event_type, timeout_ms, capture_timeout=False):
+        try:
+            # replace vpp43 wait_on_event to obtain status in a thread safe manner
+            # ret can be VI_SUCCESS or VI_SUCCESS_QUEUE_NEMPTY without raising a VisaIOError
+            event_type = vpp43.ViEventType()
+            context = vpp43.ViEvent()
+            ret = vpp43.visa_library().viWaitOnEvent(self.vi, in_event_type, timeout_ms,
+                                        _byref(event_type), _byref(context))
+            #event_type, context = vpp43.wait_on_event(self.vi, in_event_type, timeout_ms)
+        except VisaIOError as exc:
+            if capture_timeout and exc.error_code == constants.VI_ERROR_TMO:
+                return WaitResponse(0, None, exc.error_code, vpp43, timed_out=True)
+            raise
+        return WaitResponse(event_type, context, ret, vpp43)
     def control_ren(self, mode):
         vpp43.gpib_control_ren(self.vi, mode)
     def read_stb(self):
@@ -396,9 +436,11 @@ class old_Instrument(redirect_instr):
 
 class new_Instrument(redirect_instr):
     def is_serial(self):
-        return isinstance(self.instr, pyvisa.resources.SerialInstrument)
+        return self.interface_type == constants.InterfaceType.asrl
+        #return isinstance(self.instr, pyvisa.resources.SerialInstrument)
     def is_gpib(self):
-        return isinstance(self.instr, pyvisa.resources.GPIBInstrument)
+        return self.interface_type == constants.InterfaceType.gpib
+        #return isinstance(self.instr, pyvisa.resources.GPIBInstrument)
     def trigger(self):
         # VI_TRIG_SW is the default
         #self.set_attribute(constants.VI_ATTR_TRIG_ID, constants.VI_TRIG_SW) # probably uncessary but the code was like that
@@ -441,6 +483,14 @@ class new_Instrument(redirect_instr):
             self.visalib.disable_event(self.session, event_type, mechanism)
         def discard_events(self, event_type, mechanism):
             self.visalib.discard_events(self.session, event_type, mechanism)
+        def wait_on_event(self, in_event_type, timeout, capture_timeout=False):
+            try:
+                event_type, context, ret = self.visalib.wait_on_event(self.session, in_event_type, timeout)
+            except VisaIOError as exc:
+                if capture_timeout and exc.error_code == constants.StatusCode.error_timeout:
+                    return WaitResponse(0, None, exc.error_code, self.visalib, timed_out=True)
+                raise
+            return WaitResponse(event_type, context, ret, self.visalib)
         @property
         def read_termination(self):
             return self.instr.read_termination
