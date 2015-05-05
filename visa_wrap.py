@@ -300,6 +300,12 @@ class WaitResponse(object):
         if self.context != None:
             self._visalib.close(self.context)
 
+@property
+def flow_control_helper(self):
+    return self.get_visa_attribute(constants.VI_ATTR_ASRL_FLOW_CNTRL)
+@flow_control_helper.setter
+def flow_control_helper(self, value):
+    self.set_visa_attribute(constants.VI_ATTR_ASRL_FLOW_CNTRL, value)
 
 # Important: do not use wait_for_srq
 #            it enables constants.VI_EVENT_SERVICE_REQ, constants.VI_QUEUE
@@ -370,6 +376,7 @@ class old_Instrument(redirect_instr):
     @write_termination.setter
     def write_termination(self, value):
         self._write_termination = value
+    flow_control = flow_control_helper
     def is_serial(self):
         return self.get_visa_attribute(constants.VI_ATTR_INTF_TYPE) == constants.VI_INTF_ASRL
         #return isinstance(self.instr, visa.SerialInstrument)
@@ -435,6 +442,10 @@ class old_Instrument(redirect_instr):
     read = _read_helper
 
 class new_Instrument(redirect_instr):
+    def __init__(self, instr_instance, **kwargs):
+        super(new_Instrument, self).__init__(instr_instance)
+        for k,v in kwargs.items():
+            setattr(self, k, v)
     def is_serial(self):
         return self.interface_type == constants.InterfaceType.asrl
         #return isinstance(self.instr, pyvisa.resources.SerialInstrument)
@@ -501,6 +512,7 @@ class new_Instrument(redirect_instr):
                 # so return it to the default value
                 self.instr.read_termination = '\n'
             self.instr.read_termination = value
+        flow_control = flow_control_helper
     def control_ren(self, mode):
         try:
             self.instr.control_ren(mode)
@@ -597,7 +609,7 @@ class old_resource_manager(object):
             # does not map to
             raise ValueError('term_chars is not permitted in open_resource')
         kwargs_after = {}
-        for k in ['read_termination', 'write_termination', 'timeout']:
+        for k in ['read_termination', 'write_termination', 'timeout', 'flow_control']:
             if kwargs.has_key(k):
                 kwargs_after[k] = kwargs.pop(k)
         instr = visa.instrument(resource_name, **kwargs)
@@ -623,6 +635,7 @@ class new_WrapResourceManager(redirect_instr):
         super(new_WrapResourceManager, self).__init__(new_rsrc_manager)
         self._is_agilent = None
     if version in ['1.5', '1.6', '1.6.1', '1.6.2', '1.6.3']:
+        additional_properties = ['flow_control']
         # The same as the original ResourceManager one (1.6.1) except for the close statement
         def list_resources(self, query='?*::INSTR'):
             """Returns a tuple of all connected devices matching query.
@@ -641,6 +654,8 @@ class new_WrapResourceManager(redirect_instr):
             lib.close(find_list)
     
             return tuple(resource for resource in resources)
+    else:
+        additional_properties = []
     def is_agilent(self):
         if self._is_agilent is None:
             try:
@@ -649,8 +664,12 @@ class new_WrapResourceManager(redirect_instr):
                 self._is_agilent = False
         return self._is_agilent
     def open_resource(self, resource_name, **kwargs):
+        kwargs_after = {}
+        for k in self.additional_properties:
+            if kwargs.has_key(k):
+                kwargs_after[k] = kwargs.pop(k)
         instr = self.instr.open_resource(resource_name, **kwargs)
-        return new_Instrument(instr)
+        return new_Instrument(instr, **kwargs_after)
 
     get_instrument_list = _get_instrument_list
 
