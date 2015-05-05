@@ -69,7 +69,7 @@ try:
         _add_enum_equivalent_old()
         # Use these instead of the VI_ASRL constants for the code to
         # work in both pyvisa 1.4 and 1.6
-        import pyvisa.visa_exceptions as VisaIOError
+        from pyvisa.visa_exceptions import VisaIOError
         visa = None  # to be replaced during get_resource_manager
         old_interface = True
     except ImportError:
