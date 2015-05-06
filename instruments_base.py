@@ -2384,7 +2384,9 @@ class visaInstrument(BaseInstrument):
             self.visa = rsrc_mngr.open_resource(visa_addr, **kwarg)
             self._lock_extra = Lock_Visa(self.visa)
         #self.visa.timeout = 3 # in seconds
-        self.set_timeout = 3 # in seconds
+        # use 2.9 because I was getting 3.0 rounded to 10s timeouts on some visa lib configuration
+        #     2.9 seemed to be rounded up to 3s instead
+        self.set_timeout = 2.9 # in seconds
         to = time.time()
         self._last_rw_time = _LastTime(to, to) # When wait time are not 0, it will be replaced
         self._write_write_wait = 0.
