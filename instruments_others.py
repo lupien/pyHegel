@@ -611,8 +611,8 @@ class sr780_analyzer(visaInstrumentAsync):
     def _dump_getdev(self, ps=True, area='all'):
         """
         options are ps, area
-         -ps: when true returns a postscript object, otherwirse returns a GIF file
-         -area: used for GIF files, one of 'graph', 'menu', 'status' or 'all'
+         -ps: when True (default) returns a postscript object, otherwise returns a GIF file
+         -area: used for GIF files, one of 'graph', 'menu', 'status' or 'all'(default)
         """
         # Reading data is tricky because the instrument does not send
         # EOI on its last byte so we either need to detect the ending comment
@@ -639,7 +639,7 @@ class sr780_analyzer(visaInstrumentAsync):
             try:
                 while True:
                     r += self.visa.read_raw_n(1)
-            except visa.VisaIOError:
+            except visa_wrap.VisaIOError:
                 pass
         self.write('OUTX 0') # return to gpib interface
         self.set_timeout = old_to

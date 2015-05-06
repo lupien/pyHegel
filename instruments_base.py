@@ -2574,7 +2574,7 @@ class visaInstrumentAsync(visaInstrument):
             self._proxy_handler = ProxyMethod(self._RQS_handler)
             # _handler_userval is the ctype object representing the user value (0 here)
             # It is needed for uninstall
-            self._handler_userval = self.visa.install_handler(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+            self._handler_userval = self.visa.install_visa_handler(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                   self._proxy_handler, 0)
             self.visa.enable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                visa_wrap.constants.VI_HNDLR)
