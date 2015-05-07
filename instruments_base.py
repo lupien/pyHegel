@@ -2441,24 +2441,25 @@ class visaInstrument(BaseInstrument):
         #  For those reason I keep the 2 different so it can be tested later.
         # Unused state:
         #   VI_GPIB_REN_ASSERT_LLO : lockout only (no addressing)
+        cnsts = visa_wrap.constants
         if all:
             if remote:
-                val = visa_wrap.constants.VI_GPIB_REN_ASSERT
+                val = cnsts.VI_GPIB_REN_ASSERT
             else:
-                val = visa_wrap.constants.VI_GPIB_REN_DEASSERT
+                val = cnsts.VI_GPIB_REN_DEASSERT
         elif local_lockout:
             if remote:
-                val = visa_wrap.constants.VI_GPIB_REN_ASSERT_ADDRESS_LLO
+                val = cnsts.VI_GPIB_REN_ASSERT_ADDRESS_LLO
             else:
-                val = visa_wrap.constants.VI_GPIB_REN_DEASSERT_GTL
-                self.visa.gpib_control_ren(self.visa.vi, val)
-                val = visa_wrap.constants.VI_GPIB_REN_ASSERT
+                val = cnsts.VI_GPIB_REN_DEASSERT_GTL
+                self.visa.control_ren(val)
+                val = cnsts.VI_GPIB_REN_ASSERT
         else:
             if remote:
-                val = visa_wrap.constants.VI_GPIB_REN_ASSERT_ADDRESS
+                val = cnsts.VI_GPIB_REN_ASSERT_ADDRESS
             else:
-                val = visa_wrap.constants.VI_GPIB_REN_ADDRESS_GTL
-        self.visa.gpib_control_ren(self.visa.vi, val)
+                val = cnsts.VI_GPIB_REN_ADDRESS_GTL
+        self.visa.control_ren(val)
     def _do_wr_wait(self):
         if self._last_rw_time.read_time > self._last_rw_time.write_time:
             # last operation was a read
