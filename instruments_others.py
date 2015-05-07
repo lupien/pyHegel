@@ -1583,13 +1583,10 @@ class MagnetController_SMC(visaInstrument):
     in remote (press remote button).
     """
     def __init__(self, address):
-        super(MagnetController_SMC, self).__init__(address, parity=visa_wrap.constants.Parity.none,
-                                            baud_rate=9600, data_bits=8, stop_bits=2)
+        cnsts = visa_wrap.constants
+        super(MagnetController_SMC, self).__init__(address, parity=cnsts.Parity.none, flow_control=cnsts.VI_ASRL_FLOW_XON_XOFF,
+                                            baud_rate=9600, data_bits=8, stop_bits=cnsts.StopBits.two)
     def init(self, full=False):
-        if full == True:
-            if self.visa.is_serial():
-                cnst = visa_wrap.constants
-                self.visa.set_visa_attribute(cnst.VI_ATTR_ASRL_FLOW_CNTRL, cnst.VI_ASRL_FLOW_XON_XOFF)
         super(MagnetController_SMC, self).init(full=full)
         self._magnet_cal_T_per_A = self.operating_parameters.get()['calibTpA']
     def _current_config(self, dev_obj=None, options={}):
