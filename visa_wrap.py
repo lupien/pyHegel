@@ -482,6 +482,11 @@ class new_Instrument(redirect_instr):
                 self.visalib.viUninstallHandler(self.session, event_type, element[2], user_handle)
         else:
             self.visalib.uninstall_visa_handler(self.session, event_type, handler, user_handle)
+    if version in ['1.5', '1.6', '1.6.1', '1.6.2']:
+        @property
+        def interface_type(self):
+            return self.visalib.parse_resource(self._resource_manager.session,
+                                           self.resource_name)[0].interface_type
     if version in ['1.5', '1.6', '1.6.1', '1.6.2', '1.6.3']:
         def lock_excl(self, timeout_ms):
             """
