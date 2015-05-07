@@ -1633,10 +1633,11 @@ class MagnetController_SMC(visaInstrument):
         return _parse_magnet_return(s, [('A', 'rate', float), ('D', 'reverse', bool),
                                         ('T', 'Tunit', bool), ('B', 'lockout', bool),
                                         ('W', 'Htr_current', float), ('C', 'calibTpA', float)])
-    def _setpoints_setdev(self, values, Tunit='default'):
-        if Tunit != None:
-            self.write('%T%i'%Tunit)
-        for k,v in value.iteritems():
+    def _setpoints_setdev(self, values):
+        Tunit = values.pop('Tunit', None)
+        if Tunit is not None:
+            self.write('T%i'%Tunit)
+        for k,v in values.iteritems():
             if k == 'upper':
                 self.write('U%f'%v)
             elif k == 'lower':
@@ -1697,7 +1698,7 @@ class MagnetController_SMC(visaInstrument):
     def _create_devs(self):
         self._devwrap('field', doc='units are Tesla')
         self._devwrap('operating_parameters', setget=True, doc="rate in A/s depending on units")
-        self._devwrap('setpoints', setget=True, doc="Tunit can be True,False or 'default' in which case it is the instrument units")
+        self._devwrap('setpoints', setget=True, doc="For set, any unspecified value is unchanged.")
         self._devwrap('status', setget=True)
         self._devwrap('current_status')
         self._devwrap('rawIV')
