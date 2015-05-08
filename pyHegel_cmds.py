@@ -188,6 +188,7 @@ def reset_pyHegel():
 
     reload(traces.kbint_util)
     reload(traces)
+    reload(instruments.instruments_base.visa_wrap)
     reload(instruments.instruments_base)
     reload(instruments.instruments_logical)
     reload(instruments.instruments_agilent)
