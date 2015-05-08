@@ -1583,13 +1583,10 @@ class MagnetController_SMC(visaInstrument):
     in remote (press remote button).
     """
     def __init__(self, address):
-        super(MagnetController_SMC, self).__init__(address, parity=visa_wrap.constants.Parity.none,
-                                            baud_rate=9600, data_bits=8, stop_bits=2)
+        cnsts = visa_wrap.constants
+        super(MagnetController_SMC, self).__init__(address, parity=cnsts.Parity.none, flow_control=cnsts.VI_ASRL_FLOW_XON_XOFF,
+                                            baud_rate=9600, data_bits=8, stop_bits=cnsts.StopBits.two)
     def init(self, full=False):
-        if full == True:
-            if self.visa.is_serial():
-                cnst = visa_wrap.constants
-                self.visa.set_visa_attribute(cnst.VI_ATTR_ASRL_FLOW_CNTRL, cnst.VI_ASRL_FLOW_XON_XOFF)
         super(MagnetController_SMC, self).init(full=full)
         self._magnet_cal_T_per_A = self.operating_parameters.get()['calibTpA']
     def _current_config(self, dev_obj=None, options={}):
@@ -1636,10 +1633,11 @@ class MagnetController_SMC(visaInstrument):
         return _parse_magnet_return(s, [('A', 'rate', float), ('D', 'reverse', bool),
                                         ('T', 'Tunit', bool), ('B', 'lockout', bool),
                                         ('W', 'Htr_current', float), ('C', 'calibTpA', float)])
-    def _setpoints_setdev(self, values, Tunit='default'):
-        if Tunit != None:
-            self.write('%T%i'%Tunit)
-        for k,v in value.iteritems():
+    def _setpoints_setdev(self, values):
+        Tunit = values.pop('Tunit', None)
+        if Tunit is not None:
+            self.write('T%i'%Tunit)
+        for k,v in values.iteritems():
             if k == 'upper':
                 self.write('U%f'%v)
             elif k == 'lower':
@@ -1700,7 +1698,7 @@ class MagnetController_SMC(visaInstrument):
     def _create_devs(self):
         self._devwrap('field', doc='units are Tesla')
         self._devwrap('operating_parameters', setget=True, doc="rate in A/s depending on units")
-        self._devwrap('setpoints', setget=True, doc="Tunit can be True,False or 'default' in which case it is the instrument units")
+        self._devwrap('setpoints', setget=True, doc="For set, any unspecified value is unchanged.")
         self._devwrap('status', setget=True)
         self._devwrap('current_status')
         self._devwrap('rawIV')
