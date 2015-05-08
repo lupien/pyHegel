@@ -813,6 +813,9 @@ in instruments_others:
    USB device can also be shared and none of the locks on different implementation interfere with
    each other.
 
+   TCP device (VXI11) propagates the exclusive lock to the instrument so both libraries interoperate properly.
+   Shared lock are not propagated so there is no protection across visalib for shared lock.
+
    So the main consequence: DO NOT USE BOTH IMPLEMENTATION AT THE SAME TIME
 
    As for event/handlers
