@@ -30,7 +30,8 @@ import functools
 import sys
 import gc
 
-from PyQt4 import QtCore, QtGui
+import qt_wrap  # This is used for reset_pyhegel command
+from qt_wrap import QtCore, QtGui, processEvents
 import numpy as np
 from matplotlib import pylab, rcParams
 import dateutil
@@ -103,7 +104,7 @@ def wait(sec):
             return
         else:
             with kbint_util._delayed_signal_context_manager():
-                QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, dif*1000)
+                processEvents(max_time_ms = dif*1000)
             dif = end - time.time()
             if dif < 0:
                 return
@@ -233,8 +234,7 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
         self.isclosed = False
         #########
         _figlist.append(self)
-        self.window.connect(self.window, QtCore.SIGNAL('destroyed()'),
-             self.close_slot)
+        self.window.destroyed[()].connect(self.close_slot)
     def close_slot(self):
         self.isclosed = True
         _figlist.remove(self)
@@ -247,8 +247,7 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
                               # and replaces it by a new clean up class
             del tr            # this executes the clean up class (does a garbage collect)
         """
-        self.window.disconnect(self.window, QtCore.SIGNAL('destroyed()'),
-             self.close_slot)
+        self.window.destroyed[()].disconnect(self.close_slot)
         ret = self.close_slot()
         FigureManagerQT.destroy(self, *args) # this will call self.window.close()
         return ret
@@ -329,20 +328,17 @@ class Trace(TraceBase):
         self.pause_button.setCheckable(True)
         self.toolbar.addSeparator()
         self.toolbar.addWidget(self.pause_button)
-        self.pause_button.connect(self.pause_button,
-              QtCore.SIGNAL('toggled(bool)'), self.pause_button_press)
+        self.pause_button.toggled.connect(self.pause_button_press)
         # abort
         self.abort_button = QtGui.QPushButton('Abort')
         self.abort_enabled = False
         self.abort_button.setCheckable(True)
         self.toolbar.addWidget(self.abort_button)
-        self.abort_button.connect(self.abort_button,
-              QtCore.SIGNAL('toggled(bool)'), self.abort_button_press)
+        self.abort_button.toggled.connect(self.abort_button_press)
         # Rescale
         self.rescale_button = QtGui.QPushButton('Rescale')
         self.toolbar.addWidget(self.rescale_button)
-        self.rescale_button.connect(self.rescale_button,
-              QtCore.SIGNAL('clicked()'), self.rescale_button_press)
+        self.rescale_button.clicked[()].connect(self.rescale_button_press)
     def pause_button_press(self, state):
         self.pause_enabled = state
     def abort_button_press(self, state):
@@ -516,8 +512,7 @@ class TraceLots(TraceBase):
         self.central_layout.addWidget(self.bar_label)
         self.central_widget.setLayout(self.central_layout)
         self.MainWidget.setCentralWidget(self.central_widget)
-        self.bar.connect(self.bar,
-              QtCore.SIGNAL('valueChanged(int)'), self.bar_update)
+        self.bar.valueChanged.connect(self.bar_update)
         self.bar_update(0)
     def bar_update(self, val):
         offset = val * self.block_nbpoints /2
@@ -600,16 +595,11 @@ class TraceWater(TraceBase):
         #self.vbar.setInvertedControls(True)
         self.invert_y = False
         self.set_xy_offset(xoffset, yoffset)
-        self.central_widget.connect(self.hbar,
-              QtCore.SIGNAL('valueChanged(int)'), self.update)
-        self.central_widget.connect(self.vbar,
-              QtCore.SIGNAL('valueChanged(int)'), self.update)
-        self.central_widget.connect(self.hbar_rev,
-              QtCore.SIGNAL('stateChanged(int)'), self.update)
-        self.central_widget.connect(self.xlog,
-              QtCore.SIGNAL('stateChanged(int)'), self.update)
-        self.central_widget.connect(self.ylog,
-              QtCore.SIGNAL('stateChanged(int)'), self.update)
+        self.hbar.valueChanged.connect(self.update)
+        self.vbar.valueChanged.connect(self.update)
+        self.hbar_rev.stateChanged.connect(self.update)
+        self.xlog.stateChanged.connect(self.update)
+        self.ylog.stateChanged.connect(self.update)
         self.update()
     def bar_to_x(self, bar, rev=False, invert=False):
         # invert to change bar direction
@@ -744,14 +734,13 @@ class Sleeper(QtGui.QWidget):
         self.pause_start = self.start_time
         # start in pause mode
         self.pause_button.setChecked(True)
-        self.connect(self.sleep_length, QtCore.SIGNAL('valueChanged(double)'),
-                     self.sleep_length_change)
-        self.connect(self.update_timer, QtCore.SIGNAL('timeout()'),
-                     self.update_elapsed)
-        self.connect(self.skip_button, QtCore.SIGNAL('clicked()'),
-                     self, QtCore.SLOT('close()'))
-        self.connect(self.pause_button, QtCore.SIGNAL('toggled(bool)'),
-                     self.pause)
+        # setup connections
+        self.sleep_length.valueChanged.connect(self.sleep_length_change)
+        self.update_timer.timeout.connect(self.update_elapsed)
+        # This selects the clicked() instead of clicked(bool)
+        # but either one works
+        self.skip_button.clicked[()].connect(self.close)
+        self.pause_button.toggled.connect(self.pause)
         self.sleep_length.setValue(sleep)
     def sleep_length_change(self, val):
         self.update_elapsed()
@@ -822,7 +811,7 @@ def sleep(sec):
     try:
         while not sleeper.finished:
             with kbint_util._delayed_signal_context_manager():
-                QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents)
+                processEvents()
             _sleep(.1)
     except KeyboardInterrupt:
         sleeper.close()
@@ -837,7 +826,7 @@ class Quit_Button(QtGui.QPushButton):
     """
     def __init__(self, text, noshow=False):
         super(Quit_Button, self).__init__(text)
-        self.connect(self, QtCore.SIGNAL('clicked()'), self.endit)
+        self.clicked.connect(self.endit)
         if not noshow:
             self.show()
     def endit(v=None):

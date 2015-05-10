@@ -34,7 +34,7 @@ import thread
 import threading
 import weakref
 from collections import OrderedDict  # this is a subclass of dict
-from PyQt4 import QtGui, QtCore
+from qt_wrap import processEvents
 from kbint_util import sleep, _sleep_signal_context_manager, _delayed_signal_context_manager
 
 import visa_wrap
@@ -448,7 +448,7 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
         with _delayed_signal_context_manager():
             # processEvents is for the current Thread.
             # if a thread does not have and event loop, this does nothing (not an error)
-            QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 20) # 20 ms max
+            processEvents(max_time_ms = 20)
 
 def _general_check(val, min=None, max=None, choices=None ,lims=None):
    # self is use for perror
@@ -851,7 +851,7 @@ class BaseInstrument(object):
             with _delayed_signal_context_manager():
                 # processEvents is for the current Thread.
                 # if a thread does not have and event loop, this does nothing (not an error)
-                QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 20) # 20 ms max
+                processEvents(max_time_ms = 20)
     def _get_async(self, async, obj, delay=False, trig=False, **kwarg):
         self._get_async_block()
         if async == -1: # we reset task

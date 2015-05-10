@@ -166,7 +166,7 @@ if __name__ == "__main__":
     # tests of the kbint handling
     from ctypes import pythonapi, c_long, py_object
     import thread
-    from PyQt4 import QtCore, QtGui
+    from qt_wrap import QtCore, processEvents
     import dis
     def test_async(n_inner=200, n_repeat=1000):
         """ n_inner should be larger than check interval by at around 20.
@@ -221,9 +221,9 @@ if __name__ == "__main__":
             while time.time()-to < 1: # the timer should start after 1ms
                 if with_context:
                     with _delayed_signal_context_manager(raiseit=raiseit):
-                        QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 20) # 20 ms max
+                        processEvents(max_time_ms = 20)
                 else:
-                    QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 20) # 20 ms max
+                    processEvents(max_time_ms = 20)
         except KeyboardInterrupt:
             print 'The interrupt reached the python main thread'
         else:

@@ -186,6 +186,7 @@ def reset_pyHegel():
          /reset_pyNoise
     """
 
+    reload(traces.qt_wrap)
     reload(traces.kbint_util)
     reload(traces)
     reload(instruments.instruments_base.visa_wrap)
