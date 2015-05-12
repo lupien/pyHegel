@@ -43,6 +43,61 @@ If none are loaded, a default set is tried in order.
 # Only use new style slot/signal
 # so no SIGNAL or SLOT functions
 # this requiers PyQt4 >v4.5
+# If no selection is done for a signal (emit, connect) then the default one is used
+# (the one listed in the documentation). Otherwise, select them in the following way:
+#  obj.signal1[int]  # for signal1(int)
+#  obj.signal2[str, int] # for signal2(QString, int)
+#  obj.signal3[()] # for signal3()
+# Note that all the overload signals act separatelly. emitting one does nothing
+# for the others. So code should emit all the overloaded signals together.
+
+# Note that Qt (C++) allows a signal to connect to a slot with any number of parameters
+# less than or equal than the signal (they don't have to be parameters with default
+# values). Signal with parameter that have default values will have multiple signatures.
+# For example sig(int x=1), will have signatures sig(int) and sig().
+# A connection can be made to an invalid slot (wrong parameter signature), in which case the code
+# shows an error on the console during run time at connect time (but code still runs)
+#
+# Under PyQt4 or PySide conecting a builtin slot with the wrong parameters
+# produces a caught exception at call time.
+# During emit, PyQt4,5 produces an exception for wrong parameters
+# while PySide will silently converts them (I have seen str converted to float(0.))
+# at least for PyQt4-4.11.3-1.fc21.x86_64
+#              python-qt5-5.4.1-1.fc21.x86_64
+#              python-pyside-1.2.2-2.fc21.x86_64
+#              qt-4.8.6-28.fc21.x86_64
+# test like this:
+# # one of the following 3 lines
+# from PyQt4 import QtGui, QtCore; Signal = QtCore.pyqtSignal
+# from PySide import QtGui, QtCore; Signal = QtCore.Signal
+# from PyQt5 import QtCore, QtWidgets as QtGui; Signal = QtCore.pyqtSignal
+#
+# qapp = QtGui.QApplication([])
+# class C(QtGui.QDoubleSpinBox):
+#     tests = Signal([int], [float], [str], [QtCore.QObject], [])
+# c=C()
+# # These always work
+# c.tests.emit(1)
+# c.tests.emit(1.) # emits an integer
+# c.tests[int].emit(1)
+# c.tests[float].emit(5.5)
+# c.tests[str].emit('hello')
+# c.tests[()].emit()
+# c.tests[QtCore.QObject].emit(c)
+# # These should probably fail but do not
+# c.tests[int].emit('hello')
+# c.tests[int].emit(None)
+# c.tests[int].emit([])
+# c.tests[int].emit({})
+# c.tests[int].emit(object())
+# c.tests[str].emit(None) # This fails but only on PyQt4
+# # These fail on PyQt4 and PyQt5 but not PySide
+# c.tests[str].emit(5)
+# c.tests[float].emit('hello')
+# # These fail on all (wrong number of arguments)
+# c.tests[int].emit(1,2)
+# c.tests[int].emit()
+# c.tests[()].emit(1)
 
 
 # Warning: the original release of ipython 2.4.1 contains a bug

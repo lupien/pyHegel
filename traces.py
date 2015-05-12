@@ -234,7 +234,7 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
         self.isclosed = False
         #########
         _figlist.append(self)
-        self.window.destroyed[()].connect(self.close_slot)
+        self.window.destroyed.connect(self.close_slot)
     def close_slot(self):
         self.isclosed = True
         _figlist.remove(self)
@@ -247,7 +247,7 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
                               # and replaces it by a new clean up class
             del tr            # this executes the clean up class (does a garbage collect)
         """
-        self.window.destroyed[()].disconnect(self.close_slot)
+        self.window.destroyed.disconnect(self.close_slot)
         ret = self.close_slot()
         FigureManagerQT.destroy(self, *args) # this will call self.window.close()
         return ret
@@ -338,7 +338,7 @@ class Trace(TraceBase):
         # Rescale
         self.rescale_button = QtGui.QPushButton('Rescale')
         self.toolbar.addWidget(self.rescale_button)
-        self.rescale_button.clicked[()].connect(self.rescale_button_press)
+        self.rescale_button.clicked.connect(self.rescale_button_press)
     def pause_button_press(self, state):
         self.pause_enabled = state
     def abort_button_press(self, state):
@@ -739,7 +739,7 @@ class Sleeper(QtGui.QWidget):
         self.update_timer.timeout.connect(self.update_elapsed)
         # This selects the clicked() instead of clicked(bool)
         # but either one works
-        self.skip_button.clicked[()].connect(self.close)
+        self.skip_button.clicked.connect(self.close)
         self.pause_button.toggled.connect(self.pause)
         self.sleep_length.setValue(sleep)
     def sleep_length_change(self, val):
