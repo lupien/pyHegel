@@ -256,8 +256,8 @@ if __name__ == "__main__":
     print '------------- test_qtloop with context-----------------------'
     test_qtloop(with_context=True)
     print '------------- test_signal_absorb-----------------------'
-    print '  python 2.7.2 can absorb signals when changing signals'
-    print '  Therefore it is normal that not all CTRL-C produce a Got Signal'
+    print '  python can absorb signals when changing signals'
+    print '  Therefore it is normal that not all (very few/any) CTRL-C produce a Got Signal'
     # problem is the c codes resets the tripped signal when changing the signal
     # therefore, if a signal arrives during the change, it will not call the
     # python handler.
@@ -268,3 +268,31 @@ if __name__ == "__main__":
     # disappear (technically still there but cannot observe it anymore because it is now
     # too rare.)
     test_signal_absorb()
+
+""" Tests Results
+On windows:
+pythonxy 2.7.9.0 (Python 2.7.9, IPython 2.3.1, PyQt4 4.9.6, Qt4 4.8.4)
+  - sleep is ok (sleep context not needed but ok to use)
+  - Qt absorbs events (qt delayed context needed and works)
+  - absorb: get most 'Got Signal'. A few (most) get lost when run under pyHegel (under pure IPython Qt)
+  - ipython with Qt running requires 2 Keyboard Interrupt to abort a line edit and forget it (pure ipython requires just one)
+pythonxy 2.7.6.1 (Python 2.7.6, IPython 2.1.0, PyQt4 4.9.6, Qt4 4.8.4)
+  - sleep is ok (sleep context not needed but ok to use)
+  - Qt absorbs events (qt delayed context needed and works)
+  - absorb: get most 'Got Signal'. A few (most) get lost when run under pyHegel (under pure IPython Qt)
+            The difference between them is the extra handler from scipy_fortran_fix
+  - ipython with Qt running requires 2 Keyboard Interrupt to abort a line edit and forget it (pure ipython requires just one)
+      Double interrupt is a windows problem, see inputhook_qt4 in /IPython/lib/inputhookqt4.py
+pythonxy 2.7.2.0 (Python 2.7.2, IPython 0.10.2, PyQt4 4.8.5, Qt4 4.7.3)
+  - sleep is not ok (sleep context is needed: inner produces OSError 4 and a later KeyboardInterrup)
+  - Qt absorbs events (qt delayed context needed and works)
+  - absorb: get few (if any) 'Got Signal' (any condition)
+  - Only one Ctrl-C is needed to abort the current line (and it remembers it, which was a bug/feature)
+
+On linux:
+Fedora 21 (python-2.7.8-9.fc21.x86_64, python-ipython-2.4.1-3.fc21.noarch, PyQt4-4.11.3-1.fc21.x86_64, qt-4.8.6-28.fc21.x86_64)
+  - sleep is ok (sleep context not needed but ok to use)
+  - Qt absorbs events (qt delayed context needed and works)
+  - absorb: get no 'Got Signal' (any condition)
+  - Only one Ctrl-C is needed to abort the line and forget it.
+"""
