@@ -234,10 +234,31 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
         self.isclosed = False
         #########
         _figlist.append(self)
-        self.window.destroyed.connect(self.close_slot)
+        # The closing of matplotlib was changed in 1.2.1
+        #   https://github.com/matplotlib/matplotlib/pull/1498
+        #   It used to have QtCore.Qt.WA_DeleteOnClose attribute set on the main window
+        #   now it uses the closing signal for regular figures. Lets do something similar.
+        #self.window.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+        # closing is emitted when calling function slot close (usually connected to the window close
+        #  button)
+        try:
+            # for matplotlib >= 1.2.1
+            self.window.closing.connect(self.close_slot)
+        except AttributeError:
+            # Using that QtCore.Qt.WA_DeleteOnClose attribute is set
+            self.window.destroyed.connect(self.close_slot)
     def close_slot(self):
-        self.isclosed = True
-        _figlist.remove(self)
+        """
+        Remove the Trace from the list so that it can be deleted on the next
+        garbage collect. It returns an object that will do a garbage collect
+        once it is deleted.
+        """
+        if not self.isclosed:
+            self.isclosed = True
+            _figlist.remove(self)
+        # The figure is removed when all references to it are lost and probably
+        # needs a garbage collection. The _figlist removal is only one location
+        # for references. A user might have others.
         return _Trace_Cleanup() #when this return value is deleted, it will call do a gargage collect
     def destroy(self, *args):
         """
@@ -247,9 +268,16 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
                               # and replaces it by a new clean up class
             del tr            # this executes the clean up class (does a garbage collect)
         """
-        self.window.destroyed.disconnect(self.close_slot)
-        ret = self.close_slot()
-        FigureManagerQT.destroy(self, *args) # this will call self.window.close()
+        if self.isclosed:
+            super(TraceBase, self).destroy(*args)
+            return _Trace_Cleanup()
+        # we want control of the garbage collection so lets do the close_slot directly.
+        try:
+            self.window.closing.disconnect(self.close_slot)
+        except AttributeError:
+            self.window.destroyed.disconnect(self.close_slot)
+        ret = self.close_slot() # This removes the _figlist reference (if needed) and returns a garbage collector object.
+        super(TraceBase, self).destroy(*args) # this will call self.window.close()
         return ret
 
     def mykey_press(self, event):
