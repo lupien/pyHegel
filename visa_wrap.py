@@ -873,3 +873,133 @@ vg2.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.Ev
 vu2.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.queue)
 
 """
+
+########################### testing code #######################################################
+
+def visa_lib_info(rsrc_manager):
+    if _os.name != 'nt':
+        return 'Unknown version'
+    props = _get_lib_properties(rsrc_manager.visalib.lib._handle)
+    return '{company}, {product}: {version}'.format(**props)
+
+def _test_lock(instrument, exclusive=True):
+    # Use a short timeout to run more quickly
+    timeout = 500 #ms
+    try:
+        if exclusive:
+            instrument.visalib.lock(instrument.session, constants.VI_EXCLUSIVE_LOCK, timeout)
+        else:
+            instrument.lock(timeout)
+    except VisaIOError as exc:
+        if exc.error_code == constants.VI_ERROR_TMO:
+            return False, 'timeout'
+    except Exception as exc:
+        return False, str(exc)
+    return True, 'OK'
+
+def _test_communication(instrument):
+    try:
+        id = instrument.query('*idn?')
+    except VisaIOError as exc:
+        if exc.error_code == constants.VI_ERROR_TMO:
+            pass
+    except Exception as exc:
+        return False, str(exc)
+    return True, 'OK'
+
+class dictAttr(dict):
+    __getattr__ = dict.__getitem__
+    __setattr__ = dict.__setitem__
+
+def _test_cross_lib_helper(i1, i2, r1, r2):
+    results = dictAttr(
+        shared_blocks_shared = False,
+        shared_blocks_excl = False,
+        shared_blocks_comm = False,
+        excl_blocks_shared = False,
+        excl_blocks_excl = False,
+        excl_blocks_comm = False)
+    locked, reason = _test_lock(i1, exclusive=False)
+    if not locked:
+        raise RuntimeError('Unable to make initial shared lock on: '+str(i1))
+    locked, reason = _test_lock(i2, exclusive=False)
+    if locked:
+        i2.unlock()
+        results.shared_blocks_shared = True
+    locked, reason = _test_lock(i2, exclusive=True)
+    if locked:
+        i2.unlock()
+        results.shared_blocks_excl = True
+    queried, reason = _test_communication(i2)
+    if queried:
+        results.shared_blocks_comm = True
+    i1.unlock()
+    locked, reason = _test_lock(i1, exclusive=True)
+    if not locked:
+        raise RuntimeError('Unable to make exclusive lock on: '+str(i1))
+    locked, reason = _test_lock(i2, exclusive=False)
+    if locked:
+        i2.unlock()
+        results.excl_blocks_shared = True
+    locked, reason = _test_lock(i2, exclusive=True)
+    if locked:
+        i2.unlock()
+        results.excl_blocks_excl = True
+    queried, reason = _test_communication(i2)
+    if queried:
+        results.excl_blocks_comm = True
+    i1.unlock()
+    return results
+
+
+# TODO: find a way to separate the rsrc managers (so instruments) into 2 process
+def test_cross_lib(rsrc_manager1, rsrc_manager2, visa_name):
+    """
+    Try this for a device on gpib, lan and usb.
+    It will probably not work for serial (only one visalib can access
+    a serial device at a time).
+    """
+    print 'visa=', visa_name
+    print 'R1=', visa_lib_info(rsrc_manager1)
+    print 'R2=', visa_lib_info(rsrc_manager2)
+    i1 = rsrc_manager1.open_resource(visa_name)
+    i2 = rsrc_manager1.open_resource(visa_name)
+    print 'R1->R2:', test_cross_lib(i1, i2)
+    print 'R2->R1:', test_cross_lib(i2, i1)
+
+
+
+def test_handlers_events(rsrc_manager, visa_name):
+    """
+    Try this for a device on gpib, lan, usb and serial.
+
+    """
+    print 'visa=', visa_name
+    print 'R1=', visa_lib_info(rsrc_manager1)
+    i1 = rsrc_manager.open_resource(visa_name)
+    # test: event and handlers at the same time
+    #       service_request handlers and events
+    #       exception  handlers and queue
+    #       completion  handlers and queue
+
+def test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2):
+    """
+    Try this for both devices on gpib.
+
+    """
+    i1 = rsrc_manager.open_resource(visa_name1)
+    i2 = rsrc_manager.open_resource(visa_name2)
+    print 'visa1=', visa_namer1, ' id=', i1.query('*idn?')
+    print 'visa2=', visa_namer2, ' id=', i2.query('*idn?')
+    print 'R1=', visa_lib_info(rsrc_manager1)
+    # test: tests activating srq on i1, i2 works
+    #       using queue, test service request interactions
+    #       using handlers, test service request interactions
+    #       poll?, auto-serial poll?
+
+
+def test_all(rsrc_manager1, rsrc_manager2, visa_name1, visa_name2):
+    test_cross_lib(rsrc_manager1, rsrc_manager2, visa_name1)
+    test_handlers_events(rsrc_manager1, visa_name1)
+    test_gpib_handlers_events(rsrc_manager1, visa_name1, visa_name2)
+
