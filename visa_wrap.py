@@ -287,6 +287,18 @@ def _read_helper(self, termination='default'):
     termination = self.read_termination if termination == 'default' else termination
     return _strip_termination(self.read_raw(), termination)
 
+def _query_helper(self, message, termination='default', read_termination='default', write_termination='default', raw=False):
+    if termination != 'default':
+        if read_termination != 'default':
+            read_termination = termination
+        if write_termination != 'default':
+            write_termination = termination
+    self.write(message, termination=write_termination)
+    if raw:
+        return self.read_raw()
+    else:
+        return self.read(termination=read_termination)
+
 class WaitResponse(object):
     """Class used in return of wait_on_event. It properly closes the context upon delete.
     """
@@ -392,6 +404,13 @@ class old_Instrument(redirect_instr):
         timeout_ms is in ms or can be constants.VI_TMO_IMMEDIATE or constants.VI_TMO_INFINITE
         """
         vpp43.lock(self.vi, constants.VI_EXCLUSIVE_LOCK, timeout_ms)
+    def lock(self, timeout='default', requested_key=None):
+        """ Shared lock
+        """
+        # does not handle infinite time
+        timeout = self.timeout if timeout == 'default' else timeout
+        ret = vpp43.lock(self.vi, constants.VI_SHARED_LOCK, timeout, requested_key)
+        return ret.value
     def unlock(self):
         vpp43.unlock(self.vi)
     def install_visa_handler(self, event_type, handler, user_handle):
@@ -440,6 +459,7 @@ class old_Instrument(redirect_instr):
         vpp43.write(self.vi, message)
     write = _write_helper
     read = _read_helper
+    query = _query_helper
 
 class new_Instrument(redirect_instr):
     def __init__(self, instr_instance, **kwargs):
@@ -493,6 +513,13 @@ class new_Instrument(redirect_instr):
             timeout_ms is in ms or can be constants.VI_TMO_IMMEDIATE or constants.VI_TMO_INFINITE
             """
             self.visalib.lock(self.session, constants.VI_EXCLUSIVE_LOCK, timeout_ms)
+        def lock(self, timeout='default', requested_key=None):
+            """ Shared lock
+            """
+            # does not handle infinite time
+            timeout = self.timeout if timeout == 'default' else timeout
+            ret = self.visalib.lock(self.session, constants.VI_EXCLUSIVE_LOCK, timeout_ms)[0]
+            return ret.value
         def enable_event(self, event_type, mechanism):
             self.visalib.enable_event(self.session, event_type, mechanism)
         def disable_event(self, event_type, mechanism):
@@ -526,6 +553,7 @@ class new_Instrument(redirect_instr):
     #read_raw, write_raw are ok
     write = _write_helper
     read = _read_helper
+    query = _query_helper
     def read_raw_n(self, size):
         with self.ignore_warning(constants.VI_SUCCESS_MAX_CNT):
             return self.visalib.read(self.session, size)[0]
@@ -875,6 +903,35 @@ vu2.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.Ev
 """
 
 ########################### testing code #######################################################
+from contexlib import contexmanager
+
+@contexmanager
+def visa_context(ok='OK'):
+    """
+    ok selects the status that will produce True
+    select one of: 'OK', 'timeout', 'unsupported', 'locked', 'io_error'
+    """
+    res = [True, '']
+    error = 'OK'
+    try:
+        yield res
+    except VisaIOError as exc:
+        if exc.error_code == constants.VI_ERROR_TMO:
+            error = 'timeout'
+        if exc.error_code == constants.VI_ERROR_NSUP_OPER:
+            error = 'unsupported'
+        if exc.error_code == constants.VI_ERROR_RSRC_LOCKED:
+            error = 'locked'
+        if exc.error_code == constants.VI_ERROR_IO:
+            error = 'io_error'
+        else:
+            error = str(exc)
+    except Exception as exc:
+            error = str(exc)
+    finally:
+        if error != ok:
+            res[:] = [False, error]
+
 
 def visa_lib_info(rsrc_manager):
     if _os.name != 'nt':
@@ -885,33 +942,23 @@ def visa_lib_info(rsrc_manager):
 def _test_lock(instrument, exclusive=True):
     # Use a short timeout to run more quickly
     timeout = 500 #ms
-    try:
+    with visa_context() as res:
         if exclusive:
-            instrument.visalib.lock(instrument.session, constants.VI_EXCLUSIVE_LOCK, timeout)
+            instrument.lock_excl(timeout)
         else:
             instrument.lock(timeout)
-    except VisaIOError as exc:
-        if exc.error_code == constants.VI_ERROR_TMO:
-            return False, 'timeout'
-    except Exception as exc:
-        return False, str(exc)
-    return True, 'OK'
+    return res
 
-def _test_communication(instrument):
-    try:
+def _test_lock_communication(instrument):
+    with visa_context() as res:
         id = instrument.query('*idn?')
-    except VisaIOError as exc:
-        if exc.error_code == constants.VI_ERROR_TMO:
-            pass
-    except Exception as exc:
-        return False, str(exc)
-    return True, 'OK'
+    return res
 
 class dictAttr(dict):
     __getattr__ = dict.__getitem__
     __setattr__ = dict.__setitem__
 
-def _test_cross_lib_helper(i1, i2, r1, r2):
+def _test_cross_lib_helper(i1, i2):
     results = dictAttr(
         shared_blocks_shared = False,
         shared_blocks_excl = False,
@@ -953,17 +1000,31 @@ def _test_cross_lib_helper(i1, i2, r1, r2):
 
 
 # TODO: find a way to separate the rsrc managers (so instruments) into 2 process
-def test_cross_lib(rsrc_manager1, rsrc_manager2, visa_name):
+def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path2='', mode='both'):
     """
     Try this for a device on gpib, lan and usb.
     It will probably not work for serial (only one visalib can access
     a serial device at a time).
+    mode can be 'both', 'remote' or 'local' (but for old interface it is disregarded and will only do remote)
     """
-    print 'visa=', visa_name
-    print 'R1=', visa_lib_info(rsrc_manager1)
-    print 'R2=', visa_lib_info(rsrc_manager2)
+    if old_interface:
+        mode = 'remote'
+    rsrc_manager1 = get_resource_manager(rsrc_manager_path1)
+    R1 = visa_lib_info(rsrc_manager1)
     i1 = rsrc_manager1.open_resource(visa_name)
+    if mode in ['both', 'remote']:
+        R12R = test_cross_lib(i1)
+    rsrc_manager2 = get_resource_manager(rsrc_manager_path2)
+    R2 = visa_lib_info(rsrc_manager2)
     i2 = rsrc_manager1.open_resource(visa_name)
+    if mode in ['both', 'remote']:
+        R21R = test_cross_lib(i2)
+    if mode in ['both', 'local']:
+        R12L = test_cross_lib(i1, i2)
+        R21L = test_cross_lib(i2, i1)
+    print 'visa=', visa_name
+    print 'R1=', R1
+    print 'R2=', R2
     print 'R1->R2:', test_cross_lib(i1, i2)
     print 'R2->R1:', test_cross_lib(i2, i1)
 
@@ -989,13 +1050,20 @@ def test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2):
     """
     i1 = rsrc_manager.open_resource(visa_name1)
     i2 = rsrc_manager.open_resource(visa_name2)
+    if not (i1.is_gpib() and i2.is_gpib()):
+        print 'Skipping GPIB handlers tests'
+        return
     print 'visa1=', visa_namer1, ' id=', i1.query('*idn?')
     print 'visa2=', visa_namer2, ' id=', i2.query('*idn?')
-    print 'R1=', visa_lib_info(rsrc_manager1)
+    print 'R1=', visa_lib_info(rsrc_manager)
     # test: tests activating srq on i1, i2 works
     #       using queue, test service request interactions
     #       using handlers, test service request interactions
     #       poll?, auto-serial poll?
+
+
+def test_usb_resource_list(rsrc_manager):
+    print 'R1=', visa_lib_info(rsrc_manager)
 
 
 def test_all(rsrc_manager1, rsrc_manager2, visa_name1, visa_name2):
