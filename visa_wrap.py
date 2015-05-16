@@ -404,12 +404,12 @@ class old_Instrument(redirect_instr):
         timeout_ms is in ms or can be constants.VI_TMO_IMMEDIATE or constants.VI_TMO_INFINITE
         """
         vpp43.lock(self.vi, constants.VI_EXCLUSIVE_LOCK, timeout_ms)
-    def lock(self, timeout='default', requested_key=None):
+    def lock(self, timeout_ms='default', requested_key=None):
         """ Shared lock
         """
         # does not handle infinite time
-        timeout = self.timeout if timeout == 'default' else timeout
-        ret = vpp43.lock(self.vi, constants.VI_SHARED_LOCK, timeout, requested_key)
+        timeout_ms = self.timeout if timeout_ms == 'default' else timeout_ms
+        ret = vpp43.lock(self.vi, constants.VI_SHARED_LOCK, timeout_ms, requested_key)
         return ret.value
     def unlock(self):
         vpp43.unlock(self.vi)
@@ -513,12 +513,12 @@ class new_Instrument(redirect_instr):
             timeout_ms is in ms or can be constants.VI_TMO_IMMEDIATE or constants.VI_TMO_INFINITE
             """
             self.visalib.lock(self.session, constants.VI_EXCLUSIVE_LOCK, timeout_ms)
-        def lock(self, timeout='default', requested_key=None):
+        def lock(self, timeout_ms='default', requested_key=None):
             """ Shared lock
             """
             # does not handle infinite time
-            timeout = self.timeout if timeout == 'default' else timeout
-            ret = self.visalib.lock(self.session, constants.VI_EXCLUSIVE_LOCK, timeout_ms)[0]
+            timeout_ms = self.timeout if timeout_ms == 'default' else timeout_ms
+            ret = self.visalib.lock(self.session, constants.VI_SHARED_LOCK, timeout_ms, requested_key)[0]
             return ret.value
         def enable_event(self, event_type, mechanism):
             self.visalib.enable_event(self.session, event_type, mechanism)
@@ -903,103 +903,206 @@ vu2.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.Ev
 """
 
 ########################### testing code #######################################################
-from contexlib import contexmanager
+from contextlib import contextmanager
 
-@contexmanager
-def visa_context(ok='OK'):
+@contextmanager
+def visa_context(ok=None, bad=None):
     """
-    ok selects the status that will produce True
-    select one of: 'OK', 'timeout', 'unsupported', 'locked', 'io_error'
+    ok selects the status that will produce True, all others are False
+    bad selects the status that will produce False, all others are True
+    Use one or the other. If neither are sets, it is the same as ok='OK'
+    select one of: 'OK'(no erros), 'timeout', 'unsupported', 'locked', 'io_error', 'busy'
     """
     res = [True, '']
     error = 'OK'
+    if ok is None and bad is None:
+        ok = 'OK'
     try:
         yield res
     except VisaIOError as exc:
         if exc.error_code == constants.VI_ERROR_TMO:
             error = 'timeout'
-        if exc.error_code == constants.VI_ERROR_NSUP_OPER:
+        elif exc.error_code == constants.VI_ERROR_NSUP_OPER:
             error = 'unsupported'
-        if exc.error_code == constants.VI_ERROR_RSRC_LOCKED:
+        elif exc.error_code == constants.VI_ERROR_RSRC_LOCKED:
             error = 'locked'
-        if exc.error_code == constants.VI_ERROR_IO:
+        elif exc.error_code == constants.VI_ERROR_IO:
             error = 'io_error'
+        elif exc.error_code == constants.VI_ERROR_RSRC_BUSY:
+            error = 'busy'
         else:
             error = str(exc)
     except Exception as exc:
+            print type(exc)
             error = str(exc)
     finally:
-        if error != ok:
-            res[:] = [False, error]
+        if ok is not None:
+            if error != ok:
+                res[:] = [False, error]
+        else:
+            if error == bad:
+                res[:] = [False, '']
+            else:
+                res[:] = [True, error]
+
+@contextmanager
+def subprocess_start():
+    import sys
+    old_arg0 = sys.argv[0]
+    sys.argv[0] = ''
+    try:
+        yield
+    finally:
+        sys.argv[0] = old_arg0
 
 
 def visa_lib_info(rsrc_manager):
     if _os.name != 'nt':
         return 'Unknown version'
-    props = _get_lib_properties(rsrc_manager.visalib.lib._handle)
+    if old_interface:
+        handle = vpp43.visa_library()._handle
+    else:
+        handle = rsrc_manager.visalib.lib._handle
+    props = _get_lib_properties(handle)
     return '{company}, {product}: {version}'.format(**props)
 
 def _test_lock(instrument, exclusive=True):
     # Use a short timeout to run more quickly
     timeout = 500 #ms
-    with visa_context() as res:
+    # bad='OK' means it returns False if the lock went through
+    with visa_context(bad='OK') as res:
         if exclusive:
             instrument.lock_excl(timeout)
         else:
             instrument.lock(timeout)
+    res = res if res[0] else False
     return res
 
 def _test_lock_communication(instrument):
-    with visa_context() as res:
+    # bad='OK' means it returns False if the communication went through
+    with visa_context(bad='OK') as res:
         id = instrument.query('*idn?')
+    res = res if res[0] else False
     return res
 
 class dictAttr(dict):
     __getattr__ = dict.__getitem__
     __setattr__ = dict.__setitem__
+    def copy(self):
+        return dictAttr(self)
 
-def _test_cross_lib_helper(i1, i2):
-    results = dictAttr(
+def _test_cross_other_side(rsrc_manager_path, instr_name, event, pipe):
+    rm = get_resource_manager(rsrc_manager_path)
+    #pipe.send(visa_lib_info(rm))
+    #print 'subprocess started'
+    res, state, instr = _test_open_instr(rm, instr_name)
+    pipe.send([res, state])
+    if not res:
+        return
+    event.wait()
+    event.clear()
+    #print 'subprocess stage2'
+    pipe.send(_test_lock_comm(instr, exclusive=False))
+    event.wait()
+    event.clear()
+    #print 'subprocess stage3'
+    pipe.send(_test_lock_comm(instr, exclusive=True))
+    event.wait()
+    event.clear()
+    #print 'subprocess stage4'
+    pipe.send(_test_lock_comm(instr, comm=True))
+    event.wait()
+    event.clear()
+    #print 'subprocess stage5'
+    pipe.send(_test_lock_comm(instr, exclusive=False))
+    event.wait()
+    event.clear()
+    #print 'subprocess stage6'
+    pipe.send(_test_lock_comm(instr, exclusive=True))
+    event.wait()
+    event.clear()
+    #print 'subprocess stage7'
+    pipe.send(_test_lock_comm(instr, comm=True))
+    #print 'subprocess finished'
+
+
+def _test_open_instr(rsrc_manager, instr_name, pipe=None):
+    """ Returns [succes_bool, error_string, instr] """
+    from multiprocessing import Process
+    if isinstance(rsrc_manager, Process):
+        return pipe.recv() + [None]
+    else:
+        instr = None
+        with visa_context() as res:
+           instr = rsrc_manager.open_resource(instr_name)
+        return res + [instr]
+
+
+def _test_lock_comm(instr, event=None, pipe=None, exclusive=False, comm=False):
+    from multiprocessing import Process
+    if isinstance(instr, Process):
+        # The other end should do the proper sequence of tests.
+        event.set()
+        res = pipe.recv()
+    else:
+        if comm == False:
+            res = _test_lock(instr, exclusive)
+            if res == False: # lock went through
+                instr.unlock()
+        else:
+            res = _test_lock_communication(instr)
+    return res
+
+_base_cross_result = dictAttr(
         shared_blocks_shared = False,
         shared_blocks_excl = False,
         shared_blocks_comm = False,
         excl_blocks_shared = False,
         excl_blocks_excl = False,
         excl_blocks_comm = False)
-    locked, reason = _test_lock(i1, exclusive=False)
-    if not locked:
-        raise RuntimeError('Unable to make initial shared lock on: '+str(i1))
-    locked, reason = _test_lock(i2, exclusive=False)
-    if locked:
-        i2.unlock()
-        results.shared_blocks_shared = True
-    locked, reason = _test_lock(i2, exclusive=True)
-    if locked:
-        i2.unlock()
-        results.shared_blocks_excl = True
-    queried, reason = _test_communication(i2)
-    if queried:
-        results.shared_blocks_comm = True
+
+def _test_cross_show_diff(result):
+    if isinstance(result, basestring):
+        # there was an error, just return it
+        return result
+    if len(result) != len(_base_cross_result):
+        raise RuntimeError('the dictionnaries are incompatible in cross_show_diff')
+    only_diff = {k:result[k] for k in result if result[k] != _base_cross_result[k]}
+    if only_diff == {}:
+        return 'Same as default'
+    return only_diff
+
+
+def _test_cross_lib_helper(i1, i2, event=None, pipe=None):
+    from multiprocessing import Process
+    if isinstance(i2, Process):
+        if event is None or pipe is None:
+            raise RuntimeError('You need event and pipe when i2 is a Process')
+        success, error, instr = _test_open_instr(i2, '', pipe)
+        if not success:
+            return "Failure, can't open second instrument remotely, error: %s"%error
+    results = _base_cross_result.copy()
+    res = _test_lock(i1, exclusive=False)
+    if res != False: # It did not lock
+        if isinstance(i2, Process):
+            i2.terminate()
+        raise RuntimeError('Unable to make initial shared lock on: %s'%res[1])
+    results.shared_blocks_shared = _test_lock_comm(i2, event, pipe, exclusive=False)
+    results.shared_blocks_excl = _test_lock_comm(i2, event, pipe, exclusive=True)
+    results.shared_blocks_comm = _test_lock_comm(i2, event, pipe, comm=True)
     i1.unlock()
-    locked, reason = _test_lock(i1, exclusive=True)
-    if not locked:
-        raise RuntimeError('Unable to make exclusive lock on: '+str(i1))
-    locked, reason = _test_lock(i2, exclusive=False)
-    if locked:
-        i2.unlock()
-        results.excl_blocks_shared = True
-    locked, reason = _test_lock(i2, exclusive=True)
-    if locked:
-        i2.unlock()
-        results.excl_blocks_excl = True
-    queried, reason = _test_communication(i2)
-    if queried:
-        results.excl_blocks_comm = True
+    res = _test_lock(i1, exclusive=True)
+    if res != False:
+        if isinstance(i2, Process):
+            i2.terminate()
+        raise RuntimeError('Unable to make exclusive lock on: %s'%res[1])
+    results.excl_blocks_shared = _test_lock_comm(i2, event, pipe, exclusive=False)
+    results.excl_blocks_excl = _test_lock_comm(i2, event, pipe, exclusive=True)
+    results.excl_blocks_comm = _test_lock_comm(i2, event, pipe, comm=True)
     i1.unlock()
     return results
 
 
-# TODO: find a way to separate the rsrc managers (so instruments) into 2 process
 def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path2='', mode='both'):
     """
     Try this for a device on gpib, lan and usb.
@@ -1011,23 +1114,63 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
         mode = 'remote'
     rsrc_manager1 = get_resource_manager(rsrc_manager_path1)
     R1 = visa_lib_info(rsrc_manager1)
-    i1 = rsrc_manager1.open_resource(visa_name)
+    success, error, i1 = _test_open_instr(rsrc_manager1, visa_name)
+    if not success:
+        raise RuntimeError('Unable to open first instrument. visa_name: %s, R1:%s, error: %s'%(visa_name, R1, error))
+    serial = i1.is_serial()
     if mode in ['both', 'remote']:
-        R12R = test_cross_lib(i1)
+        from multiprocessing import Process, Event, Pipe
+        plocal, premote = Pipe()
+        event = Event()
+        process = Process(target=_test_cross_other_side, args=(rsrc_manager_path2, visa_name, event, premote))
+        with subprocess_start():
+            process.start()
+        R12R = _test_cross_lib_helper(i1, process, event, plocal)
+        process.join()
     rsrc_manager2 = get_resource_manager(rsrc_manager_path2)
+    if mode == 'remote':
+        del i1
+        del rsrc_manager1
     R2 = visa_lib_info(rsrc_manager2)
-    i2 = rsrc_manager1.open_resource(visa_name)
-    if mode in ['both', 'remote']:
-        R21R = test_cross_lib(i2)
-    if mode in ['both', 'local']:
-        R12L = test_cross_lib(i1, i2)
-        R21L = test_cross_lib(i2, i1)
     print 'visa=', visa_name
     print 'R1=', R1
     print 'R2=', R2
-    print 'R1->R2:', test_cross_lib(i1, i2)
-    print 'R2->R1:', test_cross_lib(i2, i1)
-
+    print 'Default result (no locking accross visalib):', _base_cross_result
+    success, error, i2 = _test_open_instr(rsrc_manager2, visa_name)
+    if not success:
+        print 'Unable to open instrument(%s) locally on second manager(%s) because of error: %s'%(visa_name, R2, error)
+        # show only result possible:
+        if mode == 'local':
+            print 'No result possible'
+        else:
+            print 'R1->R2(remote):', R12R
+        return
+    if mode in ['both', 'remote']:
+        plocal, premote = Pipe()
+        event.clear()
+        process = Process(target=_test_cross_other_side, args=(rsrc_manager_path1, visa_name, event, premote))
+        with subprocess_start():
+            process.start()
+        R21R = _test_cross_lib_helper(i2, process, event, plocal)
+        process.join()
+    if mode in ['both', 'local']:
+        R12L = _test_cross_lib_helper(i1, i2)
+        R21L = _test_cross_lib_helper(i2, i1)
+    if mode == 'both':
+        if R12R == R12L:
+            print 'R1->R2(remote/local):', _test_cross_show_diff(R12R)
+        else:
+            print 'R1->R2(remote):', _test_cross_show_diff(R12R), ' (local):', _test_cross_show_diff(R12L)
+        if R21R == R21L:
+            print 'R2->R1(remote/local):', _test_cross_show_diff(R21R)
+        else:
+            print 'R2->R1(remote):', _test_cross_show_diff(R21R), ' (local):', _test_cross_show_diff(R12L)
+    elif mode == 'local':
+        print 'R1->R2(local):', _test_cross_show_diff(R12L)
+        print 'R2->R1(local):', _test_cross_show_diff(R21L)
+    else: #remote only
+        print 'R1->R2(remote):', _test_cross_show_diff(R12R)
+        print 'R2->R1(remote):', _test_cross_show_diff(R21R)
 
 
 def test_handlers_events(rsrc_manager, visa_name):
@@ -1036,8 +1179,8 @@ def test_handlers_events(rsrc_manager, visa_name):
 
     """
     print 'visa=', visa_name
-    print 'R1=', visa_lib_info(rsrc_manager1)
-    i1 = rsrc_manager.open_resource(visa_name)
+    print 'R1=', visa_lib_info(rsrc_manager)
+    instr = rsrc_manager.open_resource(visa_name)
     # test: event and handlers at the same time
     #       service_request handlers and events
     #       exception  handlers and queue
@@ -1053,8 +1196,8 @@ def test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2):
     if not (i1.is_gpib() and i2.is_gpib()):
         print 'Skipping GPIB handlers tests'
         return
-    print 'visa1=', visa_namer1, ' id=', i1.query('*idn?')
-    print 'visa2=', visa_namer2, ' id=', i2.query('*idn?')
+    print 'visa1=', visa_name1, ' id=', i1.query('*idn?')
+    print 'visa2=', visa_name2, ' id=', i2.query('*idn?')
     print 'R1=', visa_lib_info(rsrc_manager)
     # test: tests activating srq on i1, i2 works
     #       using queue, test service request interactions
@@ -1066,8 +1209,16 @@ def test_usb_resource_list(rsrc_manager):
     print 'R1=', visa_lib_info(rsrc_manager)
 
 
-def test_all(rsrc_manager1, rsrc_manager2, visa_name1, visa_name2):
-    test_cross_lib(rsrc_manager1, rsrc_manager2, visa_name1)
-    test_handlers_events(rsrc_manager1, visa_name1)
-    test_gpib_handlers_events(rsrc_manager1, visa_name1, visa_name2)
+def test_all(rsrc_manager1, rsrc_manager2, visa_name1, visa_name2, rsrc_manager_path1=agilent_path, rsrc_manager_path2=''):
+    if rsrc_manager_path1 != rsrc_manager_path2:
+        mng_paths = [rsrc_manager_path1, rsrc_manager_path2]
+        test_cross_lib(visa_name1, rsrc_manager_path1, rsrc_manager_path2)
+    else:
+        print 'Skipping cross test: only one manager selescted'
+        mng_paths = [rsrc_manager_path1]
+    for mng_path in mng_paths:
+        rsrc_manager = get_resource_manager(mng_path)
+        test_usb_resource_list(rsrc_manager)
+        test_handlers_events(rsrc_manager, visa_name1)
+        test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2)
 
