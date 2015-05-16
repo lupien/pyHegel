@@ -916,7 +916,21 @@ class lakeshore_224(lakeshore_340):
        which defaults to current_ch
        status_ch returns the status of ch
        fetch allows to read all channels (which is the alias)
+
+       Note: The device USB is actually a serial to USB port. Therfore it
+             shows on the computer as a serial connection (once the driver
+             is installed, which could happen automatically.)
     """
+    def init(self, full=False):
+        if full:
+            if self.visa.is_serial():
+                self.visa.baud_rate = 57600
+                self.visa.parity = visa_wrap.constants.Parity.odd
+                self.visa.data_bits = 7
+            if self.visa.is_serial():
+                self._write_write_wait = 0.100
+            else: # GPIB, LAN: This is unchecked but should be ok. Shorter time might be better...
+                self._write_write_wait = 0.050
     def _current_config(self, dev_obj=None, options={}):
         if dev_obj == self.fetch:
             old_ch = self.current_ch.getcache()
