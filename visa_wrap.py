@@ -919,8 +919,7 @@ visa_wrap.test_all('ASRL1')
 visa_wrap.test_all('TCPIP::A-N9010A-20278.local')
 visa_wrap.test_all('USB0::2391::2827::MY52220278::0')
 """
-# TODO allow settings paramters for serial
-#      check what happens when both handlers and queues are enabled with agilent driver
+# TODO check what happens when both handlers and queues are enabled with agilent driver
 
 ########################### testing code #######################################################
 from contextlib import contextmanager as _contextmanager
@@ -1002,7 +1001,7 @@ def visa_lib_info(rsrc_manager):
     props = _get_lib_properties(handle)
     return '{company}, {product}: {version}'.format(**props)
 
-def _test_open_instr(rsrc_manager, instr_name, pipe=None):
+def _test_open_instr(rsrc_manager, instr_name, pipe=None, instr_options={}):
     """ Returns [succes_bool, error_string, instr] """
     from multiprocessing import Process
     if isinstance(rsrc_manager, Process):
@@ -1010,7 +1009,7 @@ def _test_open_instr(rsrc_manager, instr_name, pipe=None):
     else:
         instr = None
         with visa_context() as res:
-           instr = rsrc_manager.open_resource(instr_name)
+           instr = rsrc_manager.open_resource(instr_name, **instr_options)
         return res + [instr]
 
 def _test_lock(instrument, exclusive=True):
@@ -1048,11 +1047,11 @@ class dictAttr(dict):
 
 ########################################################################
 
-def _test_cross_other_side(rsrc_manager_path, instr_name, event, pipe):
+def _test_cross_other_side(rsrc_manager_path, instr_name, event, pipe, instr_options):
     rm = get_resource_manager(rsrc_manager_path)
     #pipe.send(visa_lib_info(rm))
     #print 'subprocess started'
-    res, state, instr = _test_open_instr(rm, instr_name)
+    res, state, instr = _test_open_instr(rm, instr_name, instr_options=instr_options)
     pipe.send([res, state])
     if not res:
         return
@@ -1147,7 +1146,7 @@ def _test_cross_lib_helper(i1, i2, event=None, pipe=None):
     return results
 
 
-def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path2='', mode='both'):
+def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path2='', mode='both', instr_options={}):
     """
     Try this for a device on gpib, lan and usb.
     It will probably not work for serial (only one visalib can access
@@ -1159,7 +1158,7 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
         mode = 'remote'
     rsrc_manager1 = get_resource_manager(rsrc_manager_path1)
     R1 = visa_lib_info(rsrc_manager1)
-    success, error, i1 = _test_open_instr(rsrc_manager1, visa_name)
+    success, error, i1 = _test_open_instr(rsrc_manager1, visa_name, instr_options=instr_options)
     if not success:
         raise RuntimeError('Unable to open first instrument. visa_name: %s, R1:%s, error: %s'%(visa_name, R1, error))
     #serial = i1.is_serial()
@@ -1167,7 +1166,7 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
         from multiprocessing import Process, Event, Pipe
         plocal, premote = Pipe()
         event = Event()
-        process = Process(target=_test_cross_other_side, args=(rsrc_manager_path2, visa_name, event, premote))
+        process = Process(target=_test_cross_other_side, args=(rsrc_manager_path2, visa_name, event, premote, instr_options))
         with subprocess_start():
             process.start()
         R12R = _test_cross_lib_helper(i1, process, event, plocal)
@@ -1193,7 +1192,7 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
     if mode in ['both', 'remote']:
         plocal, premote = Pipe()
         event.clear()
-        process = Process(target=_test_cross_other_side, args=(rsrc_manager_path1, visa_name, event, premote))
+        process = Process(target=_test_cross_other_side, args=(rsrc_manager_path1, visa_name, event, premote, instr_options))
         with subprocess_start():
             process.start()
         R21R = _test_cross_lib_helper(i2, process, event, plocal)
@@ -1219,15 +1218,15 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
 
 ########################################################################
 
-def _test_multiprocess_connect_sub(visa_name, rsrc_manager_path, pipe):
+def _test_multiprocess_connect_sub(visa_name, rsrc_manager_path, pipe, instr_options={}):
     rsrc_manager = get_resource_manager(rsrc_manager_path)
-    res, state, instr = _test_open_instr(rsrc_manager, visa_name)
+    res, state, instr = _test_open_instr(rsrc_manager, visa_name, instr_options=instr_options)
     pipe.send([res, state])
     if not res:
         return
     pipe.send(_test_communication(instr))
 
-def test_multiprocess_connect(visa_name, rsrc_manager_path=None):
+def test_multiprocess_connect(visa_name, rsrc_manager_path=None, instr_options={}):
     """
     Try this for a device on gpib, lan, usb and serial.
     """
@@ -1241,7 +1240,7 @@ def test_multiprocess_connect(visa_name, rsrc_manager_path=None):
     print 'visa=', visa_name
     print 'R1=', R1
     plocal, premote = Pipe()
-    process = Process(target=_test_multiprocess_connect_sub, args=(visa_name, rsrc_manager_path, premote))
+    process = Process(target=_test_multiprocess_connect_sub, args=(visa_name, rsrc_manager_path, premote, instr_options))
     with subprocess_start():
         process.start()
     # the remote should have opened the connection, we will test later
@@ -1505,12 +1504,12 @@ def _test_one_event(instr, event_type):
     if res != True:
         print '!!! Device does not properly discard %s events with all mechs: %s'%(event_type, res[1])
 
-def test_handlers_events(rsrc_manager, visa_name):
+def test_handlers_events(rsrc_manager, visa_name, instr_options={}):
     """
     Try this for a device on gpib, lan, usb and serial.
     """
     R1 = visa_lib_info(rsrc_manager)
-    success, error, instr = _test_open_instr(rsrc_manager, visa_name)
+    success, error, instr = _test_open_instr(rsrc_manager, visa_name, instr_options=instr_options)
     if not success:
         raise RuntimeError('Unable to open instrument. visa_name: %s, R1:%s, error: %s'%(visa_name, R1, error))
     start_test('General events (and handlers)')
@@ -1546,15 +1545,15 @@ def test_handlers_events(rsrc_manager, visa_name):
 
 ########################################################################
 
-def test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2):
+def test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2, instr_options={}):
     """
     Try this for both devices on gpib.
     """
     R1 = visa_lib_info(rsrc_manager)
-    success, error, i1 = _test_open_instr(rsrc_manager, visa_name1)
+    success, error, i1 = _test_open_instr(rsrc_manager, visa_name1, instr_options=instr_options)
     if not success:
         raise RuntimeError('Unable to open first instrument. visa_name: %s, R1:%s, error: %s'%(visa_name1, R1, error))
-    success, error, i2 = _test_open_instr(rsrc_manager, visa_name2)
+    success, error, i2 = _test_open_instr(rsrc_manager, visa_name2, instr_options=instr_options)
     if not success:
         raise RuntimeError('Unable to open second instrument. visa_name: %s, R1:%s, error: %s'%(visa_name2, R1, error))
     start_test('GPIB events (and handlers)')
@@ -1673,26 +1672,27 @@ def are_mngr_diff(m1, m2):
     else:
         return False
 
-def test_all(visa_name1, visa_name2=None, rsrc_manager_path1=agilent_path, rsrc_manager_path2=''):
+def test_all(visa_name1, visa_name2=None, rsrc_manager_path1=agilent_path, rsrc_manager_path2='', instr_options={}):
     """
     provide visa_name2 for gpib devices
     """
     start_test('-- START --')
     if are_mngr_diff(rsrc_manager_path1, rsrc_manager_path2):
         mng_paths = [rsrc_manager_path1, rsrc_manager_path2]
-        test_cross_lib(visa_name1, rsrc_manager_path1, rsrc_manager_path2)
+        test_cross_lib(visa_name1, rsrc_manager_path1, rsrc_manager_path2, instr_options=instr_options)
     else:
         print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
         print '!!! Skipping cross test: only one manager selescted'
         mng_paths = [rsrc_manager_path1]
     for mng_path in mng_paths:
-        test_multiprocess_connect(visa_name1, rsrc_manager_path=mng_path):
+        test_multiprocess_connect(visa_name1, rsrc_manager_path=mng_path, instr_options=instr_options):
         rsrc_manager = get_resource_manager(mng_path)
         test_usb_resource_list(rsrc_manager)
-        test_handlers_events(rsrc_manager, visa_name1)
+        test_handlers_events(rsrc_manager, visa_name1, instr_options=instr_options)
         if visa_name2 is None or visa_name1 == visa_name2:
             print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
             print '!!!! Skipping multi device tests (needs visa_name2) (only for gpib)'
         else:
-            test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2)
+            test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2, instr_options=instr_options)
     start_test('-- End --')
+
