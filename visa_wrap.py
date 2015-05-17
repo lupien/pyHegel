@@ -366,6 +366,9 @@ class old_Instrument(redirect_instr):
         self.instr.timeout = 0
         del self.instr.timeout
     @property
+    def session(self):
+        return self.vi
+    @property
     def read_termination(self):
         return self._read_termination
     @read_termination.setter
@@ -461,7 +464,45 @@ class old_Instrument(redirect_instr):
     read = _read_helper
     query = _query_helper
 
+
+if not old_interface:
+    # TODO transfer this to pyVisa
+    # needed for tests
+    #class _AttrVI_ATTR_EVENT_TYPE(pyvisa.attributes.EnumAttribute):
+    class AttrVI_ATTR_EVENT_TYPE(pyvisa.attributes.IntAttribute):
+        """ Provides the event type in all event contexts.
+        """
+        resources = []
+        py_name = ''
+        visa_name = 'VI_ATTR_EVENT_TYPE'
+        visa_type = 'ViEventType'
+        default = pyvisa.attributes.NotAvailable
+        read, write, local = True, False, False
+        #enum_type = constants.EventType
+    class AttrVI_ATTR_STATUS(pyvisa.attributes.EnumAttribute):
+        """ Provides the status for the source of the exception in event contexts.
+        """
+        resources = []
+        py_name = ''
+        visa_name = 'VI_ATTR_STATUS'
+        visa_type = 'ViStatus'
+        default = pyvisa.attributes.NotAvailable
+        read, write, local = True, False, False
+        enum_type = constants.StatusCode
+    class AttrVI_ATTR_OPER_NAME(pyvisa.attributes.Attribute):
+        """ Provides the operation name for the source of the exception in event contexts.
+        """
+        resources = []
+        py_name = ''
+        visa_name = 'VI_ATTR_OPER_NAME'
+        visa_type = 'ViString'
+        default = pyvisa.attributes.NotAvailable
+        read, write, local = True, False, False
+    del AttrVI_ATTR_EVENT_TYPE, AttrVI_ATTR_STATUS, AttrVI_ATTR_OPER_NAME
+
 class new_Instrument(redirect_instr):
+    #def __del__(self):
+    #    print 'Deleting instrument', self.resource_name
     def __init__(self, instr_instance, **kwargs):
         super(new_Instrument, self).__init__(instr_instance)
         for k,v in kwargs.items():
@@ -507,6 +548,7 @@ class new_Instrument(redirect_instr):
         def interface_type(self):
             return self.visalib.parse_resource(self._resource_manager.session,
                                            self.resource_name)[0].interface_type
+
     if version in ['1.5', '1.6', '1.6.1', '1.6.2', '1.6.3']:
         def lock_excl(self, timeout_ms):
             """
@@ -859,81 +901,59 @@ in instruments_others:
      SRQ behavior on agilent and NI is probably different ((NI does autopoll?), agilent checks the line)
 
 
-cd /Codes/pyvisa
-
-import pyvisa
-rm1 = pyvisa.ResourceManager(r"c:\Windows\system32\agvisa32.dll")
-rm2 = pyvisa.ResourceManager()
-
-#vs1 = rm1.get_instrument('ASRL1::INSTR', baud_rate=9600)
-vs2 = rm2.get_instrument('ASRL1::INSTR', baud_rate=9600)
-vu1 = rm1.get_instrument('USB::0x0957::0x0B0B::MY52220278')
-vu2 = rm2.get_instrument('USB::0x0957::0x0B0B::MY52220278')
-vg1 = rm1.get_instrument('GPIB0::6::INSTR')
-vg2 = rm2.get_instrument('GPIB0::6::INSTR')
-
-def handler_func(session, event_type, context, user_handle):
-    s = v.read_stb()
-    if user_handle is not None:
-        user_handle = user_handle.contents.value
-    print 'session_id=%s (==%s event_session), type=%s, context=%s, user_handle=%s, stb=%s'%( v.session, session.value, pyvisa.constants.EventType(event_type), context.value, user_handle, int(s))
-    return pyvisa.constants.VI_SUCCESS
-
-#user_handle_2_s1 = vs1.install_handler(pyvisa.constants.EventType.service_request, handler_func, 2)
-user_handle_2_g1 = vg1.install_handler(pyvisa.constants.EventType.service_request, handler_func, 2)
-user_handle_2_u1 = vu1.install_handler(pyvisa.constants.EventType.service_request, handler_func, 2)
-user_handle_2_s2 = vs2.install_handler(pyvisa.constants.EventType.exception, handler_func, 2)
-user_handle_2_g2 = vg2.install_handler(pyvisa.constants.EventType.service_request, handler_func, 2)
-user_handle_2_u2 = vu2.install_handler(pyvisa.constants.EventType.service_request, handler_func, 2)
-
-#vs1.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.handler)
-vg1.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.handler)
-vu1.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.handler)
-vs2.enable_event(pyvisa.constants.EventType.exception, pyvisa.constants.EventMechanism.handler)
-vg2.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.handler)
-vu2.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.handler)
-
-#vs1.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.queue)
-vg1.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.queue)
-vu1.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.queue)
-vs2.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.queue)
-vg2.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.queue)
-vu2.enable_event(pyvisa.constants.EventType.service_request, pyvisa.constants.EventMechanism.queue)
-
+import visa_wrap
+visa_wrap.test_all('GPIB0::6', 'GPIB0::11')
+visa_wrap.test_all('ASRL1')
+visa_wrap.test_all('TCPIP::A-N9010A-20278.local')
+visa_wrap.test_all('USB0::2391::2827::MY52220278::0')
 """
+# TODO allow settings paramters for serial
+#      check what happens when both handlers and queues are enabled with agilent driver
 
 ########################### testing code #######################################################
-from contextlib import contextmanager
+from contextlib import contextmanager as _contextmanager
+from time import time as _time, sleep as _sleep
 
-@contextmanager
-def visa_context(ok=None, bad=None):
+@_contextmanager
+def visa_context(ok=None, bad=None, handler=None):
     """
     ok selects the status that will produce True, all others are False
     bad selects the status that will produce False, all others are True
     Use one or the other. If neither are sets, it is the same as ok='OK'
-    select one of: 'OK'(no erros), 'timeout', 'unsupported', 'locked', 'io_error', 'busy'
+    select one of: 'OK'(no erros), 'timeout', 'unsupported_operation', 'locked', 'io_error', 'busy',
+                   'invalid_mechanism', 'invalid_event', 'unsupported_mechanism'
     """
     res = [True, '']
     error = 'OK'
     if ok is None and bad is None:
         ok = 'OK'
+    if handler is not None:
+        handler.reset()
     try:
         yield res
+        if handler is not None and handler.exc_status is not None:
+            print 'visa_context sees error:', handler.exc_status
+            VisaIOError(handler.exc_status)
     except VisaIOError as exc:
         if exc.error_code == constants.VI_ERROR_TMO:
             error = 'timeout'
         elif exc.error_code == constants.VI_ERROR_NSUP_OPER:
-            error = 'unsupported'
+            error = 'unsupported_operation'
         elif exc.error_code == constants.VI_ERROR_RSRC_LOCKED:
             error = 'locked'
         elif exc.error_code == constants.VI_ERROR_IO:
             error = 'io_error'
         elif exc.error_code == constants.VI_ERROR_RSRC_BUSY:
             error = 'busy'
+        elif exc.error_code == constants.VI_ERROR_INV_MECH:
+            error = 'invalid_mechanism'
+        elif exc.error_code == constants.VI_ERROR_INV_EVENT:
+            error = 'invalid_event'
+        elif exc.error_code == constants.VI_ERROR_NSUP_MECH:
+            error = 'unsupported_mechanism'
         else:
             error = str(exc)
     except Exception as exc:
-            print type(exc)
             error = str(exc)
     finally:
         if ok is not None:
@@ -945,7 +965,7 @@ def visa_context(ok=None, bad=None):
             else:
                 res[:] = [True, error]
 
-@contextmanager
+@_contextmanager
 def subprocess_start():
     import sys
     old_arg0 = sys.argv[0]
@@ -955,6 +975,10 @@ def subprocess_start():
     finally:
         sys.argv[0] = old_arg0
 
+def start_test(test_name):
+    print '======================================================'
+    print '= {:^50} ='.format(test_name)
+    print '======================================================'
 
 def visa_lib_info(rsrc_manager):
     if _os.name != 'nt':
@@ -965,6 +989,17 @@ def visa_lib_info(rsrc_manager):
         handle = rsrc_manager.visalib.lib._handle
     props = _get_lib_properties(handle)
     return '{company}, {product}: {version}'.format(**props)
+
+def _test_open_instr(rsrc_manager, instr_name, pipe=None):
+    """ Returns [succes_bool, error_string, instr] """
+    from multiprocessing import Process
+    if isinstance(rsrc_manager, Process):
+        return pipe.recv() + [None]
+    else:
+        instr = None
+        with visa_context() as res:
+           instr = rsrc_manager.open_resource(instr_name)
+        return res + [instr]
 
 def _test_lock(instrument, exclusive=True):
     # Use a short timeout to run more quickly
@@ -978,11 +1013,19 @@ def _test_lock(instrument, exclusive=True):
     res = res if res[0] else False
     return res
 
-def _test_lock_communication(instrument):
-    # bad='OK' means it returns False if the communication went through
-    with visa_context(bad='OK') as res:
+def _test_communication(instrument, lock=False):
+    # for locking a bad test means not responding to lock so
+    # actually going through.
+    if lock:
+        kwargs = dict(bad='OK')
+    else:
+        kwargs = dict(ok='OK')
+    with visa_context(**kwargs) as res:
         id = instrument.query('*idn?')
-    res = res if res[0] else False
+    if lock:
+        res = res if res[0] else False
+    else:
+        res = res if not res[0] else True
     return res
 
 class dictAttr(dict):
@@ -990,6 +1033,8 @@ class dictAttr(dict):
     __setattr__ = dict.__setitem__
     def copy(self):
         return dictAttr(self)
+
+########################################################################
 
 def _test_cross_other_side(rsrc_manager_path, instr_name, event, pipe):
     rm = get_resource_manager(rsrc_manager_path)
@@ -1025,19 +1070,6 @@ def _test_cross_other_side(rsrc_manager_path, instr_name, event, pipe):
     pipe.send(_test_lock_comm(instr, comm=True))
     #print 'subprocess finished'
 
-
-def _test_open_instr(rsrc_manager, instr_name, pipe=None):
-    """ Returns [succes_bool, error_string, instr] """
-    from multiprocessing import Process
-    if isinstance(rsrc_manager, Process):
-        return pipe.recv() + [None]
-    else:
-        instr = None
-        with visa_context() as res:
-           instr = rsrc_manager.open_resource(instr_name)
-        return res + [instr]
-
-
 def _test_lock_comm(instr, event=None, pipe=None, exclusive=False, comm=False):
     from multiprocessing import Process
     if isinstance(instr, Process):
@@ -1050,7 +1082,7 @@ def _test_lock_comm(instr, event=None, pipe=None, exclusive=False, comm=False):
             if res == False: # lock went through
                 instr.unlock()
         else:
-            res = _test_lock_communication(instr)
+            res = _test_communication(instr, lock=True)
     return res
 
 _base_cross_result = dictAttr(
@@ -1110,6 +1142,7 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
     a serial device at a time).
     mode can be 'both', 'remote' or 'local' (but for old interface it is disregarded and will only do remote)
     """
+    start_test('Cross library effects')
     if old_interface:
         mode = 'remote'
     rsrc_manager1 = get_resource_manager(rsrc_manager_path1)
@@ -1117,7 +1150,7 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
     success, error, i1 = _test_open_instr(rsrc_manager1, visa_name)
     if not success:
         raise RuntimeError('Unable to open first instrument. visa_name: %s, R1:%s, error: %s'%(visa_name, R1, error))
-    serial = i1.is_serial()
+    #serial = i1.is_serial()
     if mode in ['both', 'remote']:
         from multiprocessing import Process, Event, Pipe
         plocal, premote = Pipe()
@@ -1172,53 +1205,468 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
         print 'R1->R2(remote):', _test_cross_show_diff(R12R)
         print 'R2->R1(remote):', _test_cross_show_diff(R21R)
 
+########################################################################
+
+def _test_multiprocess_connect_sub(visa_name, rsrc_manager_path, pipe):
+    rsrc_manager = get_resource_manager(rsrc_manager_path)
+    res, state, instr = _test_open_instr(rsrc_manager, visa_name)
+    pipe.send([res, state])
+    if not res:
+        return
+    pipe.send(_test_communication(instr))
+
+def test_multiprocess_connect(visa_name, rsrc_manager_path=None):
+    """
+    Try this for a device on gpib, lan, usb and serial.
+    """
+    from multiprocessing import Process, Pipe
+    start_test('multi process access to device (same visalib)')
+    rsrc_manager = get_resource_manager(rsrc_manager_path)
+    R1 = visa_lib_info(rsrc_manager)
+    success, error, i1 = _test_open_instr(rsrc_manager, visa_name)
+    if not success:
+        raise RuntimeError('Unable to open local instrument. visa_name: %s, R1:%s, error: %s'%(visa_name, R1, error))
+    print 'visa=', visa_name
+    print 'R1=', R1
+    plocal, premote = Pipe()
+    process = Process(target=_test_multiprocess_connect_sub, args=(visa_name, rsrc_manager_path, premote))
+    with subprocess_start():
+        process.start()
+    # the remote should have opened the connection, we will test later
+    res = _test_communication(i1)
+    if res != True:
+        print 'Failure to communicate on local: %s'%res[1]
+        ok = False
+    # now check remote
+    success, error, i2 = _test_open_instr(process, '', plocal)
+    ok = True
+    if not success:
+        return "Failure, remote did not open, error: %s"%error
+        ok = False
+    else:
+        res = plocal.recv()
+        if res != True:
+            print 'Failure to communicate on remote: %s'%res[1]
+            ok = False
+    if ok:
+        print 'Success!'
+    process.join()
+
+########################################################################
+
+class Handlers(object):
+    #def __del__(self):
+    #    print 'Deleting handler', self.name
+    def __init__(self, name, instr):
+        import threading
+        super(Handlers, self).__init__()
+        self.event = threading.Event()
+        self.instr = instr
+        self.session = instr.session
+        self.event_type = None
+        self.userHandle = None
+        self.name = name
+        self.reset()
+        self._handler_func = None
+        self._exc_type = False
+    def install(self, event_type, userHandle=None):
+        if self.event_type != None:
+            raise RuntimeError('Handler %s is already installed'%self.name)
+        if event_type == 'exc':
+            self._exc_type = True
+        event_type = _event_type(event_type)
+        if old_interface and userHandle is None:
+            userHandle = 1 # old interface does not accept None
+        self._handler_func = self.handler
+        with visa_context(ok='OK') as res:
+            handl = self.instr.install_visa_handler(event_type, self._handler_func, userHandle)
+            self.event_type = event_type
+            self.userHandle = handl
+        res = res if not res[0] else True
+        if res != True:
+            self._handler_func = None
+        return res
+    def uninstall(self):
+        if self.event_type == None:
+            return True
+        with visa_context(ok='OK', handler=self) as res:
+            self.instr.uninstall_visa_handler(self.event_type, self._handler_func, self.userHandle)
+        self.event_type = None
+        self.userHandle = None
+        self._exc_type = False
+        self._handler_func = None
+        res = res if not res[0] else True
+        return res
+    def wait(self, timeout_s=1.):
+        """
+        returns the state. Should be True unless there is a timeout.
+        """
+        res = self.event.wait(timeout_s)
+        if res:
+            self.check()
+        return res
+    def reset(self):
+        self.wrong_handle = False
+        self.wrong_type = False
+        self.wrong_cntx_type = False
+        self.wrong_session = False
+        self.last = 0
+        self.count = 0
+        self.event.clear()
+        self.exc_status = None
+        self.oper_name = None
+    def check(self):
+        if self.wrong_handle:
+            print 'Handler(%s) received the wrong handle'%self.name
+        if self.wrong_type:
+            print 'Handler(%s) received the wrong type'%self.name
+        if self.wrong_cntx_type:
+            print 'Handler(%s) received the wrong context type'%self.name
+        if self.wrong_session:
+            print 'Handler(%s) received the wrong session'%self.name
+    def get_attr(self, context, attr):
+        if old_interface:
+            return vpp43.get_attribute(context, attr)
+        else:
+            return self.instr.visalib.get_attribute(context, attr)[0]
+    def handler(self, session, event_type, context, userHandle):
+        # context gives access to VI_ATTR_: EVENT_TYPE, MAX_QUEUE_LENGTH, RM_SESSION,
+        #                                   RSRC_IMPL_VERSION, RSRC_LOCK_STATE, RSRC_MANF_ID,
+        #                                   RSRC_MANF_NAME, RSRC_NAME, RSRC_SPEC_VERSION,
+        #                                   USER_DATA
+        cntx_event_type = self.get_attr(context, constants.VI_ATTR_EVENT_TYPE)
+        if event_type != self.event_type:
+            self.wrong_type = True
+        if cntx_event_type != event_type:
+            self.wrong_cntx_type = True
+        if userHandle != self.userHandle:
+            self.wrong_handle = True
+        if session != self.session:
+            self.wrong_session = True
+        self.count += 1
+        self._last = _time()
+        self.event.set()
+        if self._exc_type:
+            # the error will stil go through and cause the usual python exception
+            # but just in case we also keep track of it here.
+            status = self.get_attr(context, constants.VI_ATTR_STATUS)
+            oper_name = self.get_attr(context, constants.VI_ATTR_OPER_NAME)
+            self.oper_name = oper_name
+            #status_str = str(status) if old_interface else str(constants.StatusCode(status))
+            #print '--->> Exception Handler(%s) caught in operation %s: %s'%(self.name, oper_name, status_str)
+            self.exc_status = status
+            #self.instr.visalib.set_attribute(context, constants.VI_ATTR_STATUS, constants.VI_SUCCESS)
+            #raise VisaIOError(status)
+        return constants.VI_SUCCESS
+
+def _event_type(event_type):
+    """ event_type is one of 'srq', 'io', 'exc' or 'all'
+    """
+    if event_type == 'srq':
+        return constants.VI_EVENT_SERVICE_REQ
+    elif event_type == 'io':
+        return constants.VI_EVENT_IO_COMPLETION
+    elif event_type == 'exc':
+        return constants.VI_EVENT_EXCEPTION
+    elif event_type == 'all':
+        return constants.VI_ALL_ENABLED_EVENTS
+    raise RuntimeError('Invalid event_type')
+
+def _mech(mech):
+    """ queue is either 'queue', 'handler', 'suspend', or 'all', 'both'
+    """
+    if mech == 'queue':
+        return constants.VI_QUEUE
+    elif mech == 'suspend':
+        return constants.VI_SUSPEND_HNDLR
+    elif mech == 'all':
+        return constants.VI_ALL_MECH
+    elif mech == 'handler':
+        return constants.VI_HNDLR
+    elif mech == 'both':
+        return constants.VI_HNDLR + constants.VI_QUEUE
+    raise RuntimeError('Invalid mechanism')
+
+def _test_event(instr, event_type, mech, ok='OK', disable=False, discard=False, handler=None):
+    """ queue is either True, False, or 'suspend'
+        if neither disable or discard are True it will do enable
+    """
+    mech = _mech(mech)
+    tn = _event_type(event_type)
+    with visa_context(ok=ok, handler=handler) as res:
+        if disable:
+            instr.disable_event(tn, mech)
+        elif discard:
+            instr.discard_events(tn, mech)
+        else:
+            instr.enable_event(tn, mech)
+    res = res if not res[0] else True
+    return res
+
+def _test_one_event(instr, event_type):
+    res = _test_event(instr, event_type, 'queue')
+    if res != True:
+        queue = False
+        pre = '!! '
+        if event_type == 'exc':
+            # exception event don't handle queues
+            pre = ''
+        print pre+'Device does not allow %s queue events: %s'%(event_type, res[1])
+    else:
+        pre = ''
+        if event_type == 'exc':
+            pre = '!! '
+        print pre+'Device allows %s queue events'%event_type
+        queue = True
+        res = _test_event(instr, event_type, 'queue', disable=True)
+        if res != True:
+            print '!!! Device does not properly disable %s queue events: %s'%(event_type, res[1])
+        else:
+            res = _test_event(instr, event_type, 'queue', disable=True)
+            if res != True:
+                print '!!! Device fails for second disable of  %s queue events: %s'%(event_type, res[1])
+        res = _test_event(instr, event_type, 'queue', discard=True)
+        if res != True:
+            print '!!! Device does not properly discard %s queue events: %s'%(event_type, res[1])
+    hndlr = Handlers(event_type.upper(), instr)
+    res = hndlr.install(event_type)
+    if res != True:
+        print '!! Device does not allow %s handler: %s'%(event_type, res[1])
+    else:
+        res = _test_event(instr, event_type, 'handler', handler=hndlr)
+        if res != True:
+            print '!! Device does not allow %s handler events: %s'%(event_type, res[1])
+        else:
+            print 'Device allows %s handler events'%event_type
+            if queue:
+                res = _test_event(instr, event_type, 'queue', handler=hndlr)
+                if res != True:
+                    print '!! Device does not allow %s handler and queue events: %s'%(event_type, res[1])
+                else:
+                    print 'Device allows %s handler and queue events'%event_type
+                    _test_event(instr, event_type, 'queue', disable=True, handler=hndlr)
+            res = _test_event(instr, event_type, 'handler', disable=True, handler=hndlr)
+            if res != True:
+                print '!!! Device does not properly disable %s handler events: %s'%(event_type, res[1])
+            res = _test_event(instr, event_type, 'handler', disable=True, handler=hndlr)
+            if res != True:
+                print '!!! Device fails for second disable of  %s handler events: %s'%(event_type, res[1])
+            if queue:
+                res = _test_event(instr, event_type, 'both', handler=hndlr)
+                if res != True:
+                    print '!! Device does not allow %s handler and queue(both) events: %s'%(event_type, res[1])
+                else:
+                    print 'Device allows %s handler and queue (both) events'%event_type
+                    _test_event(instr, event_type, 'queue', disable=True, handler=hndlr)
+                    _test_event(instr, event_type, 'handler', disable=True, handler=hndlr)
+            res = _test_event(instr, event_type, 'suspend', handler=hndlr)
+            if res != True:
+                pre = '!! '
+                if event_type == 'exc':
+                    # exception event don't handle suspend handlers
+                    pre = ''
+                print pre+'Device does not allow %s suspend handler events: %s'%(event_type, res[1])
+            else:
+                print 'Device allows %s suspend handler events'%event_type
+                res = _test_event(instr, event_type, 'suspend', disable=True, handler=hndlr)
+                if res != True:
+                    print '!!! Device does not properly disable %s suspend handler events: %s'%(event_type, res[1])
+                _test_event(instr, event_type, 'handler', handler=hndlr)
+                res = _test_event(instr, event_type, 'suspend', disable=True, handler=hndlr)
+                if res != True:
+                    print '!!! Device does not properly disable %s suspend handler for handler events: %s'%(event_type, res[1])
+                _test_event(instr, event_type, 'handler', disable=True, handler=hndlr)
+            res = _test_event(instr, event_type, 'suspend', discard=True, handler=hndlr)
+            if res != True:
+                pre = '!! '
+                if event_type == 'exc':
+                    # exception event don't handle suspend handlers
+                    pre = ''
+                print pre+'Device does not properly discard %s suspend handler events: %s'%(event_type, res[1])
+        res = hndlr.uninstall()
+        if res != True:
+            print '!! Device does not allow uninstall of %s handler: %s'%(event_type, res[1])
+    res = _test_event(instr, event_type, 'all', disable=True)
+    if res != True:
+        print '!!! Device does not properly disable %s events with all mechs: %s'%(event_type, res[1])
+    res = _test_event(instr, event_type, 'all', discard=True)
+    if res != True:
+        print '!!! Device does not properly discard %s events with all mechs: %s'%(event_type, res[1])
 
 def test_handlers_events(rsrc_manager, visa_name):
     """
     Try this for a device on gpib, lan, usb and serial.
-
     """
+    R1 = visa_lib_info(rsrc_manager)
+    success, error, instr = _test_open_instr(rsrc_manager, visa_name)
+    if not success:
+        raise RuntimeError('Unable to open instrument. visa_name: %s, R1:%s, error: %s'%(visa_name, R1, error))
+    start_test('General events (and handlers)')
     print 'visa=', visa_name
-    print 'R1=', visa_lib_info(rsrc_manager)
-    instr = rsrc_manager.open_resource(visa_name)
-    # test: event and handlers at the same time
-    #       service_request handlers and events
-    #       exception  handlers and queue
-    #       completion  handlers and queue
+    print 'R1=', R1
+    res = _test_event(instr, 'all', 'all', disable=True)
+    if res != True:
+        print '!!! Device does not allow disabling all events/mechs: %s'%res[1]
+    else:
+        print 'Device allows disabling all events/mechs'
+    res = _test_event(instr, 'all', 'all', discard=True)
+    if res != True:
+        print '!!! Device does not allow discarding all events/mechs: %s'%res[1]
+    else:
+        print 'Device allows discarding all events/mechs'
+    _test_one_event(instr, 'srq')
+    _test_one_event(instr, 'io')
+    _test_one_event(instr, 'exc')
+    event_type = 'exc'
+    hndlr1 = Handlers('EXC_1', instr)
+    res = hndlr1.install(event_type)
+    if res == True:
+        hndlr2 = Handlers('EXC_2', instr)
+        res = hndlr2.install(event_type)
+        if res != True:
+            print '!! Device does not allow multiple handlers: %s'%res[1]
+        else:
+            print 'Device allows multiple handlers (at least 2 for exceptions)'
+            hndlr2.uninstall()
+        hndlr1.uninstall()
+    else:
+        print '!! Unable to test multiple handlers (exception handler does not work)'
+
+########################################################################
 
 def test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2):
     """
     Try this for both devices on gpib.
-
     """
-    i1 = rsrc_manager.open_resource(visa_name1)
-    i2 = rsrc_manager.open_resource(visa_name2)
+    R1 = visa_lib_info(rsrc_manager)
+    success, error, i1 = _test_open_instr(rsrc_manager, visa_name1)
+    if not success:
+        raise RuntimeError('Unable to open first instrument. visa_name: %s, R1:%s, error: %s'%(visa_name1, R1, error))
+    success, error, i2 = _test_open_instr(rsrc_manager, visa_name2)
+    if not success:
+        raise RuntimeError('Unable to open second instrument. visa_name: %s, R1:%s, error: %s'%(visa_name2, R1, error))
+    start_test('GPIB events (and handlers)')
     if not (i1.is_gpib() and i2.is_gpib()):
-        print 'Skipping GPIB handlers tests'
+        print '!!! Skipping GPIB handlers tests, both devices are not GPIB'
         return
     print 'visa1=', visa_name1, ' id=', i1.query('*idn?')
     print 'visa2=', visa_name2, ' id=', i2.query('*idn?')
-    print 'R1=', visa_lib_info(rsrc_manager)
+    print 'R1=', R1
     # test: tests activating srq on i1, i2 works
     #       using queue, test service request interactions
     #       using handlers, test service request interactions
     #       poll?, auto-serial poll?
 
+########################################################################
+
+def _is_hex(s):
+    if s.lower().startswith('0x'):
+        # test it
+        try:
+            int(s, 16)
+        except ValueError:
+            print '!!! Invalid hexadecimal value'
+        return True
+    else:
+        try:
+            int(s, 10)
+        except ValueError:
+            print '!!! Invalid decimal value'
+        return False
+
+def _is_upper(s):
+    if s.lower() == s:
+        return False
+    if s.upper() == s:
+        return True
+    print '!!! String is neither pure upper or lower. Considered lower...'
+    return False
+
+########################################################################
 
 def test_usb_resource_list(rsrc_manager):
+    start_test('resource list')
     print 'R1=', visa_lib_info(rsrc_manager)
+    lst = rsrc_manager.list_resources()
+    print 'List: ['
+    for l in lst:
+        print '    ', repr(l)
+    print '    ]'
+    usbs = 0
+    serials = 0
+    upper_serial = None
+    hex_vendor_product = None
+    for e in lst:
+        if e.lower().startswith('usb'):
+            usbs += 1
+            l = e.split('::')
+            v = _is_hex(l[1])
+            p = _is_hex(l[2])
+            if v != p:
+                print '!!! vendor and product not the same format for ', e
+            if hex_vendor_product is None:
+                hex_vendor_product = v
+            elif hex_vendor_product != v:
+                print '!!! vendor and product format changes accross devices'
+            serial = l[3]
+            if serial.upper() == serial.lower():
+                pass # Not usable, not alphanumeric
+            else:
+                serials += 1
+                up = _is_upper(serial)
+                if upper_serial is None:
+                    upper_serial = up
+                elif upper_serial != up:
+                    print '!!! serial numbers upper/lower is not constant accross devices'
+    if usbs>0:
+        if usbs == 1:
+            print 'Only one device used (more limited tests)'
+        else:
+            print 'Used %d usb devices for test'%usbs
+        if hex_vendor_product:
+            print 'Vendor and product ids are in hexadecimal'
+        else:
+            print '!! Vendor and product ids are in decimal'
+        if serials == 0:
+            print '!! Found no usb serial numbers with alphanumeric. lower/upper untested.'
+        elif upper_serial:
+            print 'Found %d testable usb device, allusing upper serial numbers'%serials
+        else:
+            print '!! Found %d testable usb device, all using lower serial numbers'%serials
+    else:
+        print '!!! You need some usb devices connected to the computer for futher tests.'
 
+########################################################################
 
-def test_all(rsrc_manager1, rsrc_manager2, visa_name1, visa_name2, rsrc_manager_path1=agilent_path, rsrc_manager_path2=''):
-    if rsrc_manager_path1 != rsrc_manager_path2:
+def are_mngr_diff(m1, m2):
+    if _os.name == 'nt' and try_agilent_first:
+        if m1 != m2 and (m1 is None or m2 is None):
+            # if agilent visa is present on system, this should be different, otherwise it will be the same
+            return True
+    if m1 != m2:
+        return True
+    else:
+        return False
+
+def test_all(visa_name1, visa_name2=None, rsrc_manager_path1=agilent_path, rsrc_manager_path2=''):
+    """
+    provide visa_name2 for gpib devices
+    """
+    start_test('-- START --')
+    if are_mngr_diff(rsrc_manager_path1, rsrc_manager_path2):
         mng_paths = [rsrc_manager_path1, rsrc_manager_path2]
         test_cross_lib(visa_name1, rsrc_manager_path1, rsrc_manager_path2)
     else:
-        print 'Skipping cross test: only one manager selescted'
+        print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+        print '!!! Skipping cross test: only one manager selescted'
         mng_paths = [rsrc_manager_path1]
     for mng_path in mng_paths:
         rsrc_manager = get_resource_manager(mng_path)
         test_usb_resource_list(rsrc_manager)
         test_handlers_events(rsrc_manager, visa_name1)
-        test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2)
-
+        if visa_name2 is None or visa_name1 == visa_name2:
+            print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+            print '!!!! Skipping multi device tests (needs visa_name2) (only for gpib)'
+        else:
+            test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2)
+    start_test('-- End --')
