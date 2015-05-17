@@ -630,8 +630,8 @@ def _find_normalized_alias(rsrc_manager, resource_name):
     #  The open function is a lot less sensitive on both.
     #  according to specs, the comparison should be case insensitive.
     # So lets try a few different ones
-    normalized1, alias_if_exists1 = _get_resource_info_helper(self, resource_name)
-    normalized2, alias_if_exists2 = _get_resource_info_helper(self, resource_name.upper())
+    normalized1, alias_if_exists1 = _get_resource_info_helper(rsrc_manager, resource_name)
+    normalized2, alias_if_exists2 = _get_resource_info_helper(rsrc_manager, resource_name.upper())
     if alias_if_exists1:
         normalized, alias_if_exists = normalized1, alias_if_exists1
     elif alias_if_exists2:
@@ -1606,7 +1606,7 @@ def test_usb_resource_list(rsrc_manager):
     # crash (raise exception).
     print 'List: ['
     for l in lst:
-        normalized, alias_if_exists = _find_normalized_alias(rsrc_manager, e)
+        normalized, alias_if_exists = _find_normalized_alias(rsrc_manager, l)
         if normalized:
             normalized2, alias_if_exists2 = _find_normalized_alias(rsrc_manager, normalized)
             if normalized != normalized2:
