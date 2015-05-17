@@ -630,8 +630,8 @@ def _find_normalized_alias(rsrc_manager, resource_name):
     #  The open function is a lot less sensitive on both.
     #  according to specs, the comparison should be case insensitive.
     # So lets try a few different ones
-    normalized1, alias_if_exists1 = _get_resource_info_helper(self, resource_name)
-    normalized2, alias_if_exists2 = _get_resource_info_helper(self, resource_name.upper())
+    normalized1, alias_if_exists1 = _get_resource_info_helper(rsrc_manager, resource_name)
+    normalized2, alias_if_exists2 = _get_resource_info_helper(rsrc_manager, resource_name.upper())
     if alias_if_exists1:
         normalized, alias_if_exists = normalized1, alias_if_exists1
     elif alias_if_exists2:
@@ -1607,7 +1607,7 @@ def test_usb_resource_list(rsrc_manager):
     # crash (raise exception).
     print 'List: ['
     for l in lst:
-        normalized, alias_if_exists = _find_normalized_alias(rsrc_manager, e)
+        normalized, alias_if_exists = _find_normalized_alias(rsrc_manager, l)
         if normalized:
             normalized2, alias_if_exists2 = _find_normalized_alias(rsrc_manager, normalized)
             if normalized != normalized2:
@@ -1686,7 +1686,7 @@ def test_all(visa_name1, visa_name2=None, rsrc_manager_path1=agilent_path, rsrc_
         print '!!! Skipping cross test: only one manager selescted'
         mng_paths = [rsrc_manager_path1]
     for mng_path in mng_paths:
-        test_multiprocess_connect(visa_name1, rsrc_manager_path=mng_path):
+        test_multiprocess_connect(visa_name1, rsrc_manager_path=mng_path)
         rsrc_manager = get_resource_manager(mng_path)
         test_usb_resource_list(rsrc_manager)
         test_handlers_events(rsrc_manager, visa_name1)
