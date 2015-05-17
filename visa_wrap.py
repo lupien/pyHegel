@@ -915,7 +915,8 @@ in instruments_others:
 
 import visa_wrap
 visa_wrap.test_all('GPIB0::6', 'GPIB0::11')
-visa_wrap.test_all('ASRL1')
+# ASRL1 is a lakeshore T controller
+visa_wrap.test_all('ASRL1', instr_options=dict(data_bits=7, parity=visa_wrap.constants.Parity.odd))
 visa_wrap.test_all('TCPIP::A-N9010A-20278.local')
 visa_wrap.test_all('USB0::2391::2827::MY52220278::0')
 """
@@ -1180,7 +1181,7 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
     print 'R1=', R1
     print 'R2=', R2
     print 'Default result (no locking accross visalib):', _base_cross_result
-    success, error, i2 = _test_open_instr(rsrc_manager2, visa_name)
+    success, error, i2 = _test_open_instr(rsrc_manager2, visa_name, instr_options=instr_options)
     if not success:
         print 'Unable to open instrument(%s) locally on second manager(%s) because of error: %s'%(visa_name, R2, error)
         # show only result possible:
@@ -1224,6 +1225,7 @@ def _test_multiprocess_connect_sub(visa_name, rsrc_manager_path, pipe, instr_opt
     pipe.send([res, state])
     if not res:
         return
+    pipe.recv()
     pipe.send(_test_communication(instr))
 
 def test_multiprocess_connect(visa_name, rsrc_manager_path=None, instr_options={}):
@@ -1234,27 +1236,31 @@ def test_multiprocess_connect(visa_name, rsrc_manager_path=None, instr_options={
     start_test('multi process access to device (same visalib)')
     rsrc_manager = get_resource_manager(rsrc_manager_path)
     R1 = visa_lib_info(rsrc_manager)
-    success, error, i1 = _test_open_instr(rsrc_manager, visa_name)
+    success, error, i1 = _test_open_instr(rsrc_manager, visa_name, instr_options=instr_options)
     if not success:
         raise RuntimeError('Unable to open local instrument. visa_name: %s, R1:%s, error: %s'%(visa_name, R1, error))
+    success, error, i2local = _test_open_instr(rsrc_manager, visa_name, instr_options=instr_options)
+    if not success:
+        raise RuntimeError('Unable to open local instrument twice. visa_name: %s, R1:%s, error: %s'%(visa_name, R1, error))
+    del i2local
     print 'visa=', visa_name
     print 'R1=', R1
+    ok = True
     plocal, premote = Pipe()
     process = Process(target=_test_multiprocess_connect_sub, args=(visa_name, rsrc_manager_path, premote, instr_options))
     with subprocess_start():
         process.start()
-    # the remote should have opened the connection, we will test later
-    res = _test_communication(i1)
-    if res != True:
-        print 'Failure to communicate on local: %s'%res[1]
-        ok = False
-    # now check remote
     success, error, i2 = _test_open_instr(process, '', plocal)
-    ok = True
     if not success:
-        return "Failure, remote did not open, error: %s"%error
         ok = False
+        print "Failure, remote did not open, error: %s"%error
     else:
+        # Both sides are open.
+        res = _test_communication(i1)
+        if res != True:
+            print 'Failure to communicate on local: %s'%res[1]
+            ok = False
+        plocal.send('Proceed to remote communication test')
         res = plocal.recv()
         if res != True:
             print 'Failure to communicate on remote: %s'%res[1]
@@ -1685,7 +1691,7 @@ def test_all(visa_name1, visa_name2=None, rsrc_manager_path1=agilent_path, rsrc_
         print '!!! Skipping cross test: only one manager selescted'
         mng_paths = [rsrc_manager_path1]
     for mng_path in mng_paths:
-        test_multiprocess_connect(visa_name1, rsrc_manager_path=mng_path, instr_options=instr_options):
+        test_multiprocess_connect(visa_name1, rsrc_manager_path=mng_path, instr_options=instr_options)
         rsrc_manager = get_resource_manager(mng_path)
         test_usb_resource_list(rsrc_manager)
         test_handlers_events(rsrc_manager, visa_name1, instr_options=instr_options)
