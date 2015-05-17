@@ -611,43 +611,55 @@ def _get_resource_info_helper(rsrc_manager, resource_name):
     try:
         _, _, _, normalized, alias_if_exists = rsrc_manager.resource_info(resource_name)
     except AttributeError:
+        # This could happen for very old visa lib that miss the viParseRsrcEx function
+        # which is used by resource_info
         pass
+    return normalized, alias_if_exists
+
+def _find_normalized_alias(rsrc_manager, resource_name):
+    # For agilent visa version 16.2.15823.0 (at least), the serial number (for USB)
+    # is converted to lower in the library, but the instrument really uses
+    # the upper one for the extended resources so without this upper
+    # it fails to find the alias.
+    # Howerver, this is a hack because if a serial number really uses lower case
+    # then this will prevent the match
+    # It used to work ok with agilent io 16.0.14518.0 and 16.1.14827.0
+    # Agilent also does not normalize the entries properly (it likes decimal instead of hexadecimal)
+    # National instruments (MAX) 5.1.0f0 for usb does not accept the extra ::0  (interface number)
+    # that it returns as normalized, and it requires the values to be in hexadecimal.
+    #  The open function is a lot less sensitive on both.
+    #  according to specs, the comparison should be case insensitive.
+    # So lets try a few different ones
+    normalized1, alias_if_exists1 = _get_resource_info_helper(self, resource_name)
+    normalized2, alias_if_exists2 = _get_resource_info_helper(self, resource_name.upper())
+    if alias_if_exists1:
+        normalized, alias_if_exists = normalized1, alias_if_exists1
+    elif alias_if_exists2:
+        normalized, alias_if_exists = normalized2, alias_if_exists2
+    else:
+        normalized, alias_if_exists = normalized1, None
+    # alias_if_exists is None if it was not found.
     return normalized, alias_if_exists
 
 def _get_instrument_list(self, use_aliases=True):
     # same as old pyvisa 1.4 version of get_instrument_list except with 
     # a separated and fixed (memory leak) first part (self.list_resources)
     # and a second part modified for bad visa implementations
+    # and safer truncation of "::INSTR"
     rsrcs = self.list_resources()
     # Phase two: If available and use_aliases is True, substitute the alias.
     # Otherwise, truncate the "::INSTR".
     result = []
     for resource_name in rsrcs:
-        # For agilent visa version 16.2.15823.0 (at least), the serial number (for USB)
-        # is converted to lower in the library, but the instrument really uses
-        # the upper one for the extended resources so without this upper
-        # it fails to find the alias.
-        # Howerver, this is a hack because if a serial number really uses lower case
-        # then this will prevent the match
-        # It used to work ok with agilent io 16.0.14518.0 and 16.1.14827.0
-        # Agilent also does not normalize the entries properly (it likes decimal instead of hexadecimal)
-        # National instruments (MAX) 5.1.0f0 for usb does not accept the extra ::0  (interface number)
-        # that it returns as normalized, and it requires the values to be in hexadecimal.
-        #  The open function is a lot less sensitive on both.
-        #  according to specs, the comparison should be case insensitive.
-        # So lets try a few different ones
-        normalized1, alias_if_exists1 = _get_resource_info_helper(self, resource_name)
-        normalized2, alias_if_exists2 = _get_resource_info_helper(self, resource_name.upper())
-        if alias_if_exists1:
-            normalized, alias_if_exists = normalized1, alias_if_exists1
-        elif alias_if_exists2:
-            normalized, alias_if_exists = normalized2, alias_if_exists2
-        else:
-            normalized, alias_if_exists = normalized1, None
+        normalized, alias_if_exists = _find_normalized_alias(self, resource_name)
         if alias_if_exists and use_aliases:
             result.append(alias_if_exists)
+        elif normalized and normalized.endswith('::INSTR'):
+            result.append(normalized[:-7]) # This removes ::INSTR
+        elif normalized:
+            result.append(normalized)
         else:
-            result.append(normalized[:-7])
+            result.append(resource_name)
     return result
 
 
@@ -1585,12 +1597,25 @@ def _is_upper(s):
 ########################################################################
 
 def test_usb_resource_list(rsrc_manager):
+    """ To properly tests the aliases, you should give some to various devices
+        for all visa lib being tested.
+    """
     start_test('resource list')
     print 'R1=', visa_lib_info(rsrc_manager)
     lst = rsrc_manager.list_resources()
+    # We will try a bunch of things to make sure the routines above will not
+    # crash (raise exception).
     print 'List: ['
     for l in lst:
-        print '    ', repr(l)
+        normalized, alias_if_exists = _find_normalized_alias(rsrc_manager, e)
+        if normalized:
+            normalized2, alias_if_exists2 = _find_normalized_alias(rsrc_manager, normalized)
+            if normalized != normalized2:
+                print '!!! normalized string not stable: %s %s'%(normalized, normalized)
+            if alias_if_exists != alias_if_exists2:
+                print '!!! alias string not stable: %s %s'%(normalized, normalized)
+        alias = ' (alias: %s)'%repr(alias_if_exists) if alias_if_exists else ''
+        print '    %s%s'%(repr(l), alias)
     print '    ]'
     usbs = 0
     serials = 0
@@ -1661,6 +1686,7 @@ def test_all(visa_name1, visa_name2=None, rsrc_manager_path1=agilent_path, rsrc_
         print '!!! Skipping cross test: only one manager selescted'
         mng_paths = [rsrc_manager_path1]
     for mng_path in mng_paths:
+        test_multiprocess_connect(visa_name1, rsrc_manager_path=mng_path):
         rsrc_manager = get_resource_manager(mng_path)
         test_usb_resource_list(rsrc_manager)
         test_handlers_events(rsrc_manager, visa_name1)
