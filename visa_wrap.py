@@ -1351,6 +1351,10 @@ class Handlers(object):
         #                                   RSRC_IMPL_VERSION, RSRC_LOCK_STATE, RSRC_MANF_ID,
         #                                   RSRC_MANF_NAME, RSRC_NAME, RSRC_SPEC_VERSION,
         #                                   USER_DATA
+        #print session, event_type, context, userHandle
+        if not old_interface:
+            session = session.value
+            context = context.value
         cntx_event_type = self.get_attr(context, constants.VI_ATTR_EVENT_TYPE)
         if event_type != self.event_type:
             self.wrong_type = True
@@ -1359,6 +1363,7 @@ class Handlers(object):
         if userHandle != self.userHandle:
             self.wrong_handle = True
         if session != self.session:
+            print 'wrong:', session, self.session
             self.wrong_session = True
         self.count += 1
         self._last = _time()
@@ -1551,10 +1556,298 @@ def test_handlers_events(rsrc_manager, visa_name, instr_options={}):
 
 ########################################################################
 
-def test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2, instr_options={}):
+def _test_wait(instrument, timeout_ms=500):
+    """
+    returns True when it works
+    or [False, reason] when not
+    """
+    if isinstance(instrument, Handlers):
+        res = instrument.wait(timeout_ms/1e3)
+        res = True if res else [False, 'timeout']
+    else:
+        event = _event_type('srq')
+        with visa_context(ok='OK') as res:
+            instrument.wait_on_event(event, timeout_ms)
+        res = res if not res[0] else True
+    return res
+
+def _test_write(instrument, message):
+    """ absorbs any errors, but print an error message """
+    name = instrument.resource_name
+    with visa_context(ok='OK') as res:
+        instrument.write(message)
+    res = res if not res[0] else True
+    if res != True:
+        print '!! Error when writing to %s, message: %s, error: %s'%(name, message, res[1])
+
+def _test_query(instrument, message):
+    """ absorbs any errors, but print an error message """
+    name = instrument.resource_name
+    ret = '0'
+    with visa_context(ok='OK') as res:
+        ret = instrument.query(message)
+    res = res if not res[0] else True
+    if res != True:
+        print '!! Error when querying to %s, message: %s, error: %s'%(name, message, res[1])
+    return ret
+
+def _test_stb(instrument):
+    """ absorbs any errors, but print an error message """
+    name = instrument.resource_name
+    ret = 0
+    with visa_context(ok='OK') as res:
+        ret = instrument.stb
+    res = res if not res[0] else True
+    if res != True:
+        print '!! Error when querying status byte for %s, error: %s'%(name, res[1])
+    return ret
+
+def _test_reset_queue(instr, high=False, hndlr=None):
+    name = instr.resource_name
+    if high:
+        msg = '*ese 1;*sre 96'
+    else:
+        msg = '*ese 1;*sre 32'
+    _test_write(instr, msg)
+    _test_write(instr, '*cls') # should reset the status and clear errors
+    if hndlr:
+        _test_event(instr, 'srq', 'handler', discard=True)
+        hndlr.reset()
+        wait_object = hndlr
+    else:
+        _test_event(instr, 'srq', 'queue', discard=True)
+        wait_object = instr
+    extras = 0
+    while _test_wait(wait_object, 0) == True:
+        extras += 1
+    if extras:
+        print '!! Discard of events left %d events in queue for %s'%(extras, name)
+    extras = 0
+    while _test_stb(instr)&64:
+        extras += 1
+    if extras:
+        print '!! Status byte RQS left %d events for %s'%(extras, name)
+
+def _test_one_dev(instr):
+    name = instr.resource_name
+    high = False
+    good = True
+    _test_event(instr, 'srq', 'queue')
+    _test_reset_queue(instr, high=high)
+    _test_write(instr, '*OPC')
+    res = _test_wait(instr)
+    if res != True:
+        good = False
+        high = True
+        low = res[1]
+        _test_reset_queue(instr, high=high)
+        _test_write(instr, '*OPC')
+        res = _test_wait(instr)
+        if res != True:
+            print '!!! Device(%s) will not produce service requests, aborting: %s'%(name, res[1])
+            _test_event(instr, 'srq', 'queue', disable=True)
+            return good
+        else:
+            print '! Device(%s) requires sre 96: %s'%(name, low)
+    else: # test high anyway
+        _test_reset_queue(instr, high=True)
+        _test_write(instr, '*OPC')
+        res = _test_wait(instr)
+        if res != True:
+            print '!!! Device(%s) will not produce service requests when using high: %s'%(name, res[1])
+    # check read stb, *stb
+    stb_q1 = int(_test_query(instr, '*stb?'))&96
+    stb_q2 = int(_test_query(instr, '*stb?'))&96
+    stb1 = _test_stb(instr)&96
+    stb2 = _test_stb(instr)&96
+    stb_q3 = int(_test_query(instr, '*stb?'))&96
+    if stb_q1 != 96:
+        print '!! Device(%s) *stb not as expected before'%name
+        good = False
+    if stb_q1 != stb_q2:
+        print '!! Device(%s) *stb request changes the bits'%name
+        good = False
+    if stb1 != 96:
+        print '!! Device(%s) read stb not as expected before'%name
+        good = False
+    if stb2&64:
+        print '!! Device(%s) read stb not as expected after (no reset)'%name
+        good = False
+    if not stb2&32:
+        print '!! Device(%s) read stb not as expected after (summary reset)'%name
+        good = False
+    if stb_q2 != stb_q3:
+        print '!! Device(%s) *stb changed after reset'%name
+        good = False
+    # check *esr
+    ev1 = int(_test_query(instr, '*esr?'))&1
+    stb_q = int(_test_query(instr, '*stb?'))&96
+    stb = _test_stb(instr)&96
+    ev2 = int(_test_query(instr, '*esr?'))&1
+    if not ev1:
+        print '!! Device(%s) *esr was not set'%name
+        good = False
+    if ev2:
+        print '!! Device(%s) *esr does not clear the bits'%name
+        good = False
+    if stb_q or stb:
+        print '!! Device(%s) *stb and read_stb are incorrect after *esr reset'%name
+        good = False
+    # test stb/esr
+    _test_reset_queue(instr, high=high)
+    _test_write(instr, '*OPC')
+    _test_wait(instr)
+    ev = int(_test_query(instr, '*esr?'))&1
+    stb_q = int(_test_query(instr, '*stb?'))&96
+    stb1 = _test_stb(instr)&96
+    stb2 = _test_stb(instr)&96
+    if not ev:
+        print '!! Device(%s) *esr was not set(2)'%name
+        good = False
+    if stb_q:
+        print '!! Device(%s) *stb not cleared properly by *esr'%name
+        good = False
+    if not stb1:
+        print 'Device(%s) lost read stb because of *esr (probably no autopoll: call *esr after stb)'%name
+        good = False
+    elif stb == 32:
+        print '!! Device(%s) lost read stb RQS because of *esr'%name
+        good = False
+    elif stb == 64:
+        print '!! Device(%s) lost summary bit for stb because of *esr'%name
+        good = False
+    if stb2:
+        print '!! Device(%s) status not reset properly after second read after *esr'%name
+        good = False
+    # test *clr
+    _test_reset_queue(instr, high=high)
+    _test_write(instr, '*OPC')
+    _test_wait(instr)
+    stb_q = int(_test_query(instr, '*stb?'))&96
+    if stb_q != 96:
+        print '!! Device(%s) did not produce a proper service request'%name
+        good = False
+    _test_write(instr, '*cls')
+    stb_q = int(_test_query(instr, '*stb?'))&96
+    stb = _test_stb(instr)&96
+    ev = int(_test_query(instr, '*esr?'))&1
+    if stb_q:
+        print '!! Device(%s) *cls does not reset *stb: %d'%(name, stb_q)
+        good = False
+    if stb:
+        stb2 = _test_stb(instr)&96
+        if stb2:
+            print '!! Device(%s) *cls does not reset read stb(twice): %d, %d'%(name, stb, stb2)
+        else:
+            if stb == 96:
+                print 'Device(%s) *cls does not reset read stb(single) (probably because of autopoll): %d'%(name, stb)
+            else:
+                print '!! Device(%s) *cls does not reset read stb(single): %d'%(name, stb)
+        good = False
+    if ev:
+        print '!! Device(%s) *cls does not reset *esr: %d'%(name, ev)
+        good = False
+    _test_event(instr, 'srq', 'queue', disable=True)
+    return good
+
+def _test_gpib_queue(i1, i2):
+    good = True
+    if not _test_one_dev(i1):
+        good = False
+    if not _test_one_dev(i2):
+        good = False
+    return good
+
+def _test_gpib_handler_helper(instr, hndlr):
+    # We presume all the results for queue apply to handlers.
+    # So just tests it works.
+    good = True
+    name = instr.resource_name
+    high = True
+    _test_event(instr, 'srq', 'handler')
+    _test_reset_queue(instr, high=high, hndlr=hndlr)
+    _test_write(instr, '*OPC')
+    res = _test_wait(hndlr)
+    if res != True:
+        print '!!! Device(%s) will not produce service requests for handlers: %s'%(name, res[1])
+        good = False
+    _sleep(.5)
+    # Now clear the event. To be general, both of the following are needed
+    _test_write(instr, '*cls')
+    _test_stb(instr)
+    if hndlr.count != 1:
+        print '! Device(%s) produced %d events in 0.5 s'%(name, hndlr.count)
+        good = False
+    _test_event(instr, 'srq', 'handler', disable=True)
+    return good
+
+def _test_gpib_handler(i1, hndlr1, i2, hndlr2):
+    good = True
+    if not _test_gpib_handler_helper(i1, hndlr1):
+        good = False
+    if not _test_gpib_handler_helper(i2, hndlr2):
+        good = False
+    return good
+
+def _test_gpib_cross(instr1, hndlr1, instr2, hndlr2):
+    good = True
+    name1 = instr1.resource_name
+    name2 = instr2.resource_name
+    high = True
+    _test_event(instr1, 'srq', 'handler')
+    _test_event(instr2, 'srq', 'handler')
+    _test_reset_queue(instr1, high=high, hndlr=hndlr1)
+    _test_reset_queue(instr2, high=high, hndlr=hndlr2)
+    _test_write(instr1, '*OPC')
+    _sleep(.5)
+    res = _test_wait(hndlr1)
+    if res != True:
+        print '!!! Device(%s) will not produce service requests for handlers: %s'%(name1, res[1])
+        good = False
+    res = _test_wait(hndlr2)
+    if res == True:
+        print 'Device(%s)received request from %s (probably no autopoll)'%(name2, name1)
+        good = False
+    # Now clear the event. To be general, all of the following 4 lines are needed
+    _test_write(instr2, '*cls')
+    _test_stb(instr2)
+    _test_write(instr1, '*cls')
+    _test_stb(instr1)
+    _test_event(instr2, 'srq', 'handler', disable=True)
+    _test_event(instr1, 'srq', 'handler', disable=True)
+    if hndlr1.count != 1:
+        print '! Device(%s) produced %d events in 0.5 s'%(name1, hndlr1.count)
+        good = False
+    if hndlr2.count != 0:
+        print '! Device(%s) produced %d events in 0.5 s'%(name2, hndlr2.count)
+        good = False
+    if good:
+        print 'Events on different instruments are independent'
+
+# To reset autopoll, at least for some version of NI,
+#   need to restart the library (here in another process) and enable events.
+def _reset_autopoll(manager_path, visa_name, instr_options):
+    manager = get_resource_manager(manager_path)
+    success, error, instr = _test_open_instr(manager, visa_name, instr_options=instr_options)
+    if not success:
+        print "!! Reset of %s autopoll failed (can't open): %s"%(visa_name, error)
+        return
+    res = _test_event(instr, 'srq', 'queue')
+    if res != True:
+        print "!! Reset of %s autopoll failed (can't enable event): %s"%(visa_name, res[1])
+
+
+def test_gpib_handlers_events(rsrc_manager, rsrc_manager_path, visa_name1, visa_name2, instr_options={}):
     """
     Try this for both devices on gpib.
     """
+    # Reset autopoll
+    from multiprocessing import Process
+    process = Process(target=_reset_autopoll, args=(rsrc_manager_path, visa_name1, instr_options))
+    with subprocess_start():
+        process.start()
+    process.join()
+    # Reset autopoll completed
     R1 = visa_lib_info(rsrc_manager)
     success, error, i1 = _test_open_instr(rsrc_manager, visa_name1, instr_options=instr_options)
     if not success:
@@ -1569,10 +1862,57 @@ def test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2, instr_option
     print 'visa1=', visa_name1, ' id=', i1.query('*idn?')
     print 'visa2=', visa_name2, ' id=', i2.query('*idn?')
     print 'R1=', R1
-    # test: tests activating srq on i1, i2 works
-    #       using queue, test service request interactions
-    #       using handlers, test service request interactions
-    #       poll?, auto-serial poll?
+    hndlr1 = Handlers('i1', i1)
+    hndlr2 = Handlers('i2', i2)
+    res = hndlr1.install('srq')
+    if res != True:
+        print '!! Failure to install first handler, skipping gpib test'
+        return
+    res = hndlr2.install('srq')
+    if res != True:
+        print '!! Failure to install second handler, skipping gpib test'
+        hndlr1.uninstall()
+    if _test_gpib_queue(i1, i2):
+        print 'Both separate queues work properly!'
+    if _test_gpib_handler(i1, hndlr1, i2, hndlr2):
+        print 'Both separate handlers work properly!'
+    _test_gpib_cross(i1, hndlr1, i2, hndlr2)
+    hndlr2.uninstall()
+    hndlr1.uninstall()
+
+"""
+To explore the auto-serial poll stuff (NI-488.2 gpib driver)
+    http://www.ni.com/tutorial/4054/en/
+Start NI MAX (Measurement ? Automation Explorer)
+  See properties of GPIB-USB-HS card
+     there is an autopolling option that can be toggled.
+     however it does not represent the current state of the setting. To see
+     that, click on "Interactive control" and type:
+      ibask IbaAUTOPOLL
+     To change it type
+      ibconfig IbcAUTOPOLL 1
+     To see the ibconfig IbcAUTOPOLL calls launch NI I/O trace
+     In options deselect visa trace (otherwise, NI visa calls will not show
+     the gpib trace. Agilent uses gpib directly.) Then start the trace.
+     You can then search for AUTOPOLL
+
+Observations:
+  National Instruments, NIVISA_CORE: 5.1.1f0
+    Always enables autopoll on first service request event enable communication
+      accross all devices.
+        It is only set once. To reset it requires restarting a python
+        session (reinits the visa library)
+    Forcing it to be disabled screws up its algorithm (the instruments RQS status
+    is never changed, so it times out)
+ Agilent Technologies, Agilent IO Libraries: 16.0.14518.0
+    Always disables autopoll on opening a new gpib device.
+    Forcing it be enabled does not seem to screw up the algorithm.
+
+"""
+
+# TODO: Figure out agilent Device(GPIB0::6::INSTR) lost read stb because of *esr (probably no autopoll: call *esr after stb)
+#       add read stb on non-OPC instrument to see if it changes count.
+#       Measure time between OPC and request.
 
 ########################################################################
 
@@ -1681,6 +2021,7 @@ def are_mngr_diff(m1, m2):
 def test_all(visa_name1, visa_name2=None, rsrc_manager_path1=agilent_path, rsrc_manager_path2='', instr_options={}):
     """
     provide visa_name2 for gpib devices
+    Note that the test will change the device event and request registers and send some commands (*idn?, *OPC, )
     """
     start_test('-- START --')
     if are_mngr_diff(rsrc_manager_path1, rsrc_manager_path2):
@@ -1699,6 +2040,6 @@ def test_all(visa_name1, visa_name2=None, rsrc_manager_path1=agilent_path, rsrc_
             print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
             print '!!!! Skipping multi device tests (needs visa_name2) (only for gpib)'
         else:
-            test_gpib_handlers_events(rsrc_manager, visa_name1, visa_name2, instr_options=instr_options)
+            test_gpib_handlers_events(rsrc_manager, mng_path, visa_name1, visa_name2, instr_options=instr_options)
     start_test('-- End --')
 
