@@ -110,17 +110,40 @@ def wait(sec):
                 return
             _sleep(min(.1, dif))
 
-try:
-    FigureCanvas.keyvald.update({QtCore.Qt.Key_Left:'left',
-            QtCore.Qt.Key_Right:'right',
-            QtCore.Qt.Key_Up:'up',
-            QtCore.Qt.Key_Down:'down',
-            QtCore.Qt.Key_Escape:'escape',
-            QtCore.Qt.Key_Home:'home',
-            QtCore.Qt.Key_End:'end',
-            QtCore.Qt.Key_Backspace:'backspace'})
-except AttributeError: # matplotlib 1.4.2 includes all these keys already
-    pass          # in matplotlib.backends.backend_qt5.SPECIAL_KEYS
+# FigureCanvas is already a subclass of object because of QWidget (for older
+# versions of matplotlib that used old style classes)
+class TraceCanvas(FigureCanvas):
+    def __init__(self, *args, **kwargs):
+        super(TraceCanvas, self).__init__(*args, **kwargs)
+        try:
+            self.keyvald.update({QtCore.Qt.Key_Left:'left',
+                                    QtCore.Qt.Key_Right:'right',
+                                    QtCore.Qt.Key_Up:'up',
+                                    QtCore.Qt.Key_Down:'down',
+                                    QtCore.Qt.Key_Escape:'escape',
+                                    QtCore.Qt.Key_Home:'home',
+                                    QtCore.Qt.Key_End:'end',
+                                    QtCore.Qt.Key_Backspace:'backspace'})
+        except AttributeError: # matplotlib 1.4.2 includes all these keys already
+            pass               # in matplotlib.backends.backend_qt5.SPECIAL_KEYS
+    def get_default_filename(self, *args, **kwargs):
+        default_filename = super(TraceCanvas, self).get_default_filename(*args, **kwargs)
+        # cleanup more, matplotlib 1.4.2 at least, allows : / \ in default_filename
+        # but qt, _getSaveFileName does not run with an improper filename (like sweep:0)
+        # In older versions of matplotlib (like 1.0.1) this functions was not used
+        #   The _getSaveFilename was always 'image.ext'
+        default_filename = default_filename.replace(':', '-')
+        default_filename = default_filename.replace('/', '-')
+        default_filename = default_filename.replace('\\', '-')
+        default_filename = default_filename.replace('\\', '-')
+        # other onces that windows does not like:
+        default_filename = default_filename.replace('"', '_')
+        default_filename = default_filename.replace('?', '_')
+        default_filename = default_filename.replace('|', '_')
+        default_filename = default_filename.replace('*', '_')
+        default_filename = default_filename.replace('<', '_')
+        default_filename = default_filename.replace('>', '_')
+        return default_filename
 
 def get_last_trace():
     return _figlist[-1]
@@ -227,7 +250,7 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
     # A useful subclass will need at least to include update
     def __init__(self, width=9.00, height=7.00, dpi=72):
         self.fig = Figure(figsize=(width,height),dpi=dpi)
-        self.canvas = FigureCanvas(self.fig)
+        self.canvas = TraceCanvas(self.fig)
         FigureManagerQT.__init__(self,self.canvas,-1)
         self.MainWidget = self.window
         self.setWindowTitle('Trace...')
