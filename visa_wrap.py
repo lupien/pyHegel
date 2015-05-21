@@ -32,6 +32,7 @@ import warnings as _warnings
 import os as _os
 from ctypes import byref as _byref
 from math import isinf as _isinf
+from distutils.version import LooseVersion
 
 try_agilent_first = True
 agilent_path = r"c:\Windows\system32\agvisa32.dll"
@@ -40,25 +41,81 @@ version = "1.4"
 
 _agilent_visa = False
 
+def is_version(lower=None, upper=None):
+    """
+    Return True if the pyvisa version is between lower and upper
+    including either limit if given.
+    Otherwise returns False
+    """
+    if lower is None and upper is None:
+        raise RuntimeError('You need to specify at least one of upper or lower')
+    current_version = LooseVersion(version)
+    if current_version < LooseVersion(lower):
+        return False
+    if current_version > LooseVersion(upper):
+        return False
+    return True
+
+
 def _add_enum_equivalent_old():
-        class Parity(object):
-            none = constants.VI_ASRL_PAR_NONE
-            odd = constants.VI_ASRL_PAR_ODD
-            even = constants.VI_ASRL_PAR_EVEN
-            mark = constants.VI_ASRL_PAR_MARK
-            space = constants.VI_ASRL_PAR_SPACE
-        constants.Parity = Parity
-        class StopBits(object):
-            one = 1.
-            one_and_a_half = 1.5
-            two = 2.0
-        constants.StopBits = StopBits
-        class SerialTermination(object):
-            none = constants.VI_ASRL_END_NONE
-            last_bit = constants.VI_ASRL_END_LAST_BIT
-            termination_char = constants.VI_ASRL_END_TERMCHAR
-            termination_break = constants.VI_ASRL_END_BREAK
-        constants.SerialTermination = SerialTermination
+    class Parity(object):
+        none = constants.VI_ASRL_PAR_NONE
+        odd = constants.VI_ASRL_PAR_ODD
+        even = constants.VI_ASRL_PAR_EVEN
+        mark = constants.VI_ASRL_PAR_MARK
+        space = constants.VI_ASRL_PAR_SPACE
+    constants.Parity = Parity
+    class StopBits(object):
+        one = 1.
+        one_and_a_half = 1.5
+        two = 2.0
+    constants.StopBits = StopBits
+    class SerialTermination(object):
+        none = constants.VI_ASRL_END_NONE
+        last_bit = constants.VI_ASRL_END_LAST_BIT
+        termination_char = constants.VI_ASRL_END_TERMCHAR
+        termination_break = constants.VI_ASRL_END_BREAK
+    constants.SerialTermination = SerialTermination
+
+def _add_missing_attributes_new():
+    # needed for tests
+    def not_attr(s):
+        id = getattr(constants, s)
+        return not pyvisa.attributes.AttributesByID.has_key(id)
+    #if is_version('1.5', '1.7'):
+    if not_attr('VI_ATTR_EVENT_TYPE'):
+        #class _AttrVI_ATTR_EVENT_TYPE(pyvisa.attributes.EnumAttribute):
+        class AttrVI_ATTR_EVENT_TYPE(pyvisa.attributes.IntAttribute):
+            """ Provides the event type in all event contexts.
+            """
+            resources = []
+            py_name = ''
+            visa_name = 'VI_ATTR_EVENT_TYPE'
+            visa_type = 'ViEventType'
+            default = pyvisa.attributes.NotAvailable
+            read, write, local = True, False, False
+            #enum_type = constants.EventType
+    if not_attr('VI_ATTR_STATUS'):
+        class AttrVI_ATTR_STATUS(pyvisa.attributes.EnumAttribute):
+            """ Provides the status for the source of the exception in event contexts.
+            """
+            resources = []
+            py_name = ''
+            visa_name = 'VI_ATTR_STATUS'
+            visa_type = 'ViStatus'
+            default = pyvisa.attributes.NotAvailable
+            read, write, local = True, False, False
+            enum_type = constants.StatusCode
+    if not_attr('VI_ATTR_OPER_NAME'):
+        class AttrVI_ATTR_OPER_NAME(pyvisa.attributes.Attribute):
+            """ Provides the operation name for the source of the exception in event contexts.
+            """
+            resources = []
+            py_name = ''
+            visa_name = 'VI_ATTR_OPER_NAME'
+            visa_type = 'ViString'
+            default = pyvisa.attributes.NotAvailable
+            read, write, local = True, False, False
 
 
 try:
@@ -78,6 +135,7 @@ try:
         version = pyvisa.__version__
         import pyvisa.constants as constants
         from pyvisa import VisaIOError
+        _add_missing_attributes_new()
 
 except ImportError as exc:
     # give a dummy visa to handle imports
@@ -299,6 +357,18 @@ def _query_helper(self, message, termination='default', read_termination='defaul
     else:
         return self.read(termination=read_termination)
 
+def _cleanup_timeout(timeout):
+    if timeout is None or _isinf(timeout):
+        timeout = constants.VI_TMO_INFINITE
+    elif timeout < 1:
+        timeout = constants.VI_TMO_IMMEDIATE
+    elif not (1 <= timeout <= 4294967294):
+        raise ValueError("timeout value is invalid")
+    else:
+        timeout = int(timeout)
+    return timeout
+
+
 class WaitResponse(object):
     """Class used in return of wait_on_event. It properly closes the context upon delete.
     """
@@ -404,14 +474,16 @@ class old_Instrument(redirect_instr):
         vpp43.set_attribute(self.vi, attr, state)
     def lock_excl(self, timeout_ms):
         """
-        timeout_ms is in ms or can be constants.VI_TMO_IMMEDIATE or constants.VI_TMO_INFINITE
+        timeout_ms is in ms or can be None or +inf for infinite
         """
+        timeout_ms = self.timeout if timeout_ms == 'default' else timeout_ms
+        timeout_ms = _cleanup_timeout(timeout_ms)
         vpp43.lock(self.vi, constants.VI_EXCLUSIVE_LOCK, timeout_ms)
     def lock(self, timeout_ms='default', requested_key=None):
         """ Shared lock
         """
-        # does not handle infinite time
         timeout_ms = self.timeout if timeout_ms == 'default' else timeout_ms
+        timeout_ms = _cleanup_timeout(timeout_ms)
         ret = vpp43.lock(self.vi, constants.VI_SHARED_LOCK, timeout_ms, requested_key)
         return ret.value
     def unlock(self):
@@ -465,41 +537,6 @@ class old_Instrument(redirect_instr):
     query = _query_helper
 
 
-if not old_interface:
-    # TODO transfer this to pyVisa
-    # needed for tests
-    #class _AttrVI_ATTR_EVENT_TYPE(pyvisa.attributes.EnumAttribute):
-    class AttrVI_ATTR_EVENT_TYPE(pyvisa.attributes.IntAttribute):
-        """ Provides the event type in all event contexts.
-        """
-        resources = []
-        py_name = ''
-        visa_name = 'VI_ATTR_EVENT_TYPE'
-        visa_type = 'ViEventType'
-        default = pyvisa.attributes.NotAvailable
-        read, write, local = True, False, False
-        #enum_type = constants.EventType
-    class AttrVI_ATTR_STATUS(pyvisa.attributes.EnumAttribute):
-        """ Provides the status for the source of the exception in event contexts.
-        """
-        resources = []
-        py_name = ''
-        visa_name = 'VI_ATTR_STATUS'
-        visa_type = 'ViStatus'
-        default = pyvisa.attributes.NotAvailable
-        read, write, local = True, False, False
-        enum_type = constants.StatusCode
-    class AttrVI_ATTR_OPER_NAME(pyvisa.attributes.Attribute):
-        """ Provides the operation name for the source of the exception in event contexts.
-        """
-        resources = []
-        py_name = ''
-        visa_name = 'VI_ATTR_OPER_NAME'
-        visa_type = 'ViString'
-        default = pyvisa.attributes.NotAvailable
-        read, write, local = True, False, False
-    del AttrVI_ATTR_EVENT_TYPE, AttrVI_ATTR_STATUS, AttrVI_ATTR_OPER_NAME
-
 class new_Instrument(redirect_instr):
     #def __del__(self):
     #    print 'Deleting instrument', self.resource_name
@@ -543,23 +580,26 @@ class new_Instrument(redirect_instr):
                 self.visalib.viUninstallHandler(self.session, event_type, element[2], user_handle)
         else:
             self.visalib.uninstall_visa_handler(self.session, event_type, handler, user_handle)
-    if version in ['1.5', '1.6', '1.6.1', '1.6.2']:
+    if is_version('1.5', '1.6.2'):
         @property
         def interface_type(self):
             return self.visalib.parse_resource(self._resource_manager.session,
                                            self.resource_name)[0].interface_type
-
-    if version in ['1.5', '1.6', '1.6.1', '1.6.2', '1.6.3']:
-        def lock_excl(self, timeout_ms):
+    if is_version('1.5', '1.7'):
+        def lock_excl(self, timeout_ms='default'):
             """
-            timeout_ms is in ms or can be constants.VI_TMO_IMMEDIATE or constants.VI_TMO_INFINITE
+            timeout_ms is in ms or can be None or +inf for infinite
             """
-            self.visalib.lock(self.session, constants.VI_EXCLUSIVE_LOCK, timeout_ms)
+            timeout_ms = self.timeout if timeout_ms == 'default' else timeout_ms
+            timeout_ms = _cleanup_timeout(timeout_ms)
+            # could have used self.visalib.lock except that the version in 1.7 is just bad.
+            self.visalib.viLock(self.session, constants.VI_EXCLUSIVE_LOCK, timeout_ms, None, None)
+    if is_version('1.5', '1.6.3'):
         def lock(self, timeout_ms='default', requested_key=None):
             """ Shared lock
             """
-            # does not handle infinite time
             timeout_ms = self.timeout if timeout_ms == 'default' else timeout_ms
+            timeout_ms = _cleanup_timeout(timeout_ms)
             ret = self.visalib.lock(self.session, constants.VI_SHARED_LOCK, timeout_ms, requested_key)[0]
             return ret.value
         def enable_event(self, event_type, mechanism):
@@ -721,7 +761,7 @@ class new_WrapResourceManager(redirect_instr):
     def __init__(self, new_rsrc_manager):
         super(new_WrapResourceManager, self).__init__(new_rsrc_manager)
         self._is_agilent = None
-    if version in ['1.5', '1.6', '1.6.1', '1.6.2', '1.6.3']:
+    if is_version('1.5', '1.6.3'):
         additional_properties = ['flow_control']
         # The same as the original ResourceManager one (1.6.1) except for the close statement
         def list_resources(self, query='?*::INSTR'):
