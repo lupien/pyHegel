@@ -1339,10 +1339,10 @@ def test_multiprocess_connect(visa_name, rsrc_manager_path=None, instr_options={
             print '!! multi event not produced on both sides: local(%s), remote(%s)'%(resl1[1], resr1[1])
             ok = False
         elif resl1 != True:
-            print '!! multi event not produced on local side only: %s'%(resl1[1])
+            print '!! multi event not produced on local: %s'%(resl1[1])
             ok = False
         elif resr1 != True:
-            print '!! multi event not produced on remote side only: %s'%(resr1[1])
+            print '!! multi event not produced on remote: %s'%(resr1[1])
             ok = False
         else:
             if stbl1 == 96 and stbr1 == 96:
@@ -1357,10 +1357,10 @@ def test_multiprocess_connect(visa_name, rsrc_manager_path=None, instr_options={
         if resl2 != True and resr2 != True:
             pass # Same error as above
         elif resl2 != True:
-            print '!! multi event not produced on local side only (stolen because of polling srq): %s'%(resl2[1])
+            print '!! multi event not produced on local(stolen because of polling srq): %s'%(resl2[1])
             ok = False
         elif resr2 != True:
-            print '!! multi event not produced on remote side only (stolen because of polling srq): %s'%(resr2[1])
+            print '!! multi event not produced on remote(stolen because of polling srq): %s'%(resr2[1])
             ok = False
         else:
             print 'multi event not stolen (not using polling of srq) (stbl=%d, stbr=%d)'%(stbl2, stbr2)
@@ -1889,6 +1889,7 @@ def _test_one_srq_queue(instr):
     if ev:
         print '!! Device(%s) *cls does not reset *esr: %d'%(name, ev)
         good = False
+    _test_one_srq_queue_timing(instr)
     _test_event(instr, 'srq', 'queue', disable=True)
     return good
 
@@ -1900,6 +1901,37 @@ def _test_gpib_queue(i1, i2):
     if not _test_one_srq_queue(i2):
         good = False
     return good
+
+def _test_one_srq_queue_timing(instr):
+    import numpy as np
+    name = instr.resource_name
+    high = True
+    start = _time()
+    n = 0
+    dts_opc = []
+    dts_wait = []
+    _test_reset_queue(instr, high=high)
+    while _time()-start < 1.: # test for 1 second
+        n += 1
+        c0 = _clock()
+        _test_write(instr, '*OPC')
+        c1 = _clock()
+        _test_wait(instr)
+        c2 = _clock()
+        _test_stb(instr)
+        _test_query(instr, '*esr?')
+        dts_opc.append(c1 - c0)
+        dts_wait.append(c2 - c1)
+    dts_opc = np.array(dts_opc)*1e3 # to ms
+    dts_wait = np.array(dts_wait)*1e3
+    #print dts_opc, dts_wait
+    print '  Queue(%s) are called on (avg=%f, std=%f, min=%f, max=%f ms) after *OPC (count=%d)'%(
+                name, dts_wait.mean(), dts_wait.std(), dts_wait.min(), dts_wait.max(), n)
+    print '  Write OPC for are take on (avg=%f, std=%f, min=%f, max=%f ms, count=%d)'%(
+                dts_opc.mean(), dts_opc.std(), dts_opc.min(), dts_opc.max(), n)
+    _test_stb(instr)
+    _test_write(instr, '*cls')
+
 
 def _test_one_srq_handler_timing(instr, hndlr):
     import numpy as np
