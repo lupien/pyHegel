@@ -997,6 +997,8 @@ def visa_context(ok=None, bad=None, handler=None):
             error = 'invalid_event'
         elif exc.error_code == constants.VI_ERROR_NSUP_MECH:
             error = 'unsupported_mechanism'
+        elif exc.error_code == constants.VI_ERROR_INV_ACCESS_KEY:
+            error = 'invalid access key'
         else:
             error = str(exc)
     except Exception as exc:
@@ -1139,13 +1141,22 @@ _base_cross_result = dictAttr(
         excl_blocks_excl = False,
         excl_blocks_comm = False)
 
-def _test_cross_show_diff(result):
+_base_inner_result = dictAttr(
+        shared_blocks_shared = [True, 'timeout'],
+        shared_blocks_excl = [True, 'timeout'],
+        shared_blocks_comm = [True, 'locked'],
+        excl_blocks_shared = [True, 'timeout'],
+        excl_blocks_excl = [True, 'timeout'],
+        excl_blocks_comm = [True, 'locked'])
+
+def _test_cross_show_diff(result, cross=True):
+    base = _base_cross_result if cross else _base_inner_result
     if isinstance(result, basestring):
         # there was an error, just return it
         return result
-    if len(result) != len(_base_cross_result):
+    if len(result) != len(base):
         raise RuntimeError('the dictionnaries are incompatible in cross_show_diff')
-    only_diff = {k:result[k] for k in result if result[k] != _base_cross_result[k]}
+    only_diff = {k:result[k] for k in result if result[k] != base[k]}
     if only_diff == {}:
         return 'Same as default'
     return only_diff
@@ -1188,8 +1199,13 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
     a serial device at a time).
     mode can be 'both', 'remote' or 'local' (but for old interface it is disregarded and will only do remote)
     """
-    start_test('Cross library effects')
-    if old_interface:
+    if rsrc_manager_path1 != rsrc_manager_path2:
+        start_test('Cross library locking effects')
+        cross = True
+    else:
+        start_test('Inner library locking effects')
+        cross = False
+    if old_interface and cross:
         mode = 'remote'
     rsrc_manager1 = get_resource_manager(rsrc_manager_path1)
     R1 = visa_lib_info(rsrc_manager1)
@@ -1214,7 +1230,10 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
     print 'visa=', visa_name
     print 'R1=', R1
     print 'R2=', R2
-    print 'Default result (no locking accross visalib):', _base_cross_result
+    if cross:
+        print 'Default result (no locking accross visalib):', _base_cross_result
+    else:
+        print 'Default result (locking within lib, with timeouts):', _base_inner_result
     success, error, i2 = _test_open_instr(rsrc_manager2, visa_name, instr_options=instr_options)
     if not success:
         print 'Unable to open instrument(%s) locally on second manager(%s) because of error: %s'%(visa_name, R2, error)
@@ -1237,19 +1256,19 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
         R21L = _test_cross_lib_helper(i2, i1)
     if mode == 'both':
         if R12R == R12L:
-            print 'R1->R2(remote/local):', _test_cross_show_diff(R12R)
+            print 'R1->R2(remote/local):', _test_cross_show_diff(R12R, cross)
         else:
-            print 'R1->R2(remote):', _test_cross_show_diff(R12R), ' (local):', _test_cross_show_diff(R12L)
+            print 'R1->R2(remote):', _test_cross_show_diff(R12R, cross), ' (local):', _test_cross_show_diff(R12L, cross)
         if R21R == R21L:
-            print 'R2->R1(remote/local):', _test_cross_show_diff(R21R)
+            print 'R2->R1(remote/local):', _test_cross_show_diff(R21R, cross)
         else:
-            print 'R2->R1(remote):', _test_cross_show_diff(R21R), ' (local):', _test_cross_show_diff(R12L)
+            print 'R2->R1(remote):', _test_cross_show_diff(R21R, cross), ' (local):', _test_cross_show_diff(R12L, cross)
     elif mode == 'local':
-        print 'R1->R2(local):', _test_cross_show_diff(R12L)
-        print 'R2->R1(local):', _test_cross_show_diff(R21L)
+        print 'R1->R2(local):', _test_cross_show_diff(R12L, cross)
+        print 'R2->R1(local):', _test_cross_show_diff(R21L, cross)
     else: #remote only
-        print 'R1->R2(remote):', _test_cross_show_diff(R12R)
-        print 'R2->R1(remote):', _test_cross_show_diff(R21R)
+        print 'R1->R2(remote):', _test_cross_show_diff(R12R, cross)
+        print 'R2->R1(remote):', _test_cross_show_diff(R21R, cross)
 
 ########################################################################
 
@@ -1280,6 +1299,7 @@ def _test_multiprocess_connect_sub(visa_name, rsrc_manager_path, pipe, instr_opt
     _test_write(instr, '*cls')
     _test_event(instr, 'srq', 'queue', disable=True)
     pipe.send((res, stb))
+
 
 
 def test_multiprocess_connect(visa_name, rsrc_manager_path=None, instr_options={}):
@@ -2405,6 +2425,7 @@ def test_all(visa_name1, visa_name2=None, rsrc_manager_path1=agilent_path, rsrc_
         mng_paths = [rsrc_manager_path1]
     for mng_path in mng_paths:
         _reset_autopoll_gpib(mng_path, visa_name1, instr_options)
+        test_cross_lib(visa_name1, mng_path, mng_path, instr_options=instr_options)
         test_multiprocess_connect(visa_name1, rsrc_manager_path=mng_path, instr_options=instr_options)
         rsrc_manager = get_resource_manager(mng_path)
         test_usb_resource_list(rsrc_manager)
