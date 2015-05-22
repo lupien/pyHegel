@@ -2267,6 +2267,10 @@ class Lock_Visa(object):
             self._vi.lock_excl(timeout)
         except visa_wrap.VisaIOError as exc:
             if exc.error_code == visa_wrap.constants.VI_ERROR_TMO:
+                # This is for Agilent IO visa library
+                return False
+            elif exc.error_code == visa_wrap.constants.VI_ERROR_RSRC_LOCKED:
+                # This is for National Instruments visa library
                 return False
             else:
                 raise
@@ -2634,9 +2638,8 @@ class visaInstrumentAsync(visaInstrument):
             if _retry_wait(self._async_detect_poll_func, max_time, delay=0.05):
                 return True
         elif self._RQS_status == -1:
-            # On National Instrument (NI) visa this seems to wait an extra 12 ms after the
-            # SRQ is turned on.
-            # Also the timeout actually used seems to be 16*ceil(max_time*1000/16) in ms.
+            # On National Instrument (NI) visa
+            #  the timeout actually used seems to be 16*ceil(max_time*1000/16) in ms.
             wait_resp = self.visa.wait_on_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                                 int(max_time*1000), capture_timeout=True)
             # context in wait_resp will be closed automatically
