@@ -2412,8 +2412,9 @@ def test_all(visa_name1, visa_name2=None, rsrc_manager_path1=agilent_path, rsrc_
     """
     provide visa_name2 for gpib devices
     Note that the test will change the device event and request registers and send some commands (*idn?, *OPC, )
-    For gpib devices, do not use alias, use the GPIB0::1 type of address
-      this is needed in _test_gpib_cross and _reset_autopoll_gpib
+    Make sure that the instruments are not loaded somewhere else (this is especially important on GPIB,
+    otherwise you will get locking problems (other device gpib handler locks when reading the status byte
+    in pyhegel))
     """
     start_test('-- START --')
     if are_mngr_diff(rsrc_manager_path1, rsrc_manager_path2):
