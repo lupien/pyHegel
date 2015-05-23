@@ -827,6 +827,7 @@ class BaseInstrument(object):
         return True
     def _async_trig(self):
         pass
+    # TODO replace _async_block stuff with using thread local data instead?
     def _get_async_block(self):
         # This only runs if we are in the same thread as previous calls to async
         # otherwise we wait for the other async to terminate.
@@ -2550,6 +2551,11 @@ class visaInstrument(BaseInstrument):
 ##    VISA Async Instrument
 #######################################################
 
+#TODO check that agilent RQS are not stolen when 2 process use the handler
+#  with 2 process using the same device (gpib, usb, lan)
+#     events on one will produce events on the other (which should produce an error about events present)
+#      for queues
+# fix 10 ms wait for RQS
 
 class visaInstrumentAsync(visaInstrument):
     def __init__(self, visa_addr, poll=False):
@@ -2584,7 +2590,6 @@ class visaInstrumentAsync(visaInstrument):
             self.visa.enable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                visa_wrap.constants.VI_HNDLR)
         else:
-            # NI does not allow the use of VI_HANDLR for gpib
             self._RQS_status = -1
             self.visa.enable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                visa_wrap.constants.VI_QUEUE)
@@ -2695,7 +2700,7 @@ class visaInstrumentAsync(visaInstrument):
                 while True:
                     self.visa.wait_on_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ, 0)
                     n += 1
-            except:
+            except visa_wrap.constants.VI_ERROR_TMO:
                 pass
             if n>0:
                 print 'Unread(%i) event queue!'%n
