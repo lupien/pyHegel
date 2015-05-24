@@ -2551,11 +2551,27 @@ class visaInstrument(BaseInstrument):
 ##    VISA Async Instrument
 #######################################################
 
-#TODO check that agilent RQS are not stolen when 2 process use the handler
-#  with 2 process using the same device (gpib, usb, lan)
-#     events on one will produce events on the other (which should produce an error about events present)
-#      for queues
-# fix 10 ms wait for RQS
+#TODO improve service request event handling.
+#     right now, for usb, lan I miss event when another process generates OPC
+#       for usb on NI visa lib I also need to read a miss status byte
+#     For gpib agilent, all device on bus will receive a handler/queue event
+#       I use the handler. Since I read the status byte in my handler, that
+#       would normally screw up other process (they could miss the event).
+#       However since my read_status_byte is protected by a lock, only
+#       the device that is really waiting will cleanup. The others will be locked,
+#       until the processing is complete.
+#
+#     For NI gpib, only the device that has SRQ on will receive the handler/queue event
+#       my handler are called within the gpib notify callback. All handlers
+#       across all process are called.
+#       However queued events are only produced when waiting for the events,
+#       they are not generated otherwise (for queued events, the driver does not setup
+#       a notify callback). It is possible to loose events if the serial the the status read
+#       occurs between ibwait (which is every 1ms). However, again, the status read is protected
+#       by the lock.
+#
+#     I should have a tool to check the state of the srq line, in case it is hung.
+#     I can't find a way to clear the SRQ of all devices on the bus (IFC, clear don't work)
 
 class visaInstrumentAsync(visaInstrument):
     def __init__(self, visa_addr, poll=False):
@@ -2700,8 +2716,11 @@ class visaInstrumentAsync(visaInstrument):
                 while True:
                     self.visa.wait_on_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ, 0)
                     n += 1
-            except visa_wrap.constants.VI_ERROR_TMO:
-                pass
+            except visa_wrap.VisaIOError as exc:
+                if exc.error_code == visa_wrap.constants.VI_ERROR_TMO:
+                    pass
+                else:
+                    raise
             if n>0:
                 print 'Unread(%i) event queue!'%n
         self._async_last_status = 0
