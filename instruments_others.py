@@ -885,9 +885,9 @@ class lakeshore_340(visaInstrument):
                                  choices=ChoiceMultiple(['P', 'I', 'D'], float))
         self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in %
         self.sp = devLoopOption(setstr='SETP {loop},{val}', getstr='SETP? {loop}', str_type=float)
-        self.alias = self.t
         self._devwrap('enabled_list')
         self._devwrap('fetch', autoinit=False)
+        self.alias = self.fetch
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
