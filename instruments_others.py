@@ -747,14 +747,59 @@ class sr780_analyzer(visaInstrumentAsync):
 
 
 #######################################################
-##    Lakeshore 322 Temperature controller
+##    Lakeshore 325 Temperature controller
 #######################################################
 
-class lakeshore_322(visaInstrument):
+class lakeshore_325(visaInstrument):
+    """
+       Temperature controller
+       Useful device:
+           sa
+           sb
+           ta
+           tb
+           status_a
+           status_b
+           fetch
+       s? and t? return the sensor or kelvin value of a certain channel
+       status_? returns the status of the channel
+       fetch allows to read all channels
+    """
+    def _fetch_helper(self, ch=None):
+        if ch == None:
+            ch = self.enabled_list.getcache()
+        if not isinstance(ch, (list, ChoiceBase)):
+            ch = [ch]
+        return ch
+    def _fetch_getformat(self, **kwarg):
+        ch = kwarg.get('ch', None)
+        ch = self._fetch_helper(ch)
+        multi = []
+        graph = []
+        for i, c in enumerate(ch):
+            graph.append(2*i)
+            multi.extend([c+'_T', c+'_S'])
+        fmt = self.fetch._format
+        fmt.update(multi=multi, graph=graph)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_getdev(self, ch=None):
+        ch = self._fetch_helper(ch)
+        ret = []
+        for c in ch:
+            if c == 'A':
+                ret.append(self.ta.get())
+                ret.append(self.sa.get())
+            elif c == 'B':
+                ret.append(self.tb.get())
+                ret.append(self.sb.get())
+            else:
+                raise ValueError("Invalid selection for ch. If it is None, check that enabled_list is a list with 'A' and/or 'B'")
+        return ret
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('sp', options)
     def _create_devs(self):
         self.crdg = scpiDevice(getstr='CRDG? A', str_type=float)
+        self.enabled_list = MemoryDevice(['A', 'B'])
         self.thermocouple = scpiDevice(getstr='TEMP?', str_type=float)
         self.ta = scpiDevice(getstr='KRDG? A', str_type=float) #in Kelvin
         self.tb = scpiDevice(getstr='KRDG? B', str_type=float) #in Kelvin
@@ -766,7 +811,8 @@ class lakeshore_322(visaInstrument):
         self.status_b = scpiDevice(getstr='RDGST? b', str_type=int)
         self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in %
         self.sp = scpiDevice(setstr='SETP 1,', getstr='SETP? 1', str_type=float)
-        self.alias = self.tb
+        self._devwrap('fetch', autoinit=False)
+        self.alias = self.fetch
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
