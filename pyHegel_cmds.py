@@ -53,7 +53,7 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'util
            'set', 'move', 'copy', 'spy', 'snap', 'record', 'trace', 'scope',
            '_process_filename', 'get', 'setget', 'getasync', 'make_dir',
            'iprint', 'ilist', 'dlist', 'find_all_instruments', 'checkmode', 'check',
-           'batch', 'sleep', 'load', 'load_all_usb',
+           'batch', 'sleep', 'load', 'load_all_usb', 'test_gpib_srq_state',
            'task', 'top', 'kill', '_init_pyHegel_globals', '_faster_timer', 'quiet_KeyboardInterrupt']
 
 # not in __all__: local_config _globaldict
@@ -126,6 +126,7 @@ def help_pyHegel():
         kill
         quiet_KeyboardInterrupt
         _faster_timer
+        test_gpib_srq_state
         All the commands in util (savefig, merge_pdf, ...)
     Available instruments:
         sweep
@@ -1328,6 +1329,8 @@ def find_all_instruments(use_aliases=True):
         (or National Instruments Measurement and Automation Explorer (MAX))
     """
     return instruments.find_all_instruments(use_aliases)
+
+test_gpib_srq_state = instruments_base.test_gpib_srq_state
 
 def checkmode(state=None):
     """

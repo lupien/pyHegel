@@ -53,7 +53,7 @@ class yokogawa_gs200(visaInstrument):
                    1e-15, 1e-18, 1e-21, 1e-24]
     def init(self, full=False):
         # clear event register, extended event register and error queue
-        self.write('*cls')
+        self.clear()
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('function', 'range', 'level', 'output_en', options)
     def _create_devs(self):
@@ -106,7 +106,7 @@ class sr830_lia(visaInstrument):
                   7:'Aux_in3', 8:'Aux_in4', 9:'Ref_Freq', 10:'Ch1', 11:'Ch2'}
     def init(self, full=False):
         # This empties the instrument buffers
-        self._clear()
+        self._dev_clear()
     def _check_snapsel(self,sel):
         if not (2 <= len(sel) <= 6):
             raise ValueError, 'snap sel needs at least 2 and no more thant 6 elements'
@@ -254,7 +254,7 @@ class sr384_rf(visaInstrument):
     # allowed units: amp: dBm, rms, Vpp; freq: GHz, MHz, kHz, Hz; Time: ns, us, ms, s
     def init(self, full=False):
         # This clears the error state
-        self.write('*cls')
+        self.clear()
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('freq', 'en_lf', 'amp_lf_dbm', 'offset_low',
                                  'en_rf', 'amp_rf_dbm', 'en_hf', 'amp_hf_dbm',
@@ -360,9 +360,9 @@ class sr780_analyzer(visaInstrumentAsync):
     """
     def init(self, full=False):
         # This empties the instrument buffers
-        self._clear()
-        # This clears the error state, and status/event flags?
-        self.write('*cls')
+        self._dev_clear()
+        # This clears the error state, and status/event flags
+        self.clear()
         if full:
             self._async_sre_flag = 2
             self.write('DSPE 0;*sre 2') # Display flags
@@ -1417,8 +1417,8 @@ class colby_pdl_100a(visaInstrument):
                     4: 'Delay setting requested beyond range of device',
                     5: 'Delay not set', 99: 'Buffer overflow'}
     def init(self, full=False):
-        # This clears the error state, and status/event flags?
-        self.write('*cls')
+        # This clears the error state, and status/event flags
+        self.clear()
         if full:
             self.set_timeout = 3
             #self.visa.term_chars='\n'

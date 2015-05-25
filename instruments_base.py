@@ -96,12 +96,21 @@ def find_all_instruments(use_aliases=True):
     """
     return rsrc_mngr.get_instrument_list(use_aliases)
 
+def test_gpib_srq_state(bus=0):
+    """ Test the state of the gpib bus SRQ line.
+        It should normally be False unless an instrument is in the process of communicating.
+        If it is ever True and stays that way, it will prevent further use of the line by
+        any other device.
+        It can be caused by an instrument on the bus that is not openned in any session but
+        that is activating the srq line. Either open that device and clear it or turn it off.
+    """
+    return rsrc_mngr.get_gpib_intfc_srq_state()
+
 def _repr_or_string(val):
     if isinstance(val, basestring):
         return val
     else:
         return repr(val)
-
 
 def _writevec_flatten_list(vals_list):
     ret = []
@@ -2521,7 +2530,22 @@ class visaInstrument(BaseInstrument):
         """
         self.write('*RST')
         self.force_get()
-    def _clear(self):
+    def clear(self):
+        """
+        This sends the *cls 488.2 command that should clear the status/event/
+        errors (but not change the enable registers.)
+        It also cleans up any buffered status byte.
+        """
+        self.write('*cls')
+        #some device buffer status byte so clear them
+        while self.read_status_byte()&0x40:
+            pass
+    def _dev_clear(self):
+        """ This is the device clear instruction. For some devices it will
+            clear the output buffers.
+            (it should reset the interface state, but not change the state of
+             status/event registers, errors states. See clear for that.)
+        """
         self.visa.clear()
     @property
     def set_timeout(self):
@@ -2569,9 +2593,6 @@ class visaInstrument(BaseInstrument):
 #       a notify callback). It is possible to loose events if the serial the the status read
 #       occurs between ibwait (which is every 1ms). However, again, the status read is protected
 #       by the lock.
-#
-#     I should have a tool to check the state of the srq line, in case it is hung.
-#     I can't find a way to clear the SRQ of all devices on the bus (IFC, clear don't work)
 
 class visaInstrumentAsync(visaInstrument):
     def __init__(self, visa_addr, poll=False):
