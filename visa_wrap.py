@@ -401,7 +401,7 @@ class old_Instrument(redirect_instr):
         super(old_Instrument, self).__init__(instr_instance)
         for k,v in kwargs.items():
             setattr(self, k, v)
-        if self.is_gpib():
+        if self.is_gpib() and self.resource_class != 'INTFC':
             # The old library enables this automatically. We turn it off here
             # to match the behavior of the new library
             # The reason to enable it early was probably to make
@@ -749,7 +749,7 @@ class old_resource_manager(object):
             if kwargs.has_key(k):
                 kwargs_after[k] = kwargs.pop(k)
         if resource_name.lower().endswith('intfc'):
-            instr = visa.Gpib(resource_name, **kwargs)
+            instr = visa.Interface(resource_name, **kwargs)
         else:
             instr = visa.instrument(resource_name, **kwargs)
         if isinstance(instr, visa.SerialInstrument):
