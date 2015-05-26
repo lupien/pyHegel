@@ -1480,7 +1480,12 @@ class Handlers(object):
             self.wrong_type = True
         if cntx_event_type != event_type:
             self.wrong_cntx_type = True
-        if userHandle != self.userHandle:
+        if userHandle is None and self.userHandle is not None:
+            self.wrong_handle = True
+        elif self.userHandle is None and userHandle is not None:
+            self.wrong_handle = True
+        elif userHandle is not None and userHandle.contents.value != self.userHandle.value:
+            print 'Handles:', userHandle, userHandle.contents, self.userHandle
             self.wrong_handle = True
         if session != self.session:
             print 'wrong:', session, self.session
