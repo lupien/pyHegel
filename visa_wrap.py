@@ -1238,7 +1238,7 @@ def test_cross_lib(visa_name, rsrc_manager_path1=agilent_path, rsrc_manager_path
         process.join()
     rsrc_manager2 = get_resource_manager(rsrc_manager_path2)
     if mode == 'remote':
-        del i1
+        del i1   # This might produce an ignored exception (VI_ERROR_INV_OBJECT on old_interface). That is ok.
         del rsrc_manager1
     R2 = visa_lib_info(rsrc_manager2)
     print 'visa=', visa_name
