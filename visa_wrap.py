@@ -1720,6 +1720,7 @@ def _test_wait(instrument, timeout_ms=500, event_type='srq'):
     returns True when it works
     or [False, reason] when not
     """
+    # 500 ms is probably ok, some tcpip *opc event can take 200 ms
     if isinstance(instrument, Handlers):
         res = instrument.wait(timeout_ms/1e3)
         res = True if res else [False, 'timeout']
@@ -1827,7 +1828,7 @@ def _test_one_srq_queue(instr):
     _test_stb(instr)
     _test_reset_queue(instr, high=high)
     _test_write(instr, '*OPC')
-    _sleep(0.100)
+    _sleep(0.500) # tcpip can be 200 ms, make sure we wait long enough
     _test_event(instr, 'srq', 'queue', discard=True)
     res = _test_wait(instr)
     if res == True:
