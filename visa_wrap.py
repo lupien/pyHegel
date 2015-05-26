@@ -646,6 +646,15 @@ class new_Instrument(redirect_instr):
 # Resource_manager wrapper classes
 ####################################################################
 
+# This is a tool to check the state of the srq line, in case it is hung.
+# I can't find a way to clear the SRQ of all devices on the bus (IFC, or all device clear don't work)
+# So to fix a problem, either load instruments (and clear their state) or turn them off
+
+def _get_gpib_intfc_srq_state(self, bus=0):
+    name = 'GPIB%d::INTFC'%bus
+    control = self.open_resource(name)
+    return bool(control.get_visa_attribute(constants.VI_ATTR_GPIB_SRQ_STATE))
+
 def _get_resource_info_helper(rsrc_manager, resource_name):
     normalized = alias_if_exists = None
     try:
@@ -739,7 +748,10 @@ class old_resource_manager(object):
         for k in ['read_termination', 'write_termination', 'timeout', 'flow_control']:
             if kwargs.has_key(k):
                 kwargs_after[k] = kwargs.pop(k)
-        instr = visa.instrument(resource_name, **kwargs)
+        if resource_name.lower().endswith('intfc'):
+            instr = visa.Gpib(resource_name, **kwargs)
+        else:
+            instr = visa.instrument(resource_name, **kwargs)
         if isinstance(instr, visa.SerialInstrument):
             # serials was setting term_chars to CR
             # change it to same defaults as new code (which is the general default)
@@ -756,6 +768,7 @@ class old_resource_manager(object):
     @property
     def visalib(self):
         return vpp43.visa_library()
+    get_gpib_intfc_srq_state = _get_gpib_intfc_srq_state
 
 class new_WrapResourceManager(redirect_instr):
     def __init__(self, new_rsrc_manager):
@@ -799,6 +812,7 @@ class new_WrapResourceManager(redirect_instr):
         return new_Instrument(instr, **kwargs_after)
 
     get_instrument_list = _get_instrument_list
+    get_gpib_intfc_srq_state = _get_gpib_intfc_srq_state
 
 
 ####################################################################
@@ -1414,6 +1428,7 @@ class Handlers(object):
         event_type = _event_type(event_type)
         if old_interface and userHandle is None:
             userHandle = 1 # old interface does not accept None
+        #userHandle = 1
         self._handler_func = self.handler
         with visa_context(ok='OK') as res:
             handl = self.instr.install_visa_handler(event_type, self._handler_func, userHandle)
