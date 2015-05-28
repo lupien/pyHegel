@@ -967,6 +967,7 @@ import visa_wrap
 visa_wrap.test_all('GPIB0::6', 'GPIB0::11')
 # ASRL1 is a lakeshore T controller
 visa_wrap.test_all('ASRL1', instr_options=dict(data_bits=7, parity=visa_wrap.constants.Parity.odd))
+visa_wrap.test_all('ASRL4', instr_options=dict(data_bits=7, parity=visa_wrap.constants.Parity.odd, write_delay=.1))
 visa_wrap.test_all('TCPIP::A-N9010A-20278.local')
 visa_wrap.test_all('USB0::2391::2827::MY52220278::0')
 """
@@ -1058,6 +1059,9 @@ def _test_open_instr(rsrc_manager, instr_name, pipe=None, instr_options={}):
     if isinstance(rsrc_manager, Process):
         return pipe.recv() + [None]
     else:
+        global _test_write_delay
+        instr_options = instr_options.copy() # we don't want to change the incoming dict
+        _test_write_delay = instr_options.pop('write_delay', None)
         instr = None
         with visa_context() as res:
            instr = rsrc_manager.open_resource(instr_name, **instr_options)
@@ -1731,6 +1735,9 @@ def _test_wait(instrument, timeout_ms=500, event_type='srq'):
         res = res if not res[0] else True
     return res
 
+
+_test_write_delay = None
+
 def _test_write(instrument, message):
     """ absorbs any errors, but print an error message """
     name = instrument.resource_name
@@ -1739,6 +1746,8 @@ def _test_write(instrument, message):
     res = res if not res[0] else True
     if res != True:
         print '!! Error when writing to %s, message: %s, error: %s'%(name, message, res[1])
+    if _test_write_delay is not None:
+        _sleep(_test_write_delay)
 
 def _test_query(instrument, message):
     """ absorbs any errors, but print an error message """
