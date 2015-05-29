@@ -838,6 +838,10 @@ class BaseInstrument(object):
         return True
     def _async_trig(self):
         pass
+    def _async_delay_check_helper(self):
+        if self._async_delay_check and self.async_delay.getcache() == 0.:
+            print self.perror('***** WARNING You should give a value for async_delay *****')
+            self._async_delay_check = False
     def _get_async_local_data(self):
         d = self._async_local_data
         try:
@@ -868,10 +872,10 @@ class BaseInstrument(object):
                 data.async_task = asyncThread(data.async_list, self._lock_instrument, self._lock_extra, data.async_list_init)
                 data.async_level = 0
             if delay:
-                if self._async_delay_check and self.async_delay.getcache() == 0.:
-                    print self.perror('***** WARNING You should give a value for async_delay *****')
-                self._async_delay_check = False
-                data.async_task.change_delay(self.async_delay.getcache())
+                # we only warn if we are suppose to use delay
+                self._async_delay_check_helper()
+            # but we always use delay
+            data.async_task.change_delay(self.async_delay.getcache())
             if trig:
                 data.async_task.change_detect(self._async_detect)
                 data.async_task.change_trig(self._async_trig)
