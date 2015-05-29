@@ -827,13 +827,8 @@ class BaseInstrument(object):
             # don't overwrite what is assigned in subclasses
             self._lock_extra = Lock_Extra()
         self._create_devs()
-        self._async_list = []
-        self._async_list_init = []
-        self._async_level = -1
-        self._async_counter = 0
+        self._async_local_data = threading.local()
         self._async_delay_check = True
-        self._async_task = None
-        self._async_current_calling_thread = None
         self._last_force = time.time()
         if not CHECKING:
             self.init(full=True)
@@ -843,80 +838,64 @@ class BaseInstrument(object):
         return True
     def _async_trig(self):
         pass
-    # TODO replace _async_block stuff with using thread local data instead?
-    def _get_async_block(self):
-        # This only runs if we are in the same thread as previous calls to async
-        # otherwise we wait for the other async to terminate.
-        # So if we break a running async, we should be able to restart it in
-        # the same thread but another thread might hang waiting for us.
-        # This is done so that we can block an async without holding the lock
-        # since the lock needs to be held by async_thread. But we need to
-        # protect the whole async block
-        # In case the thread the was interrupted cannot be restarted,
-        # it might be necessary to set _async_current_calling_thread=None
-        current_thread = threading.current_thread()
-        while True:
-            if self._async_current_calling_thread == current_thread:
-                return
-            else:
-                with self._lock_instrument:
-                    if self._async_current_calling_thread == None:
-                        self._async_current_calling_thread = current_thread
-                        return
-            # wait for another thread to give up
-            sleep(0.02)
-            with _delayed_signal_context_manager():
-                # processEvents is for the current Thread.
-                # if a thread does not have and event loop, this does nothing (not an error)
-                processEvents(max_time_ms = 20)
+    def _get_async_local_data(self):
+        d = self._async_local_data
+        try:
+            d.async_level
+        except AttributeError:
+            d.async_list = []
+            d.async_list_init = []
+            d.async_level = -1
+            d.async_counter = 0
+            d.async_task = None
+        return d
     def _get_async(self, async, obj, delay=False, trig=False, **kwarg):
-        self._get_async_block()
+        data = self._get_async_local_data()
         if async == -1: # we reset task
-            if self._async_level > 1:
-                self._async_task.cancel()
-            self._async_level = -1
-        if async != 3 and not (async == 2 and self._async_level == -1) and (
-          async < self._async_level or async > self._async_level + 1):
-            if self._async_level > 1:
-                self._async_task.cancel()
-            self._async_level = -1
+            if data.async_level > 1:
+                data.async_task.cancel()
+            data.async_level = -1
+        if async != 3 and not (async == 2 and data.async_level == -1) and (
+          async < data.async_level or async > data.async_level + 1):
+            if data.async_level > 1:
+                data.async_task.cancel()
+            data.async_level = -1
             raise ValueError, 'Async in the wrong order. Reseting order. Try again..'
         if async == 0:  # setup async task
-            if self._async_level == -1: # first time through
-                self._async_list = []
-                self._async_list_init = []
-                self._async_task = asyncThread(self._async_list, self._lock_instrument, self._lock_extra, self._async_list_init)
-                self._async_level = 0
+            if data.async_level == -1: # first time through
+                data.async_list = []
+                data.async_list_init = []
+                data.async_task = asyncThread(data.async_list, self._lock_instrument, self._lock_extra, data.async_list_init)
+                data.async_level = 0
             if delay:
                 if self._async_delay_check and self.async_delay.getcache() == 0.:
                     print self.perror('***** WARNING You should give a value for async_delay *****')
                 self._async_delay_check = False
-                self._async_task.change_delay(self.async_delay.getcache())
+                data.async_task.change_delay(self.async_delay.getcache())
             if trig:
-                self._async_task.change_detect(self._async_detect)
-                self._async_task.change_trig(self._async_trig)
-                self._async_task.change_cleanup(self._async_cleanup_after)
-            self._async_list.append((obj.get, kwarg))
+                data.async_task.change_detect(self._async_detect)
+                data.async_task.change_trig(self._async_trig)
+                data.async_task.change_cleanup(self._async_cleanup_after)
+            data.async_list.append((obj.get, kwarg))
         elif async == 1:  # Start async task (only once)
             #print 'async', async, 'self', self, 'time', time.time()
-            if self._async_level == 0: # First time through
-                self._async_task.start()
-                self._async_level = 1
+            if data.async_level == 0: # First time through
+                data.async_task.start()
+                data.async_level = 1
         elif async == 2:  # Wait for task to finish
             #print 'async', async, 'self', self, 'time', time.time()
-            if self._async_level == 1: # First time through (no need to wait for subsequent calls)
-                wait_on_event(self._async_task)
-                self._async_level = -1
-            self._async_counter = 0
+            if data.async_level == 1: # First time through (no need to wait for subsequent calls)
+                wait_on_event(data.async_task)
+                data.async_level = -1
+            data.async_counter = 0
         elif async == 3: # get values
             #print 'async', async, 'self', self, 'time', time.time()
             #return obj.getcache()
-            ret = self._async_task.results[self._async_counter]
-            self._async_counter += 1
-            if self._async_counter == len(self._async_task.results):
+            ret = data.async_task.results[data.async_counter]
+            data.async_counter += 1
+            if data.async_counter == len(data.async_task.results):
                 # delete task so that instrument can be deleted
-                del self._async_task
-                self._async_current_calling_thread = None
+                del data.async_task
             return ret
     def find_global_name(self):
         return _find_global_name(self)
