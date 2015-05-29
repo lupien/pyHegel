@@ -366,13 +366,14 @@ class FastCondition(threading._Condition):
 #Allow to chain one device on completion of another one.
 
 class asyncThread(threading.Thread):
-    def __init__(self, operations, lock_instrument, lock_extra, init_ops, detect=None, delay=0., trig=None):
+    def __init__(self, operations, lock_instrument, lock_extra, init_ops, detect=None, delay=0., trig=None, cleanup=None):
         super(asyncThread, self).__init__()
         self.daemon = True
         self._stop = False
         self._async_delay = delay
         self._async_trig = trig
         self._async_detect = detect
+        self._async_cleanup = cleanup
         self._operations = operations
         self._lock_instrument = lock_instrument
         self._lock_extra = lock_extra
@@ -387,6 +388,8 @@ class asyncThread(threading.Thread):
         self._async_trig = new_trig
     def change_detect(self, new_detect):
         self._async_detect = new_detect
+    def change_cleanup(self, new_cleanup):
+        self._async_cleanup = new_cleanup
     def replace_result(self, val, index=None):
         if index == None:
             index = self._replace_index
@@ -403,15 +406,19 @@ class asyncThread(threading.Thread):
             _retry_wait(func, timeout=delay, delay=0.1)
         if self._stop:
             return
-        if self._async_trig and not CHECKING:
-            self._async_trig()
-        #print 'Thread ready to detect ', time.time()-t0
-        if self._async_detect != None:
-            while not self._async_detect():
-                if self._stop:
-                    break
-        if self._stop:
-            return
+        try:
+            if self._async_trig and not CHECKING:
+                self._async_trig()
+            #print 'Thread ready to detect ', time.time()-t0
+            if self._async_detect != None:
+                while not self._async_detect():
+                    if self._stop:
+                        break
+            if self._stop:
+                return
+        finally:
+            if self._async_cleanup and not CHECKING:
+                self._async_cleanup()
         #print 'Thread ready to read ', time.time()-t0
         for func, kwarg in self._operations:
             self.results.append(func(**kwarg))
@@ -888,6 +895,7 @@ class BaseInstrument(object):
             if trig:
                 self._async_task.change_detect(self._async_detect)
                 self._async_task.change_trig(self._async_trig)
+                self._async_task.change_cleanup(self._async_cleanup_after)
             self._async_list.append((obj.get, kwarg))
         elif async == 1:  # Start async task (only once)
             #print 'async', async, 'self', self, 'time', time.time()
@@ -2575,24 +2583,32 @@ class visaInstrument(BaseInstrument):
 ##    VISA Async Instrument
 #######################################################
 
-#TODO improve service request event handling.
-#     right now, for usb, lan I miss event when another process generates OPC
-#       for usb on NI visa lib I also need to read a miss status byte
-#     For gpib agilent, all device on bus will receive a handler/queue event
-#       I use the handler. Since I read the status byte in my handler, that
-#       would normally screw up other process (they could miss the event).
-#       However since my read_status_byte is protected by a lock, only
-#       the device that is really waiting will cleanup. The others will be locked,
-#       until the processing is complete.
-#
-#     For NI gpib, only the device that has SRQ on will receive the handler/queue event
-#       my handler are called within the gpib notify callback. All handlers
-#       across all process are called.
-#       However queued events are only produced when waiting for the events,
-#       they are not generated otherwise (for queued events, the driver does not setup
-#       a notify callback). It is possible to loose events if the serial the the status read
-#       occurs between ibwait (which is every 1ms). However, again, the status read is protected
-#       by the lock.
+# Note about async:
+#  only one thread/process will have access to the device at a time
+#   others are waiting for a lock
+#  I only enable events (Queue or handlers) when I am about to use them
+#  and disable them when I am done waiting.
+#  wait_after_trig, run_and_wait and run in async should properly cleanup.
+#  In case where the cleanup is not done properly, it would leave
+#  some events/status in buffers and should be cleaned up on the
+#  next run.
+
+#   For agilent gpib, all device on bus will receive a handler/queue event.
+#    I use the handler (only one should be enabled, If not then only one will have
+#    the lock, the others will be waiting on read_status_byte: so only the important one
+#    will actually reset the srq.)
+#   For NI gpib, only the device that has SRQ on will receive the handler/queue event.
+#    handlers are called within the gpib notify callback. All handlers
+#    across all process are called. If one of the callback is slow, it only affects that process
+#    thread. While in the callback, it does not add other events.
+#    However queued events are only produced when waiting for the events,
+#    they are not generated otherwise (for queued events, the driver does not setup
+#    a notify callback). It is possible to loose events if the read_status
+#    occurs between ibwait (which is every 1ms). However, again, the status read is protected
+#    by the lock, and only one thread should be running anyway.
+#    Note also that the auto serial poll is not jammed if the device holding the line SRQ is
+#    not open. The driver will just keep autoprobing (during ibwait requests) and update the
+#    device status so it can still find out if the device is requesting service.
 
 class visaInstrumentAsync(visaInstrument):
     def __init__(self, visa_addr, poll=False):
@@ -2603,6 +2619,7 @@ class visaInstrumentAsync(visaInstrument):
         self._async_last_status = 0
         self._async_last_status_time = 0
         self._async_last_esr = 0
+        self._async_do_cleanup = False
         super(visaInstrumentAsync, self).__init__(visa_addr)
         is_gpib = self.visa.is_gpib()
         is_agilent = rsrc_mngr.is_agilent()
@@ -2624,17 +2641,25 @@ class visaInstrumentAsync(visaInstrument):
             # It is needed for uninstall
             self._handler_userval = self.visa.install_visa_handler(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                   self._proxy_handler, 0)
-            self.visa.enable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
-                               visa_wrap.constants.VI_HNDLR)
         else:
             self._RQS_status = -1
-            self.visa.enable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
-                               visa_wrap.constants.VI_QUEUE)
+            if self.visa.is_usb() and not self.visa.resource_manager.is_agilent():
+                # For some weird reason, for National Instruments visalib on usb
+                # the service request are queued by default until I enable/disable the service
+                # just disabling does not work (says it is already disabled)
+                # this with NI visa 14.0.0f0
+                self.visa.enable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+                                        visa_wrap.constants.VI_QUEUE)
+                self.visa.disable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+                                        visa_wrap.constants.VI_QUEUE)
     def __del__(self):
         if self._RQS_status != -1:
+            # Not absolutely necessary, but lets be nice
+            self.visa.disable_event(visa_wrap.constants.VI_ALL_ENABLED_EVENTS,
+                                    visa_wrap.constants.VI_ALL_MECH)
             # only necessary to keep handlers list in sync
             # the actual handler is removed when the visa is deleted (vi closed)
-            self.visa.uninstall_handler(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+            self.visa.uninstall_visa_handler(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                   self._proxy_handler, self._handler_userval)
         super(visaInstrumentAsync, self).__del__()
     def init(self, full=False):
@@ -2643,7 +2668,7 @@ class visaInstrumentAsync(visaInstrument):
         if full:
             self.write('*ese 1;*sre 32') # OPC flag
     def _RQS_handler(self, vi, event_type, context, userHandle):
-        # When NI autopoll is off:
+        # For Agilent visalib (auto serial poll is off):
         # Reading the status will clear the service request of this instrument
         # if the SRQ line is still active, another call to the handler will occur
         # after a short delay (30 ms I think) everytime a read_status_byte is done
@@ -2651,18 +2676,18 @@ class visaInstrumentAsync(visaInstrument):
         # For agilent visa, the SRQ status is queried every 30ms. So
         # you we might have to wait that time after the hardware signal is active
         # before this handler is called.
+        # Because of locking, this only succeeds if we are owning the lock
+        # (so we are the ones waiting for data or nobody is.)
+        # Remember that we are called when any instrument on the gpib bus
+        # requests service (not only for this instrument)
         status = self.read_status_byte()
-        # If multiple session talk to the same instrument
-        # only one of them will see the RQS flag. So to have a chance
-        # of more than one, look at other flag instead (which is not immediately
-        # reset)
-        # TODO, handle this better?
-        #if status&0x40:
-        if status & self._async_sre_flag:
+        #if status&0x40 and status & self._async_sre_flag:
+        #if status & self._async_sre_flag:
+        if status&0x40:
             self._RQS_status = status
             self._async_last_status = status
             self._async_last_status_time = time.time()
-            sleep(0.01) # give some time for other handlers to run
+            #sleep(0.01) # give some time for other handlers to run
             self._RQS_done.set()
             #print 'Got it', vi
         return visa_wrap.constants.VI_SUCCESS
@@ -2706,24 +2731,49 @@ class visaInstrumentAsync(visaInstrument):
         """
         waits until the triggered event is finished
         """
-        return wait_on_event(self._async_detect)
+        try:
+            ret = wait_on_event(self._async_detect)
+        finally:
+            self._async_cleanup_after()
+        return ret
+    # Always make sure that asyncThread run behaves in the same way
     @locked_calling
     def run_and_wait(self):
         """
         This initiate a trigger and waits for it to finish.
         """
-        self._async_trig()
-        self.wait_after_trig()
+        try:
+            self._async_trig()
+            self.wait_after_trig()
+        finally: # in case we were stopped because of KeyboardInterrupt or something else.
+            self._async_cleanup_after()
+    def _async_cleanup_after(self):
+        if self._async_do_cleanup:
+            self.visa.disable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ, visa_wrap.constants.VI_ALL_MECH)
+            self._async_do_cleanup = False
     def _async_trigger_helper(self):
         self.write('INITiate;*OPC') # this assume trig_src is immediate for agilent multi
     def _async_trig_cleanup(self):
+        if not self._async_polling:
+            self._async_do_cleanup = True
+            if self._RQS_status != -1:
+                self.visa.enable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+                               visa_wrap.constants.VI_HNDLR)
+            else:
+                self.visa.enable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+                               visa_wrap.constants.VI_QUEUE)
         # We detect the end of acquisition using *OPC and status byte.
         if self._get_esr() & 0x01:
             print 'Unread event byte!'
         # A while loop is needed when National Instrument (NI) gpib autopoll is active
         # This is the default when using the NI Visa.
         while self.read_status_byte() & 0x40: # This is SRQ bit
-            print 'Unread status byte!'
+            if self.visa.is_usb() and not self.visa.resource_manager.is_agilent():
+                # National instruments visa buffers usb status bytes
+                # so it is normal to hab left overs
+                pass
+            else:
+                print 'Unread status byte!'
         if self._async_polling:
             pass
         elif self._RQS_status != -1:
