@@ -842,6 +842,26 @@ class BaseInstrument(object):
         if self._async_delay_check and self.async_delay.getcache() == 0.:
             print self.perror('***** WARNING You should give a value for async_delay *****')
             self._async_delay_check = False
+    # The default run and wait implementation is to wait for self.async_delay time
+    @locked_calling
+    def run_and_wait(self):
+        """
+        This initiate a trigger and waits for it to finish.
+        """
+        self._async_delay_check_helper()
+        def wait_func(max_time):
+            cur = time.time()
+            dif = wait_time-(cur-start_time)
+            if dif <= 0:
+                return True
+            if dif < max_time:
+                sleep(dif)
+                return True
+            sleep(max_time)
+            return False
+        start_time = time.time()
+        wait_time = self.async_delay.getcache()
+        wait_on_event(wait_func)
     def _get_async_local_data(self):
         d = self._async_local_data
         try:
@@ -1086,6 +1106,7 @@ class BaseInstrument(object):
     def _lock_release(self):
         self._lock_instrument.release()
         self._lock_extra.release()
+
 
 
 #######################################################
