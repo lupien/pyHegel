@@ -397,8 +397,9 @@ class old_Instrument(redirect_instr):
     LF = '\n'
     _read_termination = None
     _write_termination = CR + LF
-    def __init__(self, instr_instance, **kwargs):
+    def __init__(self, manager, instr_instance, **kwargs):
         super(old_Instrument, self).__init__(instr_instance)
+        self.resource_manager = manager
         for k,v in kwargs.items():
             setattr(self, k, v)
         if self.is_gpib() and self.resource_class != 'INTFC':
@@ -468,6 +469,8 @@ class old_Instrument(redirect_instr):
     def is_gpib(self):
         return self.get_visa_attribute(constants.VI_ATTR_INTF_TYPE) == constants.VI_INTF_GPIB
         #return isinstance(self.instr, visa.GpibInstrument)
+    def is_usb(self):
+        return self.get_visa_attribute(constants.VI_ATTR_INTF_TYPE) == constants.VI_INTF_USB
     def get_visa_attribute(self, attr):
         return vpp43.get_attribute(self.vi, attr)
     def set_visa_attribute(self, attr, state):
@@ -540,13 +543,16 @@ class old_Instrument(redirect_instr):
 class new_Instrument(redirect_instr):
     #def __del__(self):
     #    print 'Deleting instrument', self.resource_name
-    def __init__(self, instr_instance, **kwargs):
+    def __init__(self, manager, instr_instance, **kwargs):
         super(new_Instrument, self).__init__(instr_instance)
+        self.resource_manager = manager
         for k,v in kwargs.items():
             setattr(self, k, v)
     def is_serial(self):
         return self.interface_type == constants.InterfaceType.asrl
         #return isinstance(self.instr, pyvisa.resources.SerialInstrument)
+    def is_usb(self):
+        return self.interface_type == constants.InterfaceType.usb
     def is_gpib(self):
         return self.interface_type == constants.InterfaceType.gpib
         #return isinstance(self.instr, pyvisa.resources.GPIBInstrument)
@@ -757,7 +763,7 @@ class old_resource_manager(object):
             # change it to same defaults as new code (which is the general default)
             kwargs_after.setdefault('read_termination', old_Instrument._read_termination)
         kwargs_after.setdefault('timeout', 2000)
-        return old_Instrument(instr, **kwargs_after)
+        return old_Instrument(self, instr, **kwargs_after)
     def is_agilent(self):
         if self._is_agilent is None:
             try:
@@ -809,7 +815,7 @@ class new_WrapResourceManager(redirect_instr):
             if kwargs.has_key(k):
                 kwargs_after[k] = kwargs.pop(k)
         instr = self.instr.open_resource(resource_name, **kwargs)
-        return new_Instrument(instr, **kwargs_after)
+        return new_Instrument(self, instr, **kwargs_after)
 
     get_instrument_list = _get_instrument_list
     get_gpib_intfc_srq_state = _get_gpib_intfc_srq_state
