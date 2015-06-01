@@ -1962,11 +1962,16 @@ def _test_one_srq_queue_timing(instr):
     import numpy as np
     name = instr.resource_name
     high = True
-    start = _time()
     n = 0
     dts_opc = []
     dts_wait = []
     _test_reset_queue(instr, high=high)
+    # Note that some system wait (0.2s) before acknowledging an
+    # SRQ on tcpip (vxi-11). The instrument might wait for that ack
+    # before sending the next srq. So lets wait to make sure the first one
+    # is good anyway,
+    _sleep(.5)
+    start = _time()
     while _time()-start < 1.: # test for 1 second
         n += 1
         c0 = _clock()
@@ -1983,6 +1988,15 @@ def _test_one_srq_queue_timing(instr):
     #print dts_opc, dts_wait
     print '  Queue(%s) are called on (avg=%f, std=%f, min=%f, max=%f ms) after *OPC (count=%d)'%(
                 name, dts_wait.mean(), dts_wait.std(), dts_wait.min(), dts_wait.max(), n)
+    if dts_wait.max() > 100.:
+        dl = dts_wait[np.where(dts_wait < 100.)]
+        dh = dts_wait[np.where(dts_wait >= 100.)]
+        if len(dl):
+            print '  Queue(%s) event< 0.1s (avg=%f, std=%f, min=%f, max=%f ms) after *OPC (count=%d)'%(
+                        name, dl.mean(), dl.std(), dl.min(), dl.max(), len(dl))
+        if len(dh):
+            print '  Queue(%s) event>=0.1s (avg=%f, std=%f, min=%f, max=%f ms) after *OPC (count=%d)'%(
+                        name, dh.mean(), dh.std(), dh.min(), dh.max(), len(dh))
     print '  Write OPC for are take on (avg=%f, std=%f, min=%f, max=%f ms, count=%d)'%(
                 dts_opc.mean(), dts_opc.std(), dts_opc.min(), dts_opc.max(), n)
     _test_stb(instr)
@@ -1993,10 +2007,15 @@ def _test_one_srq_handler_timing(instr, hndlr):
     import numpy as np
     name = instr.resource_name
     high = True
-    start = _time()
     n = 0
     dts = []
     _test_reset_queue(instr, high=high, hndlr=hndlr)
+    # Note that some system wait (0.2s) before acknowledging an
+    # SRQ on tcpip (vxi-11). The instrument might wait for that ack
+    # before sending the next srq. So lets wait to make sure the first one
+    # is good anyway,
+    _sleep(.5)
+    start = _time()
     while _time()-start < 1.: # test for 1 second
         n += 1
         hndlr.reset()
@@ -2010,6 +2029,15 @@ def _test_one_srq_handler_timing(instr, hndlr):
     #print dts
     print '  Handlers(%s) are called on (avg=%f, std=%f, min=%f, max=%f ms) after *OPC (count=%d)'%(
                 name, dts.mean(), dts.std(), dts.min(), dts.max(), n)
+    if dts.max() > 100.:
+        dl = dts[np.where(dts < 100.)]
+        dh = dts[np.where(dts >= 100.)]
+        if len(dl):
+            print '  Handlers(%s) event< 0.1s (avg=%f, std=%f, min=%f, max=%f ms) after *OPC (count=%d)'%(
+                        name, dl.mean(), dl.std(), dl.min(), dl.max(), len(dl))
+        if len(dh):
+            print '  Handlers(%s) event>=0.1s (avg=%f, std=%f, min=%f, max=%f ms) after *OPC (count=%d)'%(
+                        name, dh.mean(), dh.std(), dh.min(), dh.max(), len(dh))
     _test_stb(instr)
     _test_write(instr, '*cls')
 
@@ -2339,6 +2367,51 @@ def _force_autopoll(enable):
     current = out.split('Current Value:')[1].lstrip().split()[0]
     print '  current autopoll status now: ', bool(int(current, 16))
 
+########################################################################
+
+def _test_lock_cleanup_helper(visa_name, rsrc_manager_path, pipe, instr_options={}):
+    rsrc_manager = get_resource_manager(rsrc_manager_path)
+    res, state, instr = _test_open_instr(rsrc_manager, visa_name, instr_options=instr_options)
+    pipe.send([res, state])
+    if not res:
+        return
+    pipe.send(_test_lock(instr, exclusive=True))
+
+def test_lock_cleanup(visa_name, rsrc_manager_path, instr_options={}):
+    """ This tests if the visalib properly cleanups open locks
+        before closing a device. If left open, the device will not be reloadable
+        until a reboot.
+    """
+    from multiprocessing import Process, Pipe
+    start_test('Check proper lock cleanup')
+    rsrc_manager = get_resource_manager(rsrc_manager_path)
+    R1 = visa_lib_info(rsrc_manager)
+    print 'visa=', visa_name
+    print 'R1=', R1
+    plocal, premote = Pipe()
+    process = Process(target=_test_lock_cleanup_helper, args=(visa_name, rsrc_manager_path, premote, instr_options))
+    with subprocess_start():
+        process.start()
+    success, error, i2 = _test_open_instr(process, '', plocal)
+    if not success:
+        print '!! Unable to open remote instrument, abort test: %s'%error
+        process.join()
+        return
+    res = plocal.recv()
+    process.join()
+    if res != False:
+        print '!! Unable to lock the remote instrument, abort test %s'%res[1]
+        return
+    success, error, instr = _test_open_instr(rsrc_manager, visa_name, instr_options=instr_options)
+    if not success:
+        print '!! Unable to open the instrument: %s'%error
+    else:
+        res = _test_lock(instr, exclusive=True)
+        if res != False:
+            print '!! Unable to obtain the lock: %s'%res[1]
+        else:
+            print 'Locks are properly cleaned up!'
+            instr.unlock()
 
 ########################################################################
 
@@ -2451,6 +2524,10 @@ def test_all(visa_name1, visa_name2=None, rsrc_manager_path1=agilent_path, rsrc_
     Make sure that the instruments are not loaded somewhere else (this is especially important on GPIB,
     otherwise you will get locking problems (other device gpib handler locks when reading the status byte
     in pyhegel))
+    Also for TCPIP (VXI-11, make sure that the firewall does not block incoming connection to the python executable
+    (the scilland for agilent SICL-LAN)
+    (It could affect agilent and NI differently since agilent can use a different protocol (SICL-LAN) to agilent device
+     RPC program 395180 instead of 395183, and the interrupt probably works slightly differently)
     """
     start_test('-- START --')
     if are_mngr_diff(rsrc_manager_path1, rsrc_manager_path2):
