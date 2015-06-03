@@ -1311,7 +1311,7 @@ def _test_multiprocess_connect_sub(visa_name, rsrc_manager_path, pipe, instr_opt
     res = _test_wait(instr)
     # wait to give time to other side to detect event in case each sides polls
     _sleep(.2)
-    stb = int(_test_stb(instr))&96
+    stb = _test_stb(instr)&96
     _test_write(instr, '*cls')
     pipe.send((res, stb))
     # Now test if we run to quickly it will steal an event:
@@ -1319,10 +1319,72 @@ def _test_multiprocess_connect_sub(visa_name, rsrc_manager_path, pipe, instr_opt
     pipe.recv() # sync3
     _test_write(instr, '*OPC')
     res = _test_wait(instr)
-    stb = int(_test_stb(instr))&96
+    stb = _test_stb(instr)&96
+    _test_write(instr, '*cls')
+    pipe.send((res, stb))
+    # Now test what happens when multiple events are produced and detected on one
+    # side what happens on the other
+    pipe.recv() # sync4
+    _test_reset_queue(instr, high=True)
+    # once
+    n = 0
+    _test_write(instr, '*OPC')
+    res = _test_wait(instr)
+    if res == True:
+        n += 1
+    _test_stb(instr)
+    _test_write(instr, '*cls')
+    # twice
+    _test_write(instr, '*OPC')
+    res = _test_wait(instr)
+    if res == True:
+        n += 1
+    _test_stb(instr)
+    _test_write(instr, '*cls')
+    # three times
+    _test_write(instr, '*OPC')
+    res = _test_wait(instr)
+    if res == True:
+        n += 1
+    _test_stb(instr)
     _test_write(instr, '*cls')
     _test_event(instr, 'srq', 'queue', disable=True)
-    pipe.send((res, stb))
+    pipe.send(n)
+    ######################################
+    # Now repeat the test but for handlers
+    pipe.recv() # sync5
+    c0 = _clock()
+    diffs = []
+    hndlr = Handlers('SRQ', instr)
+    hndlr.install('srq')
+    _test_event(instr, 'srq', 'handler')
+    # once
+    hndlr.reset()
+    _test_write(instr, '*OPC')
+    res = _test_wait(hndlr)
+    if res == True:
+        diffs.append(hndlr.last - c0)
+    _test_stb(instr)
+    _test_write(instr, '*cls')
+    # twice
+    hndlr.reset()
+    _test_write(instr, '*OPC')
+    res = _test_wait(hndlr)
+    if res == True:
+        diffs.append(hndlr.last - c0)
+    _test_stb(instr)
+    _test_write(instr, '*cls')
+    # three times
+    hndlr.reset()
+    _test_write(instr, '*OPC')
+    res = _test_wait(hndlr)
+    if res == True:
+        diffs.append(hndlr.last - c0)
+    _test_stb(instr)
+    _test_write(instr, '*cls')
+    _test_event(instr, 'srq', 'handler', disable=True)
+    hndlr.uninstall()
+    pipe.send(diffs)
 
 
 
@@ -1331,6 +1393,7 @@ def test_multiprocess_connect(visa_name, rsrc_manager_path=None, instr_options={
     Try this for a device on gpib, lan, usb and serial.
     """
     from multiprocessing import Process, Pipe
+    import numpy as np
     start_test('multi process access to device (same visalib)')
     rsrc_manager = get_resource_manager(rsrc_manager_path)
     R1 = visa_lib_info(rsrc_manager)
@@ -1409,6 +1472,52 @@ def test_multiprocess_connect(visa_name, rsrc_manager_path=None, instr_options={
         else:
             print 'multi event not stolen (not using polling of srq) (stbl=%d, stbr=%d)'%(stbl2, stbr2)
             ok = False
+        # Now test what happens for a sequence of multiple events across process
+        # remote should produce 3.
+        _test_reset_queue(i1, high=True)
+        plocal.send('Proceed to multiple queue test') # sync4
+        remote_n = plocal.recv()
+        n = 0
+        while _test_wait(i1) == True:
+            n += 1
+        n_srq = 0
+        while _test_stb(i1)&0x40:
+            n_srq += 1
+        if remote_n != 3:
+            print '!! multi queue event across process remote did not generate 3 events, instead %i (local=%i, nsrq=%i)'%(remote_n, n, n_srq)
+        elif remote_n != n:
+            print '! missed some multi queue event from across process. Expected 3, got %i, nsrq=%i.'%(n, n_srq)
+        else:
+            print 'Got the expected 3 queue events on both sides (_srq=%i)'%n_srq
+        # Now redo the test but with handlers instead of queues, and the queue with a long wait.
+        # so also check that the handlers in separate process are independent.
+        hndlr = Handlers('SRQ', i1)
+        hndlr.install('srq')
+        _test_event(i1, 'srq', 'handler')
+        _test_reset_queue(i1, high=True, hndlr=hndlr)
+        hndlr.set_block_time(1.)
+        plocal.send('Proceed to multiple handler test') # sync5
+        c0 = _clock()
+        remote_diffs = np.array(plocal.recv())
+        diff = 0.
+        n = 0
+        _sleep(2.) # make sure we wait long enough so that all events went through
+        if _test_wait(hndlr) == True:
+            diff = hndlr.last - c0
+            n = hndlr.count
+        n_srq = 0
+        while _test_stb(i1)&0x40:
+            n_srq += 1
+        _test_event(i1, 'srq', 'handler', disable=True)
+        hndlr.uninstall()
+        if len(remote_diffs) != 3:
+            print '!! multi handler event across process remote did not generate 3 events, instead delta(s) %s (local=%i in %f s, nsrq=%i)'%(remote_diffs, n, diff, n_srq)
+        elif np.any(remote_diffs>.5):
+            print '!! multi handler event across process local wait blocked remote events, delta(s) %s (local=%i in %f s, nsrq=%i)'%(remote_diffs, n, diff, n_srq)
+        elif len(remote_diffs) != n:
+            print '! missed some multi handler event from across process. Expected 3(%s), got %i in %f s, nsrq=%i.'%(remote_diffs, n, diff, n_srq)
+        else:
+            print 'Got the expected 3 handler events on both sides. (remote delta: %s, local total: %f s, nsrq=%i)'%(remote_diffs, diff, n_srq)
     if ok:
         print 'Success!'
     process.join()
@@ -1430,6 +1539,7 @@ class Handlers(object):
         self.reset()
         self._handler_func = None
         self._exc_type = False
+        self.block_time = 0.
     def install(self, event_type, userHandle=None):
         if self.event_type != None:
             raise RuntimeError('Handler %s is already installed'%self.name)
@@ -1459,6 +1569,13 @@ class Handlers(object):
         self._handler_func = None
         res = res if not res[0] else True
         return res
+    def set_block_time(self, t):
+        """
+        The next handler event will wait this amount of seconds before
+        completing. The wait is reset after every handler call and by reset.
+        So call this after a reset if you want it to work.
+        """
+        self.block_time = t
     def wait(self, timeout_s=1.):
         """
         returns the state. Should be True unless there is a timeout.
@@ -1477,6 +1594,7 @@ class Handlers(object):
         self.event.clear()
         self.exc_status = None
         self.oper_name = None
+        self.block_time = 0.
     def check(self):
         if self.wrong_handle:
             print 'Handler(%s) received the wrong handle'%self.name
@@ -1528,6 +1646,9 @@ class Handlers(object):
             self.exc_status = status
             #self.instr.visalib.set_attribute(context, constants.VI_ATTR_STATUS, constants.VI_SUCCESS)
             #raise VisaIOError(status)
+        if self.block_time > 0.:
+            _sleep(self.block_time)
+            self.block_time = 0.
         self.event.set()
         return constants.VI_SUCCESS
 
@@ -2369,19 +2490,31 @@ def _force_autopoll(enable):
 
 ########################################################################
 
-def _test_lock_cleanup_helper(visa_name, rsrc_manager_path, pipe, instr_options={}):
+def _test_lock_cleanup_helper(visa_name, rsrc_manager_path, pipe, instr_options={}, handler=False):
     rsrc_manager = get_resource_manager(rsrc_manager_path)
     res, state, instr = _test_open_instr(rsrc_manager, visa_name, instr_options=instr_options)
     pipe.send([res, state])
     if not res:
         return
+    if handler:
+        if handler is True:
+            event_type = 'exc'
+        else:
+            event_type = handler
+        hndlr = Handlers('lock_test', instr)
+        hndlr.install(event_type, instr)
+        _test_event(instr, event_type, 'handler', handler=hndlr)
     pipe.send(_test_lock(instr, exclusive=True))
 
-def test_lock_cleanup(visa_name, rsrc_manager_path, instr_options={}):
+def test_lock_cleanup(visa_name, rsrc_manager_path, instr_options={}, handler=False):
     """ This tests if the visalib properly cleanups open locks
         before closing a device. If left open, the device will not be reloadable
         until a reboot.
+        With handler=True, tests if not cleaning up handlers borks the visalib
+         handler can also be 'srq' or 'exc' (default)
     """
+    if not (handler is False or handler is True or handler == 'exc' or handler == 'srq'):
+        raise ValueError("handler can only be True, False, 'exc' or 'srq'")
     from multiprocessing import Process, Pipe
     start_test('Check proper lock cleanup')
     rsrc_manager = get_resource_manager(rsrc_manager_path)
@@ -2389,7 +2522,7 @@ def test_lock_cleanup(visa_name, rsrc_manager_path, instr_options={}):
     print 'visa=', visa_name
     print 'R1=', R1
     plocal, premote = Pipe()
-    process = Process(target=_test_lock_cleanup_helper, args=(visa_name, rsrc_manager_path, premote, instr_options))
+    process = Process(target=_test_lock_cleanup_helper, args=(visa_name, rsrc_manager_path, premote, instr_options, handler))
     with subprocess_start():
         process.start()
     success, error, i2 = _test_open_instr(process, '', plocal)
@@ -2410,8 +2543,17 @@ def test_lock_cleanup(visa_name, rsrc_manager_path, instr_options={}):
         if res != False:
             print '!! Unable to obtain the lock: %s'%res[1]
         else:
-            print 'Locks are properly cleaned up!'
+            res = _test_communication(instr)
+            if res != True:
+                print '!! Unable to communicate with lock: %s'%res[1]
+            else:
+                print 'Locks are properly cleaned up!'
             instr.unlock()
+            res = _test_communication(instr)
+            if res != True:
+                # I have seen the above work, and this fail
+                # Seems to happen to NI visalib (must be some borked global lock)
+                print '!! Unable to communicate without lock: %s'%res[1]
 
 ########################################################################
 
