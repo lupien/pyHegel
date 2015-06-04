@@ -381,11 +381,12 @@ class sr780_analyzer(visaInstrumentAsync):
     def _get_async(self, async, obj, delay=False, trig=False, **kwarg):
         ret = super(sr780_analyzer, self)._get_async(async,  obj, delay=delay, trig=trig, **kwarg)
         if async == 0: #setup
-            if self._async_list_init == []: # first time through
-                self._async_list_init.append((self._async_detect_setup, dict(reset=True)))
+            data = self._get_async_local_data()
+            if data.async_list_init == []: # first time through
+                data.async_list_init.append((self._async_detect_setup, dict(reset=True)))
             # Assuming we only get called by fetch/readval
             disp = kwarg.get('disp', None)
-            self._async_list_init.append((self._async_detect_setup, dict(disp=disp)))
+            data.async_list_init.append((self._async_detect_setup, dict(disp=disp)))
         return ret
     def _async_detect_setup(self, disp=None, reset=False):
         if reset:
