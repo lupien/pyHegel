@@ -390,7 +390,7 @@ class Acq_Board_Instrument(visaInstrument):
     To obtain a proper x scale for graphs, use get_xdata
 
     Other methods available: stop, disconnect, shutdown_server, convert_bin2v
-                             idn, cls, wait_after_trig, wait_after_trig
+                             idn, cls, wait_after_trig
     and attribute: board_type
     """
     
@@ -499,6 +499,7 @@ You can start a server with:
         
         # init the parent class
         BaseInstrument.__init__(self)
+        self._async_mode = 'acq_run'
 
     def idn(self):
         """
@@ -546,25 +547,26 @@ You can start a server with:
         super(Acq_Board_Instrument, self).__del__()
 
     def _async_trig(self):
+        super(Acq_Board_Instrument, self)._async_trig()
         #self._run_finished.clear() # now in run itself
         self.run()
     def _async_detect(self, max_time=.5): # 0.5 s max by default
+        if self._error_state:
+            return True
         return self._run_finished.wait(max_time)
         #return wait_on_event(self._run_finished, check_state=self, max_time=max_time)
-    @locked_calling
     def wait_after_trig(self):
         """
         waits until the run is finished
         """
-        return wait_on_event(self._run_finished, check_state=self)
-    @locked_calling
+        super(Acq_Board_Instrument, self).wait_after_trig()
+        #return wait_on_event(self._run_finished, check_state=self)
     def run_and_wait(self):
         """
         This performs a run and waits for it to finish.
         See run for more details.
         """
-        self._async_trig()
-        self.wait_after_trig()
+        super(Acq_Board_Instrument, self).run_and_wait()
 
     def _current_config(self, dev_obj=None, options={}):
         if self.op_mode.getcache() == 'Acq':
