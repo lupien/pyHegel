@@ -517,7 +517,7 @@ class BaseDevice(object):
     def __init__(self, autoinit=True, doc='', setget=False, allow_kw_as_dict=False,
                   allow_missing_dict=False,
                   min=None, max=None, choices=None, multi=False, graph=True,
-                  trig=False, delay=False, redir_async=None):
+                  trig=False, redir_async=None):
         # instr and name updated by instrument's _create_devs
         # doc is inserted before the above doc
         # autoinit can be False, True or a number.
@@ -538,7 +538,6 @@ class BaseDevice(object):
         self._getdev_p = None
         self._setget = setget
         self._trig = trig
-        self._delay = delay
         self._redir_async = redir_async
         self._last_filename = None
         self.min = min
@@ -918,6 +917,7 @@ class BaseInstrument(object):
             d.async_level
         except AttributeError:
             d.async_list = []
+            d.async_select_list = []
             d.async_list_init = []
             d.async_level = -1
             d.async_counter = 0
@@ -943,7 +943,8 @@ class BaseInstrument(object):
         if async == 0:  # setup async task
             if data.async_level == -1: # first time through
                 data.async_list = []
-                data.async_list_init = [(self._async_select, (data.async_list, ), {})]
+                data.async_select_list = []
+                data.async_list_init = [(self._async_select, (data.async_select_list, ), {})]
                 delay = self.async_delay.getcache()
                 data.async_task = asyncThread(data.async_list, self._lock_instrument, self._lock_extra, data.async_list_init, delay=delay)
                 data.async_level = 0
@@ -952,6 +953,7 @@ class BaseInstrument(object):
                 data.async_task.change_trig(self._async_trig)
                 data.async_task.change_cleanup(self._async_cleanup_after)
             data.async_list.append((obj.get, kwarg))
+            data.async_select_list.append((obj, kwarg))
         elif async == 1:  # Start async task (only once)
             #print 'async', async, 'self', self, 'time', time.time()
             if data.async_level == 0: # First time through
@@ -972,6 +974,7 @@ class BaseInstrument(object):
                 # delete task so that instrument can be deleted
                 del data.async_task
                 del data.async_list
+                del data.async_select_list
                 del data.async_list_init
             return ret
     def find_global_name(self):
@@ -1483,7 +1486,7 @@ class ReadvalDev(BaseDevice):
             autoinit = dev._autoinit
         super(ReadvalDev,self).__init__(redir_async=dev, autoinit=autoinit, **kwarg)
     def _getdev(self, **kwarg):
-        self.instr._async_select([self._slave_dev])
+        self.instr._async_select([(self._slave_dev, kwarg)])
         self.instr.run_and_wait()
         ret = self._slave_dev.get(**kwarg)
         self._last_filename = self._slave_dev._last_filename
