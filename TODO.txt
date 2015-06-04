@@ -1,5 +1,4 @@
 Main TODO list:
-- properly handle run_and_wait (readval) for lockin
 - finish lecroy and Zurich
 - Create a python analysis template
 - Make check function work
@@ -9,7 +8,7 @@ Main TODO list:
       -return proper xy-axis
       -allow renormalized fetch
       -make it work with scope (or scope2d see JOS)
-
+- add data (like async_delay, idn) in all file headers.
 
 
 
