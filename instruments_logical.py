@@ -749,7 +749,7 @@ class Average(LogicalDevice):
         std = vals.std(axis=0, ddof=1)
         N = vals.shape[0]
         if avg.ndim == 0:
-            ret = [avg, std, N]
+            ret = [avg, std]
         else:
             ret = list(avg)+list(std)
         return ret + [N]
