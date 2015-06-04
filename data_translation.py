@@ -188,6 +188,7 @@ class DataTranslation(BaseInstrument):
 
         # init the parent class
         BaseInstrument.__init__(self)
+        self._async_mode = 'acq_run'
 
     def _update_all_channels_info(self, init=False):
         if init:
@@ -233,26 +234,13 @@ class DataTranslation(BaseInstrument):
         # raw is not used here but is needed by scpiDevice methods
         return eval('self.'+string)
     def _async_trig(self):
+        super(DataTranslation, self)._async_trig()
         self.run()
     def _async_detect(self, max_time=.5): # 0.5 s max by default
         func = lambda: not self._analog_in.IsRunning
         return _retry_wait(func, timeout=max_time, delay=0.05)
         # Also ai.State
         #return instrument.wait_on_event(self._run_finished, check_state=self, max_time=max_time)
-    @locked_calling
-    def wait_after_trig(self):
-        """
-        waits until the triggered event is finished
-        """
-        return wait_on_event(self._async_detect)
-    @locked_calling
-    def run_and_wait(self):
-        """
-        This performs a run and waits for it to finish.
-        See run for more details.
-        """
-        self._async_trig()
-        self.wait_after_trig()
     @locked_calling
     def abort(self):
         self._analog_in.Abort()
