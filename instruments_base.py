@@ -455,7 +455,13 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
     except AttributeError: # just consider it a function
         docheck = task_or_event_or_func
     while True:
-        if docheck(0.2):
+        if max_time != None:
+            check_time = max_time - (time.time()-start_time)
+            check_time = max(0., check_time) # make sure it is positive
+            check_time = min(check_time, 0.2) # and smaller than 0.2 s
+        else:
+            check_time = 0.2
+        if docheck(check_time):
             return True
         if max_time != None and time.time()-start_time > max_time:
             return False
@@ -654,7 +660,7 @@ class BaseDevice(object):
         obj = self._do_redir_async()
         if async != 3 or self == obj:
             ret = obj.instr._get_async(async, obj,
-                           trig=obj._trig, delay=obj._delay, **kwarg)
+                           trig=obj._trig, **kwarg)
         # now make sure obj._cache and self._cache are the same
         else: # async == 3 and self != obj:
             # async thread is finished, so lock should be available
@@ -662,8 +668,7 @@ class BaseDevice(object):
                 #_get_async blocks if it is not in the correct thread and is not
                 #complete. Here we just keep the lock until setcache is complete
                 # so setcache does not have to wait for a lock.
-                ret = obj.instr._get_async(async, obj,
-                               trig=obj._trig, delay=obj._delay, **kwarg)
+                ret = obj.instr._get_async(async, obj, **kwarg)
                 self.setcache(ret)
                 self._last_filename = obj._last_filename
         return ret
@@ -817,6 +822,26 @@ class MetaClassInit(type):
 ##    Base Instrument
 #######################################################
 
+# Async behavior changed 2015-06-03
+# Before, the device would select either trig or delay
+#   trig would use triggering, delay would use async_delay
+#   If multiple device used both, they would both be turned on
+#   and run_and_wait would only ever use trig, never async_delay
+#   That was never really used and did not provide flexibility
+#   like for devices that can sometimes need one or the other
+#   or making run_and_wait behave like async for delay
+# Now, to improve the situation, I removed the option of
+#   delay for devices. Device can only say they need triggerring
+#   or not. They also use it when then need a delay.
+#   async_delay is always respected for every and all devices,
+#   and for both async and run_and_wait. It is used before the trig
+#   For the wait option in a trig, we use async_wait device.
+#   Finally the selection of whether to use a trigger or
+#   a delay is left to _async_trig and _async_detect.
+#   They both use information from _async_mode which should be
+#   set by _async_select which is called in the async thread (init_list)
+#   and by ReadvalDev
+
 class BaseInstrument(object):
     __metaclass__ = MetaClassInit
     alias = None
@@ -826,42 +851,66 @@ class BaseInstrument(object):
         if not hasattr(self, '_lock_extra'):
             # don't overwrite what is assigned in subclasses
             self._lock_extra = Lock_Extra()
+        self._async_mode = 'wait'
         self._create_devs()
         self._async_local_data = threading.local()
-        self._async_delay_check = True
+        self._async_wait_check = True
         self._last_force = time.time()
         if not CHECKING:
             self.init(full=True)
     def __del__(self):
         print 'Destroying '+repr(self)
-    def _async_detect(self, max_time=.5):
-        return True
-    def _async_trig(self):
+    def _async_select(self, devs):
+        """ It receives a list of devices to help decide how to wait.
+            The list entries can be in the form (dev, option_dict) or just dev
+        """
         pass
-    def _async_delay_check_helper(self):
-        if self._async_delay_check and self.async_delay.getcache() == 0.:
-            print self.perror('***** WARNING You should give a value for async_delay *****')
-            self._async_delay_check = False
-    # The default run and wait implementation is to wait for self.async_delay time
+    def _async_detect(self, max_time=.5): # subclasses should only call this if they need async_wait
+        data = self._get_async_local_data()
+        cur = time.time()
+        left = data.async_wait - (cur - data.async_wait_start)
+        if left <= 0.:
+            return True
+        if left <= max_time:
+            sleep(left)
+            return True
+        sleep(max_time)
+        return False
+    def _async_trig(self): # subclasses can always call this
+        data = self._get_async_local_data()
+        if self._async_mode.startswith('wait'):
+            self._async_wait_check_helper()
+        data = self._get_async_local_data()
+        data.async_wait_start = time.time()
+        data.async_wait = self.async_wait.getcache()
+    def _async_cleanup_after(self): # subclasses should change this. Called unconditionnaly after async/run_and_wait
+        pass
+    def _async_wait_check_helper(self):
+        if self._async_wait_check and self.async_wait.getcache() == 0.:
+            print self.perror('***** WARNING You should give a value for async_wait *****')
+            self._async_wait_check = False
+    @locked_calling
+    def wait_after_trig(self):
+        """
+        waits until the triggered event is finished
+        """
+        try:
+            ret = wait_on_event(self._async_detect)
+        finally:
+            self._async_cleanup_after()
+        return ret
+    # Always make sure that asyncThread run behaves in the same way
     @locked_calling
     def run_and_wait(self):
         """
         This initiate a trigger and waits for it to finish.
         """
-        self._async_delay_check_helper()
-        def wait_func(max_time):
-            cur = time.time()
-            dif = wait_time-(cur-start_time)
-            if dif <= 0:
-                return True
-            if dif < max_time:
-                sleep(dif)
-                return True
-            sleep(max_time)
-            return False
-        start_time = time.time()
-        wait_time = self.async_delay.getcache()
-        wait_on_event(wait_func)
+        sleep(self.async_delay.getcache())
+        try:
+            self._async_trig()
+            self.wait_after_trig()
+        finally: # in case we were stopped because of KeyboardInterrupt or something else.
+            self._async_cleanup_after()
     def _get_async_local_data(self):
         d = self._async_local_data
         try:
@@ -872,8 +921,13 @@ class BaseInstrument(object):
             d.async_level = -1
             d.async_counter = 0
             d.async_task = None
+            d.async_wait_start = 0.
+            d.async_wait = 0.
         return d
-    def _get_async(self, async, obj, delay=False, trig=False, **kwarg):
+    def _get_async(self, async, obj, trig=False, **kwarg):
+        # get_async should note change anything about the instrument until
+        # we run the asyncThread. Should only change local thread data.
+        # we are not protected by a lock until that.
         data = self._get_async_local_data()
         if async == -1: # we reset task
             if data.async_level > 1:
@@ -888,14 +942,10 @@ class BaseInstrument(object):
         if async == 0:  # setup async task
             if data.async_level == -1: # first time through
                 data.async_list = []
-                data.async_list_init = []
-                data.async_task = asyncThread(data.async_list, self._lock_instrument, self._lock_extra, data.async_list_init)
+                data.async_list_init = [(self._async_select, (data.async_list, ), {})]
+                delay = self.async_delay.getcache()
+                data.async_task = asyncThread(data.async_list, self._lock_instrument, self._lock_extra, data.async_list_init, delay=delay)
                 data.async_level = 0
-            if delay:
-                # we only warn if we are suppose to use delay
-                self._async_delay_check_helper()
-            # but we always use delay
-            data.async_task.change_delay(self.async_delay.getcache())
             if trig:
                 data.async_task.change_detect(self._async_detect)
                 data.async_task.change_trig(self._async_trig)
@@ -985,7 +1035,9 @@ class BaseInstrument(object):
         # because we want each instrument instance to use its own
         # device instance (otherwise they would share the instance data)
         self.async_delay = MemoryDevice(0., doc=
-            "In seconds. Used in async mode for devices that don't start/wait (run_and_wait) functions.")
+            "In seconds. This is the delay before the trigger in async and run_and_wait.")
+        self.async_wait = MemoryDevice(0., doc=
+            "In seconds. This is the wait time after a trig for devices that don't use a real trig/detect sequence.")
         self._devwrap('header')
         self._create_devs_helper()
 #    def _current_config(self, dev_obj, get_options):
@@ -1428,6 +1480,7 @@ class ReadvalDev(BaseDevice):
             autoinit = dev._autoinit
         super(ReadvalDev,self).__init__(redir_async=dev, autoinit=autoinit, **kwarg)
     def _getdev(self, **kwarg):
+        self.instr._async_select([self._slave_dev])
         self.instr.run_and_wait()
         ret = self._slave_dev.get(**kwarg)
         self._last_filename = self._slave_dev._last_filename
@@ -2625,6 +2678,7 @@ class visaInstrumentAsync(visaInstrument):
         self._async_last_esr = 0
         self._async_do_cleanup = False
         super(visaInstrumentAsync, self).__init__(visa_addr)
+        self._async_mode = 'srq'
         is_gpib = self.visa.is_gpib()
         is_agilent = rsrc_mngr.is_agilent()
         self._async_polling = False
@@ -2705,9 +2759,23 @@ class visaInstrumentAsync(visaInstrument):
             return True
         return False
     def _async_detect(self, max_time=.5): # 0.5 s max by default
+        """
+        handles _async_mode of 'wait' (only wait delay), 'srq' (only detects srq)
+                               'wait+srq' (wait followed by srq, so minimum of wait)
+            all the options starting with wait will warn once if async_wait is 0.
+            If you don't want the warning, replace 'wait' with '_wait' in the above strings.
+        """
+        if self._async_mode not in ['wait', '_wait', 'wait+srq', '_wait+srq', 'srq']:
+            raise RuntimeError('Invalid async_mode selected')
+        if self._async_mode in ['wait', '_wait']:
+            return super(visaInstrumentAsync, self)._async_detect(max_time)
+        ret = False
+        if self._async_mode in ['wait+srq', '_wait+srq']:
+            if not super(visaInstrumentAsync, self)._async_detect(max_time):
+                return False
         if self._async_polling:
             if _retry_wait(self._async_detect_poll_func, max_time, delay=0.05):
-                return True
+                ret = True
         elif self._RQS_status == -1:
             # On National Instrument (NI) visa
             #  the timeout actually used seems to be 16*ceil(max_time*1000/16) in ms.
@@ -2720,7 +2788,7 @@ class visaInstrumentAsync(visaInstrument):
                 self._async_last_esr = self._get_esr()
                 # only reset SRQ flag. We know the bit that is set already
                 self._async_last_status = self.read_status_byte()
-                return True
+                ret = True
         else:
             if self._RQS_done.wait(max_time):
                 #we assume status only had bit 0x20(event) and 0x40(RQS) set
@@ -2728,29 +2796,8 @@ class visaInstrumentAsync(visaInstrument):
                 # status has already been reset. Now reset event flag.
                 self._async_last_esr = self._get_esr()
                 self._RQS_done.clear() # so that we can detect the next SRQ if needed without  _doing async_trig (_async_trig_cleanup)
-                return True
-        return False
-    @locked_calling
-    def wait_after_trig(self):
-        """
-        waits until the triggered event is finished
-        """
-        try:
-            ret = wait_on_event(self._async_detect)
-        finally:
-            self._async_cleanup_after()
+                ret = True
         return ret
-    # Always make sure that asyncThread run behaves in the same way
-    @locked_calling
-    def run_and_wait(self):
-        """
-        This initiate a trigger and waits for it to finish.
-        """
-        try:
-            self._async_trig()
-            self.wait_after_trig()
-        finally: # in case we were stopped because of KeyboardInterrupt or something else.
-            self._async_cleanup_after()
     def _async_cleanup_after(self):
         if self._async_do_cleanup:
             self.visa.disable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ, visa_wrap.constants.VI_ALL_MECH)
@@ -2802,5 +2849,7 @@ class visaInstrumentAsync(visaInstrument):
         self._async_last_esr = 0
     @locked_calling
     def _async_trig(self):
-        self._async_trig_cleanup()
-        self._async_trigger_helper()
+        super(visaInstrumentAsync, self)._async_trig()
+        if 'srq' in self._async_mode:
+            self._async_trig_cleanup()
+            self._async_trigger_helper()
