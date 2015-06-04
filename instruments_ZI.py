@@ -339,6 +339,7 @@ class zurich_UHF(BaseInstrument):
         self._zi_dev = zi_dev
         self._current_mode = 'lia'
         super(zurich_UHF, self).__init__()
+        self._async_select()
     def _tc_to_enbw_3dB(self, tc=None, order=None, enbw=True):
         """
         When enbw=True, uses the formula for the equivalent noise bandwidth
@@ -808,13 +809,20 @@ class zurich_UHF(BaseInstrument):
         self._zi_sweep.execute()
     def sweep_stop(self):
         self._zi_sweep.finish()
-    def run_and_wait(self):
-        if self._current_mode == 'sweep':
+    def _async_trig(self):
+        super(zurich_UHF, self)._async_trig()
+        if self._async_mode = 'sweep':
             self.sweep_start()
-            while not self.is_sweep_finished():
-                pass
+    def _async_select(self, devs=[]):
+        if self._current_mode == 'sweep':
+            self._async_mode = 'sweep'
+        else: # lia
+            self._async_mode = 'wait'
+    def _async_detect(self, max_time=.5):
+        if self._current_mode == 'sweep':
+            return _retry_wait(self.is_sweep_finished, max_time, delay=0.05)
         else:
-            sleep(self.async_delay.getcache())
+            return super(zurich_UHF, self)._async_detect(max_time)
     def sweep_data(self):
         """ Call after running a sweep """
         return self._flat_dict(self._zi_sweep.read())
@@ -824,6 +832,7 @@ class zurich_UHF(BaseInstrument):
         see also set_sweep_mode
         """
         self._current_mode = 'lia'
+        self._async_select()
     def set_sweep_mode(self, start, stop, count, logsweep=False, src='oscs/0/freq', subs='all',
                        bw='auto', loop_count=1, mode='sequential',
                        avg_count=1, avg_n_tc=0, settle_time_s=0, settle_n_tc=15):
@@ -921,6 +930,7 @@ class zurich_UHF(BaseInstrument):
             for i in subs:
                 self._subscribe('/{dev}/demods/%i/sample'%i, src='sweep')
         self._current_mode = 'sweep'
+        self._async_select()
 
 # In the result data set:
 #   available: auxin0, auxin0pwr, auxin0stddev
