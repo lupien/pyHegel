@@ -970,6 +970,8 @@ class BaseInstrument(object):
             if data.async_counter == len(data.async_task.results):
                 # delete task so that instrument can be deleted
                 del data.async_task
+                del data.async_list
+                del data.async_list_init
             return ret
     def find_global_name(self):
         return _find_global_name(self)
