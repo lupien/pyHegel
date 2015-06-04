@@ -23,7 +23,6 @@
 
 import numpy as np
 import scipy
-import time
 
 from instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
@@ -187,8 +186,7 @@ class agilent_PowerMeter(visaInstrumentAsync):
         super(agilent_PowerMeter, self).__init__(visa_addr, poll='not_gpib')
     def read_status_byte(self):
         if self._async_polling:
-            with self._lock_instrument, self._lock_extra:
-                return int(self.ask('*STB?'))
+            return int(self.ask('*STB?'))
         else:
             return super(agilent_PowerMeter, self).read_status_byte()
     def _current_config(self, dev_obj=None, options={}):

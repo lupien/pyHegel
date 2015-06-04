@@ -2481,10 +2481,13 @@ class visaInstrument(BaseInstrument):
     # Do NOT enable locked_calling for read_status_byte, otherwise we get a hang
     # when instrument is on gpib using agilent visa. But do use lock visa
     # otherwise read_stb could fail because of lock held in another thread/process
+    # The locked_calling problem is that the handler runs in a separate thread,
+    # appart from the main locked thread (when using getasync)
     #@locked_calling
     def read_status_byte(self):
         # since on serial visa does the *stb? request for us
         # might as well be explicit and therefore handle the rw_wait properly
+        # and do the locking.
         if self.visa.is_serial():
             return int(self.ask('*stb?'))
         else:
