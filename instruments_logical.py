@@ -28,7 +28,7 @@ from scipy.optimize import brentq as brentq_rootsolver
 import weakref
 import time
 
-from instruments_base import BaseDevice, BaseInstrument, ProxyMethod,\
+from instruments_base import BaseDevice, BaseInstrument, ProxyMethod, MemoryDevice,\
                         _find_global_name, _get_conf_header, locked_calling_dev
 from traces import wait
 
@@ -39,6 +39,12 @@ def _asDevice(dev):
             raise ValueError, 'We required a device, but the given instrument has no alias'
     return dev
 
+class _dummy_delay_Dev(object):
+    def __init__(self, log_device_proxy):
+        self.log_device = log_device_proxy
+    def getcache(self):
+        return self.log_device.async_delay
+
 class _LogicalInstrument(BaseInstrument):
     """
         This is only used to handle async mode properly.
@@ -48,6 +54,11 @@ class _LogicalInstrument(BaseInstrument):
     def __init__(self, device, **kwarg):
         super(_LogicalInstrument, self).__init__(**kwarg)
         self.log_device = weakref.proxy(device)
+        # We don't want to use _create_devs but we need a working async_delay
+        # for the getasync
+        self.async_delay = _dummy_delay_Dev(self.log_device)
+    def _async_trig(self): #override BaseInstrument versions.
+        pass
     def _async_detect(self, max_time=.5): # 0.5 s max by default
         return self.log_device._async_detect(max_time)
     def get_xscale(self):
@@ -86,6 +97,8 @@ class LogicalDevice(BaseDevice):
        basedev handling in get and getasync (for async this probably only makes sense for devices
        that don't have an async mode.)
        force_get always forces all subdevice unless it is overriden.
+       When using async, the attribute async_delay does the same as the async_delay device of
+       a normal instrument.
 
        The quiet_del option prevents the destructor from printing. Useful when within an instrument.
        To include a device within an instrument, do it within _create_devs, so it gets
@@ -146,6 +159,7 @@ class LogicalDevice(BaseDevice):
         super(LogicalDevice, self).__init__(doc=doc, trig=True, **kwarg)
         self._instr_internal = _LogicalInstrument(self)
         self._instr_parent = None
+        self.async_delay = 0.
         fmt = self._format
         if not fmt['header'] and hasattr(self, '_current_config'):
             conf = ProxyMethod(self._current_config)
