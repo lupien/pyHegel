@@ -2731,7 +2731,7 @@ class visaInstrumentAsync(visaInstrument):
         super(visaInstrumentAsync, self).__del__()
     def init(self, full=False):
         # This clears the error state, and status/event flags?
-        self.write('*cls')
+        self.clear()
         if full:
             self.write('*ese 1;*sre 32') # OPC flag
     def _RQS_handler(self, vi, event_type, context, userHandle):
