@@ -90,16 +90,15 @@ class yokogawa_gs200(visaInstrument):
 
 class sr830_lia(visaInstrument):
     """
-    When using async mode, don't forget to set the async_delay
-    to some usefull values.
-     might do set(sr1.async_delay, 1.)
+    Don't forget to set the async_wait to some usefull values.
+     might do set(sr1.async_wait, 1.)
     when using 24dB/oct, 100ms filter.
 
     You can use find_n_time and find_fraction to set the time.
-    For example: set(sr1.async_delay, sr1.find_n_time(.99,sec=True))
+    For example: set(sr1.async_wait, sr1.find_n_time(.99,sec=True))
 
-    To read more than one channel at a time use snap
-    Otherwise you can use x, y, t, theta and snap
+    To read more than one channel at a time use readval/fetch(snap)
+    Otherwise you can use x, y, t, theta
     """
     # TODO setup snapsel to use the names instead of the numbers
     _snap_type = {1:'x', 2:'y', 3:'R', 4:'theta', 5:'Aux_in1', 6:'Aux_in2',
@@ -131,7 +130,7 @@ class sr830_lia(visaInstrument):
         self.write('aoff '+ch_i)
     def _current_config(self, dev_obj=None, options={}):
         #base = ['async_delay=%r'%self.async_delay]
-        return self._conf_helper('async_delay', 'freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
+        return self._conf_helper('async_delay','async_wait', 'freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
                                  'sync_filter', 'reserve_mode',
                                  'offset_expand_x', 'offset_expand_y', 'offset_expand_r',
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf', options)
@@ -148,14 +147,14 @@ class sr830_lia(visaInstrument):
         filter_slopes=ChoiceIndex([6, 12, 18, 24])
         self.filter_slope = scpiDevice('ofsl', choices=filter_slopes, doc='in dB/oct\n')
         self.sync_filter = scpiDevice('sync', str_type=bool)
-        self.x = scpiDevice(getstr='outp? 1', str_type=float, delay=True)
-        self.y = scpiDevice(getstr='outp? 2', str_type=float, delay=True)
-        self.r = scpiDevice(getstr='outp? 3', str_type=float, delay=True)
+        self.x = scpiDevice(getstr='outp? 1', str_type=float, trig=True)
+        self.y = scpiDevice(getstr='outp? 2', str_type=float, trig=True)
+        self.r = scpiDevice(getstr='outp? 3', str_type=float, trig=True)
         off_exp = ChoiceMultiple(['offset_pct', 'expand_factor'], [float, ChoiceIndex([1, 10 ,100])])
         self.offset_expand_x = scpiDevice('oexp 1,{val}', 'oexp? 1', choices=off_exp, setget=True)
         self.offset_expand_y = scpiDevice('oexp 2,{val}', 'oexp? 2', choices=off_exp, setget=True)
         self.offset_expand_r = scpiDevice('oexp 3,{val}', 'oexp? 3', choices=off_exp, setget=True)
-        self.theta = scpiDevice(getstr='outp? 4', str_type=float, delay=True)
+        self.theta = scpiDevice(getstr='outp? 4', str_type=float, trig=True)
         input_conf = ChoiceIndex(['A', 'A-B', 'I1', 'I100'])
         self.input_conf = scpiDevice('isrc', choices=input_conf, doc='For currents I1 refers to 1 MOhm, I100 refers to 100 MOhm\n')
         self.grounded_conf = scpiDevice('ignd', str_type=bool)
@@ -168,7 +167,8 @@ class sr830_lia(visaInstrument):
         # b4=range change (accross 200 HZ, hysteresis), b5=indirect time constant change
         # b6=triggered, b7=unused
         self.status_byte = scpiDevice(getstr='LIAS?', str_type=int)
-        self._devwrap('snap', delay=True, doc="""
+        self._devwrap('snap', trig=True, doc="""
+            This device can be called snap or fetch (they are both the same)
             This device obtains simultaneous readings from many inputs.
             To select the inputs, use the parameter
              sel
@@ -176,7 +176,9 @@ class sr830_lia(visaInstrument):
             The numbers are taken from the following dictionnary:
                 %r
                 """%self._snap_type)
-        self.alias = self.snap
+        self.fetch = self.snap
+        self.readval = ReadvalDev(self.fetch)
+        self.alias = self.readval
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
     def get_error(self):
@@ -347,7 +349,7 @@ class sr780_analyzer(visaInstrumentAsync):
         average_type
         average_mode
         average_count_requested
-        async_delay (needed for exponential average, not for linear)
+        async_wait (needed for exponential average, not for linear)
     Useful methods:
         start
         get_xscale
@@ -370,28 +372,23 @@ class sr780_analyzer(visaInstrumentAsync):
             self._async_detect_setup(reset=True)
             #self._async_tocheck = 0
             #self._async_use_delay = False
-            self._async_trig_time = 0
-            self._async_delay_check = True
             self.visa.write_termination = '\n'
             #self.visa.term_chars='\n'
             # The above turned on detection of termchar on read. This is not good for
             # raw reads so turn it off.
             # visa.vpp43.set_attribute(self.visa.vi, visa.VI_ATTR_TERMCHAR_EN, visa.VI_FALSE)
             self.write('OUTX 0') # Force interface to be on GPIB, in case it is not anymore (problem with dump function)
-    def _get_async(self, async, obj, delay=False, trig=False, **kwarg):
-        ret = super(sr780_analyzer, self)._get_async(async,  obj, delay=delay, trig=trig, **kwarg)
-        if async == 0: #setup
-            data = self._get_async_local_data()
-            if data.async_list_init == []: # first time through
-                data.async_list_init.append((self._async_detect_setup, dict(reset=True)))
-            # Assuming we only get called by fetch/readval
-            disp = kwarg.get('disp', None)
-            data.async_list_init.append((self._async_detect_setup, dict(disp=disp)))
-        return ret
+    def _async_select(self, devs=[]):
+        # This is called during init of async mode.
+        self._async_detect_setup(reset=True)
+        for dev, kwarg in devs:
+            if dev in [self.fetch, self.readval]:
+                disp = kwarg.get('disp', None)
+                self._async_detect_setup(disp=disp)
     def _async_detect_setup(self, disp=None, reset=False):
         if reset:
             self._async_tocheck = 0
-            self._async_use_delay = False
+            self._async_mode = 'srq'
             self._cum_display_status = 0
             return
         disp_org = self.current_display.getcache()
@@ -403,10 +400,7 @@ class sr780_analyzer(visaInstrumentAsync):
             if self.average_type.get() in ['linear', 'FixedLength']:
                 tocheck = 0x2
             else:
-                if self._async_delay_check and self.async_delay.getcache() == 0.:
-                    print self.perror('***** WARNING You should give a value for async_delay *****')
-                    self._async_delay_check = False
-                self._async_use_delay = True
+                self._async_mode = 'wait+srq'
                 tocheck = 0x4
         else:
             tocheck = 0x4
@@ -415,7 +409,7 @@ class sr780_analyzer(visaInstrumentAsync):
         self._async_tocheck |= tocheck
         self.current_display.set(disp_org)
     def _async_trigger_helper(self):
-        if self._async_use_delay==False and self._async_tocheck==0:
+        if self._async_wait != 'wait' and self._async_tocheck==0:
             # Need to setup for both channels since we don't know which one
             # is needed (for exemple: get srnet.readval,disp='B' while current_disp is 'A',
             #  run_and_wait is called before current_disp is changed)
@@ -425,7 +419,6 @@ class sr780_analyzer(visaInstrumentAsync):
         self.get_display_status() # reset the display status flags
         self.write('DSPE %i'%self._async_tocheck)
         self.write('STRT')
-        self._async_trig_time = time.time()
     def _get_esr(self):
         # This disables the get_esr in the async routines.
         return 0
@@ -438,15 +431,11 @@ class sr780_analyzer(visaInstrumentAsync):
     def _async_detect(self, max_time=.5): # 0.5 s max by default
         ret = super(sr780_analyzer, self)._async_detect(max_time)
         if not ret:
-            # Did not receive SRQ
+            # Did not receive SRQ or wait long enough
             return ret
         # Received SRQ, check if we are done
         disp_st = self.get_display_status()
         self._cum_display_status |= disp_st
-        if self._async_use_delay:
-            if time.time()-self._async_trig_time < self.async_delay.getcache():
-                #print 'wait delay %0x %f'%(self._cum_display_status, time.time()-self._async_trig_time)
-                return False
         tocheck = self._async_tocheck
         #print 'tocheck %0x %0x %0x'%(tocheck, self._cum_display_status, disp_st)
         if self._cum_display_status&tocheck == tocheck:
@@ -470,8 +459,8 @@ class sr780_analyzer(visaInstrumentAsync):
          -xaxis: when True(default), the first column of data is the xaxis
         For faster transfer, make the view and unit the same type (both linear or both log)
         It is STRONGLY recommended to use linear averaging.
-        For exponential averaging you need to specify a wait time with async_delay
-         i.e. set(srnet.async_delay,3)  # for 3 seconds
+        For exponential averaging you need to specify a wait time with async_wait
+         i.e. set(srnet.async_wait,3)  # for 3 seconds
         """
         # The instrument has 5 Traces that can be used for memory.
         # There is REFY? d,j to obtain pint j (0..length-1) in ref curve of display d
@@ -511,7 +500,7 @@ class sr780_analyzer(visaInstrumentAsync):
                                  'average_en', 'average_mode', 'average_type', 'average_count_requested',
                                  'average_increment_pct', 'average_overload_reject_en', 'average_preview_type',
                                  'source_en', 'source_type', 'source_freq1', 'source_ampl1_V',
-                                 'source_offset_V', 'source_freq2', 'source_ampl2_V',
+                                 'source_offset_V', 'source_freq2', 'source_ampl2_V', 'async_wait',
                                  options)
         if want_ch != orig_ch:
             self.current_channel.set(orig_ch)
@@ -1796,7 +1785,7 @@ class dummy(BaseInstrument):
         self.current = MemoryDevice(1., doc='This is a memory current, a float')
         self.other = MemoryDevice(autoinit=False, doc='This takes a boolean')
         #self.freq = scpiDevice('freq', str_type=float)
-        self._devwrap('rand', doc='This returns a random value. There is not set.', delay=True)
+        self._devwrap('rand', doc='This returns a random value. There is not set.', trig=True)
         self._devwrap('incr')
         self.alias = self.current
         # This needs to be last to complete creation
