@@ -360,6 +360,11 @@ class sr780_analyzer(visaInstrumentAsync):
         meas_view
         unit
     """
+    def __init__(self, *args, **kwargs):
+        super(sr780_analyzer, self).__init__(*args, **kwargs)
+        # The parant __init__ overrides our selection of 'wait' mode
+        # in _async_detect_setup(reset=True) in init. So lets set it back
+        self._async_mode = 'wait'
     def init(self, full=False):
         # This empties the instrument buffers
         self._dev_clear()
@@ -368,7 +373,6 @@ class sr780_analyzer(visaInstrumentAsync):
         if full:
             self._async_sre_flag = 2
             self.write('DSPE 0;*sre 2') # Display flags
-            self._cum_display_status = 0
             self._async_detect_setup(reset=True)
             #self._async_tocheck = 0
             #self._async_use_delay = False
@@ -387,10 +391,15 @@ class sr780_analyzer(visaInstrumentAsync):
                 self._async_detect_setup(disp=disp)
     def _async_detect_setup(self, disp=None, reset=False):
         if reset:
+            # make the default async_mode is 'wait' so that if
+            # _async_tocheck == 0, we just turn on wait.
+            # This could happen when using run_and_wait before anything is set
+            # Otherwise, getasync and readval both call async_select to setup
+            # the mode properly (_async_mode and_async_tocheck).
             self._async_tocheck = 0
-            self._async_mode = 'srq'
-            self._cum_display_status = 0
+            self._async_mode = 'wait'
             return
+        self._async_mode = 'srq'
         disp_org = self.current_display.getcache()
         if disp==None:
             disp = disp_org
@@ -409,12 +418,10 @@ class sr780_analyzer(visaInstrumentAsync):
         self._async_tocheck |= tocheck
         self.current_display.set(disp_org)
     def _async_trigger_helper(self):
-        if self._async_wait != 'wait' and self._async_tocheck==0:
-            # Need to setup for both channels since we don't know which one
-            # is needed (for exemple: get srnet.readval,disp='B' while current_disp is 'A',
-            #  run_and_wait is called before current_disp is changed)
-            self._async_detect_setup('A')
-            self._async_detect_setup('B')
+        # We are setup so that run_and_wait resuses the last config which starts
+        # with a simple wait (could be invalid now if averaging is changed on the instrument).
+        # Should not be a big deal since that is not a normal use of it.
+        self._cum_display_status = 0
         self.write('PAUS') # make sure we are not scanning anymore.
         self.get_display_status() # reset the display status flags
         self.write('DSPE %i'%self._async_tocheck)
@@ -430,9 +437,12 @@ class sr780_analyzer(visaInstrumentAsync):
         self._async_trigger_helper()
     def _async_detect(self, max_time=.5): # 0.5 s max by default
         ret = super(sr780_analyzer, self)._async_detect(max_time)
+        if self._async_mode == 'wait':
+            # pure wait
+            return ret
         if not ret:
             # Did not receive SRQ or wait long enough
-            return ret
+            return False
         # Received SRQ, check if we are done
         disp_st = self.get_display_status()
         self._cum_display_status |= disp_st
@@ -440,7 +450,7 @@ class sr780_analyzer(visaInstrumentAsync):
         #print 'tocheck %0x %0x %0x'%(tocheck, self._cum_display_status, disp_st)
         if self._cum_display_status&tocheck == tocheck:
             self.write('DSPE 0')
-            self._async_detect_setup(reset=True)
+            self._cum_display_status = 0
             return True # We are done!
         return False
     def _fetch_getformat(self, **kwarg):
