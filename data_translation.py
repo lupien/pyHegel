@@ -233,6 +233,7 @@ class DataTranslation(BaseInstrument):
     def ask(self, string, raw=False):
         # raw is not used here but is needed by scpiDevice methods
         return eval('self.'+string)
+    @locked_calling
     def _async_trig(self):
         super(DataTranslation, self)._async_trig()
         self.run()

@@ -46,7 +46,7 @@ from instruments_base import BaseInstrument,\
                             ChoiceBase, _general_check,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
                             _decode_block_base, make_choice_list,\
-                            sleep, locked_calling, ProxyMethod
+                            sleep, locked_calling, ProxyMethod, _retry_wait
 from instruments_base import ChoiceIndex as _ChoiceIndex
 from instruments_logical import FunctionDevice
 from scipy.special import gamma
@@ -809,9 +809,10 @@ class zurich_UHF(BaseInstrument):
         self._zi_sweep.execute()
     def sweep_stop(self):
         self._zi_sweep.finish()
+    @locked_calling
     def _async_trig(self):
         super(zurich_UHF, self)._async_trig()
-        if self._async_mode = 'sweep':
+        if self._async_mode == 'sweep':
             self.sweep_start()
     def _async_select(self, devs=[]):
         if self._current_mode == 'sweep':

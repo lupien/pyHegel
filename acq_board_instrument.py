@@ -546,6 +546,7 @@ You can start a server with:
         self.s.close()
         super(Acq_Board_Instrument, self).__del__()
 
+    @locked_calling
     def _async_trig(self):
         super(Acq_Board_Instrument, self)._async_trig()
         #self._run_finished.clear() # now in run itself

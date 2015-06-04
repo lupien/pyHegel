@@ -876,6 +876,7 @@ class BaseInstrument(object):
             return True
         sleep(max_time)
         return False
+    @locked_calling
     def _async_trig(self): # subclasses can always call this
         data = self._get_async_local_data()
         if self._async_mode.startswith('wait'):
