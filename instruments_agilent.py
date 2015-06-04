@@ -1827,8 +1827,10 @@ class agilent_ENA(agilent_PNAL):
     @locked_calling
     def _async_trig(self):
         self.cont_trigger.set(False)
+        # we bypass the agilent_PNAL _async_trig (our parent) and go to its parent
         super(agilent_PNAL, self)._async_trig()
     def _async_detect(self, max_time=.5): # 0.5 s max by default
+        # we bypass the agilent_PNAL _async_detect (our parent) and go to its parent
         return super(agilent_PNAL, self)._async_detect(max_time)
     def _async_trigger_helper(self):
         self.trig_source.set('BUS')
@@ -2065,9 +2067,6 @@ class agilent_FieldFox(agilent_PNAL):
         #self.trig_source.set('INTernal')
         self.cont_trigger.set(True)
     @locked_calling
-    def _async_trig(self):
-        self.cont_trigger.set(False)
-        super(agilent_PNAL, self)._async_trig()
     def _async_trig(self):
         # similar to PNAL version
         # Here we will assume that _async_trigger_helper ('INITiate;*OPC')
@@ -2348,8 +2347,9 @@ class agilent_AWG(visaInstrumentAsync):
         self.write(':format:border swap')
         # initialize async stuff
         super(agilent_AWG, self).init(full=full)
+        self._async_trigger_helper_string = '*OPC'
     def _async_trigger_helper(self):
-        self.write('*OPC')
+        self.write(self._async_trigger_helper_string)
     def _current_config(self, dev_obj=None, options={}):
         orig_ch = self.current_channel.getcache()
         ch_list = ['current_channel', 'freq_source', 'cont_trigger', 'gate_mode_en', 'output_en',
@@ -2497,7 +2497,5 @@ class agilent_AWG(visaInstrumentAsync):
         if ch!=None:
             self.current_channel.set(ch)
         ch = self.current_channel.getcache()
-        self._async_trig_cleanup()
-        self.write(':TRACe{ch}:IQIMPort 1,"{f}",BIN,BOTH,ON,{p}'.format(ch=ch, f=filename, p=padding))
-        self._async_trigger_helper()
-        self.wait_after_trig()
+        self._async_trigger_helper_string = ':TRACe{ch}:IQIMPort 1,"{f}",BIN,BOTH,ON,{p};*OPC'.format(ch=ch, f=filename, p=padding)
+        self.run_and_wait()
