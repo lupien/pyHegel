@@ -46,7 +46,7 @@ from instruments_base import BaseInstrument,\
                             ChoiceBase, _general_check,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
                             _decode_block_base, make_choice_list,\
-                            sleep, locked_calling, ProxyMethod, _retry_wait
+                            sleep, locked_calling, ProxyMethod, _retry_wait, _repr_or_string
 from instruments_base import ChoiceIndex as _ChoiceIndex
 from instruments_logical import FunctionDevice
 from scipy.special import gamma
@@ -357,8 +357,60 @@ class zurich_UHF(BaseInstrument):
             return (1./(2*np.pi*tc)) * np.sqrt(np.pi)*gamma(order-0.5)/(2*gamma(order))
         else:
             return np.sqrt(2.**(1./order) -1) / (2*np.pi*tc)
+    def _current_config_demod_helper(self, chs):
+        # chs needs to be a list
+        just_one = False
+        if len(chs) == 1:
+            just_one = True
+        # could add demod_bw3db, demod_enbw but they are conversion of demod_tc
+        demod_conf = ['demod_en', 'demod_freq', 'demod_harm', 'demod_rate', 'demod_tc',
+                      'demod_order', 'demod_phase', 'demod_trigger','demod_bypass_en',
+                      'demod_osc_src', 'demod_adc_src']
+        ret = []
+        for c in chs:
+            self.current_demod.set(c)
+            cret = []
+            for n in demod_conf:
+                # follows _conf_helper
+                val = _repr_or_string(getattr(self, n).getcache())
+                cret.append(val)
+            if ret == []:
+                ret = cret
+            else:
+                ret = [old+', '+new for old, new in zip(ret, cret)]
+        if just_one:
+            ret = [n+'='+v for n, v in zip(demod_conf, ret)]
+        else:
+            ret = [n+'=['+v+']' for n, v in zip(demod_conf, ret)]
+        return ret
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('memory_size', 'trig_coupling', options)
+        extra = []
+        if dev_obj in  [self.fetch, self.readval]:
+            if self._current_mode == 'sweep':
+                extra = self._conf_helper('sweep_x_start', 'sweep_x_stop', 'sweep_x_count', 'sweep_x_log',
+                                          'sweep_loop_count', 'sweep_auto_bw_mode', 'sweep_auto_bw_fixed',
+                                          'sweep_settling_time_s', 'sweep_settling_n_tc',
+                                          'sweep_averaging_count', 'sweep_averaging_n_tc',
+                                          'sweep_mode', 'sweep_phase_unwrap_en', 'sweep_x_src_node',
+                                          'sweep_endless_loop_en')
+            elif self._current_mode == 'lia':
+                pass
+            orig_ch = self.current_demod.getcache()
+            ch = options.get('ch', None)
+            ch = self._fetch_ch_helper(ch)
+            extra += self._current_config_demod_helper(ch)
+            self.current_demod.set(orig_ch)
+        else:
+            extra = self._conf_helper('current_demod',
+                                      'demod_en', 'demod_freq', 'demod_harm', 'demod_rate', 'demod_tc', 'demod_order',
+                                      'demod_phase', 'demod_trigger','demod_bypass_en',
+                                      'demod_osc_src', 'demod_adc_src')
+        base = self._conf_helper('current_demod', 'current_osc', 'current_sigins', 'current_sigouts',
+                                 'osc_freq', 'sigins_en', 'sigins_ac_en', 'sigins_50ohm_en',
+                                 'sigins_range',
+                                 'sigouts_en', 'sigouts_offset', 'sigouts_range', 'sigouts_ampl_Vp',
+                                 'sigouts_autorange_en', 'sigouts_output_clipped', options)
+        return extra+base
     def _conv_command(self, comm):
         """
         comm can be a string, a list of strings (to concatenate together)
@@ -627,20 +679,27 @@ class zurich_UHF(BaseInstrument):
             fmt = self.fetch._format
             fmt.update(multi=multi)
         elif self._current_mode == 'sweep':
+            ch = kwarg.get('ch', None)
+            ch = self._fetch_ch_helper(ch)
+            xaxis = kwarg.get('xaxis', True)
+            vals = kwarg.get('vals', ['x', 'y'])
             multi = []
+            if xaxis:
+                multi = ['grid']
+            for c in ch:
+                for v in vals:
+                    multi.append('ch%i_%s'%(c,v))
             multi = tuple(multi)
             fmt = self.fetch._format
             fmt.update(multi=multi)
         else:
             pass
-        for c in ch:
-            multi.append('ch_%s'%c)
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_pick_help(self, d, vals):
         ret = []
         for v in vals:
             x = d['x'][0]
-            y = d['x'][0]
+            y = d['y'][0]
             z = x + 1j*y
             if v == 'r':
                 ret.append(np.abs(z))
@@ -649,20 +708,49 @@ class zurich_UHF(BaseInstrument):
             else:
                 ret.append(d[v][0])
         return ret
-    def _fetch_getdev(self, ch=None, xaxis=True, raw=False, vals=['x', 'y']):
+    def _fetch_getdev(self, ch=None, xaxis=True, raw=False, vals=None):
         """
            Options available: ch, xaxis
             -ch:    a single value or a list of values for the channels to capture
-                    a value of None selects all the active ones from 0-7.
+                    a value of None(default) selects all the active ones from 0-7.
                     in sweep mode this does nothing
-            -xaxis: Set to True (default) to return the sweep variable (freq) as the first column
-                    in sweep mode.
+            -xaxis: Set to True (default) to return the grid value (sweep control, often frequency)
+                    as the first column (it is the value it wants, not necessarily the one used)
+                    If you really want the measured frequency, add it to vals
+                    in sweep mode (it is not necessarily the sweep variable)
             -vals:  is a list of strings of elements to return.
                     The strings can be 'auxin0', 'auxin1', 'dio', 'frequency'
                     'phase', 'timestamp', 'trigger', 'x', 'y'
-                    'r', 'deg' for lia mode
-                    Note that 'phase' is not the angle from x,y (use deg for that)
-                    but instead is the phase of the ref at the point in time
+                    'r', 'deg' for lia mode. Defauts to ['x', 'y']
+                       Note that 'phase' is not the angle from x,y (use deg for that)
+                       but instead is the phase of the ref at the point in time
+                    For sweep mode defaults to ['x', 'y', 'r' ,'phase'] and the available strings are:
+                      'auxin0', 'auxin0pwr', 'auxin0stddev',
+                      'auxin1', 'auxin1pwr', 'auxin1stddev',
+                      'bandwidth', 'tc', 'tcmeas', 'grid',
+                      'settimestamp', 'nexttimestamp', 'settling',
+                      'frequency',  'frequencypwr', 'frequencystddev',
+                      'x', 'xpwr', 'xstddev',
+                      'y', 'ypwr', 'ystddev',
+                      'r', 'rpwr', 'rstddev',
+                      'phase', 'phasepwr', 'phasestddev',
+                    where endings for any of x, y, r, phase, auxin0/1, frequency
+                     the base name, here x, is the avg: sum_i x_i/N
+                                         xp           : sum_i (x_i**2)/N
+                                         xstddev      : sqrt((1/(N-1)) sum_i (x_i - x)**2)
+                                         xstddev is nan if count < 2.
+                                           N is the average count number
+                                         so xstddev = sqrt(xpwr - x**2) * sqrt(N/(N-1))
+                     r and phase are as above but using r_i = abs(x_i + 1j y_i)
+                                                    phase_i = angle(x_i + 1j y_i)
+                    grid are the sweep points requested.
+                    settimestamp, nexttimestamp are respectivelly the timestamps (in s)
+                      of the set and of the first read.
+                    settling  (=nexttimestamp-settimestamp)
+                    bandwidth is the enbw (related to tc)
+                      to obtain the actually used bandwith: bandwidth*tc/tcmeas
+                    tc is calculated tc
+                    tcmeas is the tc actually used (dues to rounding)
         """
         # the demod sample phase is related to timestamp, the following should return almost a constant
         #    I get the constant to vary over 8e-5
@@ -673,7 +761,16 @@ class zurich_UHF(BaseInstrument):
         # while True:
         #    z=get(zi.demod_data); t=zi.timestamp_to_s(z['timestamp']-tzo)
         #    print ((2*pi*t*z['frequency'] - z['phase'] + 2*pi)%(2*pi))[0]
+        #For sweep mode there is also a timestamp value. It is a single value and represents
+        # the end in raw clock ticks: 1.8 GHz
+        # with multiple enable channel, one of the timestamp is the same as the last nexttimestamp
+        #  (the last channel)
+        #  the others are probably the same as the last measured value:
+        #                  last next + (set_(i+1) - next_i)
+        #  with only a single channel, it is the last nexttimestamp
         if self._current_mode == 'lia':
+            if vals is None:
+                vals = ['x', 'y']
             channels = self._fetch_ch_helper(ch)
             current_ch = self.current_demod.getcache()
             ret = []
@@ -682,10 +779,38 @@ class zurich_UHF(BaseInstrument):
                 ret.append(self._fetch_pick_help(d, vals))
             self.current_demod.set(current_ch)
         elif self._current_mode == 'sweep':
+            # Lets assume we selected all enabled channels, or selected a particular one
+            # Does not currently handle the sweep subs option
+            channels = self._fetch_ch_helper(ch)
+            if vals is None:
+                vals = ['x', 'y']
+            data = self.sweep_data()
             ret = []
-            if xaxis:
-                pass
-            ret.append(None)
+            multi_data = False
+            xaxis_differ = False
+            for ch in channels:
+                name = self._conv_command('/{dev}/demods/%i/sample'%ch)
+                try:
+                    d = data[name]
+                except KeyError:
+                    raise RuntimeError("Selected data is not available (can't use fetch with sweep): %s"%name)
+                if len(d) > 1 and not multi_data:
+                    print 'More than one sweep data set, using the latest one only'
+                    multi_data = True
+                d = d[-1]
+                if len(d) != 1:
+                    raise RuntimeError('Second dimension size of data set is invalid.')
+                d = d[0]
+                x = d['grid']
+                if ret == [] and xaxis:
+                    main_x =x
+                    ret.append(x)
+                if not xaxis_differ and xaxis and np.any(np.abs((x-main_x)/x) > 1e-8):
+                    #print np.abs((x-main_x)/x)
+                    print 'Not all x-axis are the same, returned only the first one'
+                    xaxis_differ = True
+                for v in vals:
+                    ret.append(d[v])
         else:
             raise RuntimeError('invalid mode selected. Should be lia or sweep.')
         ret = np.asarray(ret)
