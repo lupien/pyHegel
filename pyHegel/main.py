@@ -80,15 +80,19 @@ def get_parent_globals(n=2):
     return g
 
 
-start_code = """
-get_ipython().run_line_magic('pylab', 'qt')
-get_ipython().run_line_magic('autocall', '1') # smart
+_base_start_code = """
 import scipy
 import scipy.constants
 import scipy.constants as C
 
 from pyHegel.commands import *
 _init_pyHegel_globals()
+"""
+
+_start_code = """
+get_ipython().run_line_magic('pylab', 'qt')
+get_ipython().run_line_magic('autocall', '1') # smart
+""" + _base_start_code + """
 quiet_KeyboardInterrupt(True)
 """
 
@@ -102,17 +106,17 @@ def main_start():
     while g != None:
         if g.has_key('get_ipython'):
             # execute start_code in the already running ipython session.
-            print 'Under ipython', n
-            exec(start_code, g)
+            #print 'Under ipython', n
+            exec(_start_code, g)
             return
         n += 1
         g = get_parent_globals(n)
-    print 'Outside ipython', n
+    #print 'Outside ipython', n
     # We are not running in under an ipython session, start one.
     # need to fix before importing IPython (which imports time...)
     fix_scipy()
     import IPython
-    IPython.start_ipython(argv=['--matplotlib=qt', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
+    IPython.start_ipython(argv=['--matplotlib=qt', '--InteractiveShellApp.exec_lines=%s'%_start_code.split('\n')])
     #IPython.start_ipython(argv=['--matplotlib=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     #IPython.start_ipython(argv=['--pylab=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     # qt and qt4 are both Qt4Agg
@@ -124,11 +128,15 @@ def reset_start(globals_env):
     """ You need to provide the global environment where the code will be executed
         you can obtain it from running globals() in the interactive env.
     """
-    exec(start_code, globals_env)
+    if globals_env.has_key('get_ipython'):
+        exec(_start_code, globals_env)
+    else:
+        exec(_base_start_code, globals_env)
 
 
 
-light_code = """
+
+_light_code = """
 from pyHegel.commands import *
 _init_pyHegel_globals()
 """
@@ -146,7 +154,7 @@ def light_start(globals_env=None):
     """
     if globals_env is None:
         globals_env = get_parent_globals()
-    exec(light_code, globals_env)
+    exec(_light_code, globals_env)
 
 
 """
