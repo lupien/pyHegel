@@ -2269,7 +2269,7 @@ class Dict_SubDevice(BaseDevice):
         """
         This device and the subdevice need to be part of the same instrument
         (otherwise async will not work properly)
-        The subdice needs to return a dictionary (use dict_str).
+        The subdevice needs to return a dictionary (use dict_str).
         Here we will only modify the value of key in dictionary.
         force_default, set the default value of force used in check/set.
         """
@@ -2290,13 +2290,12 @@ class Dict_SubDevice(BaseDevice):
         setget = subdevice._setget
         autoinit = subdevice._autoinit
         trig = subdevice._trig
-        delay = subdevice._delay
         # TODO find a way to point to the proper subdevice in doc string
         doc = """This device set/get the '%s' dictionnary element of device.
                  It uses the same options as that subdevice:
               """%(key)
         super(Dict_SubDevice, self).__init__(min=min, max=max, choices=choices, doc=doc,
-                setget=setget, autoinit=autoinit, trig=trig, delay=delay, **kwarg)
+                setget=setget, autoinit=autoinit, trig=trig, **kwarg)
         self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
         self._getdev_p = True # needed to enable BaseDevice get in Checking mode
     def getcache(self):
