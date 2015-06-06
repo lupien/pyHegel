@@ -33,8 +33,8 @@ from . import blueforsValves
 from . import data_translation
 
 def _reload_instruments():
-    reload(others)
     reload(logical)
+    reload(others)
     reload(agilent)
     reload(acq_board_instrument)
     reload(lecroy)
