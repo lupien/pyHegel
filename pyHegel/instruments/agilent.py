@@ -21,10 +21,12 @@
 #                                                                            #
 ##############################################################################
 
+from __future__ import absolute_import
+
 import numpy as np
 import scipy
 
-from instruments_base import visaInstrument, visaInstrumentAsync,\
+from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceMultiple, Choice_bool_OnOff, _repr_or_string,\
                             quoted_string, quoted_list, quoted_dict,\

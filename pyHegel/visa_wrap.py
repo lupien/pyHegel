@@ -26,6 +26,8 @@
 Wrapper for pyvisa to handle both versions <1.5 and after
 """
 
+from __future__ import absolute_import
+
 # don't export threading, warnings, os
 import threading as _threading
 import warnings as _warnings

@@ -21,12 +21,14 @@
 #                                                                            #
 ##############################################################################
 
+from __future__ import absolute_import
+
 import socket
 import threading
 import time
 import weakref
 
-from instruments_base import BaseInstrument, MemoryDevice,\
+from ..instruments_base import BaseInstrument, MemoryDevice,\
                              dict_improved, locked_calling
 
 

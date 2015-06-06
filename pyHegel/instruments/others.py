@@ -21,21 +21,23 @@
 #                                                                            #
 ##############################################################################
 
+from __future__ import absolute_import
+
 import numpy as np
 import random
 import time
 from scipy.optimize import brentq as brentq_rootsolver
 
-import traces
+from .. import traces
 
-from instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync,\
+from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep, ChoiceSimpleMap,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list, dict_improved, _fromstr_helper,\
                             decode_float64, visa_wrap, locked_calling
 
-from instruments_logical import FunctionDevice
+from .logical import FunctionDevice
 
 #######################################################
 ##    Yokogawa source

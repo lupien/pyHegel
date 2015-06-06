@@ -21,6 +21,8 @@
 #                                                                            #
 ##############################################################################
 
+from __future__ import absolute_import
+
 import signal
 import time
 import sys
@@ -166,7 +168,7 @@ if __name__ == "__main__":
     # tests of the kbint handling
     from ctypes import pythonapi, c_long, py_object
     import thread
-    from qt_wrap import QtCore, processEvents
+    from .qt_wrap import QtCore, processEvents
     import dis
     def test_async(n_inner=200, n_repeat=1000):
         """ n_inner should be larger than check interval by at around 20.

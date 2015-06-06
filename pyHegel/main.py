@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 ########################## Copyrights and license ############################
@@ -26,14 +25,24 @@
 # Main program to start pyHegel
 #  It replaces the older C version of Hegel
 
-# You should start this script directly.
-# It is possible to load it in ipython, however, fix_scipy is not applied
-# so CTRL-C will end the program. (applying the fix would prevent program ending
-# but time.sleep would still be unbreakable because ipython already loaded the time
-# module).
+# The routine below helps to start pyHegel in a proper ipython environment
+# and then reload it when necessary.
+
+# To properly fix the scipy CTRL-C problem (that CTRL-C ends the program)
+# requires to first execute fix_scipy, then import IPython and scipy (any order).
+# If IPython is loaded before fix_scipy, then CTRL-C ending programs is fixed
+# however, it is no longer possible to stop time.sleep (becomes unbreakable)
+# because IPython imports time (and normally installs a handler but fix_scipy
+# later installs another handler that does not call any previously installed ones)
+
+# It used to be possible to start pyHegel from a running ipython shell but
+# that is deprecated.
 # Under ipython, you need to use run -i, otherwise load does not add instruments
 # in the correct global environment.
-# if you need to access the commands in a script/import use: import pyHegel_cmds
+
+# if you need to access the commands in a script/import import pyHegel.commands
+
+from __future__ import absolute_import
 
 def fix_scipy():
     """ This fixes a problem with scipy 0.14.0-7 from python(x,y) 2.7.6.1
@@ -52,30 +61,51 @@ import scipy
 import scipy.constants
 import scipy.constants as C
 
-from pyHegel_cmds import *
+from pyHegel.commands import *
 _init_pyHegel_globals()
 quiet_KeyboardInterrupt(True)
 """
 
-# Note that importing pyHegel_cmds works if this script is executed from the python
-# command line because it then adds this script directory to the import paths.
-# Therefore it will probably not work if you start it under python and try
-# to load the file with execfile(). It might work partially if you start it while
-# the current working directory is the code one.
-
-try:
-    get_ipython # if this does not produce a NameError, we are running in an ipyhton shell
-    # we usually get here because of a reset_pyHegel
-    exec(start_code)
-except NameError:
+def main_start():
     # need to fix before importing IPython (which imports time...)
     fix_scipy()
     import IPython
-
     IPython.start_ipython(argv=['--matplotlib=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     #IPython.start_ipython(argv=['--pylab=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     # qt and qt4 are both Qt4Agg
     #TerminalIPythonApp.exec_lines is inherited from InteractiveShellApp.exec_lines
+
+def reset_start(globals_env):
+    """ You need to provice the global environment where the code will be executed
+        you can obtain it from running globals() in the interactive env.
+    """
+    exec(start_code, globals_env)
+
+light_code = """
+from pyHegel.commands import *
+_init_pyHegel_globals()
+"""
+
+def light_start(globals_env=None):
+    """ Use this to start pyHegel in an already running session of
+        ipython. By default, it will load all the pyHegel commands
+        into the callers environment and initialize it properly.
+        To fully work, your ipython session should be setup to
+        display matplotlib graphics using qt(qt4) or qt5 gui.
+
+        When globals_env is None, it uses the caller's frame globals
+        for the installing all the commands, otherwise it uses the
+        specified one.
+    """
+    if globals_env is None:
+        from inspect import currentframe
+        frame = currentframe()
+        try:
+            globals_env = frame.f_back.f_globals
+        finally:
+            del frame # this is to break cyclic references, see inspect doc
+    exec(light_code, globals_env)
+
 
 """
 Informations

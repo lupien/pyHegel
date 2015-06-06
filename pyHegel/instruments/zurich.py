@@ -34,21 +34,23 @@
 #      significantly. I will put it in out ticket system. It is however not clear
 #      when I can offer a solution.
 
+from __future__ import absolute_import
+
 import numpy as np
 #import zhinst.ziPython as zi
 #import zhinst.utils as ziu
 zi = None
 ziu = None
 
-from instruments_base import BaseInstrument,\
+from ..instruments_base import BaseInstrument,\
                             BaseDevice, scpiDevice, InvalidAutoArgument,\
                             MemoryDevice, ReadvalDev,\
                             ChoiceBase, _general_check,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
                             _decode_block_base, make_choice_list,\
                             sleep, locked_calling, ProxyMethod, _retry_wait, _repr_or_string
-from instruments_base import ChoiceIndex as _ChoiceIndex
-from instruments_logical import FunctionDevice
+from ..instruments_base import ChoiceIndex as _ChoiceIndex
+from .logical import FunctionDevice
 from scipy.special import gamma
 
 def _get_zi_python_version(dev=None, host='localhost', port=8004):
@@ -1373,7 +1375,7 @@ c_uchar_p = c_char_p # POINTER(c_ubyte)
 c_uint8_p = c_char_p # POINTER(c_uint8)
 c_uint32_p = POINTER(c_uint32)
 
-from instruments_lecroy import StructureImproved
+from .lecroy import StructureImproved
 
 try:
     warnings

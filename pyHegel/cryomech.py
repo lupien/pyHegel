@@ -25,6 +25,8 @@
 Code to communicate with the Cryomech compressor
 """
 
+from __future__ import absolute_import
+
 import datetime
 import os
 import serial

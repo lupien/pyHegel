@@ -22,6 +22,8 @@
 #                                                                            #
 ##############################################################################
 
+from __future__ import absolute_import
+
 # system import
 import socket
 import select
@@ -33,11 +35,11 @@ import numpy as np
 import sys
 
 # user made import
-from instruments_base import FastEvent, scpiDevice, wait_on_event,\
+from ..instruments_base import FastEvent, scpiDevice, wait_on_event,\
                             visaInstrument, BaseInstrument, BaseDevice,\
                             ReadvalDev, decode_uint32, _replace_ext, locked_calling,\
                             Block_Codec_Raw
-from kbint_util import _sleep_signal_context_manager
+from ..kbint_util import _sleep_signal_context_manager
 
 
 class acq_bool(object):

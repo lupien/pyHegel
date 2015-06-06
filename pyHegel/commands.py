@@ -1,4 +1,3 @@
-#!/usr/bin/ipython -i
 # -*- coding: utf-8 -*-
 
 ########################## Copyrights and license ############################
@@ -26,26 +25,29 @@
 # All the commands used in pyHegel
 #
 
+from __future__ import absolute_import
+
 import ctypes
 import os
 import time
 import re
 import string
 import sys
+import textwrap
 import threading
 import operator
 import numpy as np
 from gc import collect as collect_garbage
 
-import traces
-import instruments
-import instruments_base
-import local_config
-import util
+from . import traces
+from . import instruments
+from . import instruments_base
+from . import local_config
+from . import util
 
-from instruments_base import _writevec as writevec
-from traces import wait
-from util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
+from .instruments_base import _writevec as writevec
+from .traces import wait
+from .util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
 
 __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'util',
            'help_pyHegel', 'reset_pyHegel', 'clock', 'sweep', 'wait',
@@ -62,6 +64,7 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'util
 #             _itemgetter _write_conf
 #             _Sweep _Snap _record_execafter _normalize_usb
 #             _Hegel_Task _quiet_KeyboardInterrupt_Handler
+#             _greetings
 
 
 #instruments_base._globaldict = globals()
@@ -71,14 +74,15 @@ except NameError:
     _globaldict = {}
     instruments_base._globaldict = _globaldict
 
-def _init_pyHegel_globals(g=None):
+def _init_pyHegel_globals(g=None, show_greet=True):
     """ Call this from main interactive module as
           _init_pyHegel_globals(globals())
         or simply
           _init_pyHegel_globals()
-        which will do the same (it uses the calling frame globals).
+        which will do the same (it uses the caller's frame globals).
         It is necessary for load to modify the correct environment and
         for instruments_base to find the proper names.
+        Setting show_greet to False skips displaying the greetings
     """
     global _globaldict
     if g == None:
@@ -90,7 +94,21 @@ def _init_pyHegel_globals(g=None):
             del frame # this is to break cyclic references, see inspect doc
     _globaldict = g
     instruments_base._globaldict = g
+    if show_greet:
+        _greetings()
 
+def _greetings():
+    import pyHegel
+    print '\n\n---------'
+    print textwrap.dedent("""\
+            pyHegel {} Copyright (C) 2015  Christian Lupien
+            This program comes with ABSOLUTELY NO WARRANTY.
+            This is free software, and you are welcome to redistribute it
+            under certain conditions.
+            See files COPYING and COPYING.LESSER for detail or see
+            <http://www.gnu.org/licenses/>.""".format(pyHegel.__version__))
+    print '\nFor available commands, type "help_pyHegel()"'
+    print '---------\n\n'
 
 
 def help_pyHegel():
@@ -176,12 +194,11 @@ def help_pyHegel():
     """
     print help_pyHegel.__doc__
 
-print '\n\n---------\n For available commands, type "help_pyHegel()"\n---------\n\n'
-
 def reset_pyHegel():
     """
        Resets pyHegel
-       You need to reload instruments and reassign to sweep after calling this.
+       You need to reload instruments and readjust the sweep devices (like sweep.path)
+       after calling this.
 
        can be called in ipython command line like:
          /reset_pyNoise
@@ -192,21 +209,15 @@ def reset_pyHegel():
     reload(traces)
     reload(instruments.instruments_base.visa_wrap)
     reload(instruments.instruments_base)
-    reload(instruments.instruments_logical)
-    reload(instruments.instruments_agilent)
-    reload(instruments.instruments_others)
-    reload(instruments.acq_board_instrument)
-    reload(instruments.instruments_lecroy)
-    reload(instruments.blueforsValves)
-    import types
-    if isinstance(instruments.data_translation, types.ModuleType):
-        reload(instruments.data_translation)
-    reload(local_config.instruments)
+    instruments._reload_instruments()
+    reload(instruments)
     reload(local_config)
     reload(util)
-    reload(sys.modules['pyHegel_cmds'])
-    pyHegelExec_path = os.path.join(os.path.dirname(__file__), 'pyHegel.py')
-    execfile(pyHegelExec_path, _globaldict)
+    reload(sys.modules['pyHegel.commands'])
+    from . import main
+    reload(main)
+    main.reset_start(_globaldict)
+
 
 
 def _quiet_KeyboardInterrupt_Handler(self, exc_type, exc_value, traceback, tb_offset=None):

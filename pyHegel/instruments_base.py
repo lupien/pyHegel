@@ -21,6 +21,8 @@
 #                                                                            #
 ##############################################################################
 
+from __future__ import absolute_import
+
 import numpy as np
 import string
 import functools
@@ -34,10 +36,10 @@ import thread
 import threading
 import weakref
 from collections import OrderedDict  # this is a subclass of dict
-from qt_wrap import processEvents
-from kbint_util import sleep, _sleep_signal_context_manager, _delayed_signal_context_manager
+from .qt_wrap import processEvents
+from .kbint_util import sleep, _sleep_signal_context_manager, _delayed_signal_context_manager
 
-import visa_wrap
+from . import visa_wrap
 
 rsrc_mngr = None
 
@@ -54,7 +56,7 @@ except ImportError as exc:
 try:
     _globaldict # keep the previous values (when reloading this file)
 except NameError:
-    _globaldict = {} # This is set in pyHegel _init_pyHegel_globals (from pyHegel_cmds)
+    _globaldict = {} # This is set in pyHegel _init_pyHegel_globals (from pyHegel.commands)
 
 CHECKING = False
 

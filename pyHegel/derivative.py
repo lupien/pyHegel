@@ -21,6 +21,8 @@
 #                                                                            #
 ##############################################################################
 
+from __future__ import absolute_import
+
 from numpy import diff
 from scipy.misc import central_diff_weights
 from scipy import signal, interpolate

@@ -25,6 +25,8 @@
 This module contains many tools for fitting data
 """
 
+from __future__ import absolute_import
+
 import numpy as np
 import inspect
 import scipy.constants as C
@@ -559,7 +561,7 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, fig=None, skip=False,
         return chi2, chiNorm
 
 if __name__ == "__main__":
-    import gen_poly
+    from . import gen_poly
     N = 200
     x = np.linspace(-0.22e-3, 0.21e-3, N)
     y = noiseRFfit(x, 0.069, -.22e-3, 8., 0.113e-3, f=20e9, R=70., N=100)

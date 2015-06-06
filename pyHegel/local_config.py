@@ -21,7 +21,9 @@
 #                                                                            #
 ##############################################################################
 
-import instruments
+from __future__ import absolute_import
+
+from pyHegel import instruments
 
 
 conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),

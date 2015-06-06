@@ -38,6 +38,8 @@ This module contains many utilities:
 Note that savefig is initially disabled.
 """
 
+from __future__ import absolute_import
+
 import time
 import os
 import os.path

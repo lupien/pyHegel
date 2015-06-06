@@ -21,11 +21,13 @@
 #                                                                            #
 ##############################################################################
 
+from __future__ import absolute_import
+
 import numpy as np
 from collections import OrderedDict, namedtuple
 from ctypes import Structure, c_float, c_double, c_int8, c_int16, c_int32, c_char
 
-from instruments_base import visaInstrumentAsync, visaInstrument,\
+from ..instruments_base import visaInstrumentAsync, visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceBase, _general_check, _fromstr_helper, _tostr_helper,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\

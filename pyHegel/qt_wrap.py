@@ -118,6 +118,8 @@ If none are loaded, a default set is tried in order.
 #        ID.forbid('PyQt4')
 #        ID.forbid('PySide')
 
+from __future__ import absolute_import
+
 import sip
 import sys
 import types

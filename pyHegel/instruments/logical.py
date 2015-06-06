@@ -21,6 +21,8 @@
 #                                                                            #
 ##############################################################################
 
+from __future__ import absolute_import
+
 import os
 import subprocess
 import numpy as np
@@ -28,9 +30,9 @@ from scipy.optimize import brentq as brentq_rootsolver
 import weakref
 import time
 
-from instruments_base import BaseDevice, BaseInstrument, ProxyMethod, MemoryDevice,\
+from ..instruments_base import BaseDevice, BaseInstrument, ProxyMethod, MemoryDevice,\
                         _find_global_name, _get_conf_header, locked_calling_dev
-from traces import wait
+from ..traces import wait
 
 def _asDevice(dev):
     if isinstance(dev, BaseInstrument):

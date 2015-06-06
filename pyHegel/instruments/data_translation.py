@@ -21,27 +21,48 @@
 #                                                                            #
 ##############################################################################
 
-from instruments_base import BaseInstrument, scpiDevice, ChoiceIndex,\
+from __future__ import absolute_import
+
+from ..instruments_base import BaseInstrument, scpiDevice, ChoiceIndex,\
                             wait_on_event, BaseDevice, MemoryDevice, ReadvalDev,\
                             _retry_wait, locked_calling
 import sys
 import time
 import numpy as np
 
-try:
-    import clr
-    from System import Int32, IntPtr
-    from System.Runtime.InteropServices import Marshal
-    _datatranslation_dir = r'C:\Program Files (x86)\Data Translation\DotNet\OLClassLib\Framework 2.0 Assemblies (32-bit)'
-    if _datatranslation_dir not in sys.path:
-        sys.path.append(_datatranslation_dir)
-    import OpenLayers.Base as OlBase
-    from OpenLayers.Base import OlException
-except ImportError, exc:
-    exc.extra_info = 'Unable to load data_translation Module. Make sure pythonnet and Data Translation Omni software are installed.'
-    raise exc
+clr = None
+Int32 = None
+IntPtr = None
+Marshal = None
+OlBase = None
+OlException = None
+_assembly_Version = None
 
-_assembly_Version = OlBase.Utility.AssemblyVersion.ToString()
+_delayed_imports_done = False
+
+def _delayed_imports():
+    global _delayed_imports_done
+    if not _delayed_imports_done:
+        global clr, Int32, IntPtr, Marshal, OlBase, OlException
+        try:
+            import clr
+            from System import Int32, IntPtr
+            from System.Runtime.InteropServices import Marshal
+        except ImportError as exc:
+            raise RuntimeError('Unable to import windows clr/System: %s'%exc)
+        try:
+            _datatranslation_dir = r'C:\Program Files (x86)\Data Translation\DotNet\OLClassLib\Framework 2.0 Assemblies (32-bit)'
+            if _datatranslation_dir not in sys.path:
+                sys.path.append(_datatranslation_dir)
+            import OpenLayers.Base as OlBase
+            from OpenLayers.Base import OlException
+            _assembly_Version = OlBase.Utility.AssemblyVersion.ToString()
+        except ImportError as exc:
+            raise RuntimeError(
+                "Unable to load data_translation Module. Make sure pythonnet and "
+                "Data Translation Omni software are installed: %s"%exc)
+        _delayed_imports_done = True
+
 
 def find_all_Ol():
     """
@@ -50,6 +71,7 @@ def find_all_Ol():
     Every entry in the returned list is a tuple with the device
     name followed by a dictionnary of information.
     """
+    _delayed_imports()
     devmgr = OlBase.DeviceMgr.Get()
     card_present = devmgr.HardwareAvailable()
     ret = []
@@ -109,6 +131,7 @@ class DataTranslation(BaseInstrument):
         by find_all_Ol(), or the integer to use as an index in that
         list (defaults to 0).
         """
+        _delayed_imports()
         devmgr = OlBase.DeviceMgr.Get()
         all_Ol = find_all_Ol()
         try:

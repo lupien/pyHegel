@@ -8,6 +8,9 @@
 # due to Fortran libraries
 # See stackoverflow for explanation:
 # http://stackoverflow.com/questions/15457786/ctrl-c-crashes-python-after-importing-scipy-stats
+
+from __future__ import absolute_import
+
 import imp
 import ctypes
 import os

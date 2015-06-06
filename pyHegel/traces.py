@@ -25,18 +25,20 @@
 # python-matplotlib-0.99.1.2-4.fc13.i686 QT backend is missing many
 # key codes compared to gtk so add missing ones needed for FigureManagerQT
 
+from __future__ import absolute_import
+
 import time
 import functools
 import sys
 import gc
 
-import qt_wrap  # This is used for reset_pyhegel command
-from qt_wrap import QtCore, QtGui, processEvents
+from . import qt_wrap  # This is used for reset_pyhegel command
+from .qt_wrap import QtCore, QtGui, processEvents
 import numpy as np
 from matplotlib import pylab, rcParams
 import dateutil
 
-import kbint_util
+from . import kbint_util
 _sleep = kbint_util.sleep
 
 # same as in fullmpcanvas.py
