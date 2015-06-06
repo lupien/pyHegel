@@ -24,6 +24,7 @@
 from __future__ import absolute_import
 
 __version__ = '0.9.9'
+__copyright__ = '2011-2015  Christian Lupien'
 
 def start_pyHegel():
     """ This is the recommanded way to start pyHegel.

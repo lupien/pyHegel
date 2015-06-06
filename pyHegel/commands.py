@@ -101,12 +101,12 @@ def _greetings():
     import pyHegel
     print '\n\n---------'
     print textwrap.dedent("""\
-            pyHegel {} Copyright (C) 2015  Christian Lupien
+            pyHegel {} Copyright (C) {}
             This program comes with ABSOLUTELY NO WARRANTY.
             This is free software, and you are welcome to redistribute it
             under certain conditions.
             See files COPYING and COPYING.LESSER for detail or see
-            <http://www.gnu.org/licenses/>.""".format(pyHegel.__version__))
+            <http://www.gnu.org/licenses/>.""".format(pyHegel.__version__, pyHegel.__copyright__))
     print '\nFor available commands, type "help_pyHegel()"'
     print '---------\n\n'
 
@@ -213,6 +213,8 @@ def reset_pyHegel():
     reload(instruments)
     reload(local_config)
     reload(util)
+    import pyHegel
+    reload(pyHegel)
     reload(sys.modules['pyHegel.commands'])
     from . import main
     reload(main)
