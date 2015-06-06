@@ -34,11 +34,8 @@
 # however, it is no longer possible to stop time.sleep (becomes unbreakable)
 # because IPython imports time (and normally installs a handler but fix_scipy
 # later installs another handler that does not call any previously installed ones)
-
-# It used to be possible to start pyHegel from a running ipython shell but
-# that is deprecated.
-# Under ipython, you need to use run -i, otherwise load does not add instruments
-# in the correct global environment.
+# The is a similar problem with starting within a pure python prompt since it also
+# imports the time module.
 
 # if you need to access the commands in a script/import import pyHegel.commands
 
@@ -55,8 +52,37 @@ def fix_scipy():
     if os.name == 'nt':
         import scipy_fortran_fix
 
+
+def get_parent_globals(n=2):
+    """
+    returns the globals dictionnary of the n th caller to this function
+    n=0 would be this functions globals which is useless.
+    n=1 would be the callers frame which is useless (it will return
+         the same globals as the caller would get directly)
+    """
+    g = {}
+    if n < 2:
+        raise ValueError('n needs to be >= 1')
+    from inspect import currentframe
+    frame = currentframe()
+    try:
+        while n:
+            frame = frame.f_back
+            n -= 1
+        g = frame.f_globals
+    except AttributeError:
+        # we reach here when frame is None which happens when we go past the
+        # first ancestor
+        g = None
+        pass
+    finally:
+        del frame # this is to break cyclic references, see inspect doc
+    return g
+
+
 start_code = """
 get_ipython().run_line_magic('pylab', 'qt')
+get_ipython().run_line_magic('autocall', '1') # smart
 import scipy
 import scipy.constants
 import scipy.constants as C
@@ -67,19 +93,40 @@ quiet_KeyboardInterrupt(True)
 """
 
 def main_start():
+    # we check if we are called from an ipython session
+    # we detect the presence of a running ipython by get_ipython being present in the
+    # caller (or caller of caller, if called from pyHegel.start_pyHegel, and so one...)
+    # However this will not work if the get_ipython function has been deleted.
+    n = 2
+    g = get_parent_globals(n)
+    while g != None:
+        if g.has_key('get_ipython'):
+            # execute start_code in the already running ipython session.
+            print 'Under ipython', n
+            exec(start_code, g)
+            return
+        n += 1
+        g = get_parent_globals(n)
+    print 'Outside ipython', n
+    # We are not running in under an ipython session, start one.
     # need to fix before importing IPython (which imports time...)
     fix_scipy()
     import IPython
-    IPython.start_ipython(argv=['--matplotlib=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
+    IPython.start_ipython(argv=['--matplotlib=qt', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
+    #IPython.start_ipython(argv=['--matplotlib=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     #IPython.start_ipython(argv=['--pylab=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     # qt and qt4 are both Qt4Agg
     #TerminalIPythonApp.exec_lines is inherited from InteractiveShellApp.exec_lines
 
+
+
 def reset_start(globals_env):
-    """ You need to provice the global environment where the code will be executed
+    """ You need to provide the global environment where the code will be executed
         you can obtain it from running globals() in the interactive env.
     """
     exec(start_code, globals_env)
+
+
 
 light_code = """
 from pyHegel.commands import *
@@ -94,16 +141,11 @@ def light_start(globals_env=None):
         display matplotlib graphics using qt(qt4) or qt5 gui.
 
         When globals_env is None, it uses the caller's frame globals
-        for the installing all the commands, otherwise it uses the
-        specified one.
+        for installing all the commands and initialisation, otherwise
+        it uses the specified one.
     """
     if globals_env is None:
-        from inspect import currentframe
-        frame = currentframe()
-        try:
-            globals_env = frame.f_back.f_globals
-        finally:
-            del frame # this is to break cyclic references, see inspect doc
+        globals_env = get_parent_globals()
     exec(light_code, globals_env)
 
 

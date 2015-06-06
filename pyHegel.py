@@ -5,10 +5,15 @@
 # from a command line anywhere will work, since python then adds
 # the script directory in the search path. So we can use it from outside
 # the main python site (uninstalled).
-# However it will be fragile if you execute the script with execfile from
-# a python prompt since then the path will not be changed. It will work
-# only if the current working path is at the root of the package.
-# And commands will delay import/reload will later fail if the cwd is changed.
+
+# You can also start the script from a live python or ipython shell.
+# From an ipython shell, the start code is redirected to the interactive env
+# and you can use either run or run -i.
+# In a python live shell you can use execfile.
+# However, in all those cases, the session will be fragile since then the path
+# will not be changed. Further imports or reset_pyHegel will fail unless
+# the current working path is at the root of the package.
+# And another problem will be that the CTRL-C fix might not be applied properly.
 
 if __name__ == '__main__':
     from  pyHegel import start_pyHegel
