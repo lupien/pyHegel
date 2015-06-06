@@ -23,6 +23,8 @@
 
 from __future__ import absolute_import
 
+# make sure that new versions numbers compare properly when using
+# pkg_resources.parse_version
 __version__ = '0.9.9'
 __copyright__ = '2011-2015  Christian Lupien'
 
