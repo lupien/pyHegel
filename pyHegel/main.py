@@ -50,7 +50,7 @@ def fix_scipy():
     """
     import os
     if os.name == 'nt':
-        import scipy_fortran_fix
+        from . import scipy_fortran_fix
 
 
 def get_parent_globals(n=2):
