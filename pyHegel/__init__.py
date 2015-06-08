@@ -23,6 +23,8 @@
 
 from __future__ import absolute_import
 
+# Use version according to option 5 in https://packaging.python.org/en/latest/single_source_version.html
+
 # make sure that new versions numbers compare properly when using
 # pkg_resources.parse_version
 __version__ = '0.9.9'
