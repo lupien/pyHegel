@@ -147,8 +147,6 @@ except ImportError as exc:
 
 def _get_lib_properties(libraryHandle):
     import win32api
-    global _win32api
-    _win32api = win32api
     filename = win32api.GetModuleFileName(libraryHandle)
     fixedInfo = win32api.GetFileVersionInfo(filename, '\\')
     # Only pick the first lang, codepage combination
