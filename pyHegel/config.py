@@ -25,12 +25,17 @@ from __future__ import absolute_import
 
 import ConfigParser
 import imp
+import glob
 import os
 import os.path
-from os.path import join as pjoin
+from os.path import join as pjoin, isdir, isfile
+import re
 
 CONFIG_DIR = 'pyHegel'
 CONFIG_DOT_DIR = '.pyHegel'
+CONFIG_VENDOR = 'UdeS_Reulet'
+
+CONFIG_ENV = 'PYHEGELDIR'
 
 try:
     PYHEGEL_DIR
@@ -38,26 +43,25 @@ except NameError:
     # only change this on first run. On reload use the previous one
     # This is necessary if the __file__ was relative and the working
     # directory has changed
-    PYHEGEL_DIR = os.path.absolute(os.path.dirname(__file__))
+    PYHEGEL_DIR = os.path.abspath(os.path.dirname(__file__))
 
 CONFIG_NAME = 'pyHegel.ini'
 DEFAULT_CONFIG_NAME = 'pyHegel_default.ini'
-DEFAULT_CONF = pjoin(PYHEGEL_DIR, DEFAULT_CONFIG_NAME)
-DEFAULT_LOAD_CONF = pjoin(PYHEGEL_DIR, 'load_config_template.py')
-
-defaults = ConfigParser.SafeConfigParser()
-config_parser = ConfigParser.SafeConfigParser()
+DEFAULT_CONFIG_PATH = pjoin(PYHEGEL_DIR, DEFAULT_CONFIG_NAME)
+LOCAL_CONFIG = 'local_config'
+LOCAL_CONFIG_FILE = LOCAL_CONFIG+'.py'
+DEFAULT_LOCAL_CONFIG_PATH = pjoin(PYHEGEL_DIR, 'local_config_template.py')
 
 USER_HOME = os.path.expanduser('~')
-
-config_parser.read([])
+DEFAULT_USER_DIR = pjoin(USER_HOME, CONFIG_DOT_DIR)
 
 # For config file location see suggestions from https://github.com/ActiveState/appdirs
 # but don't really follow them completely
 
-# My list of choices:
+# My list of choices (or on one line means the first that exists is taken, the others are skipped):
 # under windows:
-#   $PYHEGELDIR or ~/.pyHegel
+#   $PYHEGELDIR or windons appdata (probably ~/AppData/Roaming/UdeS_Reulet/pyHegel) or ~/.pyHegel
+#   windows Common_appdata (probably c:/ProgramData/UdeS_Reulet/pyHegel)
 #   pyHegel module directory
 # under unix
 #  if using XDG (~/.config exists)
@@ -69,63 +73,128 @@ config_parser.read([])
 #   /etc/pyHegel
 #   pyHegel module directory
 
+def get_windows_appdata(user=True):
+    import ctypes
+    from ctypes.wintypes import HWND, HANDLE, HRESULT, DWORD, LPCSTR
+    from ctypes import c_int
+    CSIDL_COMMON_APPDATA = 0x0023
+    CSIDL_APPDATA = 0x001A # roaming
+    MAX_PATH = 260
+    S_OK = 0x00000000
+    if user:
+        nfolder = CSIDL_APPDATA
+    else:
+        nfolder = CSIDL_COMMON_APPDATA
+    path = ctypes.create_string_buffer(MAX_PATH)
+    func = ctypes.windll.shell32.SHGetFolderPathA
+    func.argtypes = [HWND, c_int, HANDLE, DWORD, LPCSTR]
+    func.restype = HRESULT
+    ret = func(None, nfolder, None, 0, path)
+    S_OK
+    if ret != S_OK:
+        raise RuntimeError('Unable to find windows default dir (HRESULT = %#0.8x)'%ret)
+    return pjoin(path.value, CONFIG_VENDOR, CONFIG_DIR)
+
+def get_env_user_dir(default_user):
+    default_user = os.environ.get(CONFIG_ENV, default_user)
+    return default_user
+
 def get_conf_dirs_nt():
-    # might add CSIDL_COMMON_APPDATA (0x0023), CSIDL_APPDATA (0x001A, roaming)
-    #     using SHGetFolderPath
-    default_user = pjoin(USER_HOME, CONFIG_DOT_DIR)
-    default_user = os.environ.get('PYHEGELDIR', default_user)
-    return [default_user, PYHEGEL_DIR]
+    default_user = get_windows_appdata(user=True)
+    if not isdir(default_user):
+        default_user = DEFAULT_USER_DIR
+    default_user = get_env_user_dir(default_user)
+    default_system = get_windows_appdata(user=False)
+    return [default_user, default_system]
 
 def get_conf_dirs_posix():
     xdg_config_home = os.environ.get('XDG_CONFIG_HOME', pjoin(USER_HOME, '.config'))
     xdg_config_dirs = os.environ.get('XDG_CONFIG_DIRS', '/etc/xdg').split(':')
-    default_user = pjoin(USER_HOME, CONFIG_DOT_DIR)
+    default_user = DEFAULT_USER_DIR
     default_system = pjoin('/etc', CONFIG_DIR)
     paths = []
-    if os.path.isdir(xdg_config_home):
+    if isdir(xdg_config_home):
         # XDG
         xdg_user = pjoin(xdg_config_home, CONFIG_DIR)
         xdg_dirs = [pjoin(d, CONFIG_DIR) for d in xdg_config_dirs]
-        if os.path.isdir(xdg_user):
-            paths.append(xdg_user)
-        else:
-            paths.append(default_user)
+        if isdir(xdg_user):
+            default_user = xdg_user
+        default_user = get_env_user_dir(default_user)
+        paths.append(default_user)
         for d in xdg_dirs:
-            if os.path.isdir(d):
+            if isdir(d):
                 paths.extend(xdg_dirs)
                 break
         else:
             paths.append(default_system)
     else:
+        default_user = get_env_user_dir(default_user)
         paths.append(default_user)
         paths.append(default_system)
-    paths.append(PYHEGEL_DIR)
     return paths
 
 # to detect the operating system:
 # os.name: posix, nt
 # sys.name startswith: linux, darwin (for mac), cygwin, win32
 
-def get_conf_dirs():
+def get_conf_dirs(skip_module_dir=False):
     if os.name == 'nt':
-        return get_conf_dirs_nt()
+        paths = get_conf_dirs_nt()
     else:
-        return get_conf_dirs_posix()
+        paths = get_conf_dirs_posix()
+    if not skip_module_dir:
+        paths.append(PYHEGEL_DIR)
+    return paths
 
 
 
-def load_config():
+def load_local_config():
     # Note that imp.load_source, forces a reload of the file
     # and adds the entry in sys.modules
-    paths = [pjoin(d, 'load_config.py') for d in get_conf_dirs()]
+    paths = [pjoin(d, LOCAL_CONFIG_FILE) for d in get_conf_dirs()]
     for p in paths:
-        if os.path.isfile(p):
-            return imp.load_source('load_config', p)
+        if isfile(p):
+            return imp.load_source(LOCAL_CONFIG, p)
     # no file found
-    print 'WARNING: using load_config template. You should create your own load_config.py file.'
-    return imp.load_source('load_config', DEFAULT_LOAD_CONF)
-
-def load_instruments():
-    pass
+    print 'WARNING: using %s template. You should create your own %s file.'%(
+            LOCAL_CONFIG, LOCAL_CONFIG_FILE)
+    return imp.load_source(LOCAL_CONFIG, DEFAULT_LOCAL_CONFIG_PATH)
 
 
+def load_user_instruments():
+    paths = [pjoin(d, 'instruments') for d in get_conf_dirs(skip_module_dir=True)]
+    loaded = {}
+    for p in paths:
+        filenames = glob.glob(pjoin(p, '*.py'))
+        for f in filenames:
+            name = os.path.basename(f)[:-3] # remove .py
+            if re.match(r'[A-Za-z_][A-Za-z0-9_]*\Z', name) is None:
+                raise RuntimeError('Trying to load "%s" but the name is invalid (should only contain letters, numbers and _)'%
+                                    f)
+            if name in loaded:
+                print 'Skipping loading "%s" because a module with that name is already loaded from %s'%(f, loaded[name])
+            imp.load_source(name, f)
+            loaded[name] = f
+    return loaded
+
+
+class PyHegel_Conf(object):
+    def __init__(self):
+        self.config_parser = ConfigParser.SafeConfigParser()
+        paths = get_conf_dirs()
+        paths = [pjoin(d, CONFIG_NAME) for d in paths]
+        paths.append(DEFAULT_CONFIG_PATH)
+        # ConfigParser.SafeConfigParser.read reads the files in the order given
+        # so if multiple files are present, later ones overide settings in
+        # earlier ones. Therefore we need the more important files last
+        # however paths is in the order of more important first. So inverse.
+        paths = paths[::-1]
+        self._paths_used = self.config_parser.read(paths)
+    @property
+    def try_agilent_first(self):
+        return self.config_parser.getboolean('VISA', 'try_agilent_first')
+    @property
+    def timezone(self):
+        return self.config_parser.get('traces', 'timezone')
+
+pyHegel_conf = PyHegel_Conf()
