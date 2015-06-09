@@ -1424,7 +1424,12 @@ def load(names=None, newnames=None):
        full visa name like those returned from find_all_instruments()
     """
     if names == None or (isinstance(names, basestring) and names == ''):
-        for name, (instr, para) in sorted(local_config.conf.items()):
+        for name, val in sorted(local_config.conf.items()):
+            if len(val) == 2:
+                instr, para = val
+            else:
+                instr, para, kwargs = val
+                para = '%s, %s'%(para, kwargs)
             instr = instr.__name__
             print '{:>10s}: {:25s} {:s}'.format(name, instr, para)
         return
@@ -1438,10 +1443,15 @@ def load(names=None, newnames=None):
     if len(newnames) < len(names):
         newnames = newnames + [None]*(len(names)-len(newnames))
     for name, newname in zip(names, newnames):
-        instr, param = local_config.conf[name]
+        val = local_config.conf[name]
+        if len(val) == 2:
+            instr, param = val
+            kwargs = {}
+        else:
+            instr, param, kwargs = val
         if newname == None:
             newname = name
-        i = instr(*param)
+        i = instr(*param, **kwargs)
         _globaldict[newname] = i
         #exec 'global '+newname+';'+newname+'=i'
 
