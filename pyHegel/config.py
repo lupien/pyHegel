@@ -173,6 +173,11 @@ def load_user_instruments():
                                     f)
             if name in loaded:
                 print 'Skipping loading "%s" because a module with that name is already loaded from %s'%(f, loaded[name])
+            # instead of imp.load_source, could do
+            #  insert path in sys.path
+            #   import (using importlib.import_module)
+            #  remove inserted path
+            # But that makes reloading more complicated
             imp.load_source(name, f)
             loaded[name] = f
     return loaded
