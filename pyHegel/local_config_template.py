@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 
-# This is and example local_config file. It is loaded if no local_config file is found.
-# To make your own one, create a local_config.py and place it in one of the same directories
-# where pyHegel.ini can be placed (see pyHegel_default.ini for those locations)
+"""
+ This is and example local_config file. It is loaded if no local_config file is found.
+ To make your own one, create a local_config.py and place it in one of the same directories
+ where pyHegel.ini can be placed (see pyHegel_default.ini for those locations)
+  It is often in the .pyHegel directory under the user home directory.
+"""
 
 from __future__ import absolute_import
 
