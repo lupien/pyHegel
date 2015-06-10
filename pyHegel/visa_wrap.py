@@ -36,7 +36,10 @@ from ctypes import byref as _byref
 from math import isinf as _isinf
 from distutils.version import LooseVersion
 
-try_agilent_first = True
+from . import config
+
+#try_agilent_first = True
+try_agilent_first = config.pyHegel_conf.try_agilent_first
 agilent_path = r"c:\Windows\system32\agvisa32.dll"
 old_interface = True       # True when pyvisa versons < 1.5
 version = "1.4"

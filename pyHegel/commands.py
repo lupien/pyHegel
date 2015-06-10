@@ -42,8 +42,11 @@ from gc import collect as collect_garbage
 from . import traces
 from . import instruments
 from . import instruments_base
-from . import local_config
+#from . import local_config
 from . import util
+from . import config
+
+local_config = config.load_local_config()
 
 from .instruments_base import _writevec as writevec
 from .traces import wait
@@ -203,7 +206,7 @@ def reset_pyHegel():
        can be called in ipython command line like:
          /reset_pyNoise
     """
-
+    reload(traces.config)
     reload(traces.qt_wrap)
     reload(traces.kbint_util)
     reload(traces)
@@ -211,7 +214,7 @@ def reset_pyHegel():
     reload(instruments.instruments_base)
     instruments._reload_instruments()
     reload(instruments)
-    reload(local_config)
+    #reload(local_config)
     reload(util)
     import pyHegel
     reload(pyHegel)

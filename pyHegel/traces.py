@@ -37,6 +37,7 @@ from .qt_wrap import QtCore, QtGui, processEvents
 import numpy as np
 from matplotlib import pylab, rcParams
 import dateutil
+from . import config
 
 from . import kbint_util
 _sleep = kbint_util.sleep
@@ -58,7 +59,8 @@ _figlist = []
 
 # set the timezone for proper display of date/time axis
 # to see available ones: import pytz; pytz.all_timezones
-pylab.rcParams['timezone']='Canada/Eastern'
+#pylab.rcParams['timezone']='Canada/Eastern'
+pylab.rcParams['timezone'] = config.pyHegel_conf.timezone
 #pylab.rc('mathtext', fontset='stixsans')
 
 """
