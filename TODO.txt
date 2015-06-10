@@ -17,7 +17,6 @@ Agilent IO Libraries Service
   Agilent LXI Mdns Responder failed to start
 
 Related to update to newer ipython
--handle new pyVisa
 -maybe get the default timezone for matplotlib using
   https://github.com/regebro/tzlocal
 -Handle optional command line argument (like a file to execute) in pyHegel.py
