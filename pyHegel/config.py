@@ -48,9 +48,11 @@ except NameError:
 CONFIG_NAME = 'pyHegel.ini'
 DEFAULT_CONFIG_NAME = 'pyHegel_default.ini'
 DEFAULT_CONFIG_PATH = pjoin(PYHEGEL_DIR, DEFAULT_CONFIG_NAME)
-LOCAL_CONFIG = 'local_config'
-LOCAL_CONFIG_FILE = LOCAL_CONFIG+'.py'
+LOCAL_CONFIG = 'pyHegel.local_config'
+LOCAL_CONFIG_FILE = 'local_config.py'
 DEFAULT_LOCAL_CONFIG_PATH = pjoin(PYHEGEL_DIR, 'local_config_template.py')
+
+INSTRUMENTS_BASE = 'pyHegel.instruments'
 
 USER_HOME = os.path.expanduser('~')
 DEFAULT_USER_DIR = pjoin(USER_HOME, CONFIG_DOT_DIR)
@@ -155,24 +157,33 @@ def load_local_config():
     for p in paths:
         if isfile(p):
             return imp.load_source(LOCAL_CONFIG, p)
-    # no file found
+    # no file found, so load the default template
+    print '\n'+'-'*30
     print 'WARNING: using %s template. You should create your own %s file.'%(
             LOCAL_CONFIG, LOCAL_CONFIG_FILE)
+    print 'see the pyHegel/local_config_template.py for more information'
+    print '-'*30+'\n'
     return imp.load_source(LOCAL_CONFIG, DEFAULT_LOCAL_CONFIG_PATH)
 
 
-def load_user_instruments():
-    paths = [pjoin(d, 'instruments') for d in get_conf_dirs(skip_module_dir=True)]
+def load_instruments():
+    #paths = [pjoin(d, 'instruments') for d in get_conf_dirs(skip_module_dir=True)]
+    paths = [pjoin(d, 'instruments') for d in get_conf_dirs(skip_module_dir=False)]
+    # move last path (within the pyHegel module) as the first so users can't override those
+    paths = [paths[-1]]+paths[1:]
     loaded = {}
     for p in paths:
         filenames = glob.glob(pjoin(p, '*.py'))
         for f in filenames:
             name = os.path.basename(f)[:-3] # remove .py
+            if name == '__init__':
+                continue
             if re.match(r'[A-Za-z_][A-Za-z0-9_]*\Z', name) is None:
                 raise RuntimeError('Trying to load "%s" but the name is invalid (should only contain letters, numbers and _)'%
                                     f)
             if name in loaded:
                 print 'Skipping loading "%s" because a module with that name is already loaded from %s'%(f, loaded[name])
+            name = INSTRUMENTS_BASE+'.'+name
             imp.load_source(name, f)
             loaded[name] = f
     return loaded
