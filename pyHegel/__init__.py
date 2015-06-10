@@ -35,6 +35,10 @@ def start_pyHegel():
         It starts ipython in a standard way (pylab, autocall enabled,...)
         and then loads and initializes the pyHegel commands.
 
+        If the python session was started with command line arguments
+        --console, it will try to start pyHegel in the Console program
+        that comes with pythonxy. This is windows only.
+
         If you later need access to the commands in a module:
             import pyHegel.commands as cmds
             cmds.get(somedevice)
@@ -43,5 +47,14 @@ def start_pyHegel():
             get(somedevice)
         or any other variants you want.
     """
-    from . import main
-    main.main_start()
+    import sys
+    import os
+    if os.name == 'nt' and len(sys.argv) == 2 and sys.argv[1] == '--console':
+        start_console()
+    else:
+        from . import main
+        main.main_start()
+
+def start_console():
+    from . import win_console_helper
+    win_console_helper.start_console()
