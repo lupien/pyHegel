@@ -45,6 +45,12 @@ except NameError:
     # directory has changed
     PYHEGEL_DIR = os.path.abspath(os.path.dirname(__file__))
 
+# Could also use pkg_resources resource_string
+#  see http://peak.telecommunity.com/DevCenter/PythonEggs#accessing-package-resources
+# from pkg_resources import resource_filename
+# DEFAULT_CONFIG_PATH = resource_string('pyHegel', DEFAULT_CONFIG_NAME)
+#  or rewrite code to use resource_stream or resource_string
+
 CONFIG_NAME = 'pyHegel.ini'
 DEFAULT_CONFIG_NAME = 'pyHegel_default.ini'
 DEFAULT_CONFIG_PATH = pjoin(PYHEGEL_DIR, DEFAULT_CONFIG_NAME)
