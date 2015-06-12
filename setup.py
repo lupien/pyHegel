@@ -96,7 +96,8 @@ setup(name='pyHegel',
       #packages=find_packages(exclude=['attic', 'docs', 'manual', 'tests']),
       packages=find_packages(),
       package_data = {
-            'pyHegel': ['pyHegel_default.ini'],
+            #'pyHegel': ['pyHegel_default.ini'],
+            'pyHegel': ['pyHegel*.ini'],
           },
       entry_points=entry_points,
       zip_safe=False)
