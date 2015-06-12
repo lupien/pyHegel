@@ -152,6 +152,7 @@ def help_pyHegel():
     Available instruments:
         sweep
         clock
+    The scipy.constants are available as C
 
     You can always stop editing a line or running a command by pressing
     CTRL-C. However, when possible, it is better to stop a sweep or a record
