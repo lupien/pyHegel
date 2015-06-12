@@ -25,7 +25,7 @@ from __future__ import absolute_import
 
 import numpy as np
 from collections import OrderedDict, namedtuple
-from ctypes import Structure, c_float, c_double, c_int8, c_int16, c_int32, c_char
+from ctypes import c_float, c_double, c_int8, c_int16, c_int32, c_char
 
 from ..instruments_base import visaInstrumentAsync, visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
@@ -33,6 +33,8 @@ from ..instruments_base import visaInstrumentAsync, visaInstrument,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
                             _decode_block_base, make_choice_list,\
                             sleep, locked_calling
+
+from ..types import StructureImproved
 
 _ChoiceStrings = ChoiceStrings
 
@@ -282,71 +284,6 @@ IST? IST? Individual STatus reads the current state of IEEE 488.
 """
 
 # get structure with print osc.ask('TeMPLate?')
-
-class _StructureImprovedMeta(Structure.__class__):
-    # Using this metaclass will add a separate cache to each new subclass
-    def __init__(cls, name, bases, d):
-        super(_StructureImprovedMeta, cls).__init__(name, bases, d)
-        cls._names_cache = [] # every sub class needs to have its own cache
-
-
-class StructureImproved(Structure):
-    """
-    This adds to the way Structure works (structure elements are
-    class attribute).
-    -can also access (RW) elements with numerical ([1]) and name indexing (['key1'])
-    -can get and OrderedDict from the data (as_dict method)
-    -can get the number of elements (len)
-    -can get a list of items, keys or values like for a dict
-    -can print a more readable version of the structure
-    Note that it can be initialized with positional arguments or keyword arguments.
-    And changed later with update.
-    You probably cannot subclass this structure (self._fields_ then only contains
-    a fraction of the names.)
-    """
-    # TODO fix the problem of not being able to subclass (_fields_ does not habe all names)
-    __metaclass__ = _StructureImprovedMeta
-    _names_cache = [] # This gets overwritten but metaclass so that all subclass have their own list
-    def _get_names(self):
-        if self._names_cache == []:
-            self._names_cache.extend([n for n,t in self._fields_])
-        return self._names_cache
-    _names_ = property(_get_names)
-    def __getitem__(self, key):
-        if not isinstance(key, basestring):
-            key = self._names_[key]
-        return getattr(self, key)
-    def __setitem__(self, key, value):
-        if not isinstance(key, basestring):
-            key = self._names_[key]
-        setattr(self, key, value)
-    def __len__(self):
-        return len(self._fields_)
-    def update(self, *args, **kwarg):
-        for i,v in enumerate(args):
-            self[i]=v
-        for k,v in kwarg:
-            self[k]=v
-    def as_dict(self):
-        return OrderedDict(self.items())
-    def items(self):
-        return [(k,self[k]) for k in self._names_]
-    def keys(self):
-        return self._names_
-    def values(self):
-        return [self[k] for k in self._names_]
-    def __repr__(self):
-        return self.show_all(multiline=False, show=False)
-    def show_all(self, multiline=True, show=True):
-        strs = ['%s=%r'%(k, v) for k,v in self.items()]
-        if multiline:
-            ret = '%s(\n  %s\n)'%(self.__class__.__name__, '\n  '.join(strs))
-        else:
-            ret = '%s(%s)'%(self.__class__.__name__, ', '.join(strs))
-        if show:
-            print ret
-        else:
-            return ret
 
 class time_stamp(StructureImproved):
     _fields_=[("seconds", c_double),

@@ -34,8 +34,9 @@ from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsy
                             BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep, ChoiceSimpleMap,\
                             ChoiceStrings, ChoiceIndex,\
-                            make_choice_list, dict_improved, _fromstr_helper,\
+                            make_choice_list, _fromstr_helper,\
                             decode_float64, visa_wrap, locked_calling
+from ..types import dict_improved
 
 from .logical import FunctionDevice
 

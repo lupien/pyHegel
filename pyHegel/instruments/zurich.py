@@ -1375,7 +1375,7 @@ c_uchar_p = c_char_p # POINTER(c_ubyte)
 c_uint8_p = c_char_p # POINTER(c_uint8)
 c_uint32_p = POINTER(c_uint32)
 
-from .lecroy import StructureImproved
+from ..types import StructureImproved
 
 try:
     warnings
