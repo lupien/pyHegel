@@ -1,6 +1,6 @@
 *~
 *.pyc
-console_c.xml
+.spyderproject
 
 # eliminate latex output
 *.out
