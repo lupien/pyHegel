@@ -43,6 +43,7 @@ Conversion functions and time constants calculation helpers:
     phase_wrap
     filter_to_fraction
     fraction_to_filter
+    tc_to_enbw_3dB
 
 Note that savefig is initially disabled.
 """
@@ -55,6 +56,8 @@ import os.path
 import subprocess
 import numpy as np
 from scipy.optimize import brentq as brentq_rootsolver
+from scipy.special import gamma
+
 
 try:
     try:
@@ -729,3 +732,25 @@ def fraction_to_filter(frac=0.99, n_filter=1):
     func = lambda x: filter_to_fraction(x, n_filter)-frac
     n_time = brentq_rootsolver(func, 0, 1000)
     return n_time
+
+def tc_to_enbw_3dB(tc, order=1, enbw=True):
+    """
+    When enbw=True, uses the formula for the equivalent noise bandwidth
+                    which is the max frequency for an absolutely abrupt filter
+                    (transfer function is 1 below fc and 0 above)
+                    which lets through the same noise power (for a white noise source)
+    When enbw=False, uses the formula for the 3dB point.
+    tc is the time constant.
+    Note that these conversions are the same in reverse. So if you provide
+    a enbw or 3dB frequency it returns the time constant
+    """
+    tcp = 2*np.pi*tc
+    if enbw:
+        # This is obtain from the integral of an RC filter
+        # i.e.: integral_0^inf (1/(1+(2*pi*f*tc)**2)**order
+        # since we need to integrate the power we take the square of the
+        # absolute reponse of the filter (1/(1+R/Zc) = 1/(1+1j*2*pi*f*tc))
+        return (1./tcp) * np.sqrt(np.pi)*gamma(order-0.5)/(2*gamma(order))
+    else:
+        # This is solving 1/2 = (1/(1+(2*pi*f*tc)**2)**order
+        return np.sqrt(2.**(1./order) -1) / tcp
