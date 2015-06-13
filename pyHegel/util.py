@@ -35,6 +35,15 @@ This module contains many utilities:
     list_printers
     blueforsTlog
     sort_file
+Conversion functions and time constants calculation helpers:
+    dB2A, dB2P, P2dB, A2dB
+    dBm2o, o2dBm
+    xy2rt, rt2xy
+    phase_unwrap
+    phase_wrap
+    filter_to_fraction
+    fraction_to_filter
+
 Note that savefig is initially disabled.
 """
 
@@ -45,6 +54,7 @@ import os
 import os.path
 import subprocess
 import numpy as np
+from scipy.optimize import brentq as brentq_rootsolver
 
 try:
     try:
@@ -505,3 +515,217 @@ def read_blueforsGauges(filename):
     # unit: 0:mbar, 1:Torr, 2:Pascal
     v = [[t]+[float(x) for x in vals[3::6]] for t, vals in v]
     return np.array(v).T
+
+#########################################################
+# Conversion functions, time constants calcs
+#########################################################
+
+def dB2A(dB):
+    """ Returns the amplitude ratio that corresponds to the input in dB
+        see also: dB2P, A2dB, P2dB
+    """
+    return 10.**(dB/20.)
+
+def A2dB(A):
+    """ Returns the corresponding dB value for an amplitude ratio A
+        see also: dB2A, dB2P, P2dB
+    """
+    return 20.*np.log10(A)
+
+def dB2P(dB):
+    """ Returns the power ratio that corresponds to the input in dB
+        see also: dB2A, A2dB, P2dB
+    """
+    return 10.**(dB/10.)
+
+def P2dB(A):
+    """ Returns the corresponding dB value for an amplitude ratio A
+        see also: dB2A, dB2P, A2dB
+    """
+    return 10.*np.log10(A)
+
+
+def rt2xy(r, phase=None, deg=True, cmplx=False, dB=True):
+    """
+    if phase is None, then, r is presume to have at least
+    2 dimensions, the first one selecting between amplitude and phase
+    The phase is in degrees unless deg=False then it is in radians
+    r is in dB when dB=True, otherwise it is a linear scale
+    It returns the amplitudes
+    cmplx: when True it returns complex values instead of a an array with 2
+            elements as the first dimension (in-phase, out-phase)
+    See also: xy2rt
+    """
+    if phase is None:
+        if len(r) != 2:
+            raise ValueError('The first dimension of db needs to have 2 element when phase is not given')
+        r, phase = r
+    if dB:
+        r = dB2A(r)
+    if deg:
+        phase = np.deg2rad(phase)
+    if cmplx:
+        return r*np.exp(1j*phase)
+    x = r*np.cos(phase)
+    y = r*np.sin(phase)
+    return np.array([x,y])
+
+def phase_unwrap(phase, deg=True, axis=-1):
+    """ This removes large discontinuities in the phase. It is useful when
+        many adjacent points have normally small changes of phase except when the
+        phase wraps around (changes of 2 pi rad or 360 deg)
+        axis: the axis (dimension) to operate on.
+        deg: when True the phase is in degrees, otherwise it is in radians
+        See also: phase_wrap
+    """
+    if deg:
+        phase = np.deg2rad(phase)
+    phase = np.unwrap(phase, axis=axis)
+    if deg:
+        return np.rad2deg(phase)
+    else:
+        return phase
+
+def phase_wrap(phase, deg=True):
+    """ Returns the phase wrapped around.
+        deg : when True the range is [-180, 180]
+              when False the range is [-pi , pi]
+        See also phase_unwrap
+    """
+    half = 180. if deg else np.pi
+    full = 2*half
+    return (phase + half)%full - half
+
+
+def xy2rt(x, y=None, cmplx=False, deg=True, dB=True, unwrap=False):
+    """
+    Takes the incoming x,y data and returns the amplitude and
+    the phase.
+    dB: when True returns the amplitude in dB otherwise in linear scale
+    deg: when True returns the phase in degrees, otherwise in radians
+    cmplx: when True, the incoming x is presumed to be complex numbers
+           z = x+1j*y
+    unwrap: when True, applies phase_unwrap to the phase on the last dimension(axis)
+    The return value will be a single array have 2 elements on the first dimension
+    corresonding to db and phase.
+    See also: rt2xy
+    """
+    if cmplx:
+        z = x
+    else:
+        if y is None:
+            if len(x) != 2:
+                raise ValueError('The first dimension of x needs to have 2 element when y is not given')
+            x, y = x
+        z = x + 1j*y
+    A = np.abs(z)
+    if dB:
+        A = A2dB(A)
+    phase = np.angle(z, deg=deg)
+    if unwrap:
+        phase = phase_unwrap(phase, deg=deg)
+    return np.array([A, phase])
+
+def dBm2o(dbm, o='W', ro=50):
+    """ This function converts an input amplitude in dBm
+        to an output in o, which can be 'W' (default),
+        'A' or 'V' for Watts, Amperes(RMS) or Volts(RMS).
+        ro: is the impedance used to calculate the values
+            for o='V' or 'A'
+        If you prefer a different default you can do it like this:
+            dBm2A = lambda x: dBm2o(x, o='A')
+        See also: o2dBm
+    """
+    Pref = 1e-3 # reference power for dBm is 1 mW
+    ro = ro*1. # make sure it is a float
+    w = Pref * dB2P(dbm)
+    if o == 'W':
+        return w
+    elif o == 'A':
+        return np.sqrt(w/ro)
+    elif o == 'V':
+        return np.sqrt(w*ro)
+    else:
+        raise ValueError("o needs to be 'W', 'A' or 'V'")
+
+def o2dBm(v, o='W', ro=50):
+    """ This function converts an input amplitude in some units
+        to an output in dBm.
+        o: selects the incoming units. It can be 'W' (default,)
+        'A' or 'V' for Watts, Amperes(RMS) or Volts(RMS).
+        ro: is the impedance used to calculate the values
+            for o='V' or 'A'
+        If you prefer a different default you can do it like this:
+            A2dBm = lambda x: o2dBm2(x, o='A')
+        See also: dBm2o
+    """
+    Pref = 1e-3 # reference power for dBm is 1 mW
+    ro = ro*1. # make sure it is a float
+    if o == 'W':
+        w = v
+    elif o == 'V':
+        w = v**2./ro
+    elif o == 'A':
+        w = v**2.*ro
+    else:
+        raise ValueError("o needs to be 'W', 'A' or 'V'")
+    return 10.*np.log10(w/Pref)
+
+
+def filter_to_fraction(n_time_constant, n_filter=1):
+    """
+    Calculates the fraction of a step function that is obtained after
+    waiting n_time_constant. It tends toward 1. (100% of stop change)
+    n_time_constant is the number of time_constants (can be fractionnal, is unitless)
+    n_filter is the number of filters (all using the same time_constants non-interacting
+     (buffered in between each))
+
+    See also the inverse function fraction_to_filter
+    """
+    t = n_time_constant * 1. # make sure n_time_constant is a float
+    if n_time_constant <= 0:
+        return 0.
+    old = n_filter
+    n_filter = int(n_filter) # makes sure n_filter is an integer
+    if old != n_filter:
+        print 'n_filter was not an integer (%r). Converted it to %i'%(old, n_filter)
+    if n_filter <= 0 or n_filter > 100:
+        raise ValueError('n_filter to be positive and non-zero (and not greater than 100)')
+    et = np.exp(-t)
+    if n_filter == 1:
+        return 1.-et
+    elif n_filter == 2:
+        return 1.-et*(1.+t)
+#    elif n_filter == 3:
+#        return 1.-et*(1.+t+0.5*t**2)
+#    elif n_filter == 4:
+#        return 1.-et*(1.+t+0.5*t**2+t**3/6.)
+    else:
+        # general formula: 1-exp(-t)*( 1+t +t**2/2 + ... t**(n-1)/(n-1)!) )
+        m = 1.
+        tt = 1.
+        for i in range(1, n_filter):
+            tt *= t/i
+            m += tt
+        return 1.-et*m
+
+def fraction_to_filter(frac=0.99, n_filter=1):
+    """
+    Calculates the number of time constants to wait to achieve the requested
+    fractional change (frac) from a step function.
+    n_filter is the number of filters (all using the same time_constants non-interacting
+     (buffered in between each))
+
+    See also the inverse function filter_to_fraction
+    """
+    if frac <= 0. or frac >= 1:
+        raise ValueError('frac is out of range need 0 < frac < 1')
+    if n_filter != int(n_filter):
+        old = n_filter
+        n_filter = int(n_filter)
+        print 'n_filter was not an integer (%r). Converted it to %i'%(old, n_filter)
+    if n_filter <= 0 or n_filter > 100:
+        raise ValueError('n_filter to be positive and non-zero (and not greater than 100)')
+    func = lambda x: filter_to_fraction(x, n_filter)-frac
+    n_time = brentq_rootsolver(func, 0, 1000)
+    return n_time
