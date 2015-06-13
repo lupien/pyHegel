@@ -79,6 +79,7 @@ Requirements
 - matplotlib
 - PyVISA (optional: will run without it, but controlling instruments will be impaired)
 - PyPDF2 or pyPdf (optional: needed for pdf merging)
+- pywin32 is needed on windows platforms
 - some other packages depending on the instrument.
 
 An easy way to obtain most of these on windows is to intall Python(x,y) (https://code.google.com/p/pythonxy/)

@@ -27,6 +27,8 @@
 # and documentation from
 #   http://pythonhosted.org/setuptools/setuptools.html
 
+import sys
+
 try:
     from setuptools import setup, find_packages
 except ImportError:
@@ -50,16 +52,27 @@ long_description = '\n\n'.join([read('README.rst'), read('AUTHORS'), read('CHANG
 __doc__ = long_description
 
 requirements = [ 'ipython', 'numpy', 'scipy', 'matplotlib' ]
+setup_requires = []
 extras_require = {
         'visa': ['PyVISA']
         }
 
-
+scripts = []
 entry_points = {
         'console_scripts': ['pyHegel=pyHegel:start_pyHegel']
         }
 if os.name == 'nt':
     entry_points['gui_scripts'] = ['pyHegel_console=pyHegel:start_console']
+    requirements.append('pywin32')
+    if 'bdist_wininst' not in sys.argv:
+        # needed by postinstall scripts
+        setup_requires.append('pywin32')
+    if 'bdist_wininst' in sys.argv:
+        pass
+        #scripts.append('path to some script')
+        # might also add the icons to the data stuff
+        # options should be in the setup
+        #options = {'bdist_wininst': {'install_script': 'some script'}}
 
 setup(name='pyHegel',
       description='Command line interface to provide a uniform interface to laboratory instruments',
@@ -74,6 +87,7 @@ setup(name='pyHegel',
       keywords='CLI VISA GPIB USB serial RS232 measurement acquisition automation',
       license='LGPL',
       install_requires=requirements,
+      setup_requires=setup_requires,
       extras_require=extras_require,
       platforms = ['Linux', 'Max OSX', 'Windows'],
       classifiers=[
@@ -99,6 +113,7 @@ setup(name='pyHegel',
             #'pyHegel': ['pyHegel_default.ini'],
             'pyHegel': ['pyHegel*.ini'],
           },
+      scripts = scripts,
       entry_points=entry_points,
       zip_safe=False)
 
