@@ -29,8 +29,11 @@ import os
 import os.path
 import sys
 import subprocess
+from win32com.shell import shell, shellcon
+from win32com.client import Dispatch
+from os.path import join as pjoin, isfile
+
 from . import config
-from os.path import join as pjoin
 
 # hard code the original file location for now.
 PYTHONXY_DIR = r'C:\Program Files (x86)\pythonxy'
@@ -40,11 +43,36 @@ CONSOLE_EXEC = pjoin(CONSOLE_DIR, 'Console.exe') # C:\Program Files (x86)\python
 CONSOLE_EXEC_QUOTED = r'C:"\Program Files (x86)\pythonxy\console\Console.exe"'
 CONSOLE_ICON = pjoin(PYTHONXY_DIR, 'icons', 'consolexy.ico') # C:\Program Files (x86)\pythonxy\icons\consolexy.ico
 
-# TODO: improve this to find installed script location (if pyHegel was installed.)
-def get_pyhegel_start_script():
-    start_script = os.path.dirname(config.PYHEGEL_DIR) # Goes to parent
-    start_script = os.path.join(start_script, 'pyHegel.py')
-    return start_script
+
+def get_pyhegel_start_script(script='pyHegel', pythonw=False):
+    exec_base = os.path.dirname(sys.executable)
+    if pythonw:
+        # This executable does not open the cmd terminal
+        executable = pjoin(exec_base, 'pythonw.exe')
+    else:
+        #executable = sys.executable
+        # this should be the same
+        executable = pjoin(exec_base, 'python.exe')
+    script_dir = pjoin(sys.exec_prefix, 'Scripts')
+    name = pjoin(script_dir, script+'.exe')
+    if isfile(name):
+        return '"%s"'%name
+    for basename in [script+'-script.py', script+'.py']:
+        name = pjoin(script_dir, basename)
+        if isfile(name):
+            return '"%s" "%s"'%(executable, name)
+    name = os.path.dirname(config.PYHEGEL_DIR) # Goes to parent
+    name = os.path.join(name, 'pyHegel.py')
+    return '"%s" "%s"'%(executable, name)
+
+def get_pyhegel_console_start_script():
+    name = get_pyhegel_start_script(script='pyHegel_console', pythonw=True)
+    if isfile(name):
+        return name
+    else:
+        name = get_pyhegel_start_script(pythonw=True)
+        name += ' --console'
+        return name
 
 
 def write_tree(tree, filename):
@@ -108,8 +136,7 @@ def update_console_xml(dest, save_orig=None):
             c = n.find('console')
             if c is not None:
                 #c.set('shell', r"C:\Python27\Scripts\ipython.bat -pylab -p xy -nopylab_import_all -editor SciTE.exe C:\Codes\pyHegel\pyHegel.py")
-                start_script = get_pyhegel_start_script()
-                cmd = '"%s" "%s"'%(sys.executable, start_script)
+                cmd = get_pyhegel_start_script()
                 c.set('shell', cmd) # Console uses CreateProcess with the string
                 #c.set('shell', r"cmd.exe /c C:\Codes\pyHegel\pyHegel.py")
                 userroot = config.USER_HOME
@@ -186,3 +213,59 @@ def start_console(mode=None):
         # not that start is a cmd.exe command, so it needs to be called from it.
         # (could be: cmd /c start ....)
         os.system('start %s -c "%s" -t "pyHegel"'%(CONSOLE_EXEC_QUOTED, dest))
+
+
+#################################################
+# Some useful tools
+#################################################
+SHGFP_TYPE_CURRENT = 0
+SHGFP_TYPE_DEFAULT = 1
+CSIDL_FLAG_CREATE = 0x8000
+
+def get_win_folder_path(csidl, create=False, default=False):
+    """
+    get the windows current folder path for a csidl
+    useful entries:
+         'CSIDL_COMMON_DESKTOPDIRECTORY'
+         'CSIDL_COMMON_STARTMENU'
+         'CSIDL_COMMON_PROGRAMS'
+         'CSIDL_PROGRAM_FILES'
+         'CSIDL_PROGRAM_FILESX86'
+    create when True, will also create it if it does not exists
+    default when True, returns the default directory instead of the current one.
+    """
+    c = getattr(shellcon, csidl)
+    flag = SHGFP_TYPE_CURRENT
+    if create:
+        c |= CSIDL_FLAG_CREATE
+    if default:
+        flag = SHGFP_TYPE_DEFAULT
+    return shell.SHGetFolderPath(None, c, None, flag)
+
+def create_shortcut(filename, description, target, arguments=None, iconpath=None, workdir='%UserProfile%', iconindex=0):
+    # This is based from
+    #  http://www.blog.pythonlibrary.org/2010/01/23/using-python-to-create-shortcuts/
+    # Another option would be to use the COM IShellLink interface of the windows shell
+    # in comnbination with the standard IPersistFile.
+    # They required constants are in win32com.shell.shell and pythoncom.
+    #  see: from pywin32:  win32comex/shell/demos/create_link.py
+    #         or: http://timgolden.me.uk/python/win32_how_do_i/create-a-shortcut.html
+    # Another interface would be the scripting interface of the windows shell:
+    #   Dispatch('Shell.Application').NameSpace('path to shortcut').ParseName('exising Shortcut Name.lnk').GetLink
+    shell = Dispatch('WScript.Shell')
+    shortcut = shell.CreateShortCut(filename)
+    shortcut.Description = description
+    # Quotes around filename are added automatically if necessary (contains spaces)
+    shortcut.Targetpath = target
+    if arguments is not None:
+        shortcut.Arguments = arguments
+    shortcut.WorkingDirectory = workdir
+    if iconpath is not None:
+        iconpath += ',%i'%iconindex
+        shortcut.IconLocation = iconpath
+    #shortcut.Hotkey = 'Ctrl+Alt+H'
+    # To available window style are at
+    #  https://technet.microsoft.com/en-us/library/ee156605.aspx
+    # Default is 1: Activates and displays a window.
+    #shortcut.WindowStyle = 1
+    shortcut.save()
