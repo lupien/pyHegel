@@ -29,19 +29,40 @@ import os
 import os.path
 import sys
 import subprocess
+from _winreg import QueryValue, HKEY_LOCAL_MACHINE
 from win32com.shell import shell, shellcon
 from win32com.client import Dispatch
 from os.path import join as pjoin, isfile
 
 from . import config
 
-# hard code the original file location for now.
-PYTHONXY_DIR = r'C:\Program Files (x86)\pythonxy'
-CONSOLE_DIR  = pjoin(PYTHONXY_DIR, 'console')
-CONSOLE_XML  = pjoin(CONSOLE_DIR, 'console.xml') # C:\Program Files (x86)\pythonxy\console\console.xml
-CONSOLE_EXEC = pjoin(CONSOLE_DIR, 'Console.exe') # C:\Program Files (x86)\pythonxy\console\Console.exe
-CONSOLE_EXEC_QUOTED = r'C:"\Program Files (x86)\pythonxy\console\Console.exe"'
-CONSOLE_ICON = pjoin(PYTHONXY_DIR, 'icons', 'consolexy.ico') # C:\Program Files (x86)\pythonxy\icons\consolexy.ico
+def get_reg_HKLM(subkey):
+    # QueryValue always returns a string. It is OK for our use
+    try:
+        return QueryValue(HKEY_LOCAL_MACHINE, subkey)
+    except WindowsError:
+        return None
+
+#PYTHONXY_DIR = r'C:\Program Files (x86)\pythonxy'
+#CONSOLE_DIR  = pjoin(PYTHONXY_DIR, 'console')
+PYTHONXY_DIR = get_reg_HKLM('Software\\Python(x,y)')
+CONSOLE_DIR  = get_reg_HKLM('Software\\console')
+# Always check for the not None of the above DIR before using the following ones
+if CONSOLE_DIR is not None:
+    CONSOLE_XML  = pjoin(CONSOLE_DIR, 'console.xml') # C:\Program Files (x86)\pythonxy\console\console.xml
+    CONSOLE_EXEC = pjoin(CONSOLE_DIR, 'Console.exe') # C:\Program Files (x86)\pythonxy\console\Console.exe
+    if CONSOLE_EXEC[1] == ':':
+        # something like: r'C:"\Program Files (x86)\pythonxy\console\Console.exe"'
+        CONSOLE_EXEC_QUOTED = CONSOLE_EXEC[:2]+'"'+CONSOLE_EXEC[2:]+'"'
+    elif CONSOLE_EXEC.find(' ') == -1:
+        # no space so no need to quote
+        CONSOLE_EXEC_QUOTED = CONSOLE_EXEC
+    else:
+        # mayb it is an UNC path \\..., try to deal with it the same way as real path
+        # insert quote after 2nd character (becomes \\"...")
+        CONSOLE_EXEC_QUOTED = CONSOLE_EXEC[:2]+'"'+CONSOLE_EXEC[2:]+'"'
+if PYTHONXY_DIR is not None:
+    CONSOLE_ICON = pjoin(PYTHONXY_DIR, 'icons', 'consolexy.ico') # C:\Program Files (x86)\pythonxy\icons\consolexy.ico
 
 
 def get_pyhegel_start_script(script='pyHegel', pythonw=False):
@@ -93,6 +114,10 @@ def update_console_xml(dest, save_orig=None):
         It can be usefull to compare before and after the change since
         writing restructures the file somewhat.
     """
+    if CONSOLE_DIR is None:
+        raise RuntimeError("Can't find the Console directory. Is it installed?")
+    if PYTHONXY_DIR is None:
+        raise RuntimeError("Can't find the Python(x,y) (pythonxy) directory. Is it installed?")
     tree = ET.parse(CONSOLE_XML) # tree represents the settings entry
     if save_orig is not None:
         write_tree(tree, save_orig)
@@ -156,6 +181,8 @@ def check_newer(dest):
     """
     returns true when the reference console.xml is newer than the user one (dest).
     """
+    if CONSOLE_DIR is None:
+        raise RuntimeError("Can't find the Console directory. Is it installed?")
     #  so far, every install of pythonxy leaves the console.xml with a modification
     #  time of the installation
     base_time = os.path.getmtime(CONSOLE_XML)
@@ -199,6 +226,8 @@ def start_console(mode=None):
     If you need to force a change of the user console.xml file, you can just delete
     it. It will be recreated at the next start_console.
     """
+    if CONSOLE_DIR is None:
+        raise RuntimeError("Can't find the Console directory. Is it installed?")
     update_if_needed()
     dest = find_destination()
     if mode == 'replace':
