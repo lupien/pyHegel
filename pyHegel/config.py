@@ -172,17 +172,20 @@ def load_local_config():
     return imp.load_source(LOCAL_CONFIG, DEFAULT_LOCAL_CONFIG_PATH)
 
 
-def load_instruments():
+def load_instruments(exclude=None):
+    if exclude is None:
+        exclude = []
     #paths = [pjoin(d, 'instruments') for d in get_conf_dirs(skip_module_dir=True)]
     paths = [pjoin(d, 'instruments') for d in get_conf_dirs(skip_module_dir=False)]
     # move last path (within the pyHegel module) as the first so users can't override those
-    paths = [paths[-1]]+paths[1:]
+    # Reverse paths so we load pyHegel internal first and let user override them if needed.
+    paths = paths[::-1]
     loaded = {}
     for p in paths:
         filenames = glob.glob(pjoin(p, '*.py'))
         for f in filenames:
             name = os.path.basename(f)[:-3] # remove .py
-            if name == '__init__':
+            if name == '__init__' or name in exclude:
                 continue
             if re.match(r'[A-Za-z_][A-Za-z0-9_]*\Z', name) is None:
                 raise RuntimeError('Trying to load "%s" but the name is invalid (should only contain letters, numbers and _)'%
