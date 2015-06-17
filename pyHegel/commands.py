@@ -707,7 +707,18 @@ class _Sweep(instruments.BaseInstrument):
             raise ValueError, 'npts needs to be at least 1'
         if dolinspace:
             if logspace:
+                negative = False
+                if start == 0. or stop == 0.:
+                    raise ValueError("Neither start nor stop can be 0. when using logspace.")
+                if start < 0.:
+                    negative = True
+                    start *= -1.
+                    stop *= -1.
+                if stop < 0:
+                    raise ValueError('Both start and stop need to have the same sign when using logspace.')
                 span = np.logspace(np.log10(start), np.log10(stop), npts)
+                if negative:
+                    span *= -1.
             else:
                 span = np.linspace(start, stop, npts)
         if instruments_base.CHECKING:
@@ -764,13 +775,19 @@ class _Sweep(instruments.BaseInstrument):
                 title = str(self._sweep_trace_num)
             self._sweep_trace_num += 1
             t.setWindowTitle('Sweep: '+title)
-            t.setLim(span)
+            if logspace and negative:
+                t.setLim(-span)
+            else:
+                t.setLim(span)
             if len(graphsel) == 0:
                 gsel = _itemgetter(0)
             else:
                 gsel = _itemgetter(*graphsel)
-            t.setlegend(gsel(hdrs))
-            t.set_xlabel(hdrs[0])
+            hdrs_leg = hdrs[:] #copy
+            if logspace and negative:
+                hdrs_leg[0] = '- '+hdrs_leg[0]
+            t.setlegend(gsel(hdrs_leg))
+            t.set_xlabel(hdrs_leg[0])
             if logspace:
                 t.set_xlogscale()
         try:
@@ -815,7 +832,10 @@ class _Sweep(instruments.BaseInstrument):
                     if cf:
                         writevec(cf, [iv]+vals+[tme])
                     if graph:
-                        t.addPoint(iv, gsel([iv]+vals))
+                        if logspace and negative:
+                            t.addPoint(-iv, gsel([-iv]+vals))
+                        else:
+                            t.addPoint(iv, gsel([iv]+vals))
                         _checkTracePause(t)
                         if t.abort_enabled:
                             break
