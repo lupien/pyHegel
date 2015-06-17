@@ -37,6 +37,7 @@ from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsy
                             make_choice_list, _fromstr_helper,\
                             decode_float64, visa_wrap, locked_calling
 from ..types import dict_improved
+from ..instruments_registry import register_instrument
 
 from .logical import FunctionDevice
 
@@ -44,6 +45,9 @@ from .logical import FunctionDevice
 ##    Yokogawa source
 #######################################################
 
+@register_instrument('YOKOGAWA', 'GS210', usb_vendor_product=[0x0B21, 0x0039])
+#@register_instrument('YOKOGAWA', 'GS210', '1.05')
+#@register_instrument('YOKOGAWA', 'GS210', '1.02')
 class yokogawa_gs200(visaInstrument):
     # TODO: implement multipliers, units. The multiplier
     #      should be the same for all instruments, and be stripped
@@ -91,6 +95,8 @@ class yokogawa_gs200(visaInstrument):
 ##    Stanford Research SR830 Lock-in Amplifier
 #######################################################
 
+#@register_instrument('Stanford_Research_Systems', 'SR830', 'ver1.07 ')
+@register_instrument('Stanford_Research_Systems', 'SR830')
 class sr830_lia(visaInstrument):
     """
     Don't forget to set the async_wait to some usefull values.
@@ -253,6 +259,8 @@ class sr830_lia(visaInstrument):
 ##    Stanford Research SR384 RF source
 #######################################################
 
+#@register_instrument('Stanford Research Systems', 'SG384', 'ver1.02.0E')
+@register_instrument('Stanford Research Systems', 'SG384')
 class sr384_rf(visaInstrument):
     # This instruments needs to be on local state or to pass through local state
     #  after a local_lockout to actually turn off the local key.
@@ -336,6 +344,8 @@ class sr384_rf(visaInstrument):
 ##    Stanford Research SR780 2 channel network analyzer
 #######################################################
 
+#@register_instrument('Stanford_Research_Systems', 'SR780', 'ver116')
+@register_instrument('Stanford_Research_Systems', 'SR780')
 class sr780_analyzer(visaInstrumentAsync):
     """
     This controls a 2 channel network analyzer
@@ -753,6 +763,8 @@ class sr780_analyzer(visaInstrumentAsync):
 ##    Lakeshore 325 Temperature controller
 #######################################################
 
+#@register_instrument('LSCI', 'MODEL325', '1.7/1.1')
+@register_instrument('LSCI', 'MODEL325')
 class lakeshore_325(visaInstrument):
     """
        Temperature controller
@@ -824,6 +836,8 @@ class lakeshore_325(visaInstrument):
 ##    Lakeshore 340 Temperature controller
 #######################################################
 
+#@register_instrument('LSCI', 'MODEL340', '061407')
+@register_instrument('LSCI', 'MODEL340')
 class lakeshore_340(visaInstrument):
     """
        Temperature controller used for He3 system
@@ -952,6 +966,8 @@ class quoted_name(object):
             raise ValueError, 'The given string already contains a quote :":'
         return '"'+input_str[:15]+'"'
 
+#@register_instrument('LSCI', 'MODEL224', '1.0')
+@register_instrument('LSCI', 'MODEL224')
 class lakeshore_224(lakeshore_340):
     """
        Temperature monitor
@@ -1080,6 +1096,8 @@ class lakeshore_224(lakeshore_340):
 ##    Lakeshore 370 Temperature controller
 #######################################################
 
+#@register_instrument('LSCI', 'MODEL370', '04102008')
+@register_instrument('LSCI', 'MODEL370')
 class lakeshore_370(visaInstrument):
     """
        Temperature controller used for dilu system
@@ -1449,6 +1467,8 @@ class lakeshore_370(visaInstrument):
 ##    Colby Instruments Programmable delay line PDL-100A-20NS
 #######################################################
 
+#@register_instrument('Colby Instruments', 'PDL-100A-20.00NS', 'V1.70')
+@register_instrument('Colby Instruments', 'PDL-100A-20.00NS')
 class colby_pdl_100a(visaInstrument):
     """
     Colby Instruments delay box: PDL-100A-20NS
@@ -1520,6 +1540,7 @@ class colby_pdl_100a(visaInstrument):
 ##    BNC 845 microwave/RF generator
 #######################################################
 
+@register_instrument('Berkeley Nucleonics Corporation', 'MODEL 845', '0.4.35', usb_vendor_product=[0x03EB, 0xAFFF])
 class BNC_rf_845(visaInstrument):
     """
     This controls a BNC 845 signal generetor
@@ -1633,6 +1654,8 @@ def _parse_magnet_return(s, conv):
         raise RuntimeError('There is some leftovers (%s) in the string'%s)
     return dict_improved(zip(names[::-1], vals[::-1]))
 
+
+@register_instrument('Scientific Magnetics', 'SMC120-10', '5.67')
 class MagnetController_SMC(visaInstrument):
     """
     This controls a Scientific Magnetics Magnet Controller SMC120-10ECS
@@ -1652,6 +1675,8 @@ class MagnetController_SMC(visaInstrument):
     def init(self, full=False):
         super(MagnetController_SMC, self).init(full=full)
         self._magnet_cal_T_per_A = self.operating_parameters.get()['calibTpA']
+    def idn(self):
+        return 'Scientific Magnetics,SMC120-10,000000,5.67'
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('field', 'current_status', 'setpoints', 'status', 'operating_parameters', options)
     def _field_internal(self):
@@ -1775,10 +1800,13 @@ class MagnetController_SMC(visaInstrument):
 ##    Dummy instrument
 #######################################################
 
+@register_instrument('pyHegel_Instrument', 'dummy', '1.0')
 class dummy(BaseInstrument):
     def init(self, full=False):
         self.incr_val = 0
         self.wait = .1
+    def idn(self):
+        return 'pyHegel_Instrument,dummy,00000,1.0'
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('volt', 'current', 'other', options)
     def _incr_getdev(self):

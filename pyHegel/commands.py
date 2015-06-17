@@ -40,7 +40,9 @@ import numpy as np
 from gc import collect as collect_garbage
 
 from . import traces
+from . import instruments_registry
 from . import instruments
+instruments._populate_instruments()
 from . import instruments_base
 #from . import local_config
 from . import util
@@ -211,11 +213,12 @@ def reset_pyHegel():
     reload(traces.qt_wrap)
     reload(traces.kbint_util)
     reload(traces)
-    reload(instruments.instruments_base.visa_wrap)
-    reload(instruments.instruments_base)
-    instruments._reload_instruments()
+    reload(instruments_base.visa_wrap)
+    reload(instruments_base)
+    instruments_registry.clean_instruments()
+    reload(instruments_registry)
+    reload(instruments.logical)
     reload(instruments)
-    #reload(local_config)
     reload(util)
     import pyHegel
     reload(pyHegel)

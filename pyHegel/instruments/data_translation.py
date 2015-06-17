@@ -23,12 +23,15 @@
 
 from __future__ import absolute_import
 
+import sys
+import numpy as np
+
+
 from ..instruments_base import BaseInstrument, scpiDevice, ChoiceIndex,\
                             wait_on_event, BaseDevice, MemoryDevice, ReadvalDev,\
                             _retry_wait, locked_calling
-import sys
-import time
-import numpy as np
+
+from ..instruments_registry import register_instrument, add_to_instruments
 
 clr = None
 Int32 = None
@@ -63,7 +66,7 @@ def _delayed_imports():
                 "Data Translation Omni software are installed: %s"%exc)
         _delayed_imports_done = True
 
-
+@add_to_instruments
 def find_all_Ol():
     """
     This returns a list of all the connected Data Translation boxes.
@@ -124,12 +127,15 @@ class Ol_ChoiceIndex(ChoiceIndex):
 ##    DataTranslation instrument
 #######################################################
 
+#@register_instrument('Data Translation', 'DT9837-C', '6.7.4.28')
+@register_instrument('Data Translation', 'DT9837-C')
 class DataTranslation(BaseInstrument):
     def __init__(self, dev_name=0):
         """
         To initialize a device, give it the device name as returned
         by find_all_Ol(), or the integer to use as an index in that
         list (defaults to 0).
+        Only one process at a time can access this type of instrument.
         """
         _delayed_imports()
         devmgr = OlBase.DeviceMgr.Get()
@@ -148,6 +154,7 @@ class DataTranslation(BaseInstrument):
         self.info = info
         dev = devmgr.GetDevice(name)
         self._dev = dev
+        self._idn_string = 'Data Translation,%s,%s,%s'%(dev.BoardModelName, dev.GetHardwareInfo().BoardId, dev.DriverVersion)
         self._num_in = dev.GetNumSubsystemElements(OlBase.SubsystemType.AnalogInput)
         if self._num_in < 1:
             raise ValueError, 'No input available for ', name
@@ -213,6 +220,8 @@ class DataTranslation(BaseInstrument):
         BaseInstrument.__init__(self)
         self._async_mode = 'acq_run'
 
+    def idn(self):
+        return self._idn_string
     def _update_all_channels_info(self, init=False):
         if init:
             gain = 1.

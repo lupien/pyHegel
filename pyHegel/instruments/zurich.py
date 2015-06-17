@@ -50,6 +50,7 @@ from ..instruments_base import BaseInstrument,\
                             _decode_block_base, make_choice_list,\
                             sleep, locked_calling, ProxyMethod, _retry_wait, _repr_or_string
 from ..instruments_base import ChoiceIndex as _ChoiceIndex
+from ..instruments_registry import register_instrument
 from .logical import FunctionDevice
 from scipy.special import gamma
 
@@ -287,6 +288,8 @@ class ziDev(scpiDevice):
 ##    Zurich Instruments UHF (600 MHz, 1.8 GS/s lock-in amplifier)
 #######################################################
 
+# make this match idn
+@register_instrument('Zurich Instrument', 'UHFLI')
 class zurich_UHF(BaseInstrument):
     """
     This instrument controls a Zurich Instrument UHF lock-in amplifier
@@ -646,7 +649,7 @@ class zurich_UHF(BaseInstrument):
         system_fpga_rev = str(self.ask('/{dev}/system/fpgarevision')[0])
         system_fw_rev = str(self.ask('/{dev}/system/fwrevision')[0])
         #return '{name} {system_devtype} #{system_serial} (analog/digital/fpga/fw_rev:{system_analog_board_rev}/{system_digital_board_rev}/{system_fpga_rev}/{system_fw_rev}, code:{system_code}, opt:{system_options}  [server {server_ver}-{server_rev} fw:{server_fw_rev}] [python {python_ver}-{python_rev}])'.format(
-        return '{name} {system_devtype} #{system_serial} (analog/digital/fpga/fw_rev:{system_analog_board_rev}/{system_digital_board_rev}/{system_fpga_rev}/{system_fw_rev}, opt:{system_options}  [server {server_ver}-{server_rev} fw:{server_fw_rev}] [python {python_ver}-{python_rev}])'.format(
+        return '{name},{system_devtype},{system_serial},(analog/digital/fpga/fw_rev:{system_analog_board_rev}/{system_digital_board_rev}/{system_fpga_rev}/{system_fw_rev}, opt:{system_options}  [server {server_ver}-{server_rev} fw:{server_fw_rev}] [python {python_ver}-{python_rev}])'.format(
              name=name, python_ver=python_ver, python_rev=python_rev,
              server_ver=server_ver, server_rev=server_rev, server_fw_rev=server_fw_rev,
              system_devtype=system_devtype, system_serial=system_serial,

@@ -23,49 +23,25 @@
 
 from __future__ import absolute_import
 
-from .. import instruments_base
-from . import others
-from . import logical
-from . import agilent
-from . import acq_board_instrument
-from . import lecroy
-from . import blueforsValves
-from . import data_translation
-
-def _reload_instruments():
-    reload(logical)
-    reload(others)
-    reload(agilent)
-    reload(acq_board_instrument)
-    reload(lecroy)
-    reload(blueforsValves)
-    reload(data_translation)
-
+from .. import config as _config
+from .. import instruments_registry as _registry
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseDevice,\
                             BaseInstrument, MemoryDevice, scpiDevice, find_all_instruments
 
-from .others import yokogawa_gs200,\
-                                sr830_lia, sr384_rf, sr780_analyzer,\
-                                lakeshore_325, lakeshore_340, lakeshore_224, lakeshore_370,\
-                                colby_pdl_100a, BNC_rf_845, MagnetController_SMC, dummy
 
-from .logical import LogicalDevice, ScalingDevice, FunctionDevice,\
-                                LimitDevice, CopyDevice, ExecuteDevice,\
-                                RThetaDevice, PickSome, Average, FunctionWrap
+# Call this after importing this module
+# It is needed to prevent cyclic import problems:
+#   logical and load_instruments use function in instruments_registry which
+#   import this module.
+def _populate_instruments():
+    global logical, _loaded
+    # logical is excluded from config.load_instruments because it needs to be loaded
+    # first. Other devices depend on it.
+    from . import logical
 
-from .agilent import agilent_rf_33522A, agilent_PowerMeter,\
-                                agilent_rf_PSG, agilent_rf_MXG,\
-                                agilent_multi_34410A, agilent_rf_Attenuator,\
-                                infiniiVision_3000, agilent_EXA,\
-                                agilent_PNAL, agilent_ENA, agilent_FieldFox,\
-                                agilent_AWG
+    # Now load all other instruments.*
+    _loaded = _config.load_instruments(exclude=['logical'])
 
-from .acq_board_instrument import Acq_Board_Instrument, HistoSmooth, calc_cumulants
 
-from .lecroy import lecroy_wavemaster
-
-from .blueforsValves import bf_valves
-
-from .data_translation import DataTranslation, find_all_Ol
-
+# This space will be filled up by config.load_instruments

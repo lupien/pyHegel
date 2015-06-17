@@ -40,7 +40,7 @@ from ..instruments_base import FastEvent, scpiDevice, wait_on_event,\
                             ReadvalDev, decode_uint32, _replace_ext, locked_calling,\
                             Block_Codec_Raw
 from ..kbint_util import _sleep_signal_context_manager
-
+from ..instruments_registry import register_instrument, add_to_instruments
 
 class acq_bool(object):
     def __call__(self, input_str):
@@ -344,6 +344,9 @@ def spectrum_smooth(data, ss=2):
 #######################################################
 
 # TODO: Add CHECKING verification in init and instrument write/read.
+@register_instrument('Acq card', 'ADC16', '1.0')
+@register_instrument('Acq card', 'ADC14', '1.0')
+@register_instrument('Acq card', 'ADC8', '1.0')
 class Acq_Board_Instrument(visaInstrument):
     """
     This instrument controls the fast acquisition cards (Ulraview 8 and 14bit)
@@ -2071,6 +2074,7 @@ You can start a server with:
 # Histogram correction algo
 ##############################################################
 
+@add_to_instruments
 def calc_cumulants(data, scale=None, max_cum=5):
     """
     This functions calculates the cumulants from a sample (like voltages
@@ -2132,6 +2136,7 @@ from scipy.special import erfinv
 # number of cycles (fraction of a cycle, changes all the
 # cumulants).
 
+@add_to_instruments
 class HistoSmooth(object):
     """
     This class provides a way to fix the imperfect spacing

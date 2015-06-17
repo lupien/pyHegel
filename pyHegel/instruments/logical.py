@@ -33,6 +33,7 @@ import time
 from ..instruments_base import BaseDevice, BaseInstrument, ProxyMethod, MemoryDevice,\
                         _find_global_name, _get_conf_header, locked_calling_dev
 from ..traces import wait
+from ..instruments_registry import add_to_instruments
 
 def _asDevice(dev):
     if isinstance(dev, BaseInstrument):
@@ -78,6 +79,7 @@ class _LogicalInstrument(BaseInstrument):
 ##    Logical Base device
 #######################################################
 
+@add_to_instruments
 class LogicalDevice(BaseDevice):
     """
        Base device for logical devices.
@@ -329,6 +331,7 @@ class LogicalDevice(BaseDevice):
 ##    Logical Scaling device
 #######################################################
 
+@add_to_instruments()
 class ScalingDevice(LogicalDevice):
     """
        This class provides a wrapper around a device.
@@ -370,6 +373,7 @@ class ScalingDevice(LogicalDevice):
 ##    Logical Function device
 #######################################################
 
+@add_to_instruments
 class FunctionDevice(LogicalDevice):
     """
        This class provides a wrapper around a device.
@@ -443,6 +447,7 @@ class FunctionDevice(LogicalDevice):
 ##    Logical Limit device
 #######################################################
 
+@add_to_instruments
 class LimitDevice(LogicalDevice):
     """
     This class provides a wrapper around a device that limits the
@@ -491,6 +496,7 @@ class LimitDevice(LogicalDevice):
 ##    Logical Copy device
 #######################################################
 
+@add_to_instruments
 class CopyDevice(LogicalDevice):
     """
        This class provides a wrapper around a device.
@@ -546,6 +552,7 @@ class CopyDevice(LogicalDevice):
 ##    Logical Execute device
 #######################################################
 
+@add_to_instruments
 class ExecuteDevice(LogicalDevice):
     """
         Performs the get then
@@ -605,6 +612,7 @@ class ExecuteDevice(LogicalDevice):
 ##    Logical R_Theta device
 #######################################################
 
+@add_to_instruments
 class RThetaDevice(LogicalDevice):
     """
        This class provides a wrapper around two devices.
@@ -647,6 +655,7 @@ class RThetaDevice(LogicalDevice):
 ##    Logical PickSome device
 #######################################################
 
+@add_to_instruments
 class PickSome(LogicalDevice):
     """
        This class provides a wrapper around one device for reading only.
@@ -681,6 +690,7 @@ class PickSome(LogicalDevice):
 ##    Logical average device
 #######################################################
 
+@add_to_instruments
 class Average(LogicalDevice):
     """
        This class provides a wrapper around one device for reading only.
@@ -761,6 +771,7 @@ class Average(LogicalDevice):
 ##    Logical wrap device
 #######################################################
 
+@add_to_instruments
 class FunctionWrap(LogicalDevice):
     """
        This class provides a wrapper around functions.

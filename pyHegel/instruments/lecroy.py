@@ -33,6 +33,7 @@ from ..instruments_base import visaInstrumentAsync, visaInstrument,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
                             _decode_block_base, make_choice_list,\
                             sleep, locked_calling
+from ..instruments_registry import register_instrument
 
 from ..types import StructureImproved
 
@@ -516,6 +517,7 @@ class lecroy_vbs_scpi(scpiDevice):
 ##    LeCroy WaveMaster 820Zi-A
 #######################################################
 
+@register_instrument('LECROY', 'WM820ZI-A', '7.2.1')
 class lecroy_wavemaster(visaInstrumentAsync):
     """
     This instrument controls a LeCory WaveMaster 820Zi-A

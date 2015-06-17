@@ -30,7 +30,7 @@ import weakref
 
 from ..instruments_base import BaseInstrument, MemoryDevice,\
                              dict_improved, locked_calling
-
+from ..instruments_registry import register_instrument
 
 #  the server has a timeout (initially 30s), so the connection is lost
 #  when no commands are sent after that interval.
@@ -85,6 +85,7 @@ def makedict(input_str, t=float):
 def booltype(s):
     return bool(int(s))
 
+@register_instrument('BlueFors', 'BF-LD400', '3.5')
 class bf_valves(BaseInstrument):
     """
     This instruments communicates with the BlueFors ValveControl program.

@@ -1135,7 +1135,12 @@ class BaseInstrument(object):
         This method should return a string that uniquely identify the instrument.
         For scpi it is often: <company name>,<model number>,<serial number>,<firmware revision>
         """
-        return "Undefined identification"
+        return "Undefined identification,X,0,0"
+    def idn_split(self):
+        idn = self.idn()
+        parts = idn.split(',', 4) # There could be , in serial firmware revision
+        # I also use lstrip because some device put a space after the comma.
+        return dict(vendor=parts[0], model=parts[1].lstrip(), serial=parts[2].lstrip(), firmware=parts[3].lstrip())
     def _info(self):
         return self.find_global_name(), self.__class__.__name__, id(self)
     def __repr__(self):
