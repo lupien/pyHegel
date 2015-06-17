@@ -192,10 +192,15 @@ class agilent_PowerMeter(visaInstrumentAsync):
     # average calculation and can all be used for reading data.
     def __init__(self, visa_addr):
         # The SRQ for this intrument only works on gpib
-        # for lan or usb we need to revert to polling
+        # for lan or usb we need to revert to polling.
+        # That is because the read_status_byte seems to always return 0
+        # in those cases. So we use *stb? and polling instead.
+        self._status_use_stb = False # Used for init
         super(agilent_PowerMeter, self).__init__(visa_addr, poll='not_gpib')
-    def read_status_byte(self):
         if self._async_polling:
+            self._status_use_stb = True
+    def read_status_byte(self):
+        if self._status_use_stb:
             return int(self.ask('*STB?'))
         else:
             return super(agilent_PowerMeter, self).read_status_byte()

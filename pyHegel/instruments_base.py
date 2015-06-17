@@ -1080,6 +1080,10 @@ class BaseInstrument(object):
             self.write(command)
     def init(self, full=False):
         """ Do instrument initialization (full=True)/reset (full=False) here """
+        # Your function should try and not interfere with another thread/process
+        # already using the instrument (if it is allowed). So it should only set things
+        # to values that should not change afterwards, or reset things that are protected
+        # with locks
         pass
     # This allows instr.get() ... to be redirected to instr.alias.get()
     def __getattr__(self, name):
@@ -2447,6 +2451,7 @@ class visaInstrument(BaseInstrument):
         return ret
     def idn(self):
         return self.ask('*idn?')
+    @locked_calling
     def factory_reset(self):
         """
         This returns the instrument to a known state.
@@ -2454,6 +2459,7 @@ class visaInstrument(BaseInstrument):
         """
         self.write('*RST')
         self.force_get()
+    @locked_calling
     def clear(self):
         """
         This sends the *cls 488.2 command that should clear the status/event/
@@ -2464,6 +2470,7 @@ class visaInstrument(BaseInstrument):
         #some device buffer status byte so clear them
         while self.read_status_byte()&0x40:
             pass
+    @locked_calling
     def _dev_clear(self):
         """ This is the device clear instruction. For some devices it will
             clear the output buffers.
@@ -2489,6 +2496,7 @@ class visaInstrument(BaseInstrument):
     def _info(self):
         gn, cn, p = BaseInstrument._info(self)
         return gn, cn+'(%s)'%self.visa_addr, p
+    @locked_calling
     def trigger(self):
         # This should produce the hardware GET on gpib
         #  Another option would be to use the *TRG 488.2 command
