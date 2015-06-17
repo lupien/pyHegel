@@ -24,7 +24,12 @@
 from __future__ import absolute_import
 
 from collections import defaultdict
-from . import instruments
+
+#from . import instruments
+# importing instrument is delayed to the functions that require it
+# to prevent import loops.
+# Just make sure That intruments_registry has been fully imported before
+# import any object that depends on it.
 
 _instruments_ids = {}
 _instruments_ids_rev = defaultdict(list)
@@ -32,11 +37,13 @@ _instruments_usb = {}
 _instruments_add = {}
 
 def clean_instruments():
+    from . import instruments
     for name in _instruments_add:
         delattr(instruments, name)
     _instruments_add.clear()
 
 def _add_to_instruments(some_object, name=None):
+    from . import instruments
     if name is None:
         # this works for classes and functions
         name = some_object.__name__
@@ -44,11 +51,12 @@ def _add_to_instruments(some_object, name=None):
         if _instruments_add[name] is some_object:
             # already installed
             return name
-        raise RuntimeError('There is already a different entry "%s"=%s, so unable to install %s'%(
-            name, _instruments_add[name], some_object))
-    # not installed yet
-    if hasattr(instruments, name):
-        raise RuntimeError('There is already an attribute "%s" within the instruments package'%(name))
+        print 'Warning: There is already a different entry "%s"=%s, overriding it with %s'%(
+            name, _instruments_add[name], some_object)
+    else:
+        # not installed yet
+        if hasattr(instruments, name):
+            raise RuntimeError('There is already an attribute "%s" within the instruments package'%(name))
     setattr(instruments, name, some_object)
     _instruments_add[name] = some_object
     return name
@@ -155,10 +163,11 @@ def register_instrument(manuf=None, product=None, firmware_version=None, usb_ven
                 raise ValueError('Out of range vendor id for %s'%instr_class)
             if pid is not None and (pid<0 or pid>0xffff):
                 raise ValueError('Out of range product id for %s'%instr_class)
-            key = usb_vendor_product
-            if not quiet and _instruments_usb.has_key(key):
-                print ' Warning: Registering usb %s with %s to override %s'%(
-                        key, instr_class, _instruments_usb[key])
+            key = (vid, pid)
+            if _instruments_usb.has_key(key):
+                if not quiet and _instruments_usb[key] is not instr_class:
+                    print ' Warning: Registering usb %s with %s to override %s'%(
+                            tuple(hex(k) for k in key), instr_class, _instruments_usb[key])
             _instruments_usb[key] = instr_class
         return instr_class
     return _internal_reg
@@ -171,14 +180,25 @@ def add_to_instruments(name=None):
         Note that if you don't specify name, it will use the class or function name.
         For an object that does not possess a __name__ attribute, you need to
         specify name.
-        Remember that even if name is not given, this is a function so use it like
+        When no specifyin a name, you can use it either like:
          @add_to_instruments()
          some_object....
+        or:
+         @add_to_instruments
+         some_object....
     """
-    def _internal_add(some_object):
-        _add_to_instruments(some_object, name)
+    if isinstance(name, basestring) or name is None:
+        def _internal_add(some_object):
+            _add_to_instruments(some_object, name)
+            return some_object
+        return _internal_add
+    else:
+        # we get here if we are called like:
+        #  @add_to_instruments  # no ()
+        #  some_class_or_func_def
+        some_object = name
+        _add_to_instruments(some_object)
         return some_object
-    return _internal_add
 
 # TODO: deal with usb database
 
