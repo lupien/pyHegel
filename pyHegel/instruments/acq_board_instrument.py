@@ -262,13 +262,16 @@ class Listen_thread(threading.Thread):
                                 # update _cache for STATUS result
                                 if obj == acq.board_status or obj == acq.result_available or \
                                           obj == acq.partial_status:
-                                    obj._cache = obj._fromstr(val)
-                                if obj == acq.partial_status:
-                                    partial_L, partial_v = obj._cache
-                                    sys.stdout.write('\rPartial %3i/%-3i     '%(partial_v,partial_L))
-                                if obj == acq.board_status and obj._cache != 'Running':
-                                    # run is finished when board_status is either Idle or Transferring
-                                    acq._run_finished.set()
+                                    obj_cache = obj._fromstr(val)
+                                    # we are not in main thread, without nolock, a get of one of these
+                                    # would lock.
+                                    obj.setcache(obj_cache, nolock=True)
+                                    if obj == acq.partial_status:
+                                        partial_L, partial_v = obj_cache
+                                        sys.stdout.write('\rPartial %3i/%-3i     '%(partial_v,partial_L))
+                                    elif obj == acq.board_status and obj_cache != 'Running':
+                                        # run is finished when board_status is either Idle or Transferring
+                                        acq._run_finished.set()
                     else: # trame[0]=='#'
                         trame = trame[1:]
                         #TODO could check head value
