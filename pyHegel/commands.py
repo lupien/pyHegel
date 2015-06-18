@@ -1093,12 +1093,12 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
             t.addPoint(tme, gsel(vals))
             if f:
                 writevec(f, [tme]+vals)
+            if t.abort_enabled:
+                break
             i += 1
             if npoints == None or i < npoints:
                 wait(interval)
             _checkTracePause(t)
-            if t.abort_enabled:
-                break
     except KeyboardInterrupt:
         (exc_type, exc_value, exc_traceback) = sys.exc_info()
         raise KeyboardInterrupt('Interrupted record'), None, exc_traceback
