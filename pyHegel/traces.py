@@ -586,7 +586,7 @@ class TraceLots(TraceBase):
 
 class TraceWater(TraceBase):
     def __init__(self, xy, y=None, width=9.00, height=7.00, dpi=72,
-                 block_size=10*1024, xoffset=0., yoffset=0., xlog=False, ylog=False):
+                 xoffset=0., yoffset=0., xlog=False, ylog=False):
         """
         This makes a waterfall plot with adjustable spacing
         Either specify x and y with the same dimensions, or xy
