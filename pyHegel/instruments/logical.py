@@ -31,7 +31,8 @@ import weakref
 import time
 
 from ..instruments_base import BaseDevice, BaseInstrument, ProxyMethod, MemoryDevice,\
-                        _find_global_name, _get_conf_header, locked_calling_dev
+                        _find_global_name, _get_conf_header, locked_calling_dev,\
+                        FastEvent, wait_on_event
 from ..traces import wait
 from ..instruments_registry import add_to_instruments
 
@@ -164,6 +165,7 @@ class LogicalDevice(BaseDevice):
         self._instr_internal = _LogicalInstrument(self)
         self._instr_parent = None
         self.async_delay = 0.
+        self._async_done_event = FastEvent()
         fmt = self._format
         if not fmt['header'] and hasattr(self, '_current_config'):
             conf = ProxyMethod(self._current_config)
@@ -262,36 +264,49 @@ class LogicalDevice(BaseDevice):
         for dev, kwarg in gl:
             dev.force_get()
         super(LogicalDevice, self).force_get()
-    @locked_calling_dev
-    def get(self, **kwarg):
+    def _getdev_log(self, **kwarg):
+        raise NotImplementedError('The logical device is missing its _getdev_log method')
+    def _getdev(self, **kwarg):
         if self._autoget == False:
             # we bypass the handling below
-            return super(LogicalDevice, self).get(**kwarg)
+            return self._getdev_log(**kwarg)
         # when not doing async, get all basedevs
         # when doing async, the basedevs are obtained automatically
-        task = getattr(self.instr, '_async_task', None) # tasks are deleted when async is done
-        if not (task and task.is_alive()):
+        #task = getattr(self.instr, '_async_task', None) # tasks are deleted when async is done
+        #if not (task and task.is_alive()):
+        if not self.instr._under_async():
             gl, kwarg = self._get_auto_list(kwarg)
             self._cached_data = []
             for dev, base_kwarg in gl:
                 self._cached_data.append(dev.get(**base_kwarg))
-            ret = super(LogicalDevice, self).get(**kwarg)
-            if self._basedev != None and self._basedev._last_filename:
-                self._last_filename = self._basedev._last_filename
-        else: # in async_task, we don't know data yet so return something temporary
-            ret = 'To be replaced' # in getasync
+        ret = self._getdev_log(**kwarg)
+        if self._basedev != None:
+            self._last_filename = self._basedev._last_filename
+        #else: # in async_task, we don't know data yet so return something temporary
+        #    ret = 'To be replaced' # in getasync
         return ret
     def _async_detect(self, max_time=.5): # 0.5 s max by default
-        return True # No need to wait
+        return wait_on_event(self._async_done_event, max_time=max_time)
     def getasync(self, async, **kwarg):
+        if async == 0:
+            if self._autoget != False:
+                self._async_done_event.clear()
+            else:
+                self._async_done_event.set()
         gl, kwarg = self._get_auto_list(kwarg)
-        if async == 3 and self._autoget != False:
+        if async == 2 and self._autoget != False:
             self._cached_data = []
             for dev, base_kwarg in gl:
-                self._cached_data.append(dev.getasync(async, **base_kwarg))
-            ret = super(LogicalDevice, self).get(**kwarg)
+                dev.getasync(2, **base_kwarg)
+            for dev, base_kwarg in gl:
+                self._cached_data.append(dev.getasync(3, **base_kwarg))
+            self._async_done_event.set()
+            #ret = super(LogicalDevice, self).get(**kwarg)
             # replace data with correct one
-            self.instr._async_task.replace_result(ret)
+            #d = self.instr._get_async_local_data()
+            #d.async_task.replace_result(ret)
+        elif async == 3 and self._autoget != False:
+            pass # we already did that async=3 on subdevices
         else:
             for dev, base_kwarg in gl:
                 dev.getasync(async, **base_kwarg)
@@ -354,7 +369,7 @@ class ScalingDevice(LogicalDevice):
         return raw * self._scale + self._offset
     def conv_todev(self, val):
         return (val - self._offset) / self._scale
-    def _getdev(self):
+    def _getdev_log(self):
         raw = self._cached_data[0]
         val = self.conv_fromdev(raw)
         return val, raw
@@ -362,7 +377,7 @@ class ScalingDevice(LogicalDevice):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
         basedev.set(self.conv_todev(val), **base_kwarg)
         # read basedev cache, in case the values is changed by setget mode.
-        self._cache = self.conv_fromdev(self._basedev.getcache())
+        self.setcache(self.conv_fromdev(self._basedev.getcache()))
     def check(self, val, **kwarg):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='check')
         raw = self.conv_todev(val)
@@ -409,7 +424,7 @@ class FunctionDevice(LogicalDevice):
         b += diff/1e6
         x = brentq_rootsolver(func, a, b)
         return x
-    def _getdev(self):
+    def _getdev_log(self):
         raw = self._cached_data[0]
         val = self.from_raw(raw)
         return val, raw
@@ -481,7 +496,7 @@ class LimitDevice(LogicalDevice):
     def _current_config(self, dev_obj=None, options={}):
         head = ['Limiting:: min=%r max=%r basedev=%s'%(self.min, self.max, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
-    def _getdev(self):
+    def _getdev_log(self):
         return self._cached_data[0]
     def _setdev(self, val, **kwarg):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
@@ -521,7 +536,7 @@ class CopyDevice(LogicalDevice):
     def _current_config(self, dev_obj=None, options={}):
         head = ['Copy:: %r'%(self._basedevs)]
         return self._current_config_addbase(head, options=options)
-    def _getdev(self):
+    def _getdev_log(self):
         return self._cached_data[0]
     # Here _setdev and check show 2 different ways of handling the parameters
     # _setdev requires a redefinition of _combine_kwarg
@@ -589,7 +604,7 @@ class ExecuteDevice(LogicalDevice):
     def _current_config(self, dev_obj=None, options={}):
         head = ['Execute:: command="%s" basedev=%s'%(self._command, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
-    def _getdev(self):
+    def _getdev_log(self):
         ret = self._cached_data[0]
         command = self._command
         filename = self._basedev._last_filename
@@ -641,7 +656,7 @@ class RThetaDevice(LogicalDevice):
     def _current_config(self, dev_obj=None, options={}):
         head = ['R_Theta_Device:: %r, xoffset=%g, yoffset=%g'%(self._basedevs, self._xoffset, self._yoffset)]
         return self._current_config_addbase(head, options=options)
-    def _getdev(self):
+    def _getdev_log(self):
         raw_x = self._cached_data[0]
         raw_y = self._cached_data[1]
         x = raw_x - self._xoffset
@@ -682,7 +697,7 @@ class PickSome(LogicalDevice):
     def _current_config(self, dev_obj=None, options={}):
         head = ['PickSome:: %r, selector=%r'%(self._basedev, self._selector)]
         return self._current_config_addbase(head, options=options)
-    def _getdev(self):
+    def _getdev_log(self):
         raw = self._cached_data[0]
         return raw[self._selector]
 
@@ -735,7 +750,7 @@ class Average(LogicalDevice):
     def _current_config(self, dev_obj=None, options={}):
         head = ['Average:: %r, filter_time=%r, repeat_time=%r'%(self._basedev, self._filter_time, self._repeat_time)]
         return self._current_config_addbase(head, options=options)
-    def _getdev(self, **kwarg):
+    def _getdev_log(self, **kwarg):
         gl, foo = self._get_auto_list(kwarg, autoget='all', op='get')
         dev, base_kwarg  = gl[0]
         to = time.time()
@@ -777,7 +792,8 @@ class FunctionWrap(LogicalDevice):
        This class provides a wrapper around functions.
        It is an easy way to turn a function into a device (to use in sweep/record)
     """
-    def __init__(self, setfunc=None, getfunc=None, checkfunc=None, getformatfunc=None, use_ret_as_cache=False, basedev=None, basedevs=None, autoget=False, doc='', **extrak):
+    def __init__(self, setfunc=None, getfunc=None, checkfunc=None, getformatfunc=None, use_ret_as_cache=False,
+                 basedev=None, basedevs=None, basedev_as_param=False, autoget=False, doc='', **extrak):
         """
         Define at least one of setfunc or getfunc.
         checkfunc is called by a set. If not specified, the default one is used (can handle
@@ -786,7 +802,9 @@ class FunctionWrap(LogicalDevice):
         use_ret_as_cache: will use the return value from set as the cached value.
         If you define a basedev or a basedevs list, those devices are included in the
         file headers. They are not read by default (autoget=False). If autoget is is set to 'all'
-        then the getfunc function can use getcache on the basedev(s) devices; otherwise it needs to use get.
+        then the getfunc function can use getcache(local=True) on the basedev(s) devices; otherwise it needs to use get.
+        With autoget enable, and basedev_as_param True, then the getfunc function is called with the first argument
+        being the list of basedev values.
         """
         super(type(self), self).__init__(doc=doc, basedev=basedev, basedevs=basedevs, autoget=autoget, **extrak)
         self._setdev_p = setfunc
@@ -795,14 +813,18 @@ class FunctionWrap(LogicalDevice):
         self._use_ret = use_ret_as_cache
         self._last_setfunc_ret = None
         self._getformatfunc = getformatfunc
+        self._basedev_as_param = basedev_as_param
     def _current_config(self, dev_obj=None, options={}):
         head = ['FunctionWrap:: set=%r, get=%r, check=%r, getformat=%r, user_ret_as_cache=%r'%(
                 self._setdev_p, self._getdev_p, self._checkfunc, self._getformatfunc, self._use_ret)]
         return self._current_config_addbase(head, options=options)
-    def _getdev(self, **kwarg):
+    def _getdev_log(self, **kwarg):
         if not self._getdev_p:
             raise NotImplementedError('This FunctionWrap device does not have a getfunc')
-        return self._getdev_p(**kwarg)
+        if self._autoget and self._basedev_as_param:
+           return self._getdev_p(self._cached_data, **kwarg)
+        else:
+            return self._getdev_p(**kwarg)
     @locked_calling_dev
     def set(self, val, **kwarg):
         super(FunctionWrap, self).set(val, **kwarg)
