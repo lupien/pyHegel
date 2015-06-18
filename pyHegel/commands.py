@@ -743,13 +743,15 @@ class _Sweep(instruments.BaseInstrument):
                 ind = 1
                 fwd = False
             now = time.time()
-            fullpath, unique_i = _process_filename(basepath, now=now, start=start, stop=stop, npts=npts, updown=updown_str[ind])
-            self._lastnames.append(fullpath)
-            if updown == True and not updown_same:
-                ni = self.next_file_i.getcache()-1
-                fullpathrev, unique_i = _process_filename(basepath, now=now, next_i=ni, start_i=unique_i, search=False,
-                                                start=start, stop=stop, npts=npts, updown=updown_str[1])
-                self._lastnames.append(fullpathrev)
+            with self._lock_instrument:
+                # lock to protect manipulation of next_file_i across threads
+                fullpath, unique_i = _process_filename(basepath, now=now, start=start, stop=stop, npts=npts, updown=updown_str[ind])
+                self._lastnames.append(fullpath)
+                if updown == True and not updown_same:
+                    ni = self.next_file_i.getcache()-1
+                    fullpathrev, unique_i = _process_filename(basepath, now=now, next_i=ni, start_i=unique_i, search=False,
+                                                    start=start, stop=stop, npts=npts, updown=updown_str[1])
+                    self._lastnames.append(fullpathrev)
             filename = os.path.basename(fullpath)
         if extra_conf == None:
             extra_conf = [sweep.out]
@@ -1181,56 +1183,59 @@ def _process_filename(filename, now=None, next_i=None, start_i=0, search=True, *
     The now parameter can be used to specify the time in sec since the epoch
     to use. Defaults to now.
     """
-    if next_i == None:
-        ni = sweep.next_file_i.getcache()
-    else:
-        ni = next_i
-    auto_si = False
-    if start_i == None:
-        start_i = ni
-        auto_si = True
-    filename_i = start_i
-    localtime = time.localtime(now)
-    datestamp = time.strftime('%Y%m%d', localtime)
-    timestamp = time.strftime('%H%M%S', localtime)
-    dtstamp = datestamp+'-'+timestamp
-    kwarg.update(datetime=dtstamp, date=datestamp, time=timestamp, next_i=ni)
-    fmtr = string.Formatter()
-    ni_present = False
-    si_changed = False
-    changed = False
-    for txt, name, spec, conv in fmtr.parse(filename):
-        if name != None:
+    # Use lock to prevent threads from incrementing next_file_i
+    # incorrectly.
+    with sweep._lock_instrument:
+        if next_i == None:
+            ni = sweep.next_file_i.getcache()
+        else:
+            ni = next_i
+        auto_si = False
+        if start_i == None:
+            start_i = ni
+            auto_si = True
+        filename_i = start_i
+        localtime = time.localtime(now)
+        datestamp = time.strftime('%Y%m%d', localtime)
+        timestamp = time.strftime('%H%M%S', localtime)
+        dtstamp = datestamp+'-'+timestamp
+        kwarg.update(datetime=dtstamp, date=datestamp, time=timestamp, next_i=ni)
+        fmtr = string.Formatter()
+        ni_present = False
+        si_changed = False
+        changed = False
+        for txt, name, spec, conv in fmtr.parse(filename):
+            if name != None:
+                changed = True
+            if name == 'next_i':
+                ni_present = True
+        filename = filename.format(**kwarg)
+        if '%T' in filename:
+            filename = filename.replace('%T', dtstamp)
             changed = True
-        if name == 'next_i':
-            ni_present = True
-    filename = filename.format(**kwarg)
-    if '%T' in filename:
-        filename = filename.replace('%T', dtstamp)
-        changed = True
-    if '%D' in filename:
-        filename = filename.replace('%D', datestamp)
-        changed = True
-    if '%t' in filename:
-        filename = filename.replace('%t', timestamp)
-        changed = True
-    if re.search(r'%[\d]*i', filename):
-        # Note that there is a possible race condition here
-        # it is still possible to overwrite a file if it
-        # is created between the check and the file creation
-        if search:
-            while os.path.exists(filename%filename_i):
-                filename_i += 1
-        filename = filename % filename_i
-        if auto_si:
-            ni = filename_i
-        changed = True
-        si_changed = True
-    if changed:
-        print 'Using filename: '+filename
-    if ni_present or (auto_si and si_changed):
-        sweep.next_file_i.set(ni+1)
-    return filename, filename_i
+        if '%D' in filename:
+            filename = filename.replace('%D', datestamp)
+            changed = True
+        if '%t' in filename:
+            filename = filename.replace('%t', timestamp)
+            changed = True
+        if re.search(r'%[\d]*i', filename):
+            # Note that there is a possible race condition here
+            # it is still possible to overwrite a file if it
+            # is created between the check and the file creation
+            if search:
+                while os.path.exists(filename%filename_i):
+                    filename_i += 1
+            filename = filename % filename_i
+            if auto_si:
+                ni = filename_i
+            changed = True
+            si_changed = True
+        if changed:
+            print 'Using filename: '+filename
+        if ni_present or (auto_si and si_changed):
+            sweep.next_file_i.set(ni+1)
+        return filename, filename_i
 
 
 ### get overides get the mathplotlib
