@@ -10,6 +10,11 @@
 from __future__ import absolute_import
 
 from pyHegel import instruments
+from pyHegel.instruments_registry import register_instrument
+
+# Lets force a new ids and usb product ids onto the agilent multimeter instrument class
+register_instrument('Agilent', 'DMM', usb_vendor_product=[0x0957, 0xFFFF])(instruments.agilent_multi_34410A)
+
 
 conf = dict(
              # Let start with some Yokogawa GS200 DC voltage/current sources

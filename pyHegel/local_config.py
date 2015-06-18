@@ -3,6 +3,9 @@
 from __future__ import absolute_import
 
 from pyHegel import instruments
+from pyHegel.instruments_registry import register_instrument
+
+register_instrument('Agilent', 'DMM', usb_vendor_product=[0x0957, 0x0607])(instruments.agilent_multi_34410A)
 
 
 conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
