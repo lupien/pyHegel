@@ -504,6 +504,7 @@ def _general_check(val, min=None, max=None, choices=None ,lims=None):
 ##    Base device
 #######################################################
 
+
 class BaseDevice(object):
     """
         ---------------- General device documentation
@@ -535,6 +536,8 @@ class BaseDevice(object):
         #  from a get
         self.instr = None
         self.name = 'foo'
+        # Use thread local data to keep the last_filename and a version of cache
+        self._local_data = threading.local()
         self._cache = None
         self._autoinit = autoinit
         self._setdev_p = None
@@ -553,6 +556,17 @@ class BaseDevice(object):
         self._format = dict(file=False, multi=multi, xaxis=None, graph=graph,
                             append=False, header=None, bin=False,
                             options={}, obj=self)
+
+    @property
+    def _last_filename(self):
+        try:
+            return self._local_data.last_filename
+        except AttributeError:
+            return None
+    @_last_filename.setter
+    def _last_filename(self, filename):
+        self._local_data.last_filename = filename
+
     def __getattribute__(self, name):
         # we override __doc__ so for instances we return the result from _get_docstring
         # But when asking for __doc__ on the class we get the original docstring
@@ -616,7 +630,7 @@ class BaseDevice(object):
         elif self._setdev_p == None:
             raise NotImplementedError, self.perror('This device does not handle _setdev')
         # only change cache after succesfull _setdev
-        self._cache = val
+        self.setcache(val)
     @locked_calling_dev
     def get(self, **kwarg):
         if not CHECKING:
@@ -638,11 +652,28 @@ class BaseDevice(object):
         elif self._getdev_p == None:
             raise NotImplementedError, self.perror('This device does not handle _getdev')
         else:
-            ret = self._cache
-        self._cache = ret
+            ret = self.getcache()
+        self.setcache(ret)
         return ret
     #@locked_calling_dev
-    def getcache(self):
+    def getcache(self, local=False):
+        """
+        With local=True, returns thread local _cache. If it does not exist yet,
+            returns None. Use this for the data from a last fetch if another
+            thread is also doing fetches.
+        With local=False (default), returns the main _cache which is shared between threads
+            (but not process). When the value is None and autoinit is set, it will
+            return the result of get. Use this if another thread might be changing the cached value
+            and you want the last one. However if another thread is changing values,
+            or the user changed the values on the instrument maually (using the front panel),
+            than you better do get instead of getcache to really get the up to date value.
+        """
+        if local:
+            try:
+                return self._local_data.cache
+            except AttributeError:
+                return None
+        # local is False
         with self.instr._lock_instrument: # only local data, so don't need _lock_extra
             if self._cache==None and self._autoinit:
                 # This can fail, but getcache should not care for
@@ -673,11 +704,18 @@ class BaseDevice(object):
                 ret = obj.instr._get_async(async, obj, **kwarg)
                 self.setcache(ret)
                 self._last_filename = obj._last_filename
+        if async == 3:
+            # update the obj local thread cache data.
+            obj._local_data.cache = ret
         return ret
     #@locked_calling_dev
-    def setcache(self, val):
-        with self.instr._lock_instrument: # only local data, so don't need _lock_extra
+    def setcache(self, val, nolock=False):
+        if nolock == True:
             self._cache = val
+        else:
+            with self.instr._lock_instrument: # only local data, so don't need _lock_extra
+                self._cache = val
+        self._local_data.cache = val # thread local, requires no lock
     def __call__(self, val=None):
         raise SyntaxError, """Do NOT call a device directly, like instr.dev().
         Instead use set/get on the device or
@@ -928,6 +966,13 @@ class BaseInstrument(object):
             d.async_wait_start = 0.
             d.async_wait = 0.
         return d
+    def _under_async_setup(self, task):
+        self._async_running_task = task
+    def _under_async(self):
+        try:
+            return self._async_running_task.is_alive()
+        except AttributeError:
+            return False
     def _get_async(self, async, obj, trig=False, **kwarg):
         # get_async should note change anything about the instrument until
         # we run the asyncThread. Should only change local thread data.
@@ -950,12 +995,14 @@ class BaseInstrument(object):
                 data.async_list_init = [(self._async_select, (data.async_select_list, ), {})]
                 delay = self.async_delay.getcache()
                 data.async_task = asyncThread(data.async_list, self._lock_instrument, self._lock_extra, data.async_list_init, delay=delay)
+                data.async_list_init.append((self._under_async_setup, (data.async_task,), {}))
                 data.async_level = 0
             if trig:
                 data.async_task.change_detect(self._async_detect)
                 data.async_task.change_trig(self._async_trig)
                 data.async_task.change_cleanup(self._async_cleanup_after)
             data.async_list.append((obj.get, kwarg))
+            data.async_list.append((lambda: obj._last_filename, {}))
             data.async_select_list.append((obj, kwarg))
         elif async == 1:  # Start async task (only once)
             #print 'async', async, 'self', self, 'time', time.time()
@@ -972,13 +1019,16 @@ class BaseInstrument(object):
             #print 'async', async, 'self', self, 'time', time.time()
             #return obj.getcache()
             ret = data.async_task.results[data.async_counter]
-            data.async_counter += 1
+            # Need to copy the _last_filename item because it is thread local
+            self._last_filename = data.async_task.results[data.async_counter+1]
+            data.async_counter += 2
             if data.async_counter == len(data.async_task.results):
                 # delete task so that instrument can be deleted
                 del data.async_task
                 del data.async_list
                 del data.async_select_list
                 del data.async_list_init
+                del self._async_running_task
             return ret
     def find_global_name(self):
         return _find_global_name(self)
@@ -1193,7 +1243,7 @@ class MemoryDevice(BaseDevice):
         kwarg['autoinit'] = False
         kwarg['setget'] = False
         BaseDevice.__init__(self, **kwarg)
-        self._cache = initval
+        self.setcache(initval, nolock=True)
         self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
         self._getdev_p = True # needed to enable BaseDevice get in Checking mode
         if self.choices != None and isinstance(self.choices, ChoiceBase):
@@ -1201,9 +1251,9 @@ class MemoryDevice(BaseDevice):
         else:
             self.type = type(initval)
     def _getdev(self):
-        return self._cache
+        return self.getcache()
     def _setdev(self, val):
-        self._cache = val
+        self.setcache(val)
     def _tostr(self, val):
         # This function converts from val to a str for the command
         t = self.type
@@ -1319,7 +1369,7 @@ class scpiDevice(BaseDevice):
             if autoget:
                 getstr = setstr+'?'
             elif get_cached_init != None:
-                self._cache = get_cached_init
+                self.setcache(get_cached_init, nolock=True)
                 self._getdev_cache = True
         self._getdev_p = getstr
         self._options = options
@@ -1374,7 +1424,9 @@ class scpiDevice(BaseDevice):
         opt.update(extradict)
         return opt
     @locked_calling_dev
-    def getcache(self):
+    def getcache(self, local=False):
+        if local:
+            return super(scpiDevice, self).getcache(local=True)
         #we need to check if we still are using the same options
         curr_cache = self._get_option_values()
         if self._option_cache != curr_cache:
@@ -2151,13 +2203,28 @@ class Dict_SubDevice(BaseDevice):
                 setget=setget, autoinit=autoinit, trig=trig, **kwarg)
         self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
         self._getdev_p = True # needed to enable BaseDevice get in Checking mode
-    def getcache(self):
+    def setcache(self, val, nolock=False):
+        if nolock:
+            # no handled because getcache can lock
+            raise ValueError('Dict_SubDevice setcache does not handle nolock=True')
         vals = self._subdevice.getcache()
+        if vals is not None:
+            vals = vals.copy()
+            vals[self._sub_key] = val
+        self._subdevice.setcache(vals)
+    def getcache(self, local=False):
+        if local:
+            vals = self._subdevice.getcache(local=True)
+        else:
+            vals = self._subdevice.getcache()
         if vals == None:
             ret = None
         else:
             ret = vals[self._sub_key]
-        self._cache = ret
+        # Lets set the _cache variable anyway but it should never
+        # be used. _cache should always be accessed with getcache and this will
+        # bypass the value we set here.
+        self.setcache(ret)
         return ret
     def _getdev(self, **kwarg):
         vals = self._subdevice.get(**kwarg)
