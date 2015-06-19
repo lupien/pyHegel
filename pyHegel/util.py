@@ -496,6 +496,8 @@ def read_bluefors(filename):
             splits = line.lstrip(' ').split(',')
             if len(splits)<3:
                 continue
+            # This strptime is the slowest thing when reading the log files
+            # TODO: speed this up and reading will be much quicker
             t = time.strptime(splits[0]+','+splits[1], '%d-%m-%y,%H:%M:%S')
             ret.append((time.mktime(t), splits[2:]))
     return ret
@@ -550,7 +552,11 @@ def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:
     When merge_if_possible is True (default), it checks if all the channels have the same date, if so
     it combines them in a single (1+2*Nch, n) array. If it can't it outputs a warning and returns the list.
     if stop_day is None, then today's date is used.
+    If start_date is an ndarray, it uses the minimum as start_date and maximum as stop_date
     """
+    if isinstance(start_date, np.ndarray):
+        stop_date = start_date.max()
+        start_date = start_date.min()
     start_date = _parse_day(start_date)
     stop_date = _parse_day(stop_date)
     date = start_date
