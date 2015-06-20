@@ -2518,6 +2518,14 @@ class visaInstrument(BaseInstrument):
         return ret
     def idn(self):
         return self.ask('*idn?')
+    def idn_usb(self):
+        """ Returns the usb names attached to the vendor/product ids and the serial number
+            The return is a tuple (vendor, product, serial)
+        """
+        vendor = self.visa.get_visa_attribute(visa_wrap.constants.VI_ATTR_MANF_NAME)
+        product = self.visa.get_visa_attribute(visa_wrap.constants.VI_ATTR_MODEL_NAME)
+        serial = self.visa.get_visa_attribute(visa_wrap.constants.VI_ATTR_USB_SERIAL_NUM)
+        return (vendor, product, serial)
     @locked_calling
     def factory_reset(self):
         """
