@@ -32,9 +32,11 @@ from collections import defaultdict
 # import any object that depends on it.
 
 _instruments_ids = {}
+_instruments_ids_alias = {}
 _instruments_ids_rev = defaultdict(list)
 _instruments_usb = {}
 _instruments_add = {}
+_instrument_usb_names = {}
 
 def clean_instruments():
     from . import instruments
@@ -127,8 +129,65 @@ def check_instr_id(instr, idn_manuf, product=None, firmware_version=None):
     return idn_manuf in _instruments_ids_rev[instr]
 
 
-# The following functions are to be used as decorators
-def register_instrument(manuf=None, product=None, firmware_version=None, usb_vendor_product=None, quiet=False, skip_add=False):
+def register_idn_alias(alias, manuf, product=None, firmware_version=None):
+    """
+    This adds (or overwrites a previous) entry for eithe the name of the manuf
+    or the name to attach to the manuf+product, or to the manuf+product+firmware_version
+    Note: the last use of this functions will be the one remembered.
+          This function is called by register_instrument
+    """
+    key = (manuf, product, firmware_version)
+    _instruments_ids_alias[key] = alias
+
+def find_idn_alias(manuf, product=None, firmware_version=None, check_no_fw=True):
+    """
+    Finds the alias attached to the manuf/product/firmware_version combination
+    given.
+    With check_no_fw it will also check for just manuf/product.
+    If not found, it returs None
+    """
+    key = (manuf, product, firmware_version)
+    try:
+        return _instruments_ids_alias[key]
+    except KeyError:
+        if check_no_fw and key[2] is not None:
+            key = key[:2] + (None,)
+            try:
+                return _instruments_ids_alias[key]
+            except KeyError:
+                pass
+    return None
+
+
+def register_usb_name(vendor_id, name, product_id=None):
+    """
+    This adds (or overwrites a previous) entry for either the name of the product
+    or the name to attach to the product id (if given)
+    Note: the last use of this functions will be the one remembered.
+          This function is called by register_instrument
+    """
+    key = (vendor_id, product_id)
+    _instrument_usb_names[key] = name
+
+def find_usb_name(vendor_id, product_id=None, retnone=False):
+    """
+    Finds the name attached to a vendor_id, or to a particular vendor_id+product_id
+    retnone when True returns None if the entry is not found, otherwise(default)
+            it returns a default string.
+    """
+    key = (vendor_id, product_id)
+    try:
+        return _instrument_usb_names[key]
+    except KeyError:
+        if product_id is None:
+            return 'Unknown Vendor (0x%04x)'%vendor_id
+        else:
+            return 'Unknown Product (0x%04x)'%product_id
+
+####################################################################
+# The following functions are(can) be used as decorators
+def register_instrument(manuf=None, product=None, firmware_version=None, usb_vendor_product=None, alias=None,
+                        skip_alias=False, quiet=False, skip_add=False):
     """
     If you don't specify any of the options, the instrument will only be added to the instruments
     module. It will not be searchable.
@@ -140,12 +199,16 @@ def register_instrument(manuf=None, product=None, firmware_version=None, usb_ven
 
     You can use multiple register_instrument decorator on an instruments.
 
+    alias, if given, is used for register_usb_name (otherwise product or manuf is used)
+           and to the ids_alias database
     quiet prevents the warning registration override
     skip_add prevents the adding of the instrument into the instruments module namespace.
+    skip_alias prevents adding the alias to the usb name database (register_usb_name)
+               and to the ids alias database
     """
     def _internal_reg(instr_class):
         if not skip_add:
-            name = _add_to_instruments(instr_class)
+            class_name = _add_to_instruments(instr_class)
         if manuf is not None:
             if ',' in manuf:
                 raise ValueError("manuf can't contain ',' for %s"%instr_class)
@@ -157,6 +220,8 @@ def register_instrument(manuf=None, product=None, firmware_version=None, usb_ven
                         key, instr_class, _instruments_ids[key])
             _instruments_ids[key] = instr_class
             _instruments_ids_rev[instr_class].append(key)
+            if not skip_alias and alias:
+                register_idn_alias(alias, manuf, product, firmware_version)
         if usb_vendor_product is not None:
             vid, pid = usb_vendor_product
             if vid<0 or vid>0xffff:
@@ -169,6 +234,17 @@ def register_instrument(manuf=None, product=None, firmware_version=None, usb_ven
                     print ' Warning: Registering usb %s with %s to override %s'%(
                             tuple(hex(k) for k in key), instr_class, _instruments_usb[key])
             _instruments_usb[key] = instr_class
+            if not skip_alias:
+                if alias:
+                    name = alias
+                elif product:
+                    name = product
+                elif manuf:
+                    name = manuf
+                else:
+                    name = None
+                if name:
+                    register_usb_name(vid, name, product_id=pid)
         return instr_class
     return _internal_reg
 
@@ -199,6 +275,3 @@ def add_to_instruments(name=None):
         some_object = name
         _add_to_instruments(some_object)
         return some_object
-
-# TODO: deal with usb database
-
