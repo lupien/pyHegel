@@ -1111,8 +1111,38 @@ class BaseInstrument(object):
         self._create_devs_helper()
 #    def _current_config(self, dev_obj, get_options):
 #        pass
-    def _conf_helper(self, *devnames):
+    def _conf_helper(self, *devnames, **kwarg):
+        """
+        The positional arguments are either device name strings or a dictionnary.
+        When given a dictionnary, it will be shown as options.
+        no_default: when True, skips adding some default entries (like idn)
+                    It can only be a kwarg.
+                    if not given, it behaves as True unless one of the options
+                    is a dictionnary, the it behaves as False.
+                    So for the default use of _conf_helper were only one the
+                    calls includes the options dictionnary (and there is always
+                    one), then there is no need to specify this values. The
+                    default behavior is correct.
+        """
         ret = []
+        no_default = kwarg.pop('no_default', None)
+        if len(kwarg):
+            raise InvalidArgument('Invalid keyword arguments %s'%kwarg)
+        if no_default is None:
+            no_default = True
+            for devname in devnames[::-1]: # start from the end
+                if isinstance(devname, dict):
+                    no_default = False
+        # by default we will append
+        add_to = lambda base, x: base.append(x)
+        if isinstance(devnames[-1], dict):
+            # unless last item is a dict then we insert before it
+            add_to = lambda base, x: base.insert(-1, x)
+        if not no_default:
+            async_delay = self.async_delay.getcache()
+            if async_delay != 0:
+                devnames = list(devnames) # need to convert from tuple to a mutable list
+                add_to(devnames, 'async_delay')
         for devname in devnames:
             if isinstance(devname, dict):
                 val = repr(devname)
@@ -1123,6 +1153,8 @@ class BaseInstrument(object):
                 except AttributeError:
                     val = _repr_or_string(getattr(self, devname)())
             ret.append('%s=%s'%(devname, val))
+        if not no_default:
+            add_to(ret, 'idn="%s"'%self.idn())
         return ret
     def read(self):
         raise NotImplementedError, self.perror('This instrument class does not implement read')

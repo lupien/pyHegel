@@ -7,7 +7,6 @@ Main TODO list:
       -return proper xy-axis
       -allow renormalized fetch
       -make it work with scope (or scope2d see JOS)
-- add data (like async_delay, idn) in all file headers.
 
 - Test agilent AWG and check idn/registery vendor/product/firmware version
 
