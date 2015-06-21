@@ -1157,21 +1157,21 @@ class lakeshore_370(visaInstrument):
         self._still_res = still_res
         self._still_full_res = still_full_res
         super(lakeshore_370, self).__init__(visa_addr, **kwarg)
-        if self.visa.is_serial():
-            self._write_write_wait = 0.100
-        else: # GPIB
-            self._write_write_wait = 0.050
         self._data_valid_last_ch = 0
         self._data_valid_last_t = 0.
         self._data_valid_last_start = 0., [0, False]
     def init(self, full=False):
         if full:
             if self.visa.is_serial():
+                # we need to set this before any writes.
+                self._write_write_wait = 0.100
                 self.visa.parity = visa_wrap.constants.Parity.odd
                 self.visa.data_bits = 7
                 #self.visa.term_chars = '\r\n'
                 self.write('*ESE 255') # needed for get_error
                 self.write('*sre 4') # neede for _data_valid
+            else: # GPIB
+                self._write_write_wait = 0.050
         super(lakeshore_370, self).init(full=full)
     def _get_esr(self):
         return int(self.ask('*esr?'))
