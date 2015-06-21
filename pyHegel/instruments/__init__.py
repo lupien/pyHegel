@@ -26,8 +26,9 @@ from __future__ import absolute_import
 from .. import config as _config
 from .. import instruments_registry as _registry
 
-from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseDevice,\
-                            BaseInstrument, MemoryDevice, scpiDevice, find_all_instruments
+from ..instruments_base import (visaInstrument, visaInstrumentAsync, visaAutoLoader,
+                            BaseDevice, BaseInstrument, MemoryDevice, scpiDevice,
+                            find_all_instruments)
 
 
 # Call this after importing this module

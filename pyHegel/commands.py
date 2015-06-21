@@ -50,7 +50,7 @@ from . import config
 
 local_config = config.load_local_config()
 
-from .instruments_base import _writevec as writevec
+from .instruments_base import _writevec as writevec, _normalize_usb
 from .traces import wait
 from .util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
 
@@ -69,7 +69,7 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
 #             _itemgetter _write_conf
 #             _Sweep _Snap _record_execafter _normalize_usb
 #             _Hegel_Task _quiet_KeyboardInterrupt_Handler
-#             _greetings
+#             _greetings _load_helper
 
 
 #instruments_base._globaldict = globals()
@@ -164,10 +164,17 @@ def help_pyHegel():
         # Remember you can use arrows to explore the history and
         # press tab to see all possible options. For example
         # type "sweep." then press the tab key.
+        # these load use information in the local_config file
         load()
         load('yo1 dmm2')
         ;load yo2 dmm2 pna1
         load_all_usb()
+        # or load instruments directly
+        yo1 = instruments.yokogawa_gs200('USB0::0x0B21::0x0039::91KB55555')
+        # or using the auto loader
+        yo1 = instruments.visaAutoLoader('USB0::0x0B21::0x0039::91KB55555')
+        # For gpib you can use either the visa address 'GPIB0::3' or for bus 0 just the integer
+        dmm2 = instruments.visaAutoLoader(3)
         iprint yo1
         get yo1
         get yo1.range
@@ -1496,19 +1503,6 @@ def load(names=None, newnames=None):
         _globaldict[newname] = i
         #exec 'global '+newname+';'+newname+'=i'
 
-def _normalize_usb(usb_resrc):
-    usb_resrc = usb_resrc.upper() # make sure it is all upercase
-    split = usb_resrc.split('::')
-    if split[-1] == 'INSTR':
-        del split[-1]
-    if len(split) != 5:
-        split.append('0')
-    usbn, manuf, model, serial, interfaceN = split
-    manuf = int(manuf, base=0)
-    model = int(model, base=0)
-    interfaceN = int(interfaceN, base=0)
-    return 'USB0::0x%04X::0x%04X::%s::%i'%(manuf, model, serial, interfaceN), manuf, model
-
 def load_all_usb():
     """
      This will load all USB instruments found with find_all_instruments
@@ -1516,7 +1510,7 @@ def load_all_usb():
      and not an alias.
     """
     found_instr = find_all_instruments(False)
-    found_usb = [_normalize_usb(instr) for instr in found_instr if instr.startswith('USB')]
+    found_usb = [_normalize_usb(instr) for instr in found_instr if instr.upper().startswith('USB')]
     # pick only USB instruments in local_config
     conf_norm = {k:_load_helper(v)[1] for k,v in local_config.conf.iteritems()}
     usb_instr = { _normalize_usb(para[0])[0]:name

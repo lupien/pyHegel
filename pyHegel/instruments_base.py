@@ -886,7 +886,8 @@ class MetaClassInit(type):
 class BaseInstrument(object):
     __metaclass__ = MetaClassInit
     alias = None
-    def __init__(self):
+    def __init__(self, quiet_delete=False):
+        self._quiet_delete = quiet_delete
         self.header_val = None
         self._lock_instrument = Lock_Instruments()
         if not hasattr(self, '_lock_extra'):
@@ -900,7 +901,8 @@ class BaseInstrument(object):
         if not CHECKING:
             self.init(full=True)
     def __del__(self):
-        print 'Destroying '+repr(self)
+        if not self._quiet_delete:
+            print 'Destroying '+repr(self)
     def _async_select(self, devs):
         """ It receives a list of devices to help decide how to wait.
             The list entries can be in the form (dev, option_dict) or just dev
@@ -2378,10 +2380,10 @@ class visaInstrument(BaseInstrument):
         Otherwise use a visa string like:
           'GPIB0::12::INSTR'
           'GPIB::12'
-          'USB0::0x0957::0x0118::MY49001395::0::INSTR'
-          'USB::0x0957::0x0118::MY49001395'
+          'USB0::0x0957::0x0118::MY49012345::0::INSTR'
+          'USB::0x0957::0x0118::MY49012345'
     """
-    def __init__(self, visa_addr, skip_id_test=False, **kwarg):
+    def __init__(self, visa_addr, skip_id_test=False, quiet_delete=False, **kwarg):
         # need to initialize visa before calling BaseInstrument init
         # which might require access to device
         if type(visa_addr)==int:
@@ -2398,7 +2400,7 @@ class visaInstrument(BaseInstrument):
         self._last_rw_time = _LastTime(to, to) # When wait time are not 0, it will be replaced
         self._write_write_wait = 0.
         self._read_write_wait = 0.
-        BaseInstrument.__init__(self)
+        BaseInstrument.__init__(self, quiet_delete=quiet_delete)
         if not CHECKING:
             if not skip_id_test:
                 idns = self.idn_split()
@@ -2802,3 +2804,51 @@ class visaInstrumentAsync(visaInstrument):
         if 'srq' in self._async_mode:
             self._async_trig_cleanup()
             self._async_trigger_helper()
+
+
+
+def _normalize_usb(usb_resrc):
+    usb_resrc = usb_resrc.upper() # make sure it is all upercase
+    split = usb_resrc.split('::')
+    if split[-1] == 'INSTR':
+        del split[-1]
+    if len(split) != 5:
+        split.append('0')
+    usbn, manuf, model, serial, interfaceN = split
+    manuf = int(manuf, base=0)
+    model = int(model, base=0)
+    interfaceN = int(interfaceN, base=0)
+    return 'USB0::0x%04X::0x%04X::%s::%i'%(manuf, model, serial, interfaceN), manuf, model
+
+
+class visaAutoLoader(visaInstrument):
+    """
+    You can use this class to automatically select the proper class to load
+    according to the idn returned by the instrument and the info in the registry.
+    It returns another class (it is a factory class).
+    Provide it at least a visa address.
+    For usb devices it will try the usb registry first. Otherwise, like for all
+    other device it will open it with visaInstrument first to read the idn then
+    properly load it with the correct class.
+    if skip_usb is set to True, then the usb search is skipped
+    """
+    def __new__(cls, visa_addr, skip_usb=False, *args, **kwargs):
+        if not skip_usb and isinstance(visa_addr, basestring) and visa_addr.upper().startswith('USB'):
+            usb, manuf, model = _normalize_usb(visa_addr)
+            try:
+                cls = instruments_registry.find_usb(manuf, model)
+            except KeyError:
+                pass
+            else:
+                print 'Autoloading(USB) using instruments class "%s"'%cls.__name__
+                return cls(visa_addr, *args, **kwargs)
+        vi = visaInstrument(visa_addr, *args, skip_id_test=True, quiet_delete=True, **kwargs)
+        idns = vi.idn_split()
+        del vi
+        try:
+            cls = instruments_registry.find_instr(idns['vendor'], idns['model'], idns['firmware'])
+        except KeyError:
+            raise RuntimeError('Could not find an instrument for: %s'%visa_addr)
+        else:
+            print 'Autoloading using instruments class "%s"'%cls.__name__
+            return cls(visa_addr, *args, **kwargs)
