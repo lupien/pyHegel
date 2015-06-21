@@ -37,13 +37,15 @@ from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsy
                             make_choice_list, _fromstr_helper,\
                             decode_float64, visa_wrap, locked_calling
 from ..types import dict_improved
-from ..instruments_registry import register_instrument
+from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 from .logical import FunctionDevice
 
 #######################################################
 ##    Yokogawa source
 #######################################################
+
+register_usb_name('Yokogawa Electric Corporation', 0x0B21)
 
 @register_instrument('YOKOGAWA', 'GS210', usb_vendor_product=[0x0B21, 0x0039])
 #@register_instrument('YOKOGAWA', 'GS210', '1.05')
@@ -96,7 +98,7 @@ class yokogawa_gs200(visaInstrument):
 #######################################################
 
 #@register_instrument('Stanford_Research_Systems', 'SR830', 'ver1.07 ')
-@register_instrument('Stanford_Research_Systems', 'SR830')
+@register_instrument('Stanford_Research_Systems', 'SR830', alias='SR830 LIA')
 class sr830_lia(visaInstrument):
     """
     Don't forget to set the async_wait to some usefull values.
@@ -260,7 +262,7 @@ class sr830_lia(visaInstrument):
 #######################################################
 
 #@register_instrument('Stanford Research Systems', 'SG384', 'ver1.02.0E')
-@register_instrument('Stanford Research Systems', 'SG384')
+@register_instrument('Stanford Research Systems', 'SG384', alias='SG384 RF source')
 class sr384_rf(visaInstrument):
     # This instruments needs to be on local state or to pass through local state
     #  after a local_lockout to actually turn off the local key.
@@ -345,7 +347,7 @@ class sr384_rf(visaInstrument):
 #######################################################
 
 #@register_instrument('Stanford_Research_Systems', 'SR780', 'ver116')
-@register_instrument('Stanford_Research_Systems', 'SR780')
+@register_instrument('Stanford_Research_Systems', 'SR780', alias='SR780 network analyser')
 class sr780_analyzer(visaInstrumentAsync):
     """
     This controls a 2 channel network analyzer
@@ -835,6 +837,8 @@ class lakeshore_325(visaInstrument):
 #######################################################
 ##    Lakeshore 340 Temperature controller
 #######################################################
+
+register_idn_alias('Lake Shore Cryotronics', 'LSCI')
 
 #@register_instrument('LSCI', 'MODEL340', '061407')
 @register_instrument('LSCI', 'MODEL340')
@@ -1539,6 +1543,8 @@ class colby_pdl_100a(visaInstrument):
 #######################################################
 ##    BNC 845 microwave/RF generator
 #######################################################
+
+register_usb_name('Berkeley Nucleonics Corporation', 0x03EB)
 
 @register_instrument('Berkeley Nucleonics Corporation', 'MODEL 845', '0.4.35', usb_vendor_product=[0x03EB, 0xAFFF])
 class BNC_rf_845(visaInstrument):

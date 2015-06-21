@@ -517,7 +517,7 @@ class lecroy_vbs_scpi(scpiDevice):
 ##    LeCroy WaveMaster 820Zi-A
 #######################################################
 
-@register_instrument('LECROY', 'WM820ZI-A', '7.2.1')
+@register_instrument('LECROY', 'WM820ZI-A', '7.2.1', alias='WM820ZI-A WaveMaster scope')
 class lecroy_wavemaster(visaInstrumentAsync):
     """
     This instrument controls a LeCory WaveMaster 820Zi-A

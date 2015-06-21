@@ -34,7 +34,9 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
                             decode_uint16_bin, _decode_block_base, decode_float64_2col,\
                             decode_complex128, sleep, locked_calling
-from ..instruments_registry import register_instrument
+from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
+
+register_usb_name('Agilent Technologies', 0x0957)
 
 #######################################################
 ##    Agilent RF 33522A generator
@@ -44,7 +46,7 @@ from ..instruments_registry import register_instrument
 #@register_instrument('Agilent Technologies', '33522A', '1.11-1.19-1.01-46-00')
 #@register_instrument('Agilent Technologies', '33522A', '1.12-1.19-1.01-50-00')
 #@register_instrument('Agilent Technologies', '33522A', '2.01-1.19-2.00-52-00')
-@register_instrument('Agilent Technologies', '33522A', usb_vendor_product=[0x0957, 0x2307])
+@register_instrument('Agilent Technologies', '33522A', usb_vendor_product=[0x0957, 0x2307], alias='33522A RF generator')
 class agilent_rf_33522A(visaInstrument):
     """
     New code should use the unumbered devices (numbered device are there for compatibility.)
@@ -166,7 +168,7 @@ class agilent_rf_33522A(visaInstrument):
 #######################################################
 
 #@register_instrument('Agilent Technologies', 'N1913A', 'A1.01.07')
-@register_instrument('Agilent Technologies', 'N1913A', usb_vendor_product=[0x0957, 0x5418])
+@register_instrument('Agilent Technologies', 'N1913A', usb_vendor_product=[0x0957, 0x5418], alias='N1913A EPM power meter')
 class agilent_PowerMeter(visaInstrumentAsync):
     """
     This instrument is for Agilent N1913A EPM seris power meter with a N8487A
@@ -273,7 +275,7 @@ class agilent_PowerMeter(visaInstrumentAsync):
 #######################################################
 
 #@register_instrument('Agilent Technologies', 'E8257D', 'C.06.16')
-@register_instrument('Agilent Technologies', 'E8257D')
+@register_instrument('Agilent Technologies', 'E8257D', alias='E8257D PSG Generator')
 class agilent_rf_PSG(visaInstrument):
     """
     This controls a PSG signal generetor
@@ -367,7 +369,7 @@ class agilent_rf_PSG(visaInstrument):
 #######################################################
 
 #@register_instrument('Agilent Technologies', 'N5183A', 'A.01.70')
-@register_instrument('Agilent Technologies', 'N5183A', usb_vendor_product=[0x0957, 0x1F01])
+@register_instrument('Agilent Technologies', 'N5183A', usb_vendor_product=[0x0957, 0x1F01], alias='N5183A MXG Generator')
 class agilent_rf_MXG(agilent_rf_PSG):
     """
     This controls a MXG signal generetor
@@ -676,8 +678,10 @@ class agilent_multi_34410A(visaInstrumentAsync):
 ##    Agilent RF attenuator
 #######################################################
 
+register_idn_alias('Agilent Technologies', 'AGILENT TECHNOLOGIES')
+
 #@register_instrument('AGILENT TECHNOLOGIES', 'J7211C', 'A.00.04')
-@register_instrument('AGILENT TECHNOLOGIES', 'J7211C', usb_vendor_product=[0x0957, 0x4C18])
+@register_instrument('AGILENT TECHNOLOGIES', 'J7211C', usb_vendor_product=[0x0957, 0x4C18], alias='J7211C RF attenuator')
 class agilent_rf_Attenuator(visaInstrument):
     """
     This controls an Agilent Attenuation Control Unit
@@ -851,9 +855,9 @@ class infiniiVision_3000(visaInstrument):
 #######################################################
 
 #@register_instrument('Agilent Technologies', 'N9010A', 'A.12.13')
-@register_instrument('Agilent Technologies', 'N9010A', usb_vendor_product=[0x0957, 0x0B0B])
+@register_instrument('Agilent Technologies', 'N9010A', usb_vendor_product=[0x0957, 0x0B0B], alias='N9010A EXA')
 #@register_instrument('Agilent Technologies', 'N9030A', 'A.12.13')
-@register_instrument('Agilent Technologies', 'N9030A', usb_vendor_product=[0x0957, 0x0D0B]) #PXA
+@register_instrument('Agilent Technologies', 'N9030A', usb_vendor_product=[0x0957, 0x0D0B], alias='N9030A PXA')
 class agilent_EXA(visaInstrumentAsync):
     """
     To use this instrument, the most useful devices are probably:
@@ -1321,8 +1325,8 @@ class agilent_EXA(visaInstrumentAsync):
 
 #@register_instrument('Agilent Technologies', 'N5244A', 'A.09.50.13')
 #@register_instrument('Agilent Technologies', 'N5230C', 'A.09.20.08')
-@register_instrument('Agilent Technologies', 'N5244A', usb_vendor_product=[0x0957, 0x0118]) # PNA-X
-@register_instrument('Agilent Technologies', 'N5230C', usb_vendor_product=[0x0957, 0x0118]) # PNA-L
+@register_instrument('Agilent Technologies', 'N5244A', usb_vendor_product=[0x0957, 0x0118], alias='N5244A PNAX')
+@register_instrument('Agilent Technologies', 'N5230C', usb_vendor_product=[0x0957, 0x0118], alias='N5230C PNA-L')
 class agilent_PNAL(visaInstrumentAsync):
     """
     To use this instrument, the most useful device is probably:
@@ -1760,6 +1764,9 @@ class agilent_PNAL(visaInstrumentAsync):
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+
+register_usb_name('PNA network analyser', 0x0957, 0x0118)
+
 # status byte stuff
 # There is a bunch of register groups:
 #  :status:operation     # 8(256)=averaging, 9(512)=user, 10(1024)=device
@@ -1821,7 +1828,7 @@ class agilent_PNAL(visaInstrumentAsync):
 #######################################################
 
 #@register_instrument('Agilent Technologies', 'E5061B', 'A.02.09')
-@register_instrument('Agilent Technologies', 'E5061B', usb_vendor_product=[0x0957, 0x1309])
+@register_instrument('Agilent Technologies', 'E5061B', usb_vendor_product=[0x0957, 0x1309], alias='E5061B ENA')
 class agilent_ENA(agilent_PNAL):
     """
     To use this instrument, the most useful device is probably:
@@ -2067,7 +2074,7 @@ class agilent_ENA(agilent_PNAL):
 #######################################################
 
 #@register_instrument('Agilent Technologies', 'N9916A', 'A.07.29,2014-02-20.14:09')
-@register_instrument('Agilent Technologies', 'N9916A')
+@register_instrument('Agilent Technologies', 'N9916A', alias='N9916A FieldFox')
 class agilent_FieldFox(agilent_PNAL):
     """
     The output is turned off when the device is in hold state (set cont_trig off to go in hold state).
@@ -2361,7 +2368,7 @@ class agilent_FieldFox(agilent_PNAL):
 ##    Agilent M8190A Arbitrary Waveform Generator
 #######################################################
 
-@register_instrument('Agilent Technologies', 'M8190A')
+@register_instrument('Agilent Technologies', 'M8190A', alias='M8190A AWG')
 class agilent_AWG(visaInstrumentAsync):
     """
     This is to control the M8190A Arbitrary Waveform Generator.
