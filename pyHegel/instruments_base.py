@@ -160,6 +160,7 @@ def _write_dev(val, filename, format=format, first=False):
     bin = format['bin']
     dev = format['obj']
     multi = format['multi']
+    extra_conf = format['extra_conf']
     doheader = True
     if bin:
         doheader = False
@@ -179,6 +180,9 @@ def _write_dev(val, filename, format=format, first=False):
         if header:
             for h in header:
                 f.write('#'+h+'\n')
+        if extra_conf: # not None or ''
+            # extra_conf should be a complete string including # and new lines
+            f.write(extra_conf)
         if isinstance(multi, tuple):
             _writevec(f, multi, pre_str='#')
     if append:
@@ -555,7 +559,7 @@ class BaseDevice(object):
         self._doc = doc
         # obj is used by _get_conf_header and _write_dev
         self._format = dict(file=False, multi=multi, xaxis=None, graph=graph,
-                            append=False, header=None, bin=False,
+                            append=False, header=None, bin=False, extra_conf=None,
                             options={}, obj=self)
 
     @property
@@ -639,6 +643,7 @@ class BaseDevice(object):
             format = self.getformat(**kwarg)
             kwarg.pop('graph', None) #now remove graph from parameters (was needed by getformat)
             kwarg.pop('bin', None) #same for bin
+            kwarg.pop('extra_conf', None)
             if kwarg.get('filename', False) and not format['file']:
                 #we did not ask for a filename but got one.
                 #since _getdev probably does not understand filename
@@ -745,6 +750,7 @@ class BaseDevice(object):
     def getformat(self, filename=None, **kwarg): # we need to absorb any filename argument
         # first handle options we don't want saved in 'options'
         graph = kwarg.pop('graph', None)
+        extra_conf = kwarg.pop('extra_conf', None)
         self._format['options'] = kwarg
         #now handle the other overides
         bin = kwarg.pop('bin', None)
@@ -759,6 +765,7 @@ class BaseDevice(object):
             format['bin'] = bin
         if xaxis != None and format['xaxis'] != None:
             format['xaxis'] = xaxis
+        format['extra_conf'] = extra_conf
         return format
     def getfullname(self):
         return self.instr.header.getcache()+'.'+self.name

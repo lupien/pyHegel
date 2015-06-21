@@ -37,6 +37,7 @@ import textwrap
 import threading
 import operator
 import numpy as np
+import StringIO
 from gc import collect as collect_garbage
 
 from . import traces
@@ -69,7 +70,7 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
 #             _itemgetter _write_conf
 #             _Sweep _Snap _record_execafter _normalize_usb
 #             _Hegel_Task _quiet_KeyboardInterrupt_Handler
-#             _greetings _load_helper
+#             _greetings _load_helper _get_extra_confs
 
 
 #instruments_base._globaldict = globals()
@@ -303,6 +304,25 @@ def _get_dev_kw(dev, **extra_kw):
         dev = dev[0]
     return dev, extra_kw
 
+def _get_extra_confs(extra_conf):
+    if extra_conf is None:
+        return []
+    if not isinstance(extra_conf, (list, tuple)):
+        extra_conf = [extra_conf]
+    formats = []
+    for x in extra_conf:
+        if isinstance(x, basestring):
+            f = dict(base_hdr_name='comment', base_conf=x)
+        else:
+            dev, kwarg = _get_dev_kw(x)
+            dev.force_get()
+            hdr = dev.getfullname()
+            f = dev.getformat(**kwarg)
+            f['base_conf'] = instruments_base._get_conf_header(f)
+            f['base_hdr_name'] = hdr
+        formats.append(f)
+    return formats
+
 
 def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     hdrs = []
@@ -356,17 +376,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         else:
             hdrs.append(hdr)
             count += 1
-    for x in extra_conf:
-        if isinstance(x, basestring):
-            f = dict(base_hdr_name='comment', base_conf=x)
-        else:
-            dev, kwarg = _get_dev_kw(x)
-            dev.force_get()
-            hdr = dev.getfullname()
-            f = dev.getformat(**kwarg)
-            f['base_conf'] = instruments_base._get_conf_header(f)
-            f['base_hdr_name'] = hdr
-        formats.append(f)
+    formats.extend(_get_extra_confs(extra_conf))
     return hdrs, graphsel, formats
 
 def _dev_filename(root, dev_name, npts, reuse, append=False):
@@ -1246,7 +1256,7 @@ def _process_filename(filename, now=None, next_i=None, start_i=0, search=True, *
 
 
 ### get overides get the mathplotlib
-def get(dev, filename=None, **kwarg):
+def get(dev, filename=None, extra_conf=None, **kwarg):
     """
        Get a value from device (or the alias for an instrument)
        When giving it a filename, data will be saved to it
@@ -1259,6 +1269,8 @@ def get(dev, filename=None, **kwarg):
        The path for saving is sweep.path if it is defined otherwise it saves
        in the current directory.
 
+       extra_conf behaves like in sweep.
+
        The options for the device are listed as keyword arguments (**kwarg).
        Example:
             get(dmm1) # uses dmm1.alias which is dmm1.readval
@@ -1270,6 +1282,12 @@ def get(dev, filename=None, **kwarg):
        Note that dev can also be a tuple like in sweep.out
     """
     dev, kwarg = _get_dev_kw(dev, **kwarg)
+    if extra_conf:
+        formats = _get_extra_confs(extra_conf)
+        f = StringIO.StringIO()
+        _write_conf(f, formats)
+        kwarg['extra_conf'] = f.getvalue()
+        f.close()
     if filename != None:
         dev.force_get()
         filename = use_sweep_path(filename)

@@ -2,7 +2,6 @@ Main TODO list:
 - finish lecroy and Zurich
 - Create a python analysis template
 - Make check function work
-- add extra_conf to get, filename=''
 - acq_histo2d,
       -make simpler (automate) the calculation of redirect on log scale
       -return proper xy-axis
