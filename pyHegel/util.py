@@ -34,7 +34,13 @@ This module contains many utilities:
     print_file
     list_printers
     blueforsTlog
+    read_blueforsTlog
+    find_closest_times
+    read_bluefors
+    read_blueforsRTF
+    read_blueforsGauges
     sort_file
+    find_index_closest
 Conversion functions and time constants calculation helpers:
     dB2A, dB2P, P2dB, A2dB
     dBm2o, o2dBm
@@ -50,6 +56,7 @@ Note that savefig is initially disabled.
 
 from __future__ import absolute_import
 
+import datetime
 import time
 import os
 import os.path
@@ -489,6 +496,8 @@ def read_bluefors(filename):
             splits = line.lstrip(' ').split(',')
             if len(splits)<3:
                 continue
+            # This strptime is the slowest thing when reading the log files
+            # TODO: speed this up and reading will be much quicker
             t = time.strptime(splits[0]+','+splits[1], '%d-%m-%y,%H:%M:%S')
             ret.append((time.mktime(t), splits[2:]))
     return ret
@@ -503,6 +512,212 @@ def read_blueforsRTF(filename):
     v = read_bluefors(filename)
     v = [(t, float(val[0])) for t, val in v]
     return np.array(v).T
+
+
+def _parse_day(date):
+    """
+    takes in the start/stop date format of read_blueforsTlog and returns a date object.
+    """
+    if date is None:
+        return datetime.date.today()
+    if isinstance(date, basestring):
+        parts = date.split('-')
+        if len(parts) != 3:
+            parts = date.split('/')
+        if len(parts) != 3:
+            parts = [date[:-4], date[-4:-2], date[-2:]]
+        year, month, day = [int(p) for p in parts]
+        if year < 2000:
+            year += 2000
+        return datetime.date(year, month, day)
+    else:
+        return datetime.date.fromtimestamp(date)
+
+def _read_helper(filename):
+    if os.path.isfile(filename):
+        return read_blueforsRTF(filename)
+    else:
+        return np.ndarray((2,0))
+
+def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:/BlueFors/Log-files', merge_if_possible=True):
+    """
+    Reads and combines the data files for temperature channels selected.
+    It looks for the files under date directories under logdir.
+    start_date and stop_date are either epoch values (number of days since jan 1st 1970)
+    or strings giving the date '20150921' '2015-09-21', '2015-9-21', '150921', '15-09-21',
+    '15-9-21' or replace '-' with '/'
+    It returns a list of arrays (one for each channel). The arrays contain the
+    are shaped (3, n) where the 3 columns stand for time since the epoch, the temperature
+    and the resistance.
+    When merge_if_possible is True (default), it checks if all the channels have the same date, if so
+    it combines them in a single (1+2*Nch, n) array. If it can't it outputs a warning and returns the list.
+    if stop_day is None, then today's date is used.
+    If start_date is an ndarray, it uses the minimum as start_date and maximum as stop_date
+    """
+    if isinstance(start_date, np.ndarray):
+        stop_date = start_date.max()
+        start_date = start_date.min()
+    start_date = _parse_day(start_date)
+    stop_date = _parse_day(stop_date)
+    date = start_date
+    results = []
+    for ch in channels:
+        results.append(np.ndarray((0,3)))
+    while date <= stop_date:
+        dirname = date.strftime('%y-%m-%d')
+        Tfile = 'CH%i T {}.log'.format(dirname)
+        Rfile = 'CH%i R {}.log'.format(dirname)
+        for i,ch in enumerate(channels):
+            Tvals = read_blueforsRTF(os.path.join(logdir, dirname, Tfile%ch))
+            Rvals = read_blueforsRTF(os.path.join(logdir, dirname, Rfile%ch))
+            if Tvals.shape[1] == 0 and Rvals.shape[1] == 0:
+                continue
+            if Tvals.shape[1] == 0:
+                Tvals = Rvals.copy()
+                Tvals[1] = np.nan
+            elif Rvals.shape[1] == 0:
+                Rvals = Tvals.copy()
+                Rvals[1] = np.nan
+            if Tvals.shape[1] == Rvals.shape[1] and np.all(Rvals[0] == Tvals[0]):
+                ar = np.empty((Tvals.shape[1],3), dtype=Tvals.dtype)
+                ar[:,:2] = Tvals.T
+                ar[:,2] = Rvals[1]
+                results[i] = np.concatenate((results[i], ar))
+            else:
+                Ts = set(Tvals[0])
+                Rs = set(Rvals[0])
+                Us = Ts.union(Rs)
+                if len(Ts.intersection(Rs)) == 0:
+                    print 'Merging data with no intersection between R and T (%i, %s)'%(ch, dirname)
+                elif len(Us) != max(len(Ts), len(Rs)):
+                    print 'Merging data with no complete set between R and T (%i, %s)'%(ch, dirname)
+                else:
+                    print 'Merging data with partial overlap between R and T (%i, %s)'%(ch, dirname)
+                # make sure the values are in increasing time order
+                Tvals = Tvals[:,Tvals[0].argsort()]
+                Rvals = Rvals[:,Rvals[0].argsort()]
+                Tn = Tvals.shape[1]
+                Rn = Rvals.shape[1]
+                ar = []
+                j = k = 0
+                while j<Tn or k<Rn:
+                    if j == Tn:
+                        ar.append([Rvals[0, k], np.nan, Rvals[1, k]])
+                        k += 1
+                        continue
+                    if k == Rn:
+                        ar.append([Tvals[0, j], Tvals[1, j], np.nan])
+                        j += 1
+                        continue
+                    ti = Tvals[0,j]
+                    tj = Rvals[0,k]
+                    if ti == tj:
+                        ar.append([ti, Tvals[1, j], Rvals[1, k]])
+                        j += 1
+                        k += 1
+                    elif ti < tj:
+                        ar.append([ti, Tvals[1, j], np.nan])
+                        j += 1
+                    elif ti > tj:
+                        ar.append([tj, np.nan, Rvals[1, k]])
+                        k += 1
+                results[i] = np.concatenate((results[i], np.append(np.array(ar))))
+        date += datetime.timedelta(days=1)
+    results = [r.T for r in results]
+    if merge_if_possible:
+        for i in range(len(channels)-1):
+            if results[i+1].shape != results[0].shape or np.all(results[i+1][0] != results[0][0]):
+                print 'WARNING: unable to merge the data. Returning a list instead of a numpy array.'
+                break
+        else:
+            # did not break so all times are the same
+            merged = np.empty((1+2*len(channels), results[0].shape[1]), dtype=results[0].dtype)
+            merged[0] = results[0][0]
+            for i in range(len(channels)):
+                j = 1 + 2*i
+                merged[j:j+2] = results[i][1:]
+            results = merged
+    return results
+
+
+def find_index_closest(data, search_values, already_sorted=False):
+    """
+    This function finds the index of data closest the the values in search_values
+    It does the equivalent of
+        ret = []
+        for v in search_values:
+            ret.append( np.abs(data-v).argmin )
+        ret = np.array(ret)
+    but is much faster when data is large.
+    If you are sure your data is already sorted, you can skip
+    a sorting step by setting already_sorted=True.
+    To find the actual minimum values use:
+      data[find_index_closest(data, search_values)]
+    """
+    data = np.asarray(data)
+    search_values = np.asarray(search_values)
+    if not already_sorted:
+        sort_idx = data.argsort()
+        data = data[sort_idx]
+    N = len(data)
+    idx = np.searchsorted(data, search_values, side='left')
+    # Using left we know that the index returned points to a value that is
+    # larger or equal to the requested search
+    # We need to check the point to the left to see if it is closer.
+    w = np.nonzero((idx != N)*(idx != 0))[0]
+    if len(w):
+        idxw = idx[w]
+        df = np.abs(data[idxw] - search_values[w])
+        df1 = np.abs(data[idxw-1] - search_values[w])
+        w_closer = np.nonzero(df1 < df)[0]
+        if len(w_closer):
+            idx[w[w_closer]] -= 1
+    # When index points to past the end of the array, take the last point
+    w = np.nonzero(idx == N)[0]
+    if len(w):
+        idx[w] = N-1
+    if not already_sorted:
+        return sort_idx[idx]
+    return idx
+
+def find_closest_times(data_set, times_to_search_for, max_delta=60*10.):
+    """
+    The input is a list of ndarray or a single ndarray which has time has the first column.
+    The return has the same structure as data_set but picks the points closest to where
+    times_to_search_for is given (can be a single value or an array)
+    The input can be the returned value from read_blueforsTlog.
+    I describe the function using time but the data can be anything (just pick the closests match
+    on the first column).
+    max_delta, when not None, prints a warning if the closest point is ever farther than that.
+    The default max_delta is 10 min.
+    """
+    ret_one = False
+    single_search = False
+    dmax = 0
+    times_to_search_for = np.asarray(times_to_search_for)
+    if len(times_to_search_for.shape) == 0:
+        single_search = True
+        times_to_search_for.shape = (1,)
+    if isinstance(data_set, np.ndarray):
+        ret_one = True
+        data_set = [data_set]
+    ret = []
+    for ar in data_set:
+        t = ar[0]
+        idx = find_index_closest(t, times_to_search_for)
+        if max_delta:
+            dmax = max(dmax, np.abs(t[idx] - times_to_search_for).max())
+        ar = ar[:, idx]
+        if single_search:
+            ar = ar[0]
+        ret.append(ar)
+    if max_delta:
+        if dmax > max_delta:
+            print 'WARNING: found values outside of requested range (max_delta found = %r)'%dmax
+    if ret_one:
+        return ret[0]
+    return ret
+
 
 def read_blueforsGauges(filename):
     """
