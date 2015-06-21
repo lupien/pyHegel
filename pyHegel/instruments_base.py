@@ -40,6 +40,7 @@ from .qt_wrap import processEvents
 from .kbint_util import sleep, _sleep_signal_context_manager, _delayed_signal_context_manager
 
 from . import visa_wrap
+from . import instruments_registry
 from .types import dict_improved
 
 rsrc_mngr = None
@@ -2380,7 +2381,7 @@ class visaInstrument(BaseInstrument):
           'USB0::0x0957::0x0118::MY49001395::0::INSTR'
           'USB::0x0957::0x0118::MY49001395'
     """
-    def __init__(self, visa_addr, **kwarg):
+    def __init__(self, visa_addr, skip_id_test=False, **kwarg):
         # need to initialize visa before calling BaseInstrument init
         # which might require access to device
         if type(visa_addr)==int:
@@ -2389,15 +2390,21 @@ class visaInstrument(BaseInstrument):
         if not CHECKING:
             self.visa = rsrc_mngr.open_resource(visa_addr, **kwarg)
             self._lock_extra = Lock_Visa(self.visa)
-        #self.visa.timeout = 3 # in seconds
-        # use 2.9 because I was getting 3.0 rounded to 10s timeouts on some visa lib configuration
-        #     2.9 seemed to be rounded up to 3s instead
-        self.set_timeout = 2.9 # in seconds
+            #self.visa.timeout = 3 # in seconds
+            # use 2.9 because I was getting 3.0 rounded to 10s timeouts on some visa lib configuration
+            #     2.9 seemed to be rounded up to 3s instead
+            self.set_timeout = 2.9 # in seconds
         to = time.time()
         self._last_rw_time = _LastTime(to, to) # When wait time are not 0, it will be replaced
         self._write_write_wait = 0.
         self._read_write_wait = 0.
         BaseInstrument.__init__(self)
+        if not CHECKING:
+            if not skip_id_test:
+                idns = self.idn_split()
+                if not instruments_registry.check_instr_id(self.__class__, idns['vendor'], idns['model'], idns['firmware']):
+                    print 'WARNING: this particular instrument idn is not attached to this class: operations might misbehave.'
+                    #print self.__class__, idns
     def __del__(self):
         #print 'Destroying '+repr(self)
         # no need to call self.visa.close()
