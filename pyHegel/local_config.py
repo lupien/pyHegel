@@ -3,10 +3,12 @@
 from __future__ import absolute_import
 
 from pyHegel import instruments
-from pyHegel.instruments_registry import register_instrument
+from pyHegel.instruments_registry import register_instrument, register_usb_name
 
 register_instrument('Agilent', 'DMM', usb_vendor_product=[0x0957, 0x0607])(instruments.agilent_multi_34410A)
 
+register_usb_name('Keysight', 0x0957)
+register_usb_name('GS200 DC current/voltage source', 0x0B21, 0x0039)
 
 conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              yo2 = (instruments.yokogawa_gs200, (13,)),
@@ -41,6 +43,7 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              tc2 = (instruments.lakeshore_340, (12,)),
              tc3 = (instruments.lakeshore_370, ('ASRL4', 120., 136.4)),
              tm1 = (instruments.lakeshore_224, (13,)),
+             tc4test = (instruments.lakeshore_370, ('ASRL4', 120.), dict(still_full_res=136.4)),
              gen1 = (instruments.agilent_rf_33522A, (10,)),
              gen2 = (instruments.agilent_rf_33522A, (14,)),
              gen5 = (instruments.agilent_rf_33522A, ('USB0::0x0957::0x2307::MY50005306',)),
@@ -95,18 +98,3 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              # delay box
              delay1 = (instruments.colby_pdl_100a, (5,))
         )
-
-usb_manuf = { 0x0957 : ('Agilent', { 0x0607 : 'multimeter',
-                                     0x2307 : 'rf_gen',
-                                     0x1309 : 'ENA',
-                                     0x0B0B : 'EXA',
-                                     0x0D0B : 'PXA',
-                                     0x0118 : 'PNA',
-                                     0x17A2 : 'infiniiVision_500',
-                                     0x1796 : 'infiniiVision_200',
-                                     0x1F01 : 'MXG',
-                                     0x5418 : 'PowerMeter',
-                                     0x4C18 : 'RF_attenuator' }),
-              0x0B21 : ('Yokogawa',  {0x0039 : 'GS200' }),
-              0x03EB : ('BNC', {0xAFFF : 'rf_845'})
-            }

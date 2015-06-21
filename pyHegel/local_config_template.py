@@ -10,11 +10,16 @@
 from __future__ import absolute_import
 
 from pyHegel import instruments
-from pyHegel.instruments_registry import register_instrument
+from pyHegel.instruments_registry import register_instrument, register_usb_name
 
 # Lets force a new ids and usb product ids onto the agilent multimeter instrument class
 register_instrument('Agilent', 'DMM', usb_vendor_product=[0x0957, 0xFFFF])(instruments.agilent_multi_34410A)
 
+# Lets override the default name for usb vendor id 0x0957 which is Agilent Technologies
+register_usb_name('Keysight', 0x0957)
+
+# Lest override the usb name for the Yokogawa GS200
+register_usb_name('GS200 DC current/voltage source', 0x0B21, 0x0039)
 
 conf = dict(
              # Let start with some Yokogawa GS200 DC voltage/current sources
@@ -36,18 +41,3 @@ conf = dict(
              # and specifying the still heater resistance and the still heater resistance including the leads.
              tc1 = (instruments.lakeshore_370, ('ASRL1', 120.), dict(still_full_res=136.4)),
         )
-
-usb_manuf = { 0x0957 : ('Agilent', { 0x0607 : 'multimeter',
-                                     0x2307 : 'rf_gen',
-                                     0x1309 : 'ENA',
-                                     0x0B0B : 'EXA',
-                                     0x0D0B : 'PXA',
-                                     0x0118 : 'PNA',
-                                     0x17A2 : 'infiniiVision_500',
-                                     0x1796 : 'infiniiVision_200',
-                                     0x1F01 : 'MXG',
-                                     0x5418 : 'PowerMeter',
-                                     0x4C18 : 'RF_attenuator' }),
-              0x0B21 : ('Yokogawa',  {0x0039 : 'GS200' }),
-              0x03EB : ('BNC', {0xAFFF : 'rf_845'})
-            }
