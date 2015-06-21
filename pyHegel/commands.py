@@ -54,8 +54,8 @@ from .instruments_base import _writevec as writevec
 from .traces import wait
 from .util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
 
-__all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'util',
-           'help_pyHegel', 'reset_pyHegel', 'clock', 'sweep', 'wait',
+__all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'instruments_registry',
+           'util', 'help_pyHegel', 'reset_pyHegel', 'clock', 'sweep', 'wait',
            'readfile', '_readfile_lastnames', '_readfile_lastheaders', '_readfile_lasttitles',
            'set', 'move', 'copy', 'spy', 'snap', 'record', 'trace', 'scope',
            '_process_filename', 'get', 'setget', 'getasync', 'make_dir',
@@ -1426,6 +1426,22 @@ def sleep(sec):
     """
     traces.sleep(sec)
 
+
+def _load_helper(entry):
+    # we will accept a single Instrument or any of the lists
+    #  (instrument, ), (instrument, arg_tuple), (instrument, arg_tuple, kwarg_dict)
+    # and always returns the latter
+    if isinstance(entry, instruments_base.BaseInstrument):
+        return entry, (), {}
+    elif len(entry) == 1:
+        return entry[0]
+    if len(entry) == 2:
+        return entry[0], entry[1], {}
+    elif len(entry) == 3:
+        return entry
+    else:
+        raise ValueError('The load_config conf entry (%s) is not in an acceptable format'%entry)
+
 # overrides pylab load (which is no longer implemented anyway)
 def load(names=None, newnames=None):
     """
@@ -1456,11 +1472,9 @@ def load(names=None, newnames=None):
        full visa name like those returned from find_all_instruments()
     """
     if names == None or (isinstance(names, basestring) and names == ''):
-        for name, val in sorted(local_config.conf.items()):
-            if len(val) == 2:
-                instr, para = val
-            else:
-                instr, para, kwargs = val
+        for name, entry in sorted(local_config.conf.items()):
+            instr, para, kwargs = _load_helper(entry)
+            if kwargs != {}:
                 para = '%s, %s'%(para, kwargs)
             instr = instr.__name__
             print '{:>10s}: {:25s} {:s}'.format(name, instr, para)
@@ -1475,12 +1489,7 @@ def load(names=None, newnames=None):
     if len(newnames) < len(names):
         newnames = newnames + [None]*(len(names)-len(newnames))
     for name, newname in zip(names, newnames):
-        val = local_config.conf[name]
-        if len(val) == 2:
-            instr, param = val
-            kwargs = {}
-        else:
-            instr, param, kwargs = val
+        instr, param, kwargs = _load_helper(local_config.conf[name])
         if newname == None:
             newname = name
         i = instr(*param, **kwargs)
@@ -1503,23 +1512,32 @@ def _normalize_usb(usb_resrc):
 def load_all_usb():
     """
      This will load all USB instruments found with find_all_instruments
-     that exist in load
+     that exist in load. They need to be defined with a fill name (USB::1234::5677...)
+     and not an alias.
     """
     found_instr = find_all_instruments(False)
     found_usb = [_normalize_usb(instr) for instr in found_instr if instr.startswith('USB')]
     # pick only USB instruments in local_config
+    conf_norm = {k:_load_helper(v)[1] for k,v in local_config.conf.iteritems()}
     usb_instr = { _normalize_usb(para[0])[0]:name
-                    for name, (instr, para) in local_config.conf.iteritems()
-                    if len(para)>0 and isinstance(para[0], basestring) and para[0].startswith('USB')}
+                    for name, para in conf_norm.iteritems()
+                    if len(para)>0 and isinstance(para[0], basestring) and para[0].upper().startswith('USB')}
     for usb, manuf, model in found_usb:
         try:
             name = usb_instr[usb]
             load(name)
             print '  Loaded: %6s   (%s)'%(name, usb)
         except KeyError:
-            guess_manuf = local_config.usb_manuf.get(manuf, ('Unknown', dict()))
-            guess_model = guess_manuf[1].get(model, ('Unknown'))
-            print '  Unknown instrument: %s (guess manuf=%s, model=%s)'%(usb, guess_manuf[0], guess_model)
+            guess_manuf = instruments_registry.find_usb_name(manuf)
+            guess_model = instruments_registry.find_usb_name(manuf, model)
+            extra=''
+            try:
+                instr_class = instruments_registry.find_usb(manuf, model)
+            except KeyError:
+                pass
+            else:
+                extra = ', instruments class=%s'%instr_class.__name__
+            print '  Unknown instrument: %s (guess manuf=%s, model=%s%s)'%(usb, guess_manuf, guess_model, extra)
 
 class _Hegel_Task(threading.Thread):
     def __init__(self, func, args=(), kwargs={}, count=None,
