@@ -51,30 +51,7 @@ long_description = '\n\n'.join([read('README.rst'), read('AUTHORS'), read('CHANG
 
 __doc__ = long_description
 
-requirements = [ 'ipython', 'numpy', 'scipy', 'matplotlib' ]
-setup_requires = []
-extras_require = {
-        'visa': ['PyVISA']
-        }
-
-scripts = []
-entry_points = {
-        'console_scripts': ['pyHegel=pyHegel:start_pyHegel']
-        }
-if os.name == 'nt':
-    entry_points['gui_scripts'] = ['pyHegel_console=pyHegel:start_console']
-    requirements.append('pywin32')
-    if 'bdist_wininst' not in sys.argv:
-        # needed by postinstall scripts
-        setup_requires.append('pywin32')
-    if 'bdist_wininst' in sys.argv:
-        pass
-        #scripts.append('path to some script')
-        # might also add the icons to the data stuff
-        # options should be in the setup
-        #options = {'bdist_wininst': {'install_script': 'some script'}}
-
-setup(name='pyHegel',
+setup_dict = dict(name='pyHegel',
       description='Command line interface to provide a uniform interface to laboratory instruments',
       version=__version__,
       long_description=long_description,
@@ -86,9 +63,6 @@ setup(name='pyHegel',
       #test_suite='pyHegel...',
       keywords='CLI VISA GPIB USB serial RS232 measurement acquisition automation',
       license='LGPL',
-      install_requires=requirements,
-      setup_requires=setup_requires,
-      extras_require=extras_require,
       platforms = ['Linux', 'Max OSX', 'Windows'],
       classifiers=[
         'Development Status :: 5 - Production/Stable',
@@ -113,9 +87,73 @@ setup(name='pyHegel',
             #'pyHegel': ['pyHegel_default.ini'],
             'pyHegel': ['pyHegel*.ini'],
           },
-      scripts = scripts,
-      entry_points=entry_points,
-      zip_safe=False)
+      zip_safe=False
+      )
+
+requirements = [ 'ipython', 'numpy', 'scipy', 'matplotlib' ]
+setup_requires = []
+extras_require = {
+        'visa': ['PyVISA']
+        }
+
+scripts = []
+entry_points = {
+        'console_scripts': ['pyHegel=pyHegel:start_pyHegel']
+        }
+
+options = {}
+
+post_script = 'pyHegel_postinstall.py'
+def _post_install():
+    print 'Running post install'
+    from subprocess import call
+    call([sys.executable, post_script, '-install'])
+
+
+# TODO: once we have icons, don't forget to add them to data stuff
+if os.name == 'nt':
+    entry_points['gui_scripts'] = ['pyHegel_console=pyHegel:start_console']
+    requirements.append('pywin32')
+    if 'bdist_msi' in sys.argv or 'bdist_wininst' in sys.argv:
+        if 'install' in sys.argv:
+            raise RuntimeError('You cannot select both a bdist and an install')
+        scripts.append(post_script)
+    if 'bdist_wininst' not in sys.argv:
+        # needed by postinstall scripts
+        setup_requires.append('pywin32')
+    if 'bdist_msi' in sys.argv:
+        options.update({'bdist_msi': {'install_script': post_script}})
+    if 'bdist_wininst' in sys.argv:
+        options.update({'bdist_wininst': {'install_script': post_script}})
+    from setuptools.command.install import install as _install
+    from setuptools.command.develop import develop as _develop
+    class my_install(_install):
+        def run(self):
+            _install.run(self)
+            self.execute(_post_install, [], msg='Running post install script')
+    class my_develop(_develop):
+        def run(self):
+            _develop.run(self)
+            if self.uninstall:
+                pass
+            else:
+                self.execute(_post_install, [], msg='Running post develop script')
+    cmdclass = {'develop': my_develop}
+    if 'install' in sys.argv:
+        cmdclass.update({'install': my_install})
+    setup_dict.update(dict(cmdclass=cmdclass))
+
+setup_dict.update(dict(install_requires=requirements,
+                       extras_require=extras_require,
+                       entry_points=entry_points))
+if setup_requires:
+    setup_dict.update(dict(setup_requires=setup_requires))
+if scripts:
+    setup_dict.update(dict(scripts=scripts))
+if options:
+    setup_dict.update(dict(options=options))
+
+setup(**setup_dict)
 
 # different ways to install (not as root):
 #  PYTHONPATH=/tmp/inst/lib/python2.7/site-packages pip install --install-option="--prefix=/tmp/inst" .

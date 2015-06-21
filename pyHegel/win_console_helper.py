@@ -64,8 +64,13 @@ if CONSOLE_DIR is not None:
 if PYTHONXY_DIR is not None:
     CONSOLE_ICON = pjoin(PYTHONXY_DIR, 'icons', 'consolexy.ico') # C:\Program Files (x86)\pythonxy\icons\consolexy.ico
 
+DEFAULT_WORK_DIR = '%UserProfile%'
 
-def get_pyhegel_start_script(script='pyHegel', pythonw=False):
+
+# TODO: when install as user, the scripts go to
+#        ~\AppData\Roaming\Python\Scripts\
+def get_pyhegel_start_script(script='pyHegel', pythonw=False, aslist=False, skip_last=False):
+    # aslist is used for creating shortcuts. It returns [executable, arguments]
     exec_base = os.path.dirname(sys.executable)
     if pythonw:
         # This executable does not open the cmd terminal
@@ -77,23 +82,37 @@ def get_pyhegel_start_script(script='pyHegel', pythonw=False):
     script_dir = pjoin(sys.exec_prefix, 'Scripts')
     name = pjoin(script_dir, script+'.exe')
     if isfile(name):
-        return '"%s"'%name
+        if aslist:
+            return [name, '']
+        else:
+            return '"%s"'%name
     for basename in [script+'-script.py', script+'.py']:
         name = pjoin(script_dir, basename)
         if isfile(name):
-            return '"%s" "%s"'%(executable, name)
+            if aslist:
+                return [executable, '"%s"'%name]
+            else:
+                return '"%s" "%s"'%(executable, name)
     name = os.path.dirname(config.PYHEGEL_DIR) # Goes to parent
     name = os.path.join(name, 'pyHegel.py')
-    return '"%s" "%s"'%(executable, name)
-
-def get_pyhegel_console_start_script():
-    name = get_pyhegel_start_script(script='pyHegel_console', pythonw=True)
-    if isfile(name):
-        return name
+    if skip_last:
+        return None
+    if aslist:
+        return [executable, '"%s"'%name]
     else:
-        name = get_pyhegel_start_script(pythonw=True)
-        name += ' --console'
-        return name
+        return '"%s" "%s"'%(executable, name)
+
+def get_pyhegel_console_start_script(aslist=False):
+    ret = get_pyhegel_start_script(script='pyHegel_console', pythonw=True, aslist=aslist, skip_last=True)
+    if ret is not None:
+        return ret
+    name = get_pyhegel_start_script(pythonw=True, aslist=aslist)
+    extra_arg = ' --console'
+    if aslist:
+        executable, args = name
+        return [executable, args + extra_arg]
+    else:
+        return name + extra_arg
 
 
 def write_tree(tree, filename):
@@ -180,6 +199,7 @@ def update_console_xml(dest, save_orig=None):
 def check_newer(dest):
     """
     returns true when the reference console.xml is newer than the user one (dest).
+    or when this module file is newer
     """
     if CONSOLE_DIR is None:
         raise RuntimeError("Can't find the Console directory. Is it installed?")
@@ -190,9 +210,10 @@ def check_newer(dest):
         return True
         # otherwise I will get a WindowsError exc with exc.errno == 2
     dest_time = os.path.getmtime(dest)
+    this_time = os.path.getmtime(__file__)
     #import time
     #print 'Base:', time.ctime(base_time), '  ---- Dest: ', time.ctime(dest_time)
-    return base_time > dest_time
+    return base_time > dest_time or this_time > dest_time
 
 def find_destination():
     # just pick the first entry
@@ -239,9 +260,15 @@ def start_console(mode=None):
         #os.system(CONSOLE_EXEC_QUOTED + ' -c "%s" -t "pyHegel"'%dest)
     else:
         # This starts and does not wait
-        # not that start is a cmd.exe command, so it needs to be called from it.
+        # note that start is a cmd.exe command, so it needs to be called from it.
         # (could be: cmd /c start ....)
-        os.system('start %s -c "%s" -t "pyHegel"'%(CONSOLE_EXEC_QUOTED, dest))
+        # However, if it is not running from a shell, it opens one.
+        #  So if this script is a .pyw one, There will be a flashing
+        #  console on the screen
+        #os.system('start %s -c "%s" -t "pyHegel"'%(CONSOLE_EXEC_QUOTED, dest))
+        # A work around that flashing problem is to use the windows scripting host
+        shell = Dispatch('WScript.Shell')
+        shell.Run('cmd /c %s -c "%s" -t "pyHegel"'%(CONSOLE_EXEC_QUOTED, dest), 0, False)
 
 
 #################################################
@@ -271,7 +298,7 @@ def get_win_folder_path(csidl, create=False, default=False):
         flag = SHGFP_TYPE_DEFAULT
     return shell.SHGetFolderPath(None, c, None, flag)
 
-def create_shortcut(filename, description, target, arguments=None, iconpath=None, workdir='%UserProfile%', iconindex=0):
+def create_shortcut(filename, description, target, arguments=None, iconpath=None, workdir=DEFAULT_WORK_DIR, iconindex=0):
     # This is based from
     #  http://www.blog.pythonlibrary.org/2010/01/23/using-python-to-create-shortcuts/
     # Another option would be to use the COM IShellLink interface of the windows shell
