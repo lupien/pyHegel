@@ -21,6 +21,14 @@
 #                                                                            #
 ##############################################################################
 
+"""
+This code is used for registering instruments to the instruments module.
+For visa devices that respond to IDN or are USB tmc devices, it allows to build
+a database of information for them.
+
+Non-Visa instruments can register idn, but they will not be used.
+"""
+
 from __future__ import absolute_import
 
 from collections import defaultdict
@@ -36,7 +44,7 @@ _instruments_ids_alias = {}
 _instruments_ids_rev = defaultdict(list)
 _instruments_usb = {}
 _instruments_add = {}
-_instrument_usb_names = {}
+_instruments_usb_names = {}
 
 def clean_instruments():
     from . import instruments
@@ -139,12 +147,13 @@ def register_idn_alias(alias, manuf, product=None, firmware_version=None):
     key = (manuf, product, firmware_version)
     _instruments_ids_alias[key] = alias
 
-def find_idn_alias(manuf, product=None, firmware_version=None, check_no_fw=True):
+def find_idn_alias(manuf, product=None, firmware_version=None, check_no_fw=True, retnone=False):
     """
     Finds the alias attached to the manuf/product/firmware_version combination
     given.
     With check_no_fw it will also check for just manuf/product.
-    If not found, it returs None
+    If not found, and retnone is True it returns None, otherwise it returns
+    the product if given, otherwise it returns manuf.
     """
     key = (manuf, product, firmware_version)
     try:
@@ -156,18 +165,22 @@ def find_idn_alias(manuf, product=None, firmware_version=None, check_no_fw=True)
                 return _instruments_ids_alias[key]
             except KeyError:
                 pass
-    return None
+    if product:
+        return product
+    else:
+        return manuf
 
 
-def register_usb_name(vendor_id, name, product_id=None):
+def register_usb_name(name, vendor_id, product_id=None):
     """
     This adds (or overwrites a previous) entry for either the name of the product
     or the name to attach to the product id (if given)
     Note: the last use of this functions will be the one remembered.
           This function is called by register_instrument
+    If you want to use the names provided by USB, use the idn_usb for any USB visa instrument.
     """
     key = (vendor_id, product_id)
-    _instrument_usb_names[key] = name
+    _instruments_usb_names[key] = name
 
 def find_usb_name(vendor_id, product_id=None, retnone=False):
     """
@@ -177,7 +190,7 @@ def find_usb_name(vendor_id, product_id=None, retnone=False):
     """
     key = (vendor_id, product_id)
     try:
-        return _instrument_usb_names[key]
+        return _instruments_usb_names[key]
     except KeyError:
         if product_id is None:
             return 'Unknown Vendor (0x%04x)'%vendor_id
@@ -244,7 +257,7 @@ def register_instrument(manuf=None, product=None, firmware_version=None, usb_ven
                 else:
                     name = None
                 if name:
-                    register_usb_name(vid, name, product_id=pid)
+                    register_usb_name(name, vid, product_id=pid)
         return instr_class
     return _internal_reg
 
