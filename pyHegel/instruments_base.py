@@ -2848,7 +2848,8 @@ class visaAutoLoader(visaInstrument):
         try:
             cls = instruments_registry.find_instr(idns['vendor'], idns['model'], idns['firmware'])
         except KeyError:
-            raise RuntimeError('Could not find an instrument for: %s'%visa_addr)
+            idn = '{vendor},{model},{firmware}'.format(**idns)
+            raise RuntimeError('Could not find an instrument for: %s (%s)'%(visa_addr, idn))
         else:
             print 'Autoloading using instruments class "%s"'%cls.__name__
             return cls(visa_addr, *args, **kwargs)
