@@ -413,7 +413,7 @@ class agilent_rf_MXG(agilent_rf_PSG):
 #######################################################
 
 #@register_instrument('Agilent Technologies', '34410A', '2.35-2.35-0.09-46-09')
-@register_instrument('Agilent Technologies', '34410A', usb_vendor_product=[0x0957, 0x0607])
+@register_instrument('Agilent Technologies', '34410A', usb_vendor_product=[0x0957, 0x0607], alias='34410A multimeter')
 class agilent_multi_34410A(visaInstrumentAsync):
     """
     This controls the agilent digital multimeters.
