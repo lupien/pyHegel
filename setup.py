@@ -190,3 +190,16 @@ setup(**setup_dict)
 #  ./setup.py develop --user
 # undevelop
 #  ./setup.py develop --user --uninstall
+
+# You can also create a windows installer executable (only under a windows environment):
+#  setup.py bdist_wininst
+# or a windows msi
+#  setup.py bdist_msi
+# Note that the msi file will not execute the remove post-install script so if
+# you want to properly remove the shortcut call the pyHegel_postinstall script with the
+#  -remove option before performing the uninstall
+# Also clicking on the file might not execute the script as admin. One way to make sure the
+# msi is executed as admin is to call it from an Administrator command shell
+# using: msiexec /i path_to.msi
+# Then you can uninstall with: msiexec /x path_to.msi
+# (and you could turn on logging: /L*v some_log_file.txt)
