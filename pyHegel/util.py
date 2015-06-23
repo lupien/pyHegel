@@ -847,9 +847,10 @@ def xy2rt(x, y=None, cmplx=False, deg=True, dB=True, unwrap=False):
 def dBm2o(dbm, o='W', ro=50):
     """ This function converts an input amplitude in dBm
         to an output in o, which can be 'W' (default),
-        'A' or 'V' for Watts, Amperes(RMS) or Volts(RMS).
+        'A', 'A2', 'V' or 'V2' for Watts, Amperes(RMS),
+        A**2, Volts(RMS) or V**2.
         ro: is the impedance used to calculate the values
-            for o='V' or 'A'
+            for o='V', 'V2', 'A' or 'A2'
         If you prefer a different default you can do it like this:
             dBm2A = lambda x: dBm2o(x, o='A')
         See also: o2dBm
@@ -861,18 +862,23 @@ def dBm2o(dbm, o='W', ro=50):
         return w
     elif o == 'A':
         return np.sqrt(w/ro)
+    elif o == 'A2':
+        return w/ro
     elif o == 'V':
         return np.sqrt(w*ro)
+    elif o == 'V2':
+        return w*ro
     else:
-        raise ValueError("o needs to be 'W', 'A' or 'V'")
+        raise ValueError("o needs to be 'W', 'A', 'A2', 'V' or 'V2'")
 
 def o2dBm(v, o='W', ro=50):
     """ This function converts an input amplitude in some units
         to an output in dBm.
         o: selects the incoming units. It can be 'W' (default,)
-        'A' or 'V' for Watts, Amperes(RMS) or Volts(RMS).
+        'A', 'A2', 'V' or 'V2' for Watts, Amperes(RMS),
+        A**2, Volts(RMS) or V**2.
         ro: is the impedance used to calculate the values
-            for o='V' or 'A'
+            for o='V', 'V2', 'A' or 'A2'
         If you prefer a different default you can do it like this:
             A2dBm = lambda x: o2dBm2(x, o='A')
         See also: dBm2o
@@ -883,8 +889,12 @@ def o2dBm(v, o='W', ro=50):
         w = v
     elif o == 'V':
         w = v**2./ro
+    elif o == 'V2':
+        w = v/ro
     elif o == 'A':
         w = v**2.*ro
+    elif o == 'A2':
+        w = v*ro
     else:
         raise ValueError("o needs to be 'W', 'A' or 'V'")
     return 10.*np.log10(w/Pref)
