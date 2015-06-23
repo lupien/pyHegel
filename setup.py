@@ -104,10 +104,15 @@ entry_points = {
 options = {}
 
 post_script = 'pyHegel_postinstall.py'
-def _post_install():
+def _post_install(cmd='install'):
     print 'Running post install'
     from subprocess import call
-    call([sys.executable, post_script, '-install'])
+    if cmd == 'install':
+        call([sys.executable, post_script, '-install'])
+    elif cmd == 'remove':
+        call([sys.executable, post_script, '-remove'])
+    else:
+        raise ValueError('The _post_install cmd parameter is invalide: %s'%cmd)
 
 
 # TODO: once we have icons, don't forget to add them to data stuff
@@ -133,10 +138,10 @@ if os.name == 'nt':
             self.execute(_post_install, [], msg='Running post install script')
     class my_develop(_develop):
         def run(self):
-            _develop.run(self)
             if self.uninstall:
-                pass
-            else:
+                self.execute(_post_install, ['remove'], msg='Running post develop uninstall script')
+            _develop.run(self)
+            if not self.uninstall:
                 self.execute(_post_install, [], msg='Running post develop script')
     cmdclass = {'develop': my_develop}
     if 'install' in sys.argv:

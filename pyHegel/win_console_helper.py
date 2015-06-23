@@ -30,9 +30,12 @@ import os.path
 import sys
 import subprocess
 from _winreg import QueryValue, HKEY_LOCAL_MACHINE
-from win32com.shell import shell, shellcon
-from win32com.client import Dispatch
 from os.path import join as pjoin, isfile
+# moved win32com import within the functions that need them
+# This prevents an error when running under the installer for bdist_wininst
+# during the post install script (it does not need these functions anyway.)
+#from win32com.shell import shell, shellcon
+#from win32com.client import Dispatch
 
 from . import config
 
@@ -247,6 +250,7 @@ def start_console(mode=None):
     If you need to force a change of the user console.xml file, you can just delete
     it. It will be recreated at the next start_console.
     """
+    from win32com.client import Dispatch
     if CONSOLE_DIR is None:
         raise RuntimeError("Can't find the Console directory. Is it installed?")
     update_if_needed()
@@ -290,6 +294,7 @@ def get_win_folder_path(csidl, create=False, default=False):
     create when True, will also create it if it does not exists
     default when True, returns the default directory instead of the current one.
     """
+    from win32com.shell import shell, shellcon
     c = getattr(shellcon, csidl)
     flag = SHGFP_TYPE_CURRENT
     if create:
@@ -308,6 +313,7 @@ def create_shortcut(filename, description, target, arguments=None, iconpath=None
     #         or: http://timgolden.me.uk/python/win32_how_do_i/create-a-shortcut.html
     # Another interface would be the scripting interface of the windows shell:
     #   Dispatch('Shell.Application').NameSpace('path to shortcut').ParseName('exising Shortcut Name.lnk').GetLink
+    from win32com.client import Dispatch
     shell = Dispatch('WScript.Shell')
     shortcut = shell.CreateShortCut(filename)
     shortcut.Description = description

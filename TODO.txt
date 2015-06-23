@@ -23,4 +23,4 @@ Related to update to newer ipython
   qt4 backend has added most keys (except backspace. But it is still behind gtk)
   key_press_handler has not changed (still does not reorder overlayed axes so you can't
   see the x,y values except for the last axes.)
--write a script to create the shortcuts, setup the configuration files
+-create icons for pyHegel

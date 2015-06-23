@@ -25,16 +25,21 @@
 import sys
 import os
 import os.path as osp
+import time
 
 SHORTCUT_CMD = 'pyHegel.lnk'
 SHORTCUT_CONSOLE = 'pyHegel_console.lnk'
 
+#DEBUG_SLEEP = False # Turns it off
+#DEBUG_SLEEP = 10 # s
+DEBUG_SLEEP = 2 # s
 
 def _install(create_shortcut, get_special_folder_path, file_created, directory_created):
     import pyHegel.win_console_helper as helper
     def mk_sc(folder, filename, *arg, **kwarg):
         path = osp.join(folder, filename)
         create_shortcut(path, *arg, **kwarg)
+        print 'file created: "%s"'%path
         file_created(path)
     target1 = helper.get_pyhegel_start_script(aslist=True)
     icon1 = r'%windir%\system32\cmd.exe'
@@ -54,6 +59,7 @@ def _install(create_shortcut, get_special_folder_path, file_created, directory_c
             folder = get_special_folder_path(user)
             if not osp.isdir(folder):
                 os.mkdir(folder)
+                print 'directory created: "%s"'%folder
                 directory_created(folder)
         else:
             folder = admin
@@ -72,8 +78,9 @@ def install_wininst():
         create_shortcut(target, description, filename, arguments, workdir, iconpath, iconindex)
     #with open(r'\TEMP\pyHegel_install_test.txt', 'w') as f:
     #    print >>f, 'In bdist_wininst install'
-    #print 'In bdist_wininst install'
+    print 'In bdist_wininst install'
     _install(mk_shortcut, get_special_folder_path, file_created, directory_created)
+    print 'Finished executing post install script'
 
 def remove_wininst():
     # nothing to do. We registered the shortcuts so they should be removed properly
@@ -83,15 +90,39 @@ def install():
     import pyHegel.win_console_helper as helper
     # TODO improve file/directory created to allow removing them later.
     def file_created(path):
-        print 'file created: "%s"'%path
+        #print 'file created: "%s"'%path
+        pass
     def directory_created(path):
-        print 'directory created: "%s"'%path
+        #print 'directory created: "%s"'%path
+        pass
     print 'In regular install'
     _install(helper.create_shortcut, helper.get_win_folder_path, file_created, directory_created)
+    print 'Finished executing post install script'
+    if DEBUG_SLEEP:
+        print '   waiting.. %i s'%DEBUG_SLEEP
+        time.sleep(DEBUG_SLEEP)
+    #sys.exit(1) # This will produce an error message under msi install
 
 def remove():
+    # lets just try and remove all possible shortcuts we might have created.
+    # This should be executed before the unistalling of the package (we need
+    #  pyHegel.win_console_helper)
+    # Note: I don't think msi uninstall calls this script.
     import pyHegel.win_console_helper as helper
-    # TODO remove the previously recorded created...
+    install_folders = ['CSIDL_COMMON_DESKTOPDIRECTORY', 'CSIDL_DESKTOPDIRECTORY',
+                       'CSIDL_COMMON_PROGRAMS', 'CSIDL_PROGRAMS']
+    for folder in install_folders:
+        folder = helper.get_win_folder_path(folder)
+        for filename in [SHORTCUT_CMD, SHORTCUT_CONSOLE]:
+            path = osp.join(folder, filename)
+            try:
+                os.remove(path)
+                print 'file deleted: "%s"'%path
+            except OSError:
+                pass
+    if DEBUG_SLEEP:
+        print '   waiting.. %i s'%DEBUG_SLEEP
+        time.sleep(DEBUG_SLEEP)
 
 #import sys
 #with open(r'\TEMP\pyHegel_install_test.txt', 'w') as f:
