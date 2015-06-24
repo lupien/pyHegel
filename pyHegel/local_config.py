@@ -92,7 +92,8 @@ conf = dict( yo1 = (instruments.yokogawa_gs200, (10,)),
              # Power meters
              epm1 = (instruments.agilent_PowerMeter, ('USB0::0x0957::0x5418::MY52290056',)),
              # Arbitratry waveform generator
-             awg1 = (instruments.agilent_AWG, ('awg1',)),
+             #awg1 = (instruments.agilent_AWG, ('awg1',)),
+             awg1 = (instruments.agilent_AWG, ('TCPIP0::localhost::inst0::INSTR',)),
              #Bluefors
              bf1 = (instruments.bf_valves, ()),
              # delay box

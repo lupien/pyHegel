@@ -25,6 +25,7 @@ from __future__ import absolute_import
 
 import numpy as np
 import scipy
+import os.path
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
@@ -2368,6 +2369,7 @@ class agilent_FieldFox(agilent_PNAL):
 ##    Agilent M8190A Arbitrary Waveform Generator
 #######################################################
 
+#@register_instrument('Agilent Technologies', 'M8190A', '5.0.14.0-2')
 @register_instrument('Agilent Technologies', 'M8190A', alias='M8190A AWG')
 class agilent_AWG(visaInstrumentAsync):
     """
@@ -2389,6 +2391,9 @@ class agilent_AWG(visaInstrumentAsync):
     or volt_high, volt_low (volt_ampl is peak to peak amplitude)
     There is one sampling frequency for both channels.
     Many options depend on the channel.
+
+    If something looks like it is not working, you might be creating errors so
+    first check the get_error function return.
     """
     def init(self, full=False):
         self.write(':format:border swap')
@@ -2397,6 +2402,7 @@ class agilent_AWG(visaInstrumentAsync):
         self._async_trigger_helper_string = '*OPC'
     def _async_trigger_helper(self):
         self.write(self._async_trigger_helper_string)
+        #self._async_trigger_helper_string = '*OPC'
     def _current_config(self, dev_obj=None, options={}):
         orig_ch = self.current_channel.getcache()
         ch_list = ['current_channel', 'freq_source', 'cont_trigger', 'gate_mode_en', 'output_en',
@@ -2523,18 +2529,26 @@ class agilent_AWG(visaInstrumentAsync):
         filename needs to be a file in the correct binary format.
         fill when True will pad the data with 0 to the correct length
              when an integer (not 0), will pad the data with that DAC value,
-               (there seems to be a bug here: every sample with value fill is followed by a 0)
              when false, will copy (repeat) the data multiple times to obtain
              the correct length.
              Note that with padding enabled, the segment length stays the same
-             lenght as defined (so it can be shorted than the file; the data is truncated)
+             length as defined (so it can be shorted than the file; the data is truncated).
+             Use the set_length function to change it.
              With fill disabled (False): the segment length is adjusted
         The vector length is 48 samples in 14 bits mode and 64 in 12 bits mode.
         The minimum length is 5 vectors (240 samples in 14 bits, 320 for 12 bits)
         This command will wait for the transfer to finish before returning.
         If the output is running when calling load_file, it will be temporarilly
         stopped during loading.
+
+        Here is an example to produce the file and load it:
+          t=linspace(0,10*pi,192*100+1)[:-1]
+          y=sin(t)**7
+          yy=array(y*(2**15-1), dtype=int16)&np.array(0xfffc, dtype=int16)
+          yy.tofile('awgtest1.bin')
+          awg1.load_file('awgtest1.bin')
         """
+        # The newer firmware as fixed the problem with using a non-zero fill.
         if fill==False:
             padding='ALENgth'
         elif fill==True:
@@ -2544,5 +2558,8 @@ class agilent_AWG(visaInstrumentAsync):
         if ch!=None:
             self.current_channel.set(ch)
         ch = self.current_channel.getcache()
-        self._async_trigger_helper_string = ':TRACe{ch}:IQIMPort 1,"{f}",BIN,BOTH,ON,{p};*OPC'.format(ch=ch, f=filename, p=padding)
+        # Make sure filename is reachable. Make it absolute.
+        filename = os.path.abspath(filename)
+        self.write(':TRACe{ch}:IQIMPort 1,"{f}",BIN,BOTH,ON,{p}'.format(ch=ch, f=filename, p=padding))
+        #self._async_trigger_helper_string = ':TRACe{ch}:IQIMPort 1,"{f}",BIN,BOTH,ON,{p};*OPC'.format(ch=ch, f=filename, p=padding)
         self.run_and_wait()

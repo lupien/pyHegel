@@ -8,9 +8,6 @@ Main TODO list:
       -allow renormalized fetch
       -make it work with scope (or scope2d see JOS)
 
-- Test agilent AWG and check idn/registery vendor/product/firmware version
-
-
 Agilent IO Libraries Service
  Error 1923. Service Agilent PXI Resource Manager
   Agilent LXI Mdns Responder failed to start
