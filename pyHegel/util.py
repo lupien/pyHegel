@@ -44,6 +44,7 @@ This module contains many utilities:
 Conversion functions and time constants calculation helpers:
     dB2A, dB2P, P2dB, A2dB
     dBm2o, o2dBm
+    G2Z, Z2G, vswr2g, g2vswr
     xy2rt, rt2xy
     phase_unwrap
     phase_wrap
@@ -899,6 +900,76 @@ def o2dBm(v, o='W', ro=50):
         raise ValueError("o needs to be 'W', 'A' or 'V'")
     return 10.*np.log10(w/Pref)
 
+def vswr2g(v):
+    """
+    Converts from a Voltage Standing Wave Ratio (VSWR) to the
+    modulus of the reflection coefficient rho = |Gamma|:
+          Gamma(S11) = (Z2-Z1)/(Z2+Z1)
+     where Z1 is the incoming medium and Z2 is the medium producing the reflection.
+    v should be >= 1.
+    for rho = |Gamma|, then vswr = (1+rho)/(1-rho)
+    where 0 <= rho <= 1
+    You might also be interested in the return loss which is given by
+       -20 log10(rho) (or -A2dB(abs(Gamma)))
+       which is <= 0.
+    See also: g2vswr, G2Z, Z2G
+    """
+    return (v-1.)/(v+1.)
+
+def g2vswr(g):
+    """
+    Converts from the coefficient of reflection Gamma (S11) to
+    the Voltage Standing Wave Ratio (VSWR).
+           Gamma = (Z2-Z1)/(Z2+Z1).
+     where Z1 is the incoming medium and Z2 is the medium producing the reflection.
+    We have for rho = |Gamma|:
+        0 <= rho <= 1.
+    The VSWR is givent by
+       VSWR = (1+rho)/(1-rho)
+    and will be >= 1.
+    You might also be interested in the return loss which is given by
+       -20 log10(rho) (or -A2dB(abs(Gamma)))
+       which range from -infinity to 0.
+    See also: vswr2g, G2Z, Z2G
+    """
+    rho = np.abs(g)
+    return (rho+1.)/(1.-rho)
+
+def Z2G(Z1, Z2=None):
+    """
+    Converts from an impedance Z1, Z2 to a reflection coefficient
+    Gamma (S11) = (Z2-Z1)/(Z2+Z1)
+     where Z1 is the incoming medium and Z2 the medium producing the reflection.
+    if Z2 is None, then Z1 is the ratio Z1/Z2
+    See also: G2Z, vswr2g, g2vswr
+    """
+    if Z2 is None:
+        Z2 = 1.
+    Z1 *= 1. # make it a float
+    return (Z2-Z1)/(Z2+Z1)
+
+def G2Z(G, Z1=None, Z2=None):
+    """
+    Converts from a reflection coefficient Gamma (S11) to
+    an impedance Z1 or Z2
+        Gamma = (Z2-Z1)/(Z2+Z1)
+     where Z1 is the incoming medium and Z2 the medium producing the reflection.
+    if either Z1 or Z2 is given, then it returns the other one.
+    If neither Z1 nor Z2 are given (they are both None),
+    it returns the ration Z1/Z2
+    if Z2 is None, then Z1 is the ratio Z1/Z2
+    See also: Z2G, vswr2g, g2vswr
+    """
+    if Z1 is not None and Z2 is not None:
+        raise ValueError('You cannot specify both Z1 and Z2.')
+    G = np.asarray(G) # shows a divide by zero warning instead of raising one
+    Z12 =  (-G+1.)/(1.+G)
+    if Z2 is not None:
+        return Z12*Z2
+    elif Z1 is not None:
+        return Z1/Z12
+    else:
+        return Z12
 
 def filter_to_fraction(n_time_constant, n_filter=1):
     """
