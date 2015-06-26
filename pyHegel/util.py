@@ -647,7 +647,7 @@ def find_index_closest(data, search_values, already_sorted=False):
     It does the equivalent of
         ret = []
         for v in search_values:
-            ret.append( np.abs(data-v).argmin )
+            ret.append( np.abs(data-v).argmin() )
         ret = np.array(ret)
     but is much faster when data is large.
     If you are sure your data is already sorted, you can skip
@@ -795,7 +795,7 @@ def phase_unwrap(phase, deg=True, axis=-1):
         phase wraps around (changes of 2 pi rad or 360 deg)
         axis: the axis (dimension) to operate on.
         deg: when True the phase is in degrees, otherwise it is in radians
-        See also: phase_wrap
+        See also: phase_wrap, scipy.signal.detrend
     """
     if deg:
         phase = np.deg2rad(phase)
