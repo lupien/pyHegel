@@ -23,122 +23,21 @@
 
 """
 This module contains many tools for fitting data
+see also the module fit_functions for many examples of functions to
+use in fitting.
 """
 
 from __future__ import absolute_import
 
 import numpy as np
 import inspect
-import scipy.constants as C
-from scipy.special import jn
 from scipy.optimize import leastsq
 # see also scipy.optimize.curve_fit
 import matplotlib.pylab as plt
 import collections
 import __builtin__
 
-def xcothx(x):
-    """
-    This functions returns the x/tanh(x) and does the proper thing
-    when x=0.
-    """
-    # similar to sinc function
-    x = np.asanyarray(x)
-    # remove 0 from x
-    nx = np.where(x==0, 1e-16, x)
-    # 1e-8 is enough to give exactly 1.
-    #return where(x==0, 1., nx/tanh(nx))
-    return nx/np.tanh(nx)
 
-def noisePower(V, T, R=50.):
-    """
-    Use this function to fit the noise power (from a diode).
-    T is in Kelvin
-    V in Volts is the dc voltage on the sample
-    R in Ohms of the tunnel junction
-    The returned values is the noise power density.
-    i.e. (I-Iavg)^2
-    The current is obtained by integrating over the bandwidth.
-
-    For V=0, this is 4 kB T/R
-    For large V this tends to 2e V/R
-    """
-    kbt = C.k*T
-    v = C.e * V / (2.*kbt)
-    return xcothx(v) * (4.*kbt/R)
-noisePower.display_str = r"$2e\frac{V}{R} \coth\left(\frac{eV}{2k_B T}\right)$"
-
-def noisefitV(V, T, A, Toffset, R=50.):
-    """
-    Use this function to fit. Based on noisePower.
-    Use this when you know the applied DC voltage (in volts) on the sample.
-    A is the scale of the fit. It contains the effect of the
-    bandwidth and the amplifiers gains. In the measurement unit.
-    The Toffset is in units of Kelvin and is the noise temperature of the
-    amplifiers, assuming Ro=50 Ohms.
-    """
-    kbt = C.k*T
-    offset = 4.*C.k*Toffset/50.
-    Aunit = 4.*kbt/R
-    return A*(noisePower(V, T, R)+offset)/Aunit
-noisefitV.display_str = r"$\frac{A}{4k_B T/R}\left(2e\frac{V}{R} \coth\left(\frac{eV}{2k_B T}\right) +\frac{4 k_B T_{offset}}{50})\right)$"
-
-def noisefitI(I, T, A, Toffset, R=50.):
-    """
-    Use this function to fit. Based on noisePower.
-    Use this when you know the applied DC current (in amps) on the sample.
-    A is the scale of the fit. It contains the effect of the
-    bandwidth and the amplifiers gains. In the measurement unit.
-    The Toffset is in units of Kelvin and is the noise temperature of the
-    amplifiers, assuming Ro=50 Ohms.
-    """
-    kbt = C.k*T
-    offset = 4.*C.k*Toffset/50.
-    Aunit = 4.*kbt/R
-    return A*(noisePower(I*R, T, R)+offset)/Aunit
-noisefitI.display_str = r"$\frac{A}{4k_B T/R}\left(2eI \coth\left(\frac{eIR}{2k_B T}\right) +\frac{4 k_B T_{offset}}{50})\right)$"
-
-def noiseRF(Vdc, T, Vac, f, R=50., N=100):
-    """
-    Vdc in Volts
-    RF signal of Vac (Volts peak) at frequency f (Hz)
-    T in Kelvin
-    R in Ohms of the junction.
-    N is the limit of the sum of bessels (from -N to +N)
-    """
-    hf = C.h*f
-    kbt = C.k*T
-    ev = C.e*Vdc
-    vac = C.e*Vac/hf
-    n = np.arange(-N, N+1)[:,None]
-    x=(ev-n*hf)/(2.*kbt)
-    tmp = jn(n,vac)**2 *xcothx(x)
-    return tmp.sum(axis=0) * (4*kbt/R)
-noiseRF.display_str = r"$\frac{4 k_B T}{R} \sum_{n=-N}^{N} J_n(e V_{AC}/hf)^2 \frac{e V_{DC}-nhf}{2 k_B T} \coth\left(\frac{e V_{DC}-nhf}{2 k_B T}\right)$"
-
-
-def noiseRFfit(Vdc, T, A, Toffset, Vac, f=20e9, R=70., N=100):
-    """
-    A is the scale of the fit. It contains the effect of the
-    bandwidth and the amplifiers gains. In the measurement unit.
-    The Toffset is in units of Kelvin and is the noise temperature of the
-    amplifiers, assuming Ro=50 Ohms.
-
-    Vdc in Volts
-    RF signal of Vac (Volts peak) at frequency f (Hz)
-    T in Kelvin
-    R in Ohms of the junction.
-    N is the limit of the sum of bessels (from -N to +N)
-    """
-    kbt = C.k*T
-    offset = 4.*C.k*Toffset/50.
-    Aunit = 4.*kbt/R
-    return A*(noiseRF(Vdc, T, Vac, f, R, N)+offset)/Aunit
-noiseRFfit.display_str = r"$ A \left(\left[\sum_{n=-N}^{N} J_n(e V_{AC}/hf)^2 \frac{e V_{DC}-nhf}{2 k_B T} \coth\left(\frac{e V_{DC}-nhf}{2 k_B T} \right)\right] + T_{offset}/T\right)$"
-
-
-
-#########################################################
 def getVarNames(func):
     """
     This function finds the name of the parameter as used in the function
@@ -561,7 +460,8 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, fig=None, skip=False,
         return chi2, chiNorm
 
 if __name__ == "__main__":
-    from . import gen_poly
+    from pyHegel.fit_functions import noiseRFfit
+    from pyHegel import gen_poly
     N = 200
     x = np.linspace(-0.22e-3, 0.21e-3, N)
     y = noiseRFfit(x, 0.069, -.22e-3, 8., 0.113e-3, f=20e9, R=70., N=100)
