@@ -34,6 +34,8 @@ import inspect
 from scipy.optimize import leastsq
 # see also scipy.optimize.curve_fit
 import matplotlib.pylab as plt
+import matplotlib.colors
+import matplotlib.text
 import collections
 import __builtin__
 
@@ -210,6 +212,60 @@ def strResult(func, p, pe, extra={}, signif=2):
 def printResult(func, p, pe, extra={}, signif=2):
     print '\n'.join(strResult(func, p, pe, extra, signif))
 
+# TODO: handler positioning better (the bbox is not where I ask for)
+def plotResult(func, p, pe, extra={}, signif=2, loc='upper right', ax=None, formats={}):
+    """
+    takes the fitting results and make a text box on the axis ax
+    according to location loc (can be the same as for legend except for best(0) or
+    a (x,y) tuple in axes fraction coordinate.
+    It uses annotate, so you can override some of the settings with formats
+    """
+    res = '\n'.join(strResult(func, p, pe, extra, signif))
+    kwarg = dict(family='monospace', size=14, xycoords='axes fraction')
+    update = False
+    if ax is None:
+        ax = plt.gca()
+        update = True
+    bg = ax.get_axis_bgcolor()
+    kwarg['bbox'] = dict(boxstyle='round', fill=True, facecolor=bg, alpha=.6)
+    codes = {'upper right':  1,
+             'upper left':   2,
+             'lower left':   3,
+             'lower right':  4,
+             'right':        5,
+             'center left':  6,
+             'center right': 7,
+             'lower center': 8,
+             'upper center': 9,
+             'center':       10
+            }
+    UR, UL, LL, LR, R, CL, CR, LC, UC, C = range(1, 11)
+    loc_para = {
+            UR : (.99, .99, 'right', 'top'),
+            UL : (.01, .99, 'left', 'top'),
+            LL : (.01, .01, 'left', 'bottom'),
+            LR : (.99, .01, 'right', 'bottom'),
+            R : (.99, .5, 'right', 'center'),
+            CL : (.01, .5, 'left', 'center'),
+            CR : (.99, .5, 'right', 'center'),
+            LC : (.5, .01, 'center', 'bottom'),
+            UC : (.5, .99, 'center', 'top'),
+            C : (.5, .5, 'center', 'center')
+            }
+    if not isinstance(loc, tuple):
+        if isinstance(loc, basestring):
+            loc = codes[loc]
+        x, y, ha, va = loc_para[loc]
+        loc = x, y
+        kwarg['horizontalalignment'] = ha
+        kwarg['verticalalignment'] = va
+    kwarg.update(formats)
+    if update:
+        a = plt.annotate(res, loc, **kwarg).draggable()
+    else:
+        a = ax.annotate(res, loc, **kwarg).draggable()
+    return a
+
 
 def _handle_adjust(func, p0, adjust, noadjust):
     if adjust == None and noadjust == None:
@@ -255,7 +311,7 @@ def _adjust_merge(padj, p0, adj):
     p0[adj] = padj
     return p0
 
-def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noadjust=None, **kwarg):
+def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noadjust=None, sel=None, **kwarg):
     """
     func is the function. It needs to be of the form:
           f(x, p1, p2, p3, ..., k1=1, k2=2, ...)
@@ -265,11 +321,14 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
     where x is the independent variables. All the others are
     the parameters (they can be named as you like)
     The function can also have and attribute display_str that contains
-    the function representation in TeX form (func.disp='$a_1 x+b x^2$')
+    the function representation in TeX form (func.display_str='$a_1 x+b x^2$')
+
+    The fit always minimizes
+     sum( ((func(x,..)-y)/yerr)**2 )
 
     x is the independent variable (passed to the function). It can be any shape.
       It can be a tuple of arrays (result from meshgrid)
-    y is the dependent variable. The fit will minimize sum((func(x,..)-y)**2)
+    y is the dependent variable.
       y and funct(x,...) need to be of the same shape and need to be arrays.
         They can be multi-dimensional.
     p0 is a vector of the initial parameters used for the fit. It needs to be
@@ -277,6 +336,7 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
 
     yerr when given is the value of the sigma (the error) of all the y.
          It needs a shape broadcastable to y, so it can be a constant.
+         When not given, the minimazation proceeds using yerr=1. internally.
 
     extra is a way to specify any of the function parameters that
           are not included in the fit. It needs to be a dictionnary.
@@ -285,11 +345,12 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
           so if extra={'a':1, 'b':2}
           which is the same as extra=dict(a=1, b=2)
           then the function will be effectivaly called like:
-           func(..., a=1, b=2)
+           func(x, *p, a=1, b=2)
     errors controls the handling of the yerr.
            It can be True (default), or False.
-           When False, yerr are used as fitting weights.
+           When False, yerr behave as fitting weights w:
             w = 1/yerr**2
+           The fit error is then independent of sum(w)
 
     adjust and noadjust select the parameters to fit.
            They are both lists, or slices.
@@ -307,6 +368,10 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
               removes b,c)
              fitcurve(f,x,y, [1,2,3,4,5,6], noadjust=[1,2])
               will adjust parameter c,d,e and also f
+    sel is a point selector. It can be a slice or a list of indices, or a
+        tuple of those (you can also use the Ellipsis).
+        It is applied on x, y and yerr to limit the range of samples used in
+        the fit. When left as None, all the points are used.
 
     The kwarg available are the ones for leastsq (see its documentation):
       The tolerances when set to 0 is the same as the machine precision
@@ -340,7 +405,7 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
       chi2 is the chi square
       pe are the errors on pf
           Without a yerr given, or with a yerr and errors=False,
-          it does the neede correction to make chiNornm==1.
+          it does the needed correction to make chiNornm==1.
           With a yerr given and errors=True: it takes into account
           of the yerr and does not consider chiNorm at all.
 
@@ -360,11 +425,16 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
      or some other trick.
     """
     do_corr = not errors
-    if yerr == None:
+    if yerr is None:
         yerr = 1.
         do_corr = True
     p0 = np.array(p0, dtype=float) # this allows complex indexing lik p0[[1,2,3]]
     adj = _handle_adjust(func, p0, adjust, noadjust)
+    if sel is not None:
+        y = y[sel]
+        x = x[sel]
+        if np.asarray(yerr).size > 1:
+            yerr = yerr[sel]
     # we returned a flat vector.
     f = lambda p, x, y, yerr: ((func(x, *_adjust_merge(p, p0, adj), **extra)-y)/yerr).reshape(-1)
     p, cov_x, infodict, mesg, ier = leastsq(f, p0[adj], args=(x, y, yerr), full_output=True, **kwarg)
@@ -378,7 +448,7 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
         pe = np.sqrt(cov_x.diagonal())
         pei = 1./pe
         covar =  cov_x*pei[None,:]*pei[:,None]
-    else: # can happen when with a singular matrix (very flat curvature in some direction)
+    else: # can happen with a singular matrix (very flat curvature in some direction)
         pe = p*0. -1 # same shape as p but with -1
         covar = None
     s = yerr
@@ -393,12 +463,15 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
     return p_all, chi2, pe_all, extras
 
 
-def fitplot(func, x, y, p0, yerr=None, extra={}, fig=None, skip=False,
-                  xpts=1000, **kwarg):
+def fitplot(func, x, y, p0, yerr=None, extra={}, sel=None, fig=None, skip=False, hold=False,
+                  col_fit='red', col_data=None, col_unsel_data=None, label=None, result_loc='upper right',
+                  xpts=1000, xlabel=None, ylabel=None, title_fmt={}, **kwarg):
     """
     This does the same as fitcurve (see its documentation)
     but also plots the data, the fit on the top panel and
     the difference between the fit and the data on the bottom panel.
+    sel selects the point to use for the fit. The unselected points are plotted
+        in a color closer to the background.
     xpts selects the number of points to use for the xscale (from min to max)
          or it can be a tuple (min, max, npts)
          or it can also be a vector of points to use directly
@@ -408,17 +481,72 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, fig=None, skip=False,
     skip when True, prevents the fitting. This is useful when trying out initial
          parameters for the fit. In this case, the returned values are
          (chi2, chiNorm)
+    hold: when True, the plots are added on top of the previous ones.
+    xlabel, ylabel: when given, changes the x and y labels.
+    title_fmt is the options used to display the functions.
+           For example to have a larger title you can use:
+           title_fmt = dict(size=20)
+    col_fit, col_data, col_unsel_data: are respectivelly the colors for the
+           fit, the (selected) data and the unselected data.
+           By default, the fit is red, the others cycle.
+    label is a string used to label the curves. 'data' or 'fit' is appended
+    result_loc when not None, is the position where the parameters will be printed.
+            the box is draggable.
+               see plotResult
+    On return the active axis is the main one.
     """
     if fig:
         fig=plt.figure(fig)
     else:
         fig=plt.gcf()
-    plt.clf()
+    if title_fmt.get('verticalalignment', None) is None:
+        # This prevents the title from leaking into the axes.
+        title_fmt['verticalalignment'] = 'bottom'
+    if not hold:
+        plt.clf()
+    if label is not None:
+        data_label = label+' data'
+        fit_label = label+' fit'
+    else:
+        data_label = 'data'
+        fit_label = 'fit'
     fig, (ax1, ax2) = plt.subplots(2,1, sharex=True, num=fig.number)
-    ax1.set_position([.125, .3, .85, .6])
-    ax2.set_position([.125, .05, .85, .2])
-    plt.sca(ax1)
-    plt.errorbar(x, y, yerr=yerr, fmt='.', label='data')
+    ax1.set_position([.125, .30, .85, .60])
+    ax2.set_position([.125, .05, .85, .20])
+    if not hold and col_fit == 'red':
+        # skip red from color cycle.
+        # here it gets hard coded
+        ax1.set_color_cycle(['b', 'g', 'c', 'm', 'y', 'k'])
+    if col_data is None:
+        # This is a bit of a hack, a matplotlib update could break this.
+        # Another way would be to create a plot, use get_color() on it and remove the plot.
+        col_data = ax1._get_lines.color_cycle.next()
+    if col_fit is None:
+        col_fit = ax1._get_lines.color_cycle.next()
+    if col_unsel_data is None:
+        col = matplotlib.colors.colorConverter.to_rgb(col_data)
+        bgcol = matplotlib.colors.colorConverter.to_rgb(ax1.get_axis_bgcolor())
+        # move halfway between col abd bgcol
+        col = np.array(col)
+        bgcol = np.array(bgcol)
+        col_unsel_data = tuple( (col+bgcol)/2. )
+    if xlabel is not None:
+        ax1.set_xlabel(xlabel)
+    if ylabel is not None:
+        ax1.set_ylabel(ylabel)
+    plt.sca(ax1) # the current axis on return
+    if sel is not None:
+        xsel = x[sel]
+        ysel = y[sel]
+        if yerr is not None and np.asarray(yerr).size > 1:
+            yerrsel = yerr[sel]
+        else:
+            yerrsel = yerr
+        ax1.errorbar(x, y, yerr=yerr, fmt='.', label='_nolegend_', color=col_unsel_data)
+    else:
+        xsel = x
+        ysel = y
+        yerrsel = yerr
     if xpts == 'reuse':
         xx = x
     elif isinstance(xpts, (list, np.ndarray)):
@@ -427,35 +555,43 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, fig=None, skip=False,
         xx = np.linspace(xpts[0],xpts[1], xpts[2])
     else:
         xx = np.linspace(x.min(), x.max(), xpts)
-    pl = plt.plot(xx, func(xx, *p0, **extra), 'r-')[0]
-    plt.sca(ax2)
-    plt.cla()
-    plt.errorbar(x, func(x, *p0, **extra)-y, yerr=yerr, fmt='.')
-    plt.draw()
+    err_func = lambda x, y, p: func(x, *p, **extra) - y
+    if skip:
+        pld1 = ax1.errorbar(xsel, ysel, yerr=yerrsel, fmt='.', label=data_label, color=col_data)
+        pld2 = ax2.errorbar(xsel, err_func(xsel, ysel, p0), yerr=yerrsel, fmt='.', label=data_label, color=col_data)
+    pl = ax1.plot(xx, func(xx, *p0, **extra), '-', color=col_fit, label=fit_label)[0]
+    try:
+        plt.title(func.display_str, **title_fmt)
+    except AttributeError: # No display_str
+        pass
+    fig.canvas.draw()
+    #plt.draw()
     if not skip:
-        p, resids, pe, extras = fitcurve(func, x, y, p0, yerr=yerr, extra=extra, **kwarg)
+        p, resids, pe, extras = fitcurve(func, xsel, ysel, p0, yerr=yerrsel, extra=extra, **kwarg)
         printResult(func, p, pe, extra=extra)
-        #xx.set_ydata(func(xx, *p, **extra))
-        plt.sca(ax1)
-        plt.cla()
-        plt.errorbar(x, y, yerr=extras['s'], fmt='.', label='data')
-        plt.plot(xx, func(xx, *p, **extra), 'r-')
-        plt.sca(ax2)
-        plt.cla()
-        plt.errorbar(x, func(x, *p, **extra)-y, yerr=extras['s'], fmt='.')
-        try:
-            plt.sca(ax1)
-            plt.title(func.display_str)
-        except AttributeError: # No display_str
-            pass
-        plt.draw()
+        #pld1.remove()
+        ax1.errorbar(xsel, ysel, yerr=extras['s'], fmt='.', label=data_label, color=col_data)
+        pl.set_ydata(func(xx, *p, **extra))
+        ax1.relim() # this is needed for the autoscaling to use the new data
+        #pld2.remove()
+        ax2.errorbar(xsel, err_func(xsel, ysel, p), yerr=extras['s'], fmt='.', label=data_label, color=col_data)
+        ax2.autoscale_view(scalex=False) # only need to rescale y
+        ax1.autoscale_view(scalex=False) # only need to rescale y
+        for t in ax1.texts:
+            if isinstance(t, matplotlib.text.Annotation):
+                t.remove()
+                break
+        if result_loc is not None:
+            plotResult(func, p, pe, extra=extra, loc=result_loc, ax=ax1)
+        fig.canvas.draw()
+        #plt.draw()
         return p, resids, pe, extras
     else:
-        if yerr==None:
-            yerr=1
-        f = lambda p, x, y, yerr: (func(x, *p, **extra)-y)/yerr
-        chi2 = np.sum(f(p0, x, y, yerr)**2)
-        Ndof = len(x)- len(p0)
+        if yerrsel is None:
+            yerrsel = 1
+        f = lambda p, x, y, yerr: ((func(x, *p, **extra)-y)/yerr)**2.
+        chi2 = np.sum(f(p0, xsel, ysel, yerrsel))
+        Ndof = len(xsel)- len(p0)
         chiNorm = chi2/Ndof
         return chi2, chiNorm
 
