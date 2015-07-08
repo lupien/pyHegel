@@ -124,6 +124,37 @@ import sip
 import sys
 import types
 
+def fix_ipython_241():
+    """
+    IPython 2.4.1 has a bug that prevents
+     import PyQt4
+    from working.
+    This function monkey patches over the problem.
+    """
+    try:
+        sys.modules['IPython.external.qt_loaders']
+    except KeyError:
+        # ipython not loaded. No need to fix anything
+        return
+    import IPython
+    if IPython.__version__ != '2.4.1':
+        return
+    from IPython.external.qt_loaders import ID, loaded_api
+    id_forb = ID._ImportDenier__forbidden
+    if loaded_api() == 'pyqtv1' and 'PyQt4' in id_forb:
+        print 'fixing IPython 2.4.1 import denier'
+        id_forb.remove('PyQt4')
+        ID.forbid('PyQt5')
+        # need to reimport so that from import work
+        # otherwise from PyQt4 import QtCore, QtGui fail because
+        # they look imported (are present in sys.module) but the
+        # name is not present in the PyQt4 package
+        import PyQt4
+        PyQt4.QtGui = sys.modules['PyQt4.QtGui']
+        PyQt4.QtCore = sys.modules['PyQt4.QtCore']
+        PyQt4.QtSvg = sys.modules['PyQt4.QtSvg']
+
+
 def load_Qt4():
     from PyQt4 import QtGui, QtCore
 
@@ -178,8 +209,10 @@ def check_qt(base):
     # need to check also for QtCore and QtGui since IPython
     # removes the base (to make its import forbid work IPython/external/qt_loaders.py)
     if base+'.QtCore' in sys.modules:
+        fix_ipython_241()
         return True
     if base+'.QtGui' in sys.modules:
+        fix_ipython_241()
         return True
     return False
 
