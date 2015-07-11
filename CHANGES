@@ -9,6 +9,7 @@ pyHegel Changelog
 - Requires ipython >1.0
 - Tested with python(x,y) 2.7.6.1 (ipython 2.1.0-6,  pyvisa 1.4, numpy 1.8.1-6, scipy 0.14.0-7, matplotlib 1.3.1-4)
           and python(x,y) 2.7.9.0 (ipython 2.3.1-9,  pyvisa 1.6.1-3, numpy 1.8.2-7, scipy 0.14.0-7, matplotlib 1.4.2-6)
+     rc2 adds python(x,y) 2.7.10.0 (ipython 2.4.1-10,  pyvisa 1.7-6, numpy 1.9.2-8, scipy 0.15.1-8, matplotlib 1.4.3-7)
 
 0.8.0 (2014-12-22)
 ------------------
