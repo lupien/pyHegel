@@ -127,11 +127,11 @@ def find_usb(vendor_id, product_id=None):
 
 def check_instr_id(instr, idn_manuf, product=None, firmware_version=None):
     """
-    idn is either the 3 element tuple (manuf, product, firmware version)
+    idn_manuf is either the 3 element tuple (manuf, product, firmware version)
     or the value of manuf
     Returns True if there is a match found. Otherwise False.
     Note that the check works for overrides.
-    If the full check does not work, it tries then tries to see if manuf/product is present
+    If the full check does not work, it tries to see if manuf/product is correct
     then if manuf is.
     """
     if not isinstance(idn_manuf, tuple):
