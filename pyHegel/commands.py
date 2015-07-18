@@ -51,7 +51,7 @@ from . import config
 
 local_config = config.load_local_config()
 
-from .instruments_base import _writevec as writevec, _normalize_usb
+from .instruments_base import _writevec as writevec, _normalize_usb, _normalize_gpib, _get_visa_idns
 from .traces import wait
 from .util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
 
@@ -61,14 +61,14 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
            'set', 'move', 'copy', 'spy', 'snap', 'record', 'trace', 'scope',
            '_process_filename', 'get', 'setget', 'getasync', 'make_dir',
            'iprint', 'ilist', 'dlist', 'find_all_instruments', 'checkmode', 'check',
-           'batch', 'sleep', 'load', 'load_all_usb', 'test_gpib_srq_state',
+           'batch', 'sleep', 'load', 'load_all_usb', 'load_all_gpib', 'test_gpib_srq_state',
            'task', 'top', 'kill', '_init_pyHegel_globals', '_faster_timer', 'quiet_KeyboardInterrupt']
 
 # not in __all__: local_config _globaldict
 #             _Clock _update_sys_path writevec _get_dev_kw _getheaders
 #             _dev_filename _readall _readall_async _checkTracePause
 #             _itemgetter _write_conf
-#             _Sweep _Snap _record_execafter _normalize_usb
+#             _Sweep _Snap _record_execafter _normalize_usb _normalize_gpib _get_visa_idns
 #             _Hegel_Task _quiet_KeyboardInterrupt_Handler
 #             _greetings _load_helper _get_extra_confs
 
@@ -145,6 +145,7 @@ def help_pyHegel():
         wait
         load
         load_all_usb
+        load_all_gpib
         task
         top
         kill
@@ -170,6 +171,7 @@ def help_pyHegel():
         load('yo1 dmm2')
         ;load yo2 dmm2 pna1
         load_all_usb()
+        load_all_gpib()
         # or load instruments directly
         yo1 = instruments.yokogawa_gs200('USB0::0x0B21::0x0039::91KB55555')
         # or using the auto loader
@@ -1459,8 +1461,8 @@ def _load_helper(entry):
     if isinstance(entry, instruments_base.BaseInstrument):
         return entry, (), {}
     elif len(entry) == 1:
-        return entry[0]
-    if len(entry) == 2:
+        return entry[0], (), {}
+    elif len(entry) == 2:
         return entry[0], entry[1], {}
     elif len(entry) == 3:
         return entry
@@ -1524,7 +1526,7 @@ def load(names=None, newnames=None):
 def load_all_usb():
     """
      This will load all USB instruments found with find_all_instruments
-     that exist in load. They need to be defined with a fill name (USB::1234::5677...)
+     that exist in load. They need to be defined with a full name (USB::1234::5677...)
      and not an alias.
     """
     found_instr = find_all_instruments(False)
@@ -1550,6 +1552,62 @@ def load_all_usb():
             else:
                 extra = ', instruments class=%s'%instr_class.__name__
             print '  Unknown instrument: %s (guess manuf=%s, model=%s%s)'%(usb, guess_manuf, guess_model, extra)
+
+def load_all_gpib(all_ids=True):
+    """
+     This will load all GPIB instruments found with find_all_instruments
+     that exist in load and for which the idn is accepted. They need to be
+     defined with a full name (GPIB0::1...) or an integer but not an alias.
+     all_ids: when True (default) communicates with all gpib devices to obtain their
+              ids. When false, only communicates with devices having a possible
+              address match in local_config. However, the missing entry will
+              less descriptive (will not show the id).
+    """
+    def check(instr):
+        if isinstance(instr, basestring) and instr.upper().startswith('GPIB'):
+            return True
+        if isinstance(instr, int):
+            if 0 <= instr < 31: # address 31 is untalk command
+                return True
+        return False
+    found_instr = find_all_instruments(False)
+    found_gpib = [_normalize_gpib(instr) for instr in found_instr if check(instr)]
+    conf_norm = {k:_load_helper(v) for k,v in local_config.conf.iteritems()}
+    gpib_instr = { name: (para[0], _normalize_gpib(para[1][0]))
+                    for name, para in conf_norm.iteritems()
+                    if len(para[1]) >= 1 and check(para[1][0])}
+    for instr in found_gpib:
+        if all_ids:
+            idns = _get_visa_idns(instr)
+            id = (idns['vendor'], idns['model'], idns['firmware'])
+        else:
+            idns = None
+        correct_addr = {name: para for name, para in gpib_instr.iteritems()
+                            if para[1] == instr}
+        not_found = True
+        if len(correct_addr):
+            if not all_ids:
+                idns = _get_visa_idns(instr)
+                id = (idns['vendor'], idns['model'], idns['firmware'])
+            for name, para in correct_addr.iteritems():
+                if instruments_registry.check_instr_id(para[0], id):
+                    load(name)
+                    print '  Loaded: %6s   (%s)'%(name, instr)
+                    not_found = False
+                    break
+        if not_found:
+            if idns is not None:
+                extra=''
+                try:
+                    instr_class = instruments_registry.find_instr(id)
+                except KeyError:
+                    pass
+                else:
+                    extra = ', instruments class=%s'%instr_class.__name__
+                print '  Unknown instrument: %s (id vendor=%s, model=%s%s)'%(instr, idns['vendor'], idns['model'], extra)
+            else:
+                print '  Unknown instrument: %s'%(instr)
+
 
 class _Hegel_Task(threading.Thread):
     def __init__(self, func, args=(), kwargs={}, count=None,
