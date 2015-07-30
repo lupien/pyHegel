@@ -2044,7 +2044,7 @@ class agilent_ENA(agilent_PNAL):
             kwarg.update(options=options, options_lim=options_lim)
             return devMkrOption(*arg, **kwarg)
         self.marker_en = devMkrOption('CALC{ch}:TRACe{trace}:MARKer{mkr}', str_type=bool, autoinit=5)
-        marker_funcs = ChoiceStrings('MAXimum', 'MINimum', 'RPEak', 'LPEak', 'TARGet', 'LTARget', 'RTARget', 'COMPression')
+        marker_funcs = ChoiceStrings('MAXimum', 'MINimum', 'PEAK', 'RPEak', 'LPEak', 'TARGet', 'LTARget', 'RTARget')
         self.marker_trac_func = devMkrEnOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:FUNCtion', 'CALC{ch}:MARKer{mkr}:FUNCtion:TYPE?', choices=marker_funcs)
         # This is set only
         self.marker_exec = devMkrOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:FUNCTION:EXECute', choices=marker_funcs, autoget=False)
