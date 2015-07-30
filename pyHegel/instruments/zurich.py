@@ -23,6 +23,7 @@
 
 # answers obtained on phone in july 2014
 #  next version might use msi for python install (option of distutils)
+#     Done in 14.08
 #  Juerg said set-sync--get is the safest (better than set--get). Other option
 #    would be to subscribe to the changes.
 #  time-constants in sweep (real vs calculated value).
@@ -45,9 +46,7 @@ ziu = None
 from ..instruments_base import BaseInstrument,\
                             BaseDevice, scpiDevice, InvalidAutoArgument,\
                             MemoryDevice, ReadvalDev,\
-                            ChoiceBase, _general_check,\
-                            ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
-                            _decode_block_base, make_choice_list,\
+                            ChoiceDevDep,\
                             sleep, locked_calling, ProxyMethod, _retry_wait, _repr_or_string
 from ..instruments_base import ChoiceIndex as _ChoiceIndex
 from ..instruments_registry import register_instrument
@@ -72,9 +71,8 @@ def _check_zi_python_version(*arg, **kwarg):
         else:
             raise
     python_ver = [int(v) for v in python_ver.split('.')]
-    if python_ver[0] < 14 or python_ver[1] < 02 or python_rev < 23152:
-        # installer 23225 provdes python revision 23152
-        raise RuntimeError("The ziPython is to old. Install at least ziPython2.7_ucs2-14.02.23225-win32.exe")
+    if python_ver[0] < 14 or python_ver[1] < 8 or python_rev < 26222:
+        raise RuntimeError("The ziPython is too old. Install at least ziPython2.7_ucs2-14.08.26222-win32.msi")
 
 class ChoiceIndex(_ChoiceIndex):
     def __call__(self, input_val):
@@ -234,11 +232,17 @@ class ziDev(scpiDevice):
 #  sweep/gridnode
 #  sweep/historylength
 #  sweep/loopcount
+#  sweep/maxbandwidth      (new 14.08)
+#  sweep/omegasuppression  (new 14.08)
+#  sweep/order             (new 14.08)
 #  sweep/phaseunwrap
 #  sweep/samplecount
+#  sweep/savepath          (new 14.08)
 #  sweep/scan
+#  sweep/settling/inaccuracy (new 14.08)
 #  sweep/settling/tc
 #  sweep/settling/time
+#  sweep/sincfilter        (new 14.08)
 #  sweep/start
 #  sweep/stop
 #  sweep/xmapping
@@ -252,11 +256,10 @@ class ziDev(scpiDevice):
 #  trigger/0/duration
 #  trigger/0/edge
 #  trigger/0/findlevel
-#  trigger/0/highlevel
 #  trigger/0/holdoff/count
 #  trigger/0/holdoff/time
 #  trigger/0/hwtrigsource (new in 13.10)
-#  trigger/0/lowlevel
+#  trigger/0/hysteresis   (new 14.08)
 #  trigger/0/path
 #  trigger/0/pulse/max
 #  trigger/0/pulse/min
@@ -267,10 +270,13 @@ class ziDev(scpiDevice):
 #  trigger/clearhistory
 #  trigger/device
 #  trigger/endless
+#  trigger/fileformat    (new 14.08)
 #  trigger/filename
 #  trigger/forcetrigger (new in 13.10)
 #  trigger/historylength
+#  trigger/savepath      (new 14.08)
 #  trigger/triggered
+#          14.08 removed trigger/0/highlevel, trigger/0/lowlevel
 
 # zoomFFT structure
 #  zoomFFT/absolute
@@ -307,14 +313,12 @@ class zurich_UHF(BaseInstrument):
         global zi, ziu
         import zhinst.ziPython as zi
         import zhinst.utils as ziu
-        # The SRQ for this intrument does not work
-        # as of version 7.2.1.0
         timeout = 500 #ms
         # Note that deleting the _zi_daq frees up all the memory of
         #  sweep, record, .... and renders them unusable
         # To free up the memory of sweep, call sweep.clear() before deleting
         # (or replacing) it.
-        APIlevel = 4 # 1 or 4 for version 14.02
+        APIlevel = 4 # 1 or 4 for version 14.02, 14.08
         try:
             self._zi_daq = zi.ziDAQServer(host, port, APIlevel)
         except RuntimeError as e:
@@ -351,7 +355,7 @@ class zurich_UHF(BaseInstrument):
         When enbw=False, uses the formula for the 3dB point.
         When either or both tc and order are None, the cached values are used
         for the current_demod channel.
-        If you enter the bandwith frequencyfor tc, a time constant is returned.
+        If you enter the bandwith frequency for tc, a time constant is returned.
         If you enter a timeconstant for tc, a bandwidth frequency is returned.
         """
         if order == None:
@@ -370,7 +374,7 @@ class zurich_UHF(BaseInstrument):
         # could add demod_bw3db, demod_enbw but they are conversion of demod_tc
         demod_conf = ['demod_en', 'demod_freq', 'demod_harm', 'demod_rate', 'demod_tc',
                       'demod_order', 'demod_phase', 'demod_trigger','demod_bypass_en',
-                      'demod_osc_src', 'demod_adc_src']
+                      'demod_osc_src', 'demod_adc_src', 'demod_sinc_en']
         ret = []
         for c in chs:
             self.current_demod.set(c)
@@ -393,8 +397,9 @@ class zurich_UHF(BaseInstrument):
         if dev_obj in  [self.fetch, self.readval]:
             if self._current_mode == 'sweep':
                 extra = self._conf_helper('sweep_x_start', 'sweep_x_stop', 'sweep_x_count', 'sweep_x_log',
-                                          'sweep_loop_count', 'sweep_auto_bw_mode', 'sweep_auto_bw_fixed',
-                                          'sweep_settling_time_s', 'sweep_settling_n_tc',
+                                          'sweep_loop_count', 'sweep_auto_bw_mode', 'sweep_auto_bw_fixed', 'sweep_max_bw',
+                                          'sweep_order', 'sweep_omega_suppression_db', 'sweep_sinc_en',
+                                          'sweep_settling_time_s', 'sweep_settling_n_tc', 'sweep_settling_inaccuracy',
                                           'sweep_averaging_count', 'sweep_averaging_n_tc',
                                           'sweep_mode', 'sweep_phase_unwrap_en', 'sweep_x_src_node',
                                           'sweep_endless_loop_en')
@@ -408,12 +413,12 @@ class zurich_UHF(BaseInstrument):
         else:
             extra = self._conf_helper('current_demod',
                                       'demod_en', 'demod_freq', 'demod_harm', 'demod_rate', 'demod_tc', 'demod_order',
-                                      'demod_phase', 'demod_trigger','demod_bypass_en',
+                                      'demod_phase', 'demod_trigger', 'demod_bypass_en', 'sweep_sinc_en',
                                       'demod_osc_src', 'demod_adc_src')
         base = self._conf_helper('current_demod', 'current_osc', 'current_sigins', 'current_sigouts',
                                  'osc_freq', 'sigins_en', 'sigins_ac_en', 'sigins_50ohm_en',
                                  'sigins_range',
-                                 'sigouts_en', 'sigouts_offset', 'sigouts_range', 'sigouts_ampl_Vp',
+                                 'sigouts_en', 'sigouts_offset', 'sigouts_range', 'sigouts_ampl_Vp', 'sigouts_50ohm_en',
                                  'sigouts_autorange_en', 'sigouts_output_clipped', options)
         return extra+base
     def _conv_command(self, comm):
@@ -630,8 +635,13 @@ class zurich_UHF(BaseInstrument):
         Using a timestamp from the instrument, returns
         the number of seconds since the instrument turn on.
         """
-        # The timestamp just seems to be the counter of the 1.8 GHz clock
+        # Starting in 14.08, officially documented as the counter of the 1.8 GHz clock
         return timestamp/self.clockbase.getcache()
+    def sync(self):
+        """ Performs a synchronization. All data read after this point use
+            the previously set values.
+        """
+        self._zi_daq.sync()
     def idn(self):
         name = 'Zurich Instrument'
         python_ver, python_rev = _get_zi_python_version(self._zi_daq)
@@ -642,21 +652,24 @@ class zurich_UHF(BaseInstrument):
         server_fw_rev = str(self.ask('/zi/about/fwrevision')[0])
         system_devtype = self.ask('/{dev}/features/devtype')[0]
         system_serial = self.ask('/{dev}/features/serial')[0]
-        #system_code = self.ask('/{dev}/features/code')[0] # not available in vs 13.10, in 14.02 it returns an empty dict after a long timeout. It is a write only node.
+        #system_code = self.ask('/{dev}/features/code')[0] # not available in vs 13.10, in 14.02, 14.08 it returns an empty dict after a long timeout. It is a write only node.
         system_options = self.ask('/{dev}/features/options')[0]
-        system_analog_board_rev = self.ask('/{dev}/system/analogboardrevision')[0]
-        system_digital_board_rev = self.ask('/{dev}/system/digitalboardrevision')[0]
+        #system_analog_board_rev = self.ask('/{dev}/system/analogboardrevision')[0]
+        #system_digital_board_rev = self.ask('/{dev}/system/digitalboardrevision')[0]
+        system_analog_board_rev = self.ask('/{dev}/system/boardrevisions/1')[0] # To match web interface, 1=analog, 0=digital
+        system_digital_board_rev = self.ask('/{dev}/system/boardrevisions/0')[0]
         system_fpga_rev = str(self.ask('/{dev}/system/fpgarevision')[0])
         system_fw_rev = str(self.ask('/{dev}/system/fwrevision')[0])
+        system_fx2_usb = self.ask('/{dev}/system/fx2revision')[0]
         #return '{name} {system_devtype} #{system_serial} (analog/digital/fpga/fw_rev:{system_analog_board_rev}/{system_digital_board_rev}/{system_fpga_rev}/{system_fw_rev}, code:{system_code}, opt:{system_options}  [server {server_ver}-{server_rev} fw:{server_fw_rev}] [python {python_ver}-{python_rev}])'.format(
-        return '{name},{system_devtype},{system_serial},(analog/digital/fpga/fw_rev:{system_analog_board_rev}/{system_digital_board_rev}/{system_fpga_rev}/{system_fw_rev}, opt:{system_options}  [server {server_ver}-{server_rev} fw:{server_fw_rev}] [python {python_ver}-{python_rev}])'.format(
+        return '{name},{system_devtype},{system_serial},(analog/digital/fpga/fw_rev/fx2_usb:{system_analog_board_rev}/{system_digital_board_rev}/{system_fpga_rev}/{system_fw_rev}, opt:{system_options}  [server {server_ver}-{server_rev} fw:{server_fw_rev}] [python {python_ver}-{python_rev}])'.format(
              name=name, python_ver=python_ver, python_rev=python_rev,
              server_ver=server_ver, server_rev=server_rev, server_fw_rev=server_fw_rev,
              system_devtype=system_devtype, system_serial=system_serial,
              #system_code=system_code,
              system_options=system_options,
              system_analog_board_rev=system_analog_board_rev, system_digital_board_rev=system_digital_board_rev,
-             system_fpga_rev=system_fpga_rev, system_fw_rev=system_fw_rev)
+             system_fpga_rev=system_fpga_rev, system_fw_rev=system_fw_rev, system_fx2_usb=system_fx2_usb)
 
     def find_all_active_channels(self):
         current_ch = self.current_demod.getcache()
@@ -755,7 +768,7 @@ class zurich_UHF(BaseInstrument):
                     bandwidth is the enbw (related to tc)
                       to obtain the actually used bandwith: bandwidth*tc/tcmeas
                     tc is calculated tc
-                    tcmeas is the tc actually used (dues to rounding)
+                    tcmeas is the tc actually used (due to rounding)
         """
         # the demod sample phase is related to timestamp, the following should return almost a constant
         #    I get the constant to vary over 8e-5
@@ -847,13 +860,14 @@ class zurich_UHF(BaseInstrument):
         self.demod_freq = ziDev_ch_demod(getstr='demods/{ch}/freq', str_type=float)
         self.demod_harm = ziDev_ch_demod('demods/{ch}/harmonic', str_type=int)
         self.demod_en = ziDev_ch_demod('demods/{ch}/enable', str_type=bool)
-        #self.demod_sinc_en = ziDev_ch_demod('demods/{ch}/sinc', str_type=bool) # this makes the UHF crash with version 14.02
+        # demod_sinc_en did not do anything before 14.08. In 14.02 in made UHF crash. Now it works
+        self.demod_sinc_en = ziDev_ch_demod('demods/{ch}/sinc', str_type=bool)
         self.demod_bypass_en = ziDev_ch_demod('demods/{ch}/bypass', str_type=bool, doc="Don't know what this does.")
         self.demod_osc_src = ziDev_ch_demod(getstr='demods/{ch}/oscselect', str_type=int, choices=[0,1])
         self.demod_adc_src = ziDev_ch_demod('demods/{ch}/adcselect', str_type=int, choices=range(13))
         self.demod_rate = ziDev_ch_demod('demods/{ch}/rate', str_type=float, setget=True, doc="""
             The rate are power of 2 fractions of the base sampling rate.
-            With the base of 1.8 GS/s, the weeb interface has a max rate of
+            With the base of 1.8 GS/s, the web interface has a max rate of
               1.8e9/2**7 = 14.1 MS/s
             and a min rate of
               1.8e9/2**30 = 1.68 S/s
@@ -878,13 +892,42 @@ class zurich_UHF(BaseInstrument):
         self.sigouts_range = ziDev_ch_sigouts('sigouts/{ch}/range', str_type=float, setget=True, choices=[0.15, 1.5])
         self.sigouts_autorange_en = ziDev_ch_sigouts('sigouts/{ch}/autorange', str_type=bool)
         self.sigouts_output_clipped = ziDev_ch_sigouts(getstr='sigouts/{ch}/over', str_type=bool)
-        # There is also amplitudes/7, enables/3, enables/7, syncfallings/3 and /7, syncrisings/3 and /7
+        # There is also 1/amplitudes/7, 0/enables/3, 1/enables/7,
+        #     (syncfallings/3 and /7, syncrisings/3 and /7 have been removed in 14.08)
         #   Without the multi-frequency (MF) option signal output 1 (2) is connected to demod3 (7) see Juerg 22012014
-        self.sigouts_ampl_Vp = ziDev_ch_sigouts(getstr='sigouts/{ch}/amplitudes/3', str_type=bool, doc='Amplitude A of sin wave (it goes from -A to +A without an offset')
+        # Here I implement a general way to select sigouts ch and the demod ch.
+        # However, since on my system U don't have multi-frequency, I make the demod parameter invisible (using _demod)
+        # and I override the value so ch=0 gives demod 3 and ch=1 gives demod 7, always.
+        # Because of the override, current_sigouts_demod is not kept up to date, however that values
+        # ends up never to be used.
+        # To later implement multi-frequency should mostly invovle removing the override
+        # making demod visible (remove _) and adjusting out_demod
+        out_demod = ChoiceDevDep(self.current_sigouts, {0:[3], 1:[7]})
+        self.current_sigouts_demod = MemoryDevice(3, choices=out_demod)
+        # using _demod make it invisible in help
+        def ziDev_ch_demod_sigouts(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            #options.update(_demod=self.current_sigouts_demod)
+            options.update(_demod=self.current_sigouts_demod)
+            app = kwarg.pop('options_apply', ['ch', '_demod'])
+            options_conv = kwarg.pop('options_conv', {}).copy()
+            def demod_override(base_val, conv_val):
+                index = self.current_sigouts.getcache()
+                return [3, 7][index]
+            options_conv.update(_demod=demod_override)
+            options_lim = kwarg.pop('options_lim', {}).copy()
+            # We need to prevent the use of the device check until the apply because
+            # otherwise it will be checked before ch is changed (on which it depends)
+            options_lim.update(_demod=(0,7)) #This prevents the use of the device check until the apply
+            kwarg.update(options=options, options_apply=app, options_conv=options_conv, options_lim=options_lim)
+            return ziDev_ch_sigouts(*arg, **kwarg)
+        self.sigouts_ampl_Vp = ziDev_ch_demod_sigouts(getstr='sigouts/{ch}/amplitudes/{_demod}', str_type=float, doc='Amplitude A of sin wave (it goes from -A to +A without an offset')
+        self.sigouts_50ohm_en = ziDev_ch_sigins('sigouts/{ch}/imp50', str_type=bool)
         # TODO: triggers, SYSTEM(/EXTCLK), EXTREFS, status stats
         #       conn, inputpwas, outputpwas
         #       auxins/0/sample, auxins/0/averaging
         #       auxouts/0-4, dios/0, scopes/0
+
         self.sweep_device = ziDev('device', str_type=str, input_src='sweep')
         self.sweep_x_start = ziDev('start', str_type=float, input_src='sweep')
         self.sweep_x_stop = ziDev('stop', str_type=float, input_src='sweep')
@@ -897,12 +940,17 @@ class zurich_UHF(BaseInstrument):
         self.sweep_auto_bw_mode = ziDev('bandwidthcontrol', choices=auto_bw_ch, input_src='sweep')
         #self.sweep_auto_bw_en = ziDev('bandwidthcontrol', str_type=bool, input_src='sweep')
         self.sweep_auto_bw_fixed = ziDev('bandwidth', str_type=float, input_src='sweep', min=1e-6)
+        self.sweep_max_bw = ziDev('maxbandwidth', str_type=float, input_src='sweep')
+        self.sweep_omega_suppression_db = ziDev('omegasuppression', str_type=float, input_src='sweep', min=0)
+        self.sweep_order = ziDev('order', str_type=int, input_src='sweep', min=1, max=8)
+        self.sweep_sinc_en = ziDev('sincfilter', str_type=bool, input_src='sweep', doc='When True, sinc will be used when f<50 Hz')
         self.sweep_settling_time_s = ziDev('settling/time', str_type=float, input_src='sweep')
         self.sweep_settling_n_tc = ziDev('settling/tc', str_type=float, input_src='sweep')
+        self.sweep_settling_inaccuracy = ziDev('settling/inaccuracy', str_type=float, input_src='sweep')
         self.sweep_averaging_count = ziDev('averaging/sample', str_type=int, input_src='sweep')
         #self.sweep_averaging_n_tc = ziDev('averaging/tc', str_type=float, choices=[0, 5, 15, 50], input_src='sweep')
         self.sweep_averaging_n_tc = ziDev('averaging/tc', str_type=float, input_src='sweep')
-        sweep_mode_ch = ChoiceIndex(['sequential', 'binary', 'bidirectional'])
+        sweep_mode_ch = ChoiceIndex(['sequential', 'binary', 'bidirectional', 'reverse'])
         self.sweep_mode = ziDev('scan', choices=sweep_mode_ch, input_src='sweep')
 
         self.sweep_phase_unwrap_en = ziDev('phaseunwrap', str_type=bool, input_src='sweep')
@@ -910,6 +958,7 @@ class zurich_UHF(BaseInstrument):
 #  sweep/fileformat
 #  sweep/filename
 #  sweep/historylength
+#  sweep/savepath
 
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
@@ -964,29 +1013,46 @@ class zurich_UHF(BaseInstrument):
         """
         self._current_mode = 'lia'
         self._async_select()
+# The bw calculation has changed in 14.08. Before that it was:
+#        The following discussion is valid for version 14.02
+#               for auto the computed bandwidth (the one asked for, but the instruments rounds it
+#               to another value) is the equivalent noise bandwidth and is:
+#                   min(df/2,  f/100**(1/n))
+#                     where n is order,
+#                     f is frequency, and df[1:] = diff(f), df[0]=df[1]
+#                   It is also bounded by the max and min available bandwidth (time constants)
+#                    available for the order (min tc=1.026e-7, max tc=76.35)
+#                   The reason for df/2 is to have independent points,
+#                   The reason for f/100*(1/n) is to kill the harmonics in a similar way.
+#                     The H harmonic is attenuated for order n by ~100*(H*Kn)**n,
+#                      where Kn is 2*pi*ENBW(tau=1, order=n)
+#                      hence the attenuation for the 2nd harmonic is
+#                        ~314 for order 1,  ~247 for 2, ~164 for 3, ..., =31.5 for 8 (no approximation, approx gave 3)
+#                           the formula for no approximation is sqrt(1 + (F)**2)**n
+#                            with F = 100**(1./n) * (H*Kn)
+#                   Enabling sync does not seem to change anything (crashes in 14.02)
     def set_sweep_mode(self, start, stop, count, logsweep=False, src='oscs/0/freq', subs='all',
                        bw='auto', loop_count=1, mode='sequential',
-                       avg_count=1, avg_n_tc=0, settle_time_s=0, settle_n_tc=15):
+                       avg_count=1, avg_n_tc=0, settle_time_s=0, settle_n_tc=15,
+                       order=4, sinc=False, max_bw=1.25e6, w_suppr=40.):
         """
         bw can be a value (fixed mode), 'auto' or None (uses the currently set timeconstant)
-           The following discussion is valid for version 14.02
+           The following discussion is valid for version 14.08
            for auto the computed bandwidth (the one asked for, but the instruments rounds it
            to another value) is the equivalent noise bandwidth and is:
-               min(df/2,  f/100**(1/n))
-                 where n is order,
+               min( df/2,  f/sqrt(atten**(2/n)-1)*Kn, max_bw )
+                 where n is order, atten = 10**(w_suppr/20.)
+                 Kn is 2*pi*ENBW(tc=1, order=n)
+                     ENBW = _tc_to_enbw_3dB
                  f is frequency, and df[1:] = diff(f), df[0]=df[1]
                It is also bounded by the max and min available bandwidth (time constants)
                 available for the order (min tc=1.026e-7, max tc=76.35)
-               The reason for df/2 is to have independent points,
-               The reason for f/100*(1/n) is to kill the harmonics in a similar way.
-                 The H harmonic is attenuated for order n by ~100*(H*Kn)**n,
-                  where Kn is 2*pi*ENBW(tau=1, order=n)
-                  hence the attenuation for the 2nd harmonic is
-                    ~314 for order 1,  ~247 for 2, ~164 for 3, ..., =31.5 for 8 (no approximation, approx gave 3)
-                       the formula for no approximation is sqrt(1 + (F)**2)**n
-                        with F = 100**(1./n) * (H*Kn)
-               Enabling sync does not seem to change anything (crashes in 14.02)
-        mode is 'sequential', 'binary', or 'bidirectional'
+               The reason for df/2 is to have independent points.
+               The reason for the other term is to kill the first harmonic by at least w_suppr dB.
+                 The H harmonic is attenuated for order n by ~ atten*(H**n),
+               With sinc enabled, frequencies below 50 Hz will use the frequency as the bandwidth
+        max_bw: Maximum enbw to use when bw is 'auto'
+        mode is 'sequential', 'binary', 'bidirectional', or 'reverse'
           Note that 1 loopcount of bidirectionnal includes twice the count
           of points (the up and down sweep together)
         subs is the list of demods channels to subscribe to
@@ -997,6 +1063,9 @@ class zurich_UHF(BaseInstrument):
               If no channels are active, the sweep will not progress, it will stall.
               If an active channel is subscribed to, deactivating without changing the
               subscription will hang the sweep.
+        order: is the filter order when bw is fixed or 'auto'
+        w_suppr: is omega suppression in dB used for bw='auto'
+        sinc: sets the filter sinc, when bw is fixed or 'auto'
         The total settling time in seconds is max(settle_time_s, settle_n_tc*timeconstant_s)
         where timeconstant_s is the timeconstant in seconds for each frequency (can change with bw='auto').
         The total averaging time in seconds is max(avg_count/rate, avg_n_tc*timeconstant_s, 1/rate).
@@ -1020,13 +1089,17 @@ class zurich_UHF(BaseInstrument):
         self.sweep_x_count.set(count)
         self.sweep_x_src_node.set(src)
         self.sweep_x_log.set(logsweep)
-        self.sweep_x_log.set(logsweep)
+        # Need to set order first, otherwise the time constant is not
+        # set properly
+        self.sweep_order.set(order)
+        sleep(0.1) # This seems to be needed to make sure order is set before we change
+                   # the fix frequency
         # In version 14.02, whenever sweep_auto_bw_fixed is 0.
         # It goes in auto mode. This is the same
         # behavior as before. 14.02 added auto has bw_mode=2
         # which is auto irrespective of sweep_auto_bw_fixed value.
         # The old behavior was not change to keep backwards compatibility (Juerg 23062014)
-        #  Documentations errors should be fixed.
+        #  Documentations errors should be fixed (done in 14.08)
         if bw == None:
             self.sweep_auto_bw_mode.set('manual')
             if self.sweep_auto_bw_fixed.getcache()<=0:
@@ -1044,6 +1117,9 @@ class zurich_UHF(BaseInstrument):
             self.sweep_loop_count.set(loop_count)
         self.sweep_x_log.set(logsweep)
         self.sweep_mode.set(mode)
+        self.sweep_sinc_en.set(sinc)
+        self.sweep_max_bw.set(max_bw)
+        self.sweep_omega_suppression_db.set(w_suppr)
         self.sweep_averaging_count.set(avg_count)
         self.sweep_averaging_n_tc.set(avg_n_tc)
         self.sweep_settling_time_s.set(settle_time_s)
@@ -1067,19 +1143,20 @@ class zurich_UHF(BaseInstrument):
 #   available: auxin0, auxin0pwr, auxin0stddev
 #              auxin1, auxin1pwr, auxin1stddev
 #              bandwidth, tc (for auto they are the computed ones, the ones set to, the used one are truncated)
-#              frequency, frequencystddev
+#              tcmeas
+#              frequency, frequencypwr, frequencystddev
 #              grid
 #              nexttimestamp, settimestamp (both in s, timestamps of set and first read)
 #              settling  (=nexttimestamp-settimestamp)
 #              timestamp (single value, in raw clock ticks: 1.8 GHz)
 #              r, rpwr, rstddev
-#              phase, phasestddev
+#              phase, phasepwr, phasestddev
 #              x, xpwr, xstddev
 #              y, ypwr, ystddev
 # All points are in order of start-stop, even for binary.
 #  however
 # bandwidth is enbw (related to tc)
-#  for the various stddev to not be nan, you need avg count>1 (>2 for 14.02)
+#  for the various stddev to not be nan, you need avg count>1 (>2 only for 14.02)
 #    for i the iterations of N averages
 #   base(avg): sum_i x_i/N
 #   pwr: sum_i (x_i**2)/N
@@ -1095,14 +1172,20 @@ class zurich_UHF(BaseInstrument):
 #    As of version 14.02 it is fast
 #  get of subdevices does not work like get of main device (not option to flatten)
 #   should be changed in next version (Juerg 23062014)
+#   fixed in 14.08
 # Documentation is much improved in version 14.02
 #     pwrtemps was temps before version 14.02
 #  timeit zi.ask('/{dev}/stats/physical/digitalboard/pwrtemps/0', t='int')
+#    for 14.08 use this instead
+#  timeit zi.ask('/{dev}/stats/physical/temperatures/0', t='int')
 #  100 loops, best of 3: 2.55 ms per loop
 #  100 loops, best of 3: 5.36 ms per loop  # version 14.02 using USB
+#  100 loops, best of 3: 5.75 ms per loop  # version 14.08 using USB
 # timeit zi.ask('/{dev}/stats/physical/digitalboard/pwrtemps/0')
-#  10 loops, best of 3: 250 ms per loop (for 13.06 and 100 ms for 13.10)
-# 100 loops, best of 3: 9.31 ms per loop # version 14.02 using USB
+#  timeit zi.ask('/{dev}/stats/physical/temperatures/0')
+#   10 loops, best of 3: 250 ms per loop (for 13.06 and 100 ms for 13.10)
+#  100 loops, best of 3: 9.31 ms per loop  # version 14.02 using USB
+#  100 loops, best of 3: 12.5 ms per loop  # version 14.08 using USB
 # This is because it uses get_as_poll
 #  some are faster like '/zi' or '/{dev}/stats/cmdstream'
 #  as of 14.02 that is no longer the case.
@@ -1117,29 +1200,38 @@ class zurich_UHF(BaseInstrument):
 # sorted([ k for k in ll if k not in llso]) # nodes that are not settings only (they are stream, read only), same as above
 #   there are many: /zi/about /zi/clockbase /zi/devices
 #                   {dev}/*/*/sample
+#                   {dev}/aucarts/*/value
+#                   {dev}/aupolars/*/value
 #                   {dev}/auxouts/*/value
 #                   {dev}/clockbase
+#                   {dev}/demods/0/freq
 #                   {dev}/dios/0/input
+#                   {dev}/extrefs/*/adcselect
 #                   {dev}/features/*
+#                   {dev}/inputpwas/*/wave
+#                   {dev}/outputpwas/*/wave
+#                   {dev}/scopes/0/trigforce
 #                   {dev}/scopes/0/wave
 #                   {dev}/sigouts/*/over
 #                   {dev}/stats
 #                   {dev}/status
 #                   {dev}/system everything except:
+#                       sorted([k for k in vv if k.startswith('/dev2021/system')])
 #                      {dev}/system/calib/auto
 #                      {dev}/system/calib/tempthreshold
 #                      {dev}/system/calib/timeinterval
-#                      {dev}/system/compdelay/delays/*
 #                      {dev}/system/extclk
-#                      {dev}/system/extclksquare
 #                      {dev}/system/preampenable
 #                      {dev}/system/xenpakenable
-# nodes not identified as settings only: {dev}/system/
+#
+# nodes not identified as settings only (and maybe should): {dev}/system/
 #                         jumbo
 #                         nics ...
 #                         porttcp portudp
 #  These might be more properly documented in next version (Juerg 23062014)
+#     14.08: no change
 
+# instruments_ZI = instruments.zurich
 # za=instruments_ZI.ziAPI()
 def _time_poll(za):
     import time
@@ -1157,36 +1249,43 @@ def _time_poll(za):
 # za.poll() # first empty the poll buffer
 # timeit instruments_ZI._time_poll(za)
 # timeit print instruments_ZI._time_poll(za)
-#  This is always 100 ms (version 13.10). For version 14.02 it is now ~6 ms
+#  This is always 100 ms (version 13.10). For version 14.02 it is now ~6 ms, version 14.08 it is 6.9 ms
 #  When subscribing to something like
 #    /dev2021/demods/0/sample at 1.717 kS/s  (timeit za.poll()  returns ~25 ms)
 #             in version 14.02 timeit za.poll(100)  returns ~ 16ms
+#             in version 14.08 timeit za.poll(100)  returns ~ 18ms
 #  polls will return more quickly but with the information from /dev2021/demods/0/sample multiples times
 #  between the /dev2021/demods/0/sinc ones
 #
 #  tests: (These are unchanged for 14.02)
-# set(zi.demod_en,True, ch=0); set(zi.demod_rate,13.41); set(zi.demod_order,3)
+# set(zi.demod_en,True, ch=0); set(zi.demod_rate,13.41); set(zi.demod_order,3); set(zi.demod_enbw,1.)
 #   get(zi.demod_tc) # 0.0938 s (1.00 enbw, 0.865 3dB bw)
 #   first test settling time/average time is maximum of both n_tc and time
-# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=1)
-# timeit zi.run_and_wait() # 1.78s
-# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=1, settle_n_tc=0, avg_count=1)
-# timeit zi.run_and_wait() # 11.5s
-# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=5, avg_count=1)
-# timeit zi.run_and_wait() # 6.25s
-# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=13)
-# timeit zi.run_and_wait() # 10.8s
-# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=0, avg_n_tc=5)
-# timeit zi.run_and_wait() # 5.59s
+# In 14.08 this test is no longer possible as is because settle_n_tc is forced to 1 has minimum
+#   There also seem to be a longer overhead. 14.08 also incorrectly calculates the bandwidth
+#     when calling set_sweep_mode successively with different order
+#  But documentation now specifies that it is the maximum of both times.
+# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=1, order=3)
+# timeit zi.run_and_wait() # 1.78s,  14.08 gives 7.89 s
+# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=1, settle_n_tc=0, avg_count=1, order=3)
+# timeit zi.run_and_wait() # 11.5s,  14.08 gives 15.4
+# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=5, avg_count=1, order=3)
+# timeit zi.run_and_wait() # 6.25s,  14.08 gives 13.9
+# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=13, order=3)
+# timeit zi.run_and_wait() # 10.8s,  14.08 gives 17.6
+# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=0, avg_n_tc=5, order=3)
+# timeit zi.run_and_wait() # 5.59s,  14.08 gives 11.6
 #
+# set(zi.demod_rate, 1.717e3)
 #  test the calculations for stddev
-# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=2)
+# zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=2, order=3)
 # zi.run_and_wait(); r=zi.sweep_data(); rr=r['/dev2021/demods/0/sample'][0][0]
 # sqrt(rr['ypwr']-rr['y']**2)/rr['ystddev'] # should be all 1.
 #   Version 14.02 is now unbiased so for avg_count=n
 # sqrt((rr['ypwr']-rr['y']**2)*n/(n-1.))/rr['ystddev'] # should be all 1.
 #   This fails for n=2 because rr['ystddev'] is NaN
 #   It should be fixed in next version (Juerg 23062014) and return a real number when n=2
+#   Fixed in 14.08
 #
 #  test auto time constants
 def _calc_bw(demod_result_dict, order=3):
@@ -1198,20 +1297,45 @@ def _calc_bw(demod_result_dict, order=3):
     m =np.array([df/2, f/k])
     bw = np.min(m, axis=0)
     return bw
-# zi.set_sweep_mode(10e3,10e4,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1)
-# zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1)
+# For 14.08 the bandwidth calculation has changed
+def _calc_bw2(f, order=3, w_suppr=40, sinc=False, max_bw=1.25e6):
+    atten = 10.**(w_suppr/20.)
+    df = np.diff(f)
+    df = np.append(df[0], df)
+    # atten = (fc/f)**n, f>>fc, fc=1/(2*pi*tc)
+    #  we need enbw from fc
+    k = np.sqrt(atten**(2./order) - 1.)
+    fc = f/k
+    enbw = fc * np.sqrt(np.pi)*gamma(order-0.5)/(2*gamma(order))
+    m =np.array([df/2, enbw])
+    bw = np.min(m, axis=0)
+    if sinc:
+        # I checked and it is really f<50, not f<=50.
+        bw = np.where(f<50, f, bw)
+    bw = np.minimum(bw, max_bw)
+    return bw
+# zi.set_sweep_mode(10e3,10e4,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1, order=3, w_suppr=40)
+# zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1, order=3, w_suppr=40)
 #  zi.run_and_wait(); r=zi.sweep_data(); rr=r['/dev2021/demods/0/sample'][0][0]
 # instruments_ZI._calc_bw(rr)/rr['bandwidth'] # should all be 1
+#   for 14.08, use instead
+# instruments_ZI._calc_bw2(rr['grid'], order=3, w_suppr=46.)/ rr['bandwidth']
 #  repeat with
-# zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1, logsweep=True)
-# set(zi.demod_sinc_en,True)  # For 14.02 this makes the instrument crash
+# zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1, logsweep=True, order=3, w_suppr=40)
+# ##set(zi.demod_sinc_en,True)  # For 14.02 this makes the instrument crash
+# ##zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1, order=3, w_suppr=40) # same bandwidth calc but much slower to run
+# zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1, logsweep=True, sinc=True, order=3, w_suppr=40)
 #    sinc filter is not enabled yet (Juerg 23062014):
 #      We're currently working on a fix on
 #      the firmware. The next step is then support on the sweeper. This is
 #      needed as the sinc filter does only support discrete frequency values.
 #      The filter itself should be working in the next release. The sweeper
 #      support may take longer.
-# zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1) # same bandwidth calc but much slower to run
+#    Fixed in 14.08
+#   instruments_ZI._calc_bw2(rr['grid'], order=3., w_suppr=40, sinc=True)/ rr['bandwidth']
+#
+# zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1, logsweep=True, sinc=True, order=3, w_suppr=40, max_bw=17)
+#   instruments_ZI._calc_bw2(rr['grid'], order=3., w_suppr=40, max_bw=17., sinc=True)/ rr['bandwidth']
 #
 # find all available time constants
 def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
@@ -1297,7 +1421,8 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 # it seems to do the time constants calculation in floats instead of double
 #
 # in 13.10 get('', True) fails (was returning a flat dictionnary), 14.02 it now works again.
-#  also zhinst loads all the examples. (still in 14.02)
+#  also zhinst loads all the examples. (still in 14.02. This is no longer the case in 14.08 where nothing
+#    is automatically loaded, and the examples have moved to a submodule.)
 #  and list_nodes shows FEATURES/CODE but it cannot be read (in 14.02 it times out). It is a write only node.
 # sweep has lots of output to the screen (can it be disabled?) (fixed in 14.02)
 #   can reenable it in 14.02 (also logs the info in a file with zi._zi_daq.setDebugLevel(2) (2 or below looks like what I had before))
@@ -1306,10 +1431,12 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 #    to redisable it)
 #
 # python says revision 20298, installer says 20315 (installer revision is head revision. installer>python is normal)
-# for 14.02 it python says 23152, installer says 23225
+# for 14.02, python says 23152, installer says 23225
+# for 14.08, python says 26222, installer says 26222
 #
 # echoDevice does not work (still in 14.02). It is for HF2 instruments not for UHF.
 #   better documention awaits changes to properly handle synchronisation on all platforms (Juerg 23062014)
+#   This is fixed in 14.08: echoDevice now works and does the same as sync (which is a new function to help synchronise)
 # syncSetInt takes 250 ms (with 13.06,100 ms with 13.10, It is no longer a problem with 14.02, but sync/no sync give ~6 ms)
 #  compare
 #   timeit zi.write('/dev2021/sigins/0/on', 1, t='int')
@@ -1323,6 +1450,7 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 #    However sync-set does not help to synchronize between sessions or with streaming (subscribe)
 #    Suggest to add 100 ms if there is a need to make sure streaming data comes after change
 #    A futur sync-set might do this stream sync correctly.
+#  For 14.08 sync=True: 7.2ms, False: 6.0 ms
 # Compare
 # s='/dev2021/demods/0/enable'
 # za.set_async(s,1); print za.getI(s); time.sleep(.1); print za.getI(s)
@@ -1793,7 +1921,8 @@ zi_result_dic = {ZI_INFO_SUCCESS:'Success (no error)',
                  ZI_ERROR_GENERAL+0x17:'Device connection timeout',
                  ZI_ERROR_GENERAL+0x18:'Device already connected using another interface',
                  ZI_ERROR_GENERAL+0x19:'Device needs firmware upgrade',
-                 ZI_ERROR_GENERAL+0x1a:'Max Error' }
+                 ZI_ERROR_GENERAL+0x1a:'Trying to get data from a poll event with wrong target data type',
+                 ZI_ERROR_GENERAL+0x1b:'Max Error' }
 
 class ziAPI(object):
     _default_host = 'localhost'
@@ -1802,7 +1931,6 @@ class ziAPI(object):
         self._last_result = 0
         self._ziDll = ctypes.CDLL('/Program Files/Zurich Instruments/LabOne/API/C/lib/ziAPI-win32.dll')
         self._conn = ziConnection()
-        # skipped ziAPIAllocateEventEx: example do no use it, they say to free it but not how. Is it just malloc?
         self._makefunc('ziAPIInit', [POINTER(ziConnection)],  prepend_con=False)
         self._makefunc('ziAPIDestroy', [] )
         self._makefunc('ziAPIGetRevision', [POINTER(c_uint)], prepend_con=False )
@@ -1827,6 +1955,8 @@ class ziAPI(object):
         self._makefunc('ziAPISyncSetValueD', [c_char_p, POINTER(ziDoubleType)] )
         self._makefunc('ziAPISyncSetValueI', [c_char_p, POINTER(ziIntegerType)] )
         self._makefunc('ziAPISyncSetValueB', [c_char_p, c_uint8_p, c_uint32_p, c_uint32] )
+        self._makefunc('ziAPISync', [] ) # added in 14.08
+        self._makefunc('ziAPIEchoDevice', [c_char_p] ) # added in 14.08, deprecated.
         self._makefunc('ziAPISubscribe', [c_char_p] )
         self._makefunc('ziAPIUnSubscribe', [c_char_p] )
         self._makefunc('ziAPIPollDataEx', [POINTER(ziEvent), c_uint32] )
@@ -1843,6 +1973,13 @@ class ziAPI(object):
         self._SecondsTimeStamp = self._ziDll.ziAPISecondsTimeStamp
         self._SecondsTimeStamp.restype = c_double
         self._SecondsTimeStamp.argtypes = [ziTimeStampType]
+        # The allocate/deallocate are not useful in python but they are included here for completeness/testing
+        self._AllocateEventEx = self._ziDll.ziAPIAllocateEventEx
+        self._AllocateEventEx.restype = POINTER(ziEvent)
+        self._AllocateEventEx.argtypes = []
+        self._DeallocateEventEx = self._ziDll.ziAPIDeallocateEventEx # added in 14.08
+        self._DeallocateEventEx.restype = None
+        self._DeallocateEventEx.argtypes = [POINTER(ziEvent)]
         self.init()
         if autoconnect:
             self.connect_ex(hostname, port)
@@ -1905,9 +2042,10 @@ class ziAPI(object):
         self._Destroy()
     def connect(self, hostname=_default_host, port=_default_port):
         """
-        If you want to reconnect, you need to first disconnect, then destroy
-        then init, before trying connect.
+        If you want to reconnect, you need to first disconnect.
         """
+        # before 14.08, to reconnect required: first disconnect, then destroy
+        # then init, before trying connect. Now just disconnect first is necessary
         self._Connect(hostname, port)
         print 'Connected'
     def disconnect(self):
@@ -1986,6 +2124,17 @@ class ziAPI(object):
             self._SyncSetValueB(path, val, byref(l), l)
         else:
             raise TypeError, 'Unhandled type for val'
+    def sync(self):
+        """ Make sure all changes have been propagated
+        """
+        self._Sync()
+        # For 14.08, %timeit z.sync(), takes about 10 ms
+    def echo(self, device_serial=''):
+        """ For UHF, the same as sync, device_serial is ignored.
+            Only for HF2 is per decice echo implemented.
+            Note: It is a depracated function.
+        """
+        self._EchoDevice(device_serial)
 
 # In Visual studio use, Tools/Visual studio command prompt, then:
 #    dumpbin /EXPORTS "\Program Files\Zurich Instruments\LabOne\API\C\lib\ziAPI-win32.dll"
@@ -1999,3 +2148,31 @@ class ziAPI(object):
 #        or use cygwin objdump
 # objdump -x "\Program Files\Zurich Instruments\LabOne\API\C\lib\ziAPI-win32.dll" | less
 #    and look for The Export Tables section
+
+
+# Version 14.08
+#  msi install worked well
+#  /dev/demods/0/bypass: what is this (it has been there for a while, but undocumented)
+#  /{dev}/sigins/0/bw: what is this
+#  Documentation for settling/inaccuracy is unclear (it is the fraction of the change left)
+#  settling/tc can't be <1 anymore
+#  longer overhead for sweep
+#  Documentation for sweeeper output: repeat of rpwr, missing tcmeas
+# web: Sweep statistics *TC only allows 0, 5, 15, 50
+#      sweep reverse mode undocumented
+#      sweep.fixed always turns on sync at lowe freq
+# ziPython:
+#      Could you return the error code as a value available in the exception
+#         (so I don't have to parse the error message (in case it changes))
+#      Also it no longer produces the
+#          'ZIAPIException with status code: 32778. Unable to connect socket'
+#      which I was using to tell the user to start the server.
+#      There is a problem when changing the order/ fixed bw for sweep:
+#         zi.sweep_auto_bw_mode.set('fixed')
+#         zi.sweep_order.set(3); zi.sweep_auto_bw_fixed.set(23.); wait(1)
+#         get(zi.sweep_order), get(zi.sweep_auto_bw_fixed) # should see (3. 23)
+#         zi.sweep_order.set(4); zi.sweep_auto_bw_fixed.set(23.); wait(1)
+#         get(zi.sweep_order), get(zi.sweep_auto_bw_fixed) # should see (4, 23) but instead get (4, 19.167)
+#      Changing order changes the bw. But when they are done quickly, they behave as if
+#          fixed_bw is set before order is changed, hence the incorrect bw.
+#      It is probably a thread sync problem
