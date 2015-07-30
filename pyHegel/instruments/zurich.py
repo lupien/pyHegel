@@ -71,7 +71,7 @@ def _check_zi_python_version(*arg, **kwarg):
         else:
             raise
     python_ver = [int(v) for v in python_ver.split('.')]
-    if python_ver[0] < 14 or python_ver[1] < 8 or python_rev < 26222:
+    if python_ver[0] < 14 or (python_ver[0] == 14 and python_ver[1] < 8) or python_rev < 26222:
         raise RuntimeError("The ziPython is too old. Install at least ziPython2.7_ucs2-14.08.26222-win32.msi")
 
 class ChoiceIndex(_ChoiceIndex):
