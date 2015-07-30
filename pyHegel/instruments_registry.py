@@ -280,7 +280,7 @@ def add_to_instruments(name=None):
         Note that if you don't specify name, it will use the class or function name.
         For an object that does not possess a __name__ attribute, you need to
         specify name.
-        When no specifyin a name, you can use it either like:
+        When not specifying a name, you can use it either like:
          @add_to_instruments()
          some_object....
         or:
