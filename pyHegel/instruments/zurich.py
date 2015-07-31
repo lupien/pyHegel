@@ -662,7 +662,7 @@ class zurich_UHF(BaseInstrument):
         system_fw_rev = str(self.ask('/{dev}/system/fwrevision')[0])
         system_fx2_usb = self.ask('/{dev}/system/fx2revision')[0]
         #return '{name} {system_devtype} #{system_serial} (analog/digital/fpga/fw_rev:{system_analog_board_rev}/{system_digital_board_rev}/{system_fpga_rev}/{system_fw_rev}, code:{system_code}, opt:{system_options}  [server {server_ver}-{server_rev} fw:{server_fw_rev}] [python {python_ver}-{python_rev}])'.format(
-        return '{name},{system_devtype},{system_serial},(analog/digital/fpga/fw_rev/fx2_usb:{system_analog_board_rev}/{system_digital_board_rev}/{system_fpga_rev}/{system_fw_rev}, opt:{system_options}  [server {server_ver}-{server_rev} fw:{server_fw_rev}] [python {python_ver}-{python_rev}])'.format(
+        return '{name},{system_devtype},{system_serial},(analog/digital/fpga/fw_rev/fx2_usb:{system_analog_board_rev}/{system_digital_board_rev}/{system_fpga_rev}/{system_fw_rev}/{system_fx2_usb}, opt:{system_options}  [server {server_ver}-{server_rev} fw:{server_fw_rev}] [python {python_ver}-{python_rev}])'.format(
              name=name, python_ver=python_ver, python_rev=python_rev,
              server_ver=server_ver, server_rev=server_rev, server_fw_rev=server_fw_rev,
              system_devtype=system_devtype, system_serial=system_serial,
