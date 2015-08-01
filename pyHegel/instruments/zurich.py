@@ -71,8 +71,8 @@ def _check_zi_python_version(*arg, **kwarg):
         else:
             raise
     python_ver = [int(v) for v in python_ver.split('.')]
-    if python_ver[0] < 14 or (python_ver[0] == 14 and python_ver[1] < 8) or python_rev < 26222:
-        raise RuntimeError("The ziPython is too old. Install at least ziPython2.7_ucs2-14.08.26222-win32.msi")
+    if python_ver[0] < 15 or (python_ver[0] == 15 and python_ver[1] < 5) or python_rev < 31456:
+        raise RuntimeError("The ziPython is too old. Install at least ziPython2.7_ucs2-15.05.31456-win32.msi")
 
 class ChoiceIndex(_ChoiceIndex):
     def __call__(self, input_val):
@@ -236,6 +236,7 @@ class ziDev(scpiDevice):
 #  sweep/omegasuppression  (new 14.08)
 #  sweep/order             (new 14.08)
 #  sweep/phaseunwrap
+#  sweep/remainingtime     (new 15.05, undocumented)
 #  sweep/samplecount
 #  sweep/savepath          (new 14.08)
 #  sweep/scan
@@ -260,6 +261,7 @@ class ziDev(scpiDevice):
 #  trigger/0/holdoff/time
 #  trigger/0/hwtrigsource (new in 13.10)
 #  trigger/0/hysteresis   (new 14.08)
+#  trigger/0/level        (new 15.05)
 #  trigger/0/path
 #  trigger/0/pulse/max
 #  trigger/0/pulse/min
@@ -318,13 +320,15 @@ class zurich_UHF(BaseInstrument):
         #  sweep, record, .... and renders them unusable
         # To free up the memory of sweep, call sweep.clear() before deleting
         # (or replacing) it.
-        APIlevel = 4 # 1 or 4 for version 14.02, 14.08
+        #APIlevel = 4 # 1 or 4 for version 14.02, 14.08
+        APIlevel = 4 # 1, 4 or 5 for version 15.05
         try:
             self._zi_daq = zi.ziDAQServer(host, port, APIlevel)
         except RuntimeError as e:
             if e.message == _error_connection_invalid:
                 # we are probably using the wrong version, check that.
                 _check_zi_python_version(host=host, port=port)
+            # This message does not seem to occur anymore: 14.08 15.05
             if e.message == 'ZIAPIException with status code: 32778. Unable to connect socket':
                 raise RuntimeError('Unable to connect to server. Either you have the wrong host/port '
                                    'or the server is not running. On Windows you need to start (from start menu): '
@@ -417,7 +421,7 @@ class zurich_UHF(BaseInstrument):
                                       'demod_osc_src', 'demod_adc_src')
         base = self._conf_helper('current_demod', 'current_osc', 'current_sigins', 'current_sigouts',
                                  'osc_freq', 'sigins_en', 'sigins_ac_en', 'sigins_50ohm_en',
-                                 'sigins_range',
+                                 'sigins_range', 'sigins_scaling', 'sigins_aa_bw_en',
                                  'sigouts_en', 'sigouts_offset', 'sigouts_range', 'sigouts_ampl_Vp', 'sigouts_50ohm_en',
                                  'sigouts_autorange_en', 'sigouts_output_clipped', options)
         return extra+base
@@ -478,7 +482,7 @@ class zurich_UHF(BaseInstrument):
         if settings_only:
             flags |= (1<<3)
         src, pre = self._select_src(src)
-        # The returned list is all caps (up to 14.02), but I prefer/want it lower case
+        # The returned list is all caps (up to 15.05), but I prefer/want it lower case
         return [s.lower() for s in src.listNodes(pre+base, flags)]
     def _subscribe(self, base='/{dev}/demods/*/sample', src='main'):
         base = self._conv_command(base)
@@ -490,11 +494,12 @@ class zurich_UHF(BaseInstrument):
         src, pre = self._select_src(src)
         unsub = getattr(src, 'unsubscribe')
         unsub(base)
-    #def echo_dev(self):
-    #    """
-    #    It is suppose to wait until all buffers are flushed.
-    #    """
-    #    self._zi_daq.echoDevice(self._zi_dev)
+    def echo_dev(self):
+        """
+        It waits until all buffers are flushed.
+        For UHF, same as sync.
+        """
+        self._zi_daq.echoDevice(self._zi_dev)
     def flush(self):
         """
         Flush data in socket connection and API buffers.
@@ -640,6 +645,7 @@ class zurich_UHF(BaseInstrument):
     def sync(self):
         """ Performs a synchronization. All data read after this point use
             the previously set values.
+            For UHF, same as echo_dev
         """
         self._zi_daq.sync()
     def idn(self):
@@ -745,8 +751,9 @@ class zurich_UHF(BaseInstrument):
                     For sweep mode defaults to ['x', 'y', 'r' ,'phase'] and the available strings are:
                       'auxin0', 'auxin0pwr', 'auxin0stddev',
                       'auxin1', 'auxin1pwr', 'auxin1stddev',
-                      'bandwidth', 'tc', 'tcmeas', 'grid',
+                      'bandwidth', 'tc', 'tcmeas',
                       'settimestamp', 'nexttimestamp', 'settling',
+                      'grid', 'count',
                       'frequency',  'frequencypwr', 'frequencystddev',
                       'x', 'xpwr', 'xstddev',
                       'y', 'ypwr', 'ystddev',
@@ -762,11 +769,11 @@ class zurich_UHF(BaseInstrument):
                      r and phase are as above but using r_i = abs(x_i + 1j y_i)
                                                     phase_i = angle(x_i + 1j y_i)
                     grid are the sweep points requested.
-                    settimestamp, nexttimestamp are respectivelly the timestamps (in s)
+                    settimestamp, nexttimestamp are respectivelly the timestamps (in ticks)
                       of the set and of the first read.
                     settling  (=nexttimestamp-settimestamp)
-                    bandwidth is the enbw (related to tc)
-                      to obtain the actually used bandwith: bandwidth*tc/tcmeas
+                    bandwidth is the enbw (related to tcmeas)
+                      to obtain the calculated bandwith: bandwidth*tcmeas/tc
                     tc is calculated tc
                     tcmeas is the tc actually used (due to rounding)
         """
@@ -880,10 +887,14 @@ class zurich_UHF(BaseInstrument):
         self.demod_trigger = ziDev_ch_demod('demods/{ch}/trigger', str_type=int)
         self.demod_data = ziDev_ch_demod(getstr='demods/{ch}/sample', input_type='sample', doc='It will wait for the next available samples (depends on rate). X and Y are in RMS')
         self.osc_freq = ziDev_ch_osc('oscs/{ch}/freq', str_type=float, setget=True)
-        # TODO figure out what sigins/{ch}/bw does
+        # TODO handle sigins/{ch}/autorange (only a command?)
         self.sigins_ac_en = ziDev_ch_sigins('sigins/{ch}/ac', str_type=bool)
         self.sigins_50ohm_en = ziDev_ch_sigins('sigins/{ch}/imp50', str_type=bool)
+        self.sigins_aa_bw_en = ziDev_ch_sigins('sigins/{ch}/bw', str_type=bool, doc='Enables the antialiasing 600 MHz filer. It is 900 MHz when disabled.') # doc from web interface debug entry
         self.sigins_en = ziDev_ch_sigins('sigins/{ch}/on', str_type=bool)
+        self.sigins_max = ziDev_ch_sigins(getstr='sigins/{ch}/max', str_type=float)
+        self.sigins_min = ziDev_ch_sigins(getstr='sigins/{ch}/min', str_type=float)
+        self.sigins_scaling = ziDev_ch_sigins('sigins/{ch}/scaling', str_type=float)
         range_lst = np.concatenate( (np.linspace(0.01, .1, 10), np.linspace(0.2, 1.5, 14)))
         range_lst = [float(v) for v in np.around(range_lst, 3)]
         self.sigins_range = ziDev_ch_sigins('sigins/{ch}/range', str_type=float, setget=True, choices=range_lst, doc='The voltage range amplitude A (the input needs to be between -A and +A. There is a attenuator for A<= 0.1')
@@ -938,7 +949,6 @@ class zurich_UHF(BaseInstrument):
         self.sweep_endless_loop_en = ziDev('endless', str_type=bool, input_src='sweep')
         auto_bw_ch = ChoiceIndex(['manual', 'fixed', 'auto'])
         self.sweep_auto_bw_mode = ziDev('bandwidthcontrol', choices=auto_bw_ch, input_src='sweep')
-        #self.sweep_auto_bw_en = ziDev('bandwidthcontrol', str_type=bool, input_src='sweep')
         self.sweep_auto_bw_fixed = ziDev('bandwidth', str_type=float, input_src='sweep', min=1e-6)
         self.sweep_max_bw = ziDev('maxbandwidth', str_type=float, input_src='sweep')
         self.sweep_omega_suppression_db = ziDev('omegasuppression', str_type=float, input_src='sweep', min=0)
@@ -959,6 +969,7 @@ class zurich_UHF(BaseInstrument):
 #  sweep/filename
 #  sweep/historylength
 #  sweep/savepath
+#  sweep/remainingtime
 
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
@@ -1092,8 +1103,8 @@ class zurich_UHF(BaseInstrument):
         # Need to set order first, otherwise the time constant is not
         # set properly
         self.sweep_order.set(order)
-        sleep(0.1) # This seems to be needed to make sure order is set before we change
-                   # the fix frequency
+        #sleep(0.1) # This seems to be needed to make sure order is set before we change
+                   # the fix frequency. No longer needed in 15.05
         # In version 14.02, whenever sweep_auto_bw_fixed is 0.
         # It goes in auto mode. This is the same
         # behavior as before. 14.02 added auto has bw_mode=2
@@ -1147,12 +1158,15 @@ class zurich_UHF(BaseInstrument):
 #              frequency, frequencypwr, frequencystddev
 #              grid
 #              nexttimestamp, settimestamp (both in s, timestamps of set and first read)
+#                     They are now (15.05) in clock ticks
 #              settling  (=nexttimestamp-settimestamp)
-#              timestamp (single value, in raw clock ticks: 1.8 GHz)
+#              timestamp (single value, in raw clock ticks: 1.8 GHz, at end of measurement)
 #              r, rpwr, rstddev
 #              phase, phasepwr, phasestddev
 #              x, xpwr, xstddev
 #              y, ypwr, ystddev
+#   new in 15.05: bandwidthmode (single value), count (per sample), flags (single value),
+#                 samplecount (single value, # points), sampleformat (single value), sweepmode (single value)
 # All points are in order of start-stop, even for binary.
 #  however
 # bandwidth is enbw (related to tc)
@@ -1181,11 +1195,13 @@ class zurich_UHF(BaseInstrument):
 #  100 loops, best of 3: 2.55 ms per loop
 #  100 loops, best of 3: 5.36 ms per loop  # version 14.02 using USB
 #  100 loops, best of 3: 5.75 ms per loop  # version 14.08 using USB
+#  100 loops, best of 3: 5.65 ms per loop  # version 15.05 using USB
 # timeit zi.ask('/{dev}/stats/physical/digitalboard/pwrtemps/0')
 #  timeit zi.ask('/{dev}/stats/physical/temperatures/0')
 #   10 loops, best of 3: 250 ms per loop (for 13.06 and 100 ms for 13.10)
 #  100 loops, best of 3: 9.31 ms per loop  # version 14.02 using USB
 #  100 loops, best of 3: 12.5 ms per loop  # version 14.08 using USB
+#  100 loops, best of 3: 11.7 ms per loop  # version 14.08 using USB
 # This is because it uses get_as_poll
 #  some are faster like '/zi' or '/{dev}/stats/cmdstream'
 #  as of 14.02 that is no longer the case.
@@ -1211,7 +1227,11 @@ class zurich_UHF(BaseInstrument):
 #                   {dev}/inputpwas/*/wave
 #                   {dev}/outputpwas/*/wave
 #                   {dev}/scopes/0/trigforce
+#                   {dev}/scopes/0/trigpredelay
 #                   {dev}/scopes/0/wave
+#                   {dev}/sigins/*/autorange
+#                   {dev}/sigins/*/max
+#                   {dev}/sigins/*/min
 #                   {dev}/sigouts/*/over
 #                   {dev}/stats
 #                   {dev}/status
@@ -1222,7 +1242,6 @@ class zurich_UHF(BaseInstrument):
 #                      {dev}/system/calib/timeinterval
 #                      {dev}/system/extclk
 #                      {dev}/system/preampenable
-#                      {dev}/system/xenpakenable
 #
 # nodes not identified as settings only (and maybe should): {dev}/system/
 #                         jumbo
@@ -1230,6 +1249,7 @@ class zurich_UHF(BaseInstrument):
 #                         porttcp portudp
 #  These might be more properly documented in next version (Juerg 23062014)
 #     14.08: no change
+#     15.05: no change
 
 # instruments_ZI = instruments.zurich
 # za=instruments_ZI.ziAPI()
@@ -1250,10 +1270,12 @@ def _time_poll(za):
 # timeit instruments_ZI._time_poll(za)
 # timeit print instruments_ZI._time_poll(za)
 #  This is always 100 ms (version 13.10). For version 14.02 it is now ~6 ms, version 14.08 it is 6.9 ms
+#        version 15.05:  6.6 ms
 #  When subscribing to something like
 #    /dev2021/demods/0/sample at 1.717 kS/s  (timeit za.poll()  returns ~25 ms)
 #             in version 14.02 timeit za.poll(100)  returns ~ 16ms
 #             in version 14.08 timeit za.poll(100)  returns ~ 18ms
+#             in version 15.05 timeit za.poll(100)  returns ~ 16ms
 #  polls will return more quickly but with the information from /dev2021/demods/0/sample multiples times
 #  between the /dev2021/demods/0/sinc ones
 #
@@ -1266,15 +1288,15 @@ def _time_poll(za):
 #     when calling set_sweep_mode successively with different order
 #  But documentation now specifies that it is the maximum of both times.
 # zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=1, order=3)
-# timeit zi.run_and_wait() # 1.78s,  14.08 gives 7.89 s
+# timeit zi.run_and_wait() # 1.78s,  14.08 gives 7.89 s,  15.05 gives 4.8 s
 # zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=1, settle_n_tc=0, avg_count=1, order=3)
-# timeit zi.run_and_wait() # 11.5s,  14.08 gives 15.4
+# timeit zi.run_and_wait() # 11.5s,  14.08 gives 15.4,    15.05 gives 11.5
 # zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=5, avg_count=1, order=3)
-# timeit zi.run_and_wait() # 6.25s,  14.08 gives 13.9
+# timeit zi.run_and_wait() # 6.25s,  14.08 gives 13.9,    15.05 gives 10
 # zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=13, order=3)
-# timeit zi.run_and_wait() # 10.8s,  14.08 gives 17.6
+# timeit zi.run_and_wait() # 10.8s,  14.08 gives 17.6,    15.05 gives 13.8
 # zi.set_sweep_mode(10e3,10e4,10, bw=1, settle_time_s=0, settle_n_tc=0, avg_count=0, avg_n_tc=5, order=3)
-# timeit zi.run_and_wait() # 5.59s,  14.08 gives 11.6
+# timeit zi.run_and_wait() # 5.59s,  14.08 gives 11.6,    15.05 gives 8.9
 #
 # set(zi.demod_rate, 1.717e3)
 #  test the calculations for stddev
@@ -1319,7 +1341,10 @@ def _calc_bw2(f, order=3, w_suppr=40, sinc=False, max_bw=1.25e6):
 #  zi.run_and_wait(); r=zi.sweep_data(); rr=r['/dev2021/demods/0/sample'][0][0]
 # instruments_ZI._calc_bw(rr)/rr['bandwidth'] # should all be 1
 #   for 14.08, use instead
-# instruments_ZI._calc_bw2(rr['grid'], order=3, w_suppr=46.)/ rr['bandwidth']
+# instruments_ZI._calc_bw2(rr['grid'], order=3, w_suppr=40.)/ rr['bandwidth']
+#  for 15.05 use instead (bandwidth is now based on tcmeas)
+# instruments_ZI._calc_bw2(rr['grid'], order=3, w_suppr=40.)/zi._tc_to_enbw_3dB(rr['tc'], order=3)
+#    zi._tc_to_enbw_3dB(rr['tcmeas'], order=3)/rr['bandwidth']
 #  repeat with
 # zi.set_sweep_mode(10,1010,10, bw='auto', settle_time_s=0, settle_n_tc=0, avg_count=1, logsweep=True, order=3, w_suppr=40)
 # ##set(zi.demod_sinc_en,True)  # For 14.02 this makes the instrument crash
@@ -1393,7 +1418,7 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 #             array([  2.99000007e-08,   6.00999996e-08,   1.02592772e-07, 1.02593908e-07,   1.02595038e-07,   1.02596161e-07,  1.02597291e-07,   1.02598420e-07,   1.02599557e-07])
 #  array(instruments_ZI._find_tc(zi, 10,2000))
 #    returns:  array([  9.5443716 ,  10.90785408,  12.72582912,  15.27099514,  19.08874321, 25.45165825,  38.17748642,  76.35497284])
-# The above results have not changed for version 14.02
+# The above results have not changed for version 14.02, 14.08  or 15.05
 #
 # From those observations the time constant is selected as:
 #      numerically, the algorithm used is Vo(i+1) = (Vi + (t-1)Voi)/t
@@ -1433,10 +1458,12 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 # python says revision 20298, installer says 20315 (installer revision is head revision. installer>python is normal)
 # for 14.02, python says 23152, installer says 23225
 # for 14.08, python says 26222, installer says 26222
+# for 15.05, python says 31456, installer says 31456
 #
 # echoDevice does not work (still in 14.02). It is for HF2 instruments not for UHF.
 #   better documention awaits changes to properly handle synchronisation on all platforms (Juerg 23062014)
 #   This is fixed in 14.08: echoDevice now works and does the same as sync (which is a new function to help synchronise)
+#  timeit zi.sync()  # 15.05 takes 8 ms.
 # syncSetInt takes 250 ms (with 13.06,100 ms with 13.10, It is no longer a problem with 14.02, but sync/no sync give ~6 ms)
 #  compare
 #   timeit zi.write('/dev2021/sigins/0/on', 1, t='int')
@@ -1451,6 +1478,7 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 #    Suggest to add 100 ms if there is a need to make sure streaming data comes after change
 #    A futur sync-set might do this stream sync correctly.
 #  For 14.08 sync=True: 7.2ms, False: 6.0 ms
+#  For 14.08 sync=True: 6.2ms, False: 4.6 ms
 # Compare
 # s='/dev2021/demods/0/enable'
 # za.set_async(s,1); print za.getI(s); time.sleep(.1); print za.getI(s)
@@ -1488,6 +1516,12 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 #    low frequencies the sweeper was waiting forever as it was never
 #    detecting the target frequency.
 
+# Check/use scope: (can use web interface to set some settings)
+#  zi._subscribe('/{dev}/scopes/0/wave')
+#  zi.write('/{dev}/scopes/0/single',1)
+#  zi.write('/{dev}/scopes/0/enable',1)
+#  v=zi.read(1000)
+
 
 ##################################################################
 #   Direct Access to ZI C API
@@ -1523,6 +1557,8 @@ ziIntegerType = c_int64
 ziTimeStampType = c_uint64
 ziAPIDataType = c_int
 ziConnection = c_void_p
+ziAsyncTag = c_uint32
+ziModuleHandle = c_uint64
 
 MAX_PATH_LEN = 256
 MAX_EVENT_SIZE = 0x400000
@@ -1559,6 +1595,15 @@ class TreeChange_old(StructureImproved):
     _fields_ = [('Action', c_uint32),
                 ('Name', c_char*32) ]
 
+class AsyncReply(StructureImproved):
+    _fields_ = [('timeStamp', ziTimeStampType),
+                ('sampleTimeStamp', ziTimeStampType),
+                ('command', c_uint16),
+                ('resultCode', c_uint16), #ZIResult_enum: zi_result_dic
+                ('tag', ziAsyncTag) ]
+AsyncReply_commands = {1: 'ziAPIAsyncSetDoubleData', 2: 'ziAPIAsyncSetIntegerData',
+                       3: 'ziAPIAsyncSetByteArray', 4: 'ziAPIAsyncSubscribe',
+                       5: 'ziAPIAsyncUnSubscribe', 5: 'ziAPIAsyncGetValueAsPollData'}
 
 # ctypes in Python 2.6.2 at least has a bug that prevents
 # subclassing arrays unless _length_ and _type_ are redefined
@@ -1720,7 +1765,43 @@ class c_floatx4(c_float*4):
     def __repr__(self):
         return repr(self[:])
 
-class ScopeWave(StructureImproved_extend): # Changed a lot on version 14.02
+class c_doublex4(c_double*4):
+    __metaclass__ = _ctypes_array_metabase_fix
+    def __repr__(self):
+        return repr(self[:])
+
+class ScopeWaveBase(StructureImproved_extend):
+    # This requires fields sampleFormat, channelEnable
+    # And to set class attribute _mask_ and _mask_lengthvar
+    #_mask_basetype = c_short
+    @property
+    def _mask_basetype(self):
+        fmt = self.sampleFormat & 3
+        types = [c_int16, c_int32, c_float]
+        return types[fmt]
+    def _get_nch(self):
+        nch = 0
+        for i in range(4):
+            if self.channelEnable[i]:
+                nch += 1
+        return nch
+    def _mask_get_count(self):
+        nch = self._get_nch()
+        return self.sampleCount * nch
+    def _mask_get_conv(self, cdata):
+        newd = super(ScopeWaveBase, self)._mask_get_conv(cdata)
+        if isinstance(newd, np.ndarray):
+            nch = self._get_nch()
+            if nch > 1:
+                # TODO figure out the data structure for interleaved or not
+                #   I have not been able to produce data with nch>1 (14.02). So not checked.
+                if self.sampleFormat & 4: #interleaved
+                    newd.shape=(-1, nch)
+                else:
+                    newd.shape=(nch, -1)
+        return newd
+
+class ScopeWave(ScopeWaveBase): # for APIlevel 4. Changed a lot on version 14.02
     _fields_ = [('timeStamp', ziTimeStampType),
                 ('triggerTimeStamp', ziTimeStampType), # can be between samples
                 ('dt', c_double), # time between samples
@@ -1748,32 +1829,33 @@ class ScopeWave(StructureImproved_extend): # Changed a lot on version 14.02
     # Warning: you need to set channel_Enable and sampleFormat appropriately before calling set_data_size
     #  set_data_size adjusts sampleCount directly but also reserves space according to that
     #  and sampleFormat and channelEnable
-    @property
-    def _mask_basetype(self):
-        fmt = self.sampleFormat & 3
-        types = [c_int16, c_int32, c_float]
-        return types[fmt]
-    def _get_nch(self):
-        nch = 0
-        for i in range(4):
-            if self.channelEnable[i]:
-                nch += 1
-        return nch
-    def _mask_get_count(self):
-        nch = self._get_nch()
-        return self.sampleCount * nch
-    def _mask_get_conv(self, cdata):
-        newd = super(ScopeWave, self)._mask_get_conv(cdata)
-        if isinstance(newd, np.ndarray):
-            nch = self._get_nch()
-            if nch > 1:
-                # TODO figure out the data structure for interleaved or not
-                #   I have not been able to produce data with nch>1 (14.02). So not checked.
-                if self.sampleFormat & 4: #interleaved
-                    newd.shape=(-1, nch)
-                else:
-                    newd.shape=(nch, -1)
-        return newd
+
+class ScopeWaveEx(StructureImproved_extend): # for APIlevel 5
+    _fields_ = [('timeStamp', ziTimeStampType),
+                ('triggerTimeStamp', ziTimeStampType), # can be between samples
+                ('dt', c_double), # time between samples
+                ('channelEnable', c_uint8x4), # bool for enabled channel
+                ('channelInput', c_uint8x4), # input source for each channel (0-1: input1-2, 2-3: trigger in1-2, 4-7:Aux out1-4, 8-9:Aux in 1-2)
+                ('triggerEnable', c_uint8), # bit0: rising edge enable, bit1: falling edge enable (enable=1)
+                ('triggerInput', c_uint8), # same as channelInput
+                ('reserved0', c_uint8*2),
+                ('channelBWLimit', c_uint8x4), # per channel, bit0: off=0, on=1, bit1-7: reserved
+                ('channelMath', c_uint8x4), # Math(averaging...) per channel, bit0-7: reserved
+                ('channelScaling', c_floatx4),
+                ('sequenceNumber', c_uint32),
+                ('segmentNumber', c_uint32),
+                ('blockNumber', c_uint32), # large scope shots comes in multiple blocks that need to be concatenated
+                ('totalSamples', c_uint64),
+                ('dataTransferMode', c_uint8), # SingleTransfer = 0, BlockTransfer = 1, ContinuousTransfer = 3, FFTSingleTransfer = 4
+                ('blockMarker', c_uint8),  # bit0: 1=end marker
+                ('flags', c_uint8),  # bit0: data lost detected(samples are 0), bit1: missed trigger, bit2: Transfer failure (corrupted data)
+                ('sampleFormat', c_uint8), # 0=int16, 1=int32, 2=float, 4=int16interleaved, 5=int32interleaved, 6=float interleaved
+                ('sampleCount', c_uint32), # number of samples in one channel, the same in the others
+                ('channelOffset', c_doublex4), # Data offset (scaled) for up to 4 channels
+                ('reserved1', c_uint64*32),
+                ('Data', c_short*0) ] # Data can be int16, int32 or float
+    _mask_ = 'Data'
+    _mask_lengthvar = 'sampleCount'
 
 
 class PWASample(StructureImproved):
@@ -1809,8 +1891,20 @@ class PWAWave(StructureImproved_extend):
         else:
             return cdata
 
+# Structures not implemented:
+#    ZIDiscoveryProperty
+#    ZISweeperWave  ZISweeperHeader ZISweeperDoubleSample ZISweeperDemodSample ZIStatisticSample
+#    ZISpectrumWave ZISpectrumHeader ZISpectrumDemodSample
+#    ZIAdvisorWave   ZIAdvisorHeader ZIAdvisorSample
+#    ZIModuleEvent  ZIModuleEventPtr
+# The following are temporary place olders
+SweeperWave = DemodSample
+SpectrumWave = DemodSample
+AdvisorWave = DemodSample
+
 # These point to the first element of DATA with the correct type.
 class ziEventUnion(Union):
+    # the names are from ziAPIDataType_vals
     _fields_ = [('Void', c_void_p),
                 ('Double', POINTER(ziDoubleType)),
                 ('DoubleTS', POINTER(ziDoubleTypeTS)),
@@ -1825,12 +1919,18 @@ class ziEventUnion(Union):
                 ('SampleDIO', POINTER(DIOSample)),
                 ('ScopeWave', POINTER(ScopeWave)),
                 ('ScopeWave_old', POINTER(ScopeWave_old)),
-                ('pwaWave', POINTER(PWAWave)) ]
+                ('ScopeWaveEx', POINTER(ScopeWaveEx)),
+                ('pwaWave', POINTER(PWAWave)),
+                ('SweeperWave', POINTER(DemodSample)),
+                ('SpectrumWave', POINTER(DemodSample)),
+                ('AdvisorWave', POINTER(DemodSample)),
+                ('AsyncReply', POINTER(AsyncReply)) ]
 
 ziAPIDataType_vals = {0:'None', 1:'Double', 2:'Integer', 3:'SampleDemod', 4:'ScopeWave_old',
-                 5:'SampleAuxIn', 6:'SampleDIO', 7:'ByteArray', 16:'Tree_old',
-                 32:'DoubleTS', 33:'IntegerTS', 35:'ScopeWave', 38:'ByteArrayTS', 48:'Tree',
-                 8:'pwaWave'}
+                 5:'SampleAuxIn', 6:'SampleDIO', 7:'ByteArray', 8:'pwaWave', 16:'Tree_old',
+                 32:'DoubleTS', 33:'IntegerTS', 35:'ScopeWave', 36:'ScopeWaveEx',
+                 38:'ByteArrayTS', 48:'Tree', 50:'AsyncReply', 64:'SweeperWave',
+                 65:'SpectrumWave', 66:'AdvisorWave'}
 
 class ziEvent(StructureImproved):
     _fields_ = [('valueType', ziAPIDataType),
@@ -1886,7 +1986,7 @@ ZI_ERROR_GENERAL   = ZI_ERROR_BASE    = 0x8000
 
 ZIAPIVersion = c_int
 #zi_api_version = {1:'ziAPIv1', 3:'ziAPIv3'}
-zi_api_version = {1:'ziAPIv1', 4:'ziAPIv4'}
+zi_api_version = {1:'ziAPIv1', 4:'ziAPIv4', 5:'ziAPIv5'}
 
 zi_result_dic = {ZI_INFO_SUCCESS:'Success (no error)',
                  ZI_INFO_SUCCESS+1:'Max Info',
@@ -1894,7 +1994,8 @@ zi_result_dic = {ZI_INFO_SUCCESS:'Success (no error)',
                  ZI_WARNING_GENERAL+1:'FIFO Underrun',
                  ZI_WARNING_GENERAL+2:'FIFO Overflow',
                  ZI_WARNING_GENERAL+3:'NotFound',
-                 ZI_WARNING_GENERAL+4:'Max Warning',
+                 ZI_WARNING_GENERAL+4:'No async in sync mode',
+                 ZI_WARNING_GENERAL+5:'Max Warning',
                  ZI_ERROR_GENERAL:'Error (general)',
                  ZI_ERROR_GENERAL+1:'USB communication failed',
                  ZI_ERROR_GENERAL+2:'Malloc failed',
@@ -1931,12 +2032,17 @@ class ziAPI(object):
         self._last_result = 0
         self._ziDll = ctypes.CDLL('/Program Files/Zurich Instruments/LabOne/API/C/lib/ziAPI-win32.dll')
         self._conn = ziConnection()
+        # functions not implemented
+        #   ziAPIModCreate ziAPIModSetDoubleData ziAPIModSetIntegerData ziAPIModSetByteArray ziAPIModSubscribe
+        #   ziAPIModUnSubscribe ziAPIModSave ziAPIModExecute ziAPIModTrigger ziAPIModClear ziAPIModFinish
+        #   ziAPIModFinished ziAPIModProgress ziAPIModRead ziAPIModNextNode ziAPIModGetChunk ziAPIModEventDeallocate
+        #   ziAPIModListNodes
         self._makefunc('ziAPIInit', [POINTER(ziConnection)],  prepend_con=False)
         self._makefunc('ziAPIDestroy', [] )
         self._makefunc('ziAPIGetRevision', [POINTER(c_uint)], prepend_con=False )
         self._makefunc('ziAPIConnect', [c_char_p, c_ushort] )
         self._makefunc('ziAPIDisconnect', [] )
-        self._makefunc('ziAPIListNodes', [c_char_p, c_char_p, c_int, c_int] )
+        self._makefunc('ziAPIListNodes', [c_char_p, c_char_p, c_uint32, c_uint32] )
         self._makefunc('ziAPIUpdateDevices', [] )
         self._makefunc('ziAPIConnectDevice', [c_char_p, c_char_p, c_char_p] ) # deviceSerialNum, deviceInterface(USB|1GbE), interfaceParameters
         self._makefunc('ziAPIDisconnectDevice', [c_char_p] ) # deviceSerialNum
@@ -1966,6 +2072,9 @@ class ziAPI(object):
         self._makefunc('ziAPIAsyncSetDoubleData', [c_char_p, ziDoubleType] )
         self._makefunc('ziAPIAsyncSetIntegerData', [c_char_p, ziIntegerType] )
         self._makefunc('ziAPIAsyncSetByteArray', [c_char_p, c_uint8_p, c_uint32] )
+        self._makefunc('ziAPIAsyncSubscribe', [c_char_p, c_uint8_p,  ziAsyncTag] )
+        self._makefunc('ziAPIAsyncUnSubscribe', [c_char_p, c_uint8_p,  ziAsyncTag] )
+        self._makefunc('ziAPIAsyncGetValueAsPollData', [c_char_p, c_uint8_p,  ziAsyncTag] )
         self._makefunc('ziAPIListImplementations', [c_char_p, c_uint32], prepend_con=False )
         self._makefunc('ziAPIConnectEx', [c_char_p, c_uint16, ZIAPIVersion, c_char_p] )
         self._makefunc('ziAPIGetConnectionAPILevel', [POINTER(ZIAPIVersion)] )
@@ -2054,7 +2163,7 @@ class ziAPI(object):
         rev = c_uint()
         self._ziAPIGetRevision(byref(rev))
         return rev.value
-    def connect_ex(self, hostname=_default_host, port=_default_port, version=4, implementation=None):
+    def connect_ex(self, hostname=_default_host, port=_default_port, version=5, implementation=None):
         self._ConnectEx(hostname, port, version, implementation)
         print 'Connected ex'
     def list_implementation(self):
@@ -2153,20 +2262,24 @@ class ziAPI(object):
 # Version 14.08
 #  msi install worked well
 #  /dev/demods/0/bypass: what is this (it has been there for a while, but undocumented)
-#  /{dev}/sigins/0/bw: what is this
+#  /{dev}/sigins/0/bw: what is this. Ok see info in webinterface debug entry.
 #  Documentation for settling/inaccuracy is unclear (it is the fraction of the change left)
 #  settling/tc can't be <1 anymore
 #  longer overhead for sweep
 #  Documentation for sweeeper output: repeat of rpwr, missing tcmeas
 # web: Sweep statistics *TC only allows 0, 5, 15, 50
 #      sweep reverse mode undocumented
-#      sweep.fixed always turns on sync at lowe freq
+#      sweep.fixed always turns on sync at low freq
 # ziPython:
 #      Could you return the error code as a value available in the exception
 #         (so I don't have to parse the error message (in case it changes))
 #      Also it no longer produces the
 #          'ZIAPIException with status code: 32778. Unable to connect socket'
 #      which I was using to tell the user to start the server.
+#       It would be nice to have 2 different exception
+#              unconnect
+#              wrong version
+#         either different class or class with a error code number (and document it)
 #      There is a problem when changing the order/ fixed bw for sweep:
 #         zi.sweep_auto_bw_mode.set('fixed')
 #         zi.sweep_order.set(3); zi.sweep_auto_bw_fixed.set(23.); wait(1)
@@ -2176,3 +2289,23 @@ class ziAPI(object):
 #      Changing order changes the bw. But when they are done quickly, they behave as if
 #          fixed_bw is set before order is changed, hence the incorrect bw.
 #      It is probably a thread sync problem
+
+# Version 15.05
+#    overhead got smaller
+#    sweeper documentation missing new paramters
+#    lower/upper is still present:
+#      zi._zi_daq.listNodes('/dev2021/features', 3)
+#      zi._zi_daq.get('/dev2021/features/OPTIONS',1)
+#    sweep/remainingtime is undocumented
+#   The above order/fixed_bw problem seems to be fixed
+#   reverse mode now documented
+#   Documentation improvents are very  nice (I like your new chapter 6)
+#   ProgrammingManual C api does not match new one.
+#  Question: when using scope in sample average (instead of decimation, i.e. enabled bandwidth)
+#    Why is the resolution not improved (sample discretization stays the same 12 bit)
+#  Also the channelbwlimit dictionnary entry in scope wave data does not seem to be following
+#  the bw state of the channel.
+#  since bandwidth uses tcmeas, and it is used for spectral density calculation in web interface,
+#   the data is now always properly normalize (no more jumps when tcmeas suddenly grows.
+#           see sweeper, X, 900 t0 1110Hz, 20 points, log, Noise amplitude sweep(with only sample count changed to 10000
+#                1.7kSa/s), look at TC changes(jumps between 18.6 to 9.3 ms), on X.)
