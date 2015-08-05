@@ -78,7 +78,8 @@ class ChoiceIndex(_ChoiceIndex):
     def __call__(self, input_val):
         return self[input_val]
     def tostr(self, input_choice):
-        return self.index(input_choice)
+        i = self.index(input_choice)
+        return self.keys[i]
 
 def _tostr_helper(val, t):
     # This function converts from pyHegel val to ZI val (on set/write)
@@ -419,6 +420,14 @@ class zurich_UHF(BaseInstrument):
                                       'demod_en', 'demod_freq', 'demod_harm', 'demod_rate', 'demod_tc', 'demod_order',
                                       'demod_phase', 'demod_trigger', 'demod_bypass_en', 'sweep_sinc_en',
                                       'demod_osc_src', 'demod_adc_src')
+        aux_ch_orig = self.current_auxouts.get()
+        for c in range(4):
+            self.current_auxouts.set(c)
+            xx =self._conf_helper('auxouts_output_sel', 'auxouts_demod_sel', 'auxouts_preoffset', 'auxouts_scale', 'auxouts_offset',
+                                  'auxouts_limit_lower', 'auxouts_limit_upper', 'auxouts_value')
+            extra += ['auxout_%i=[%s]'%(c, ','.join(xx).replace('auxouts_',''))]
+        self.current_auxouts.set(aux_ch_orig)
+
         base = self._conf_helper('current_demod', 'current_osc', 'current_sigins', 'current_sigouts',
                                  'osc_freq', 'sigins_en', 'sigins_ac_en', 'sigins_50ohm_en',
                                  'sigins_range', 'sigins_scaling', 'sigins_aa_bw_en',
@@ -830,7 +839,7 @@ class zurich_UHF(BaseInstrument):
                 if ret == [] and xaxis:
                     main_x =x
                     ret.append(x)
-                if not xaxis_differ and xaxis and np.any(np.abs((x-main_x)/x) > 1e-8):
+                if not xaxis_differ and xaxis and not np.all(np.isclose(main_x, x, rtol=1e-8, atol=1e-15)):
                     #print np.abs((x-main_x)/x)
                     print 'Not all x-axis are the same, returned only the first one'
                     xaxis_differ = True
@@ -852,6 +861,7 @@ class zurich_UHF(BaseInstrument):
         self.current_osc = MemoryDevice(0, choices=range(2))
         self.current_sigins = MemoryDevice(0, choices=range(2))
         self.current_sigouts = MemoryDevice(0, choices=range(2))
+        self.current_auxouts = MemoryDevice(0, choices=range(4))
         def ziDev_ch_gen(ch, *arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(ch=ch)
@@ -864,6 +874,7 @@ class zurich_UHF(BaseInstrument):
         ziDev_ch_osc = lambda *arg, **kwarg: ziDev_ch_gen(self.current_osc, *arg, **kwarg)
         ziDev_ch_sigins = lambda *arg, **kwarg: ziDev_ch_gen(self.current_sigins, *arg, **kwarg)
         ziDev_ch_sigouts = lambda *arg, **kwarg: ziDev_ch_gen(self.current_sigouts, *arg, **kwarg)
+        ziDev_ch_auxouts = lambda *arg, **kwarg: ziDev_ch_gen(self.current_auxouts, *arg, **kwarg)
         self.demod_freq = ziDev_ch_demod(getstr='demods/{ch}/freq', str_type=float)
         self.demod_harm = ziDev_ch_demod('demods/{ch}/harmonic', str_type=int)
         self.demod_en = ziDev_ch_demod('demods/{ch}/enable', str_type=bool)
@@ -937,7 +948,16 @@ class zurich_UHF(BaseInstrument):
         # TODO: triggers, SYSTEM(/EXTCLK), EXTREFS, status stats
         #       conn, inputpwas, outputpwas
         #       auxins/0/sample, auxins/0/averaging
-        #       auxouts/0-4, dios/0, scopes/0
+        #       dios/0, scopes/0#A
+        self.auxouts_limit_lower = ziDev_ch_auxouts('auxouts/{ch}/limitlower', str_type=float, setget=True, min=-10, max=10)
+        self.auxouts_limit_upper = ziDev_ch_auxouts('auxouts/{ch}/limitupper', str_type=float, setget=True, min=-10, max=10)
+        auxouts_outputs = ChoiceIndex({0:'demodX', 1:'demodY', 2:'demodR', 3:'demodTheta', 7:'auCart', 8:'auPolar', -1:'manual'})
+        self.auxouts_output_sel = ziDev_ch_auxouts('auxouts/{ch}/outputselect', choices=auxouts_outputs, input_type='int')
+        self.auxouts_demod_sel = ziDev_ch_auxouts('auxouts/{ch}/demodselect', str_type=int, min=0, max=7, setget=True)
+        self.auxouts_preoffset = ziDev_ch_auxouts('auxouts/{ch}/preoffset', str_type=float, setget=True)
+        self.auxouts_scale = ziDev_ch_auxouts('auxouts/{ch}/scale', str_type=float, setget=True)
+        self.auxouts_offset = ziDev_ch_auxouts('auxouts/{ch}/offset', str_type=float, setget=True, min=-10., max=10)
+        self.auxouts_value = ziDev_ch_auxouts(getstr='auxouts/{ch}/value', str_type=float)
 
         self.sweep_device = ziDev('device', str_type=str, input_src='sweep')
         self.sweep_x_start = ziDev('start', str_type=float, input_src='sweep')
