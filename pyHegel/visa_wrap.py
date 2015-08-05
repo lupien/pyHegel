@@ -617,6 +617,7 @@ class new_Instrument(redirect_instr):
             self.visalib.disable_event(self.session, event_type, mechanism)
         def discard_events(self, event_type, mechanism):
             self.visalib.discard_events(self.session, event_type, mechanism)
+    if is_version('1.5', '1.7'):
         def wait_on_event(self, in_event_type, timeout, capture_timeout=False):
             try:
                 event_type, context, ret = self.visalib.wait_on_event(self.session, in_event_type, timeout)
