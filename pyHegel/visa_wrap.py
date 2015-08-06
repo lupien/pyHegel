@@ -376,7 +376,10 @@ class WaitResponse(object):
     """Class used in return of wait_on_event. It properly closes the context upon delete.
     """
     def __init__(self, event_type, context, ret, visalib, timed_out=False):
-        self.event_type = event_type
+        if event_type == 0:
+            self.event_type = None
+        else:
+            self.event_type = event_type
         self.context = context
         self.ret = ret
         self._visalib = visalib
