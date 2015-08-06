@@ -517,7 +517,9 @@ class lecroy_vbs_scpi(scpiDevice):
 ##    LeCroy WaveMaster 820Zi-A
 #######################################################
 
-@register_instrument('LECROY', 'WM820ZI-A', '7.2.1', alias='WM820ZI-A WaveMaster scope')
+#@register_instrument('LECROY', 'WM820ZI-A', '7.2.1', alias='WM820ZI-A WaveMaster scope')
+#@register_instrument('LECROY', 'WM820ZI-A', '7.8.0', alias='WM820ZI-A WaveMaster scope')
+@register_instrument('LECROY', 'WM820ZI-A', alias='WM820ZI-A WaveMaster scope')
 class lecroy_wavemaster(visaInstrumentAsync):
     """
     This instrument controls a LeCory WaveMaster 820Zi-A
@@ -525,6 +527,8 @@ class lecroy_wavemaster(visaInstrumentAsync):
        fetch
        readval
        snap_png
+    To work properly, make sure the instrument is set to use LXI(VXI11) as remote
+    and not TCPIP(VICP).
     """
     def __init__(self, visa_addr):
         # The SRQ for this intrument does not work
