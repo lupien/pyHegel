@@ -948,7 +948,7 @@ class zurich_UHF(BaseInstrument):
         # TODO: triggers, SYSTEM(/EXTCLK), EXTREFS, status stats
         #       conn, inputpwas, outputpwas
         #       auxins/0/sample, auxins/0/averaging
-        #       dios/0, scopes/0#A
+        #       dios/0, scopes/0
         self.auxouts_limit_lower = ziDev_ch_auxouts('auxouts/{ch}/limitlower', str_type=float, setget=True, min=-10, max=10)
         self.auxouts_limit_upper = ziDev_ch_auxouts('auxouts/{ch}/limitupper', str_type=float, setget=True, min=-10, max=10)
         auxouts_outputs = ChoiceIndex({0:'demodX', 1:'demodY', 2:'demodR', 3:'demodTheta', 7:'auCart', 8:'auPolar', -1:'manual'})
@@ -1537,6 +1537,7 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 #    detecting the target frequency.
 
 # Check/use scope: (can use web interface to set some settings)
+#  zi.write('/{dev}/scopes/0/time', 1) # with n=1, the sampling rate is 1.8e9/2**n, so 900 MS/s here.
 #  zi._subscribe('/{dev}/scopes/0/wave')
 #  zi.write('/{dev}/scopes/0/single',1)
 #  zi.write('/{dev}/scopes/0/enable',1)
