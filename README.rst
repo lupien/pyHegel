@@ -28,12 +28,12 @@ situations or a more complex one that handles all the situations you thought
 of. Well pyHegel is intended to be the later.
 
 However, contrary to LabVIEW (C, C++, etc.), it uses a command line interface
-(the one provided py IPython: http://ipython.org/), and the generality of the
+(the one provided by IPython: http://ipython.org/), and the generality of the
 python language itself to provide the flexibility needed to quickly change and
 adapt to the experiments and the measurements needed.
 
-Interactivity provides a quick exploration of a setup. And advance function
-like sweep and record permits measurement to be taken interactively (with a
+Interactivity provides a quick exploration of a setup. And advanced functions
+like sweep and record permit measurements to be taken interactively (with a
 single line command).  But for more advanced uses, or to better repeat
 measurements, you can write scripts and new functions.
 
@@ -62,13 +62,13 @@ Another feature is to allow measurements to be done in parallel. Imagine you
 perform a sweep and for each points in the sweep, you need to read two
 instruments and they both take 10s. If you proceed sequentially it would take
 20s in total for each points in the sweep. However if you can take both
-measurement concurently (in parallel) then it only takes 10s. This is allowed
+measurements concurently (in parallel) then it only takes 10s. This is allowed
 in pyHegel in what is known as async mode. The same tricks that are use for
-that, allow instruments that take a long time to respond to a request to be
+that allow instruments that take a long time to respond to a request to be
 waited on instead of receiving timeouts (or making the timeouts too long which
 makes error recovery slower).
 
-The locking and waiting is normally non-blocking and keeps to graphical
+The locking and waiting is normally non-blocking and keeps the graphical
 interface updated.  If you want it to stop waiting you can press CTRL-C (or
 quit a sweep by using the abort button, which is cleaner, but requires waiting
 for the end of the point).
@@ -125,6 +125,6 @@ Documentation
 
 There is some old/partially written documentation in the distribution under the
 manual directory. However most pyHegel commands as well as instruments/devices
-have online documentation (use the ipython trick of placing "?" after an object
+have inline documentation (use the ipython trick of placing "?" after an object
 to obtain its documentation).
 
