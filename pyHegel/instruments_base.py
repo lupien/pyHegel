@@ -30,6 +30,7 @@ import ctypes
 import hashlib
 import os
 import signal
+import sys
 import time
 import inspect
 import thread
@@ -80,6 +81,61 @@ class ProxyMethod(object):
         return getattr(self.instance, self.func_name)(*arg, **kwarg)
 
 #######################################################
+##    Have a status line active
+#######################################################
+class UserStatusLine(object):
+    """
+    The is the object created by MainStatusLine.new
+    You should not create it directly.
+    To use, just call the object with the new string.
+    If the new string is not empty, the status line is also output.
+    You can force an output using the method output.
+    """
+    def __init__(self, main, handle):
+        self.main = main
+        self.handle = handle
+    def __del__(self):
+        self.main.delete(self.handle)
+    def __call__(self, new_status=''):
+        self.main.change(self.handle, new_status)
+        if new_status != '':
+            self.main.output()
+    def output(self):
+        self.main.output()
+
+class MainStatusLine(object):
+    """
+    This class provides a tools for combining multiple strings in a status line.
+    The status line the next line on the console which we keep rewriting (using
+    a carriage return). To use, create a new user object (it will properly clean
+    itself on deletion) using a single instance of this class (so should use:
+    mainStatusLine.new()). You can select the priority you want for the status.
+    Larger priority will show before lower ones.
+    For information on using the user object see UserStatusLine
+    """
+    def __init__(self):
+        self.last_handle = 0
+        self.users = {}
+    def new(self, priority=1):
+        handle = self.last_handle + 1
+        self.last_handle = handle
+        self.users[handle] = [priority, '']
+        return UserStatusLine(self, handle)
+        # higher priority shows before lower ones
+    def delete(self, handle):
+        del self.users[handle]
+    def change(self, handle, new_status):
+        self.users[handle][1] = new_status
+    def output(self):
+        entries = self.users.values()
+        entries = sorted(entries, key=lambda x: x[0], reverse=True) # sort on decreasing priority only
+        outstr = ' '.join([e[1] for e in entries if e[1] != '']) # join the non-empty status
+        outstr = outstr if len(outstr)<=72 else outstr[:69]+'...'
+        sys.stdout.write('\r%-72s'%outstr)
+
+mainStatusLine = MainStatusLine()
+
+#######################################################
 ##    find_all_instruments function (for VISA)
 #######################################################
 
@@ -126,6 +182,13 @@ def _writevec_flatten_list(vals_list):
     return ret
 
 def _writevec(file_obj, vals_list, pre_str=''):
+    """ write a line of data in the open file_obj.
+    vals_list is a list of values or strings, or of np.ndarray which
+    are flatten. Any value that is not a base_string is converted
+    to a string use repr.
+    The columns in the file are separated by tabs.
+    pre_str is prepended to every line. Can use '#' when adding comments.
+    """
     vals_list = _writevec_flatten_list(vals_list)
     strs_list = map(_repr_or_string, vals_list)
     file_obj.write(pre_str+'\t'.join(strs_list)+'\n')
