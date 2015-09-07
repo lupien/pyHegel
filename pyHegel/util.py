@@ -120,7 +120,7 @@ def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0):
 _readfile_lastnames = []
 _readfile_lastheaders = []
 _readfile_lasttitles = []
-def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None):
+def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -143,6 +143,9 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     so selecting a column in a data file is the first index dimension.
     For multiple files, the shape is (n_columns, n_files, n_rows)
      or (nfiles, n_rows) if the files contain only a single column
+    When multi_sweep is True and the file was created from a multi sweep,
+     n_rows is replaced by the correct shape to handle the multiple dimensions of the sweep
+     if possible.
 
     The csv option can be True, False or 'auto'. When in auto, the file extension
     is used to detect wheter to use csv or not. When csv is used
@@ -192,6 +195,9 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
         with open(filelist[0], 'rU') as f: # only the first file
             while True:
                 line = f.readline()
+                if len(line) == 0:
+                    # eof encountered
+                    raise RuntimeError('File "%s" contains no data, except for possibly some headers'%filelist[0])
                 if line[0] != '#':
                     break
                 hdrs.append(line)
@@ -199,25 +205,39 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
             titles = hdrs[-1][1:-1].split('\t')
     _readfile_lastheaders[:] = hdrs
     _readfile_lasttitles[:] = titles
+    # This needs to match the line in commands.sweep_multi
+    multi_hdr = '#readback numpy shape for line part: '
+    if multi_sweep and len(hdrs)>2 and hdrs[-2].startswith(multi_hdr):
+        shape_s = hdrs[-2][len(multi_hdr):].strip().split(',')
+        shape = tuple([int(s) for s in shape_s])
+    else:
+        shape = None
     ret = []
+    first_shape = None
     for fn in filelist:
         if dtype != None:
+            current = np.fromfile(fn, dtype=dtype)
             ret.append(np.fromfile(fn, dtype=dtype))
-            continue
-        if fn.lower().endswith('.npy'):
-            ret.append(np.load(fn))
-            continue
-        if csv=='auto':
-            if fn.lower().endswith('.csv'):
-                docsv = True
+        elif fn.lower().endswith('.npy'):
+            current = np.load(fn)
+        else:
+            if csv=='auto':
+                if fn.lower().endswith('.csv'):
+                    docsv = True
+                else:
+                    docsv = False
             else:
-                docsv = False
-        else:
-            docsv = csv
-        if docsv:
-            ret.append(loadtxt_csv(fn).T)
-        else:
-            ret.append(np.loadtxt(fn).T)
+                docsv = csv
+            if docsv:
+                current = loadtxt_csv(fn).T
+            else:
+                current = np.loadtxt(fn).T
+        if first_shape is None:
+            first_shape = current.shape
+        elif first_shape != current.shape:
+            raise RuntimeError('Not all objects have same shape. "%s"=%s and "%s"=%s'%
+                                (filelist[0], first_shape, fn, current.shape))
+        ret.append(current)
     if not multi:
         ret = ret[0]
     else:
@@ -226,6 +246,15 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     if ret.ndim == 3:
         # we make a copy to make it a nice contiguous array
         ret = ret.swapaxes(0,1).copy()
+    if shape is not None:
+        old_shape = ret.shape
+        new_shape = old_shape[:-1] + shape
+        try:
+            ret.shape = new_shape
+        except ValueError:
+            print 'Unable to convert shape from %s to %s (probably an incomplet sweep). Shape unadjusted.'%(old_shape, new_shape)
+        else:
+            print 'Converted shape from %s to %s.'%(old_shape, new_shape)
     if getnames and getheaders:
         return (ret, filelist, titles, hdrs)
     elif getnames:
