@@ -1808,6 +1808,13 @@ class MagnetController_SMC(visaInstrument):
 
 @register_instrument('pyHegel_Instrument', 'dummy', '1.0')
 class dummy(BaseInstrument):
+    """ This is a dummy device (just in memory) to use for testing.
+        There are 5 devices: volt, current, incr, rand and other
+          incr is a device that is incremented by 1 after every get
+          rand returns a random value from a normal distribution
+        Both incr and rand wait the time set in the wait attribute
+        before returning from get. The wait attribute defaults to 0.1
+    """
     def init(self, full=False):
         self.incr_val = 0
         self.wait = .1
