@@ -132,6 +132,7 @@ class MainStatusLine(object):
         outstr = ' '.join([e[1] for e in entries if e[1] != '']) # join the non-empty status
         outstr = outstr if len(outstr)<=72 else outstr[:69]+'...'
         sys.stdout.write('\r%-72s'%outstr)
+        sys.stdout.flush()
 
 mainStatusLine = MainStatusLine()
 
