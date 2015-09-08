@@ -56,7 +56,7 @@ from .traces import wait
 from .util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
 
 __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'instruments_registry',
-           'util', 'help_pyHegel', 'reset_pyHegel', 'clock', 'sweep', 'wait',
+           'util', 'help_pyHegel', 'reset_pyHegel', 'clock', 'sweep', 'sweep_multi', 'wait',
            'readfile', '_readfile_lastnames', '_readfile_lastheaders', '_readfile_lasttitles',
            'set', 'move', 'copy', 'spy', 'snap', 'record', 'trace', 'scope',
            '_process_filename', 'get', 'setget', 'getasync', 'make_dir',
@@ -70,7 +70,7 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
 #             _itemgetter _write_conf
 #             _Sweep _Snap _record_execafter _normalize_usb _normalize_gpib _get_visa_idns
 #             _Hegel_Task _quiet_KeyboardInterrupt_Handler
-#             _greetings _load_helper _get_extra_confs
+#             _greetings _load_helper _get_extra_confs dump_conf _time_check
 
 
 #instruments_base._globaldict = globals()
@@ -126,6 +126,8 @@ def help_pyHegel():
         move
         copy
         spy
+        sweep
+        sweep_multi
         record
         trace
         snap
@@ -338,10 +340,13 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     else:
         extra_conf = extra_conf[:] # make a copy so we can change it locally
     if setdev != None:
-        dev, kwarg = _get_dev_kw(setdev)
-        hdrs.append(dev.getfullname())
-        count += 1
-        extra_conf.append(setdev)
+        if not isinstance(setdev, list):
+            setdev = [setdev]
+        for s in setdev:
+            dev, kwarg = _get_dev_kw(s)
+            hdrs.append(dev.getfullname())
+            count += 1
+            extra_conf.append(s)
     reuse_dict = {}
     for dev in getdevs:
         dev, kwarg = _get_dev_kw(dev)
@@ -349,8 +354,10 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         reuse_dict[dev] = reuse + 1
         dev.force_get()
         hdr = dev.getfullname()
+        if reuse > 0:
+            hdr += '%i'%(reuse+1)
         f = dev.getformat(**kwarg)
-        f['basename'] = _dev_filename(root, hdr, npts, reuse, append=f['append'])
+        f['basename'] = _dev_filename(root, hdr, npts, 0, append=f['append'])
         f['base_conf'] = instruments_base._get_conf_header(f)
         f['base_hdr_name'] = hdr
         formats.append(f)
@@ -525,9 +532,31 @@ def _write_conf(f, formats, extra_base=None, **kwarg):
                 f.write(' '+conf)
             f.write('\n')
 
-# TODO: add a sweep up down.
-#       could save in 2 files but display on same trace
-#       Add a way to put a comment in the headers
+def dump_conf(f, setdevs=None, getdevs=[], extra_conf=None):
+    """ This functions dumps the settings of the list of devices and extra_conf
+        in the same way sweep and record does.
+        You can set a single setdevs, a list of setdevs and/or a list of getdevs.
+        Use setdevs for values you set (like in a sweep).
+        To write data in the file, including headers, use pyHegel.commands.writevec
+        Returns a list of hdrs (which are the name of the devices) that can be used
+        to create column headers.
+    """
+    hdrs, graphsel, formats = _getheaders(setdevs, getdevs, extra_conf=extra_conf)
+    _write_conf(f, formats)
+    return hdrs
+
+
+class _time_check(object):
+    def __init__(self, delay=10):
+        self.last_update = time.time()
+        self.delay = delay
+    def check(self):
+        now = time.time()
+        if now > self.last_update + self.delay:
+            self.last_update = now
+            return True
+        return False
+
 
 class _Sweep(instruments.BaseInstrument):
     # This MemoryDevice will be shared among different instances
@@ -537,8 +566,9 @@ class _Sweep(instruments.BaseInstrument):
       When this is a string (not None), it will be executed after the new values is
       set but BEFORE the out list is read.
       If you only want a delay, you can also change the beforewait device.
-      The variables i and v represent the current cycle index and the current set value.
-      The variable fwd is True unless in the second cycle of updown.
+      The variables i, v and vv represent the current cycle index, the current set value
+      (the last one for multi sweep), and a vector of all set values.
+      The variable fwd is forward(True)/reverse(False) state of v.
       """)
     beforewait = instruments.MemoryDevice(0.02, doc="""
       Wait after the new value is set but before the out list is read.
@@ -554,8 +584,9 @@ class _Sweep(instruments.BaseInstrument):
     after = instruments.MemoryDevice(doc="""
       When this is a string (not None), it will be executed AFTER the out list is read
       but before the next values is set.
-      The variables i and v represent the current cycle index and the current set value.
-      The variable fwd is True unless in the second cycle of updown.
+      The variables i, v and vv represent the current cycle index, the current set value
+      (the last one for multi sweep), and a vector of all set values.
+      The variable fwd is forward(True)/reverse(False) state of v.
       The variable vars contain all the values read in out. It is a flat list
       that contains all the data to be saved on a row of the main file.
       Note that v and vals[0] can be different for devices that use setget
@@ -598,17 +629,17 @@ class _Sweep(instruments.BaseInstrument):
        One string can be the empty one: ''
 
        The parameter can also be None. In that case a single file is saved containing
-       but the up and down sweep.
+       both the up and down sweep.
     """)
     next_file_i = instruments.MemoryDevice(0,doc="""
     This number is used, and incremented automatically when {next_i:02} is used (for 00 to 99).
      {next_i:03}  is used for 000 to 999, etc
     """)
-    def execbefore(self, i, v, fwd):
+    def execbefore(self, i, fwd, v, vv):
         b = self.before.get()
         if b:
             exec b
-    def execafter(self, i , v, fwd, vals):
+    def execafter(self, i, fwd, v, vv, vals):
         b = self.after.get()
         if b:
             exec b
@@ -637,9 +668,169 @@ class _Sweep(instruments.BaseInstrument):
         return self._conf_helper('before', 'after', 'beforewait')
     def __repr__(self):
         return '<sweep instrument>'
+    def _find_span(self, dev, logspace, start, stop, npts):
+        """
+        Finds the proper span. Also checks the validity of start/stop values.
+        """
+        dolinspace = True
+        negative = False
+        if isinstance(start, (list, np.ndarray)):
+            span = np.asarray(start)
+            # make start stop extremes for now
+            start = np.min(span)
+            stop = np.max(span)
+            npts = len(span)
+            dolinspace = False
+        dev_orig = dev
+        dev, dev_opt = _get_dev_kw(dev)
+        try:
+            dev.check(start, **dev_opt)
+            dev.check(stop, **dev_opt)
+        except ValueError:
+            raise ValueError('Wrong start or stop values (outside of valid range) for dev=%s. Aborting!'%dev)
+        # now make start stop of list, first and last values
+        if not dolinspace:
+            start = span[0]
+            stop = span[-1]
+        npts = int(npts)
+        if npts < 1:
+            raise ValueError, 'npts needs to be at least 1'
+        if dolinspace:
+            if logspace:
+                if start == 0. or stop == 0.:
+                    raise ValueError("Neither start nor stop can be 0. when using logspace for dev=%s."%dev)
+                if start < 0.:
+                    negative = True
+                    start *= -1.
+                    stop *= -1.
+                if stop < 0:
+                    raise ValueError('Both start and stop need to have the same sign when using logspace for dev=%s.'%dev)
+                span = np.logspace(np.log10(start), np.log10(stop), npts)
+                if negative:
+                    span *= -1.
+            else:
+                span = np.linspace(start, stop, npts)
+        if instruments_base.CHECKING:
+            # For checking only take first and last values
+            span = span[[0,-1]]
+        return span, start, stop, npts, dev_orig, dev, dev_opt, negative
+    def _get_filenames(self, filename, updown=False, start=None, stop=None, npts=None):
+        updown_str = self.updown.getcache()
+        updown_same = False
+        if updown_str == None:
+            updown_str = ['', '']
+            updown_same = True
+        fullpath = None
+        fullpathrev = None
+        fwd = True
+        self._lastnames = []
+        if filename != None:
+            basepath = use_sweep_path(filename)
+            if updown == True:
+                basepath = self._fn_insert_updown(basepath)
+            ind = 0
+            if updown == -1:
+                ind = 1
+                fwd = False
+            now = time.time()
+            with self._lock_instrument:
+                # lock to protect manipulation of next_file_i across threads
+                fullpath, unique_i = _process_filename(basepath, now=now, start=start, stop=stop, npts=npts, updown=updown_str[ind])
+                self._lastnames.append(fullpath)
+                if updown == True and not updown_same:
+                    ni = self.next_file_i.getcache()-1
+                    fullpathrev, unique_i = _process_filename(basepath, now=now, next_i=ni, start_i=unique_i, search=False,
+                                                    start=start, stop=stop, npts=npts, updown=updown_str[1])
+                    self._lastnames.append(fullpathrev)
+            filename = os.path.basename(fullpath)
+        return filename, fullpath, fullpathrev, fwd, updown_same
+    def _get_extraconf(self, extra_conf):
+        if extra_conf == None:
+            extra_conf = [sweep.out]
+        elif not isinstance(extra_conf, list):
+            extra_conf = [extra_conf, sweep.out]
+        else:
+            extra_conf = extra_conf[:] # make a copy so we don't change the user parameters
+            extra_conf.append(sweep.out)
+        return extra_conf
+
+    def _init_graph(self, title, filename, hdrs, x_idx, span, graphsel, logspace, negative, title_pre='Sweep: '):
+        t = traces.Trace()
+        if title == None:
+            title = filename
+        if title == None:
+            title = str(self._sweep_trace_num)
+        self._sweep_trace_num += 1
+        t.setWindowTitle(title_pre+title)
+        if logspace and negative:
+            t.setLim(-span)
+        else:
+            t.setLim(span)
+        if len(graphsel) == 0:
+            gsel = _itemgetter(x_idx)
+        else:
+            gsel = _itemgetter(*graphsel)
+        hdrs_leg = hdrs[:] #copy
+        if logspace and negative:
+            hdrs_leg[x_idx] = '- '+hdrs_leg[x_idx]
+        t.setlegend(gsel(hdrs_leg))
+        t.set_xlabel(hdrs_leg[x_idx])
+        if logspace:
+            t.set_xlogscale()
+        return t, gsel
+
+    def _do_inner_loop(self, iter_info, sets, devs, cformats, fobj, async, trace_obj, negative, gsel, clf=False, printit=False):
+        # iter_n is used for filenames and exec_before/after (could depend on separate fwd/rev files)
+        # iter_partial between 1 and iter_total: they are both used for progress update.
+        #   iter_partial can sometimes be iter_n+1
+        # cfwd is True when we are currently doing a forward sweep (uses for exec before/after)
+        iter_n, iter_part, iter_total, cfwd = iter_info
+        tme = clock.get()
+        vv = []
+        iv = []
+        bwait = 0.
+        for dev, dev_opt, v, beforewait, doset in zip(*sets):
+            vv.append(v)
+            if doset:
+                dev.set(v, **dev_opt) # TODO replace with move
+                bwait = max(bwait, beforewait)
+            iv.append( dev.getcache() )# in case the instrument changed the value
+        if printit:
+            printit('Sweep part: %3i/%-3i   %s'%(iter_part, iter_total, vv))
+        self.execbefore(iter_n, cfwd, v, vv)
+        wait(bwait)
+        if async:
+            vals = _readall_async(devs, cformats, iter_n)
+        else:
+            vals = _readall(devs, cformats, iter_n)
+        self.execafter(iter_n, cfwd, v, vv, iv+vals+[tme])
+        if fobj:
+            writevec(fobj, iv+vals+[tme])
+        if trace_obj is not None:
+            giv = iv[-1]
+            gvals = gsel(iv+vals)
+            if negative: #for when doing negative logspace
+                giv = -giv
+                ivn = iv[:]
+                ivn[-1] = giv
+                gvals = gsel(ivn+vals)
+            if clf:
+                trace_obj.setPoints([giv], np.array([gvals]).T)
+            else:
+                trace_obj.addPoint(giv, gvals)
+            _checkTracePause(trace_obj)
+            if trace_obj.abort_enabled:
+                return 'break'
+        return None
+
+
+# TODO deal with dev set that return multiple values (like some logical devices)
+#      properly handle progress update after a stop with a graph. It seems to
+#        get stuck until a collect_garbage is done.
     def __call__(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
-                  close_after=False, title=None, out=None, extra_conf=None,
-                  async=False, reset=False, logspace=False, updown=False, first_wait=None):
+                  close_after=False, graph=None, title=None, out=None, extra_conf=None,
+                  async=False, reset=False, logspace=False, updown=False, first_wait=None, beforewait=None,
+                  progress=True):
         """
             Usage:
                 dev is the device to sweep. For more advanced uses (devices with options),
@@ -672,6 +863,9 @@ class _Sweep(instruments.BaseInstrument):
                       filenames used.
                 rate: unused
                 close_after: automatically closes the figure after the sweep when True
+                graph: If graph is True, a figure is plotter while taking data. When
+                       False no figure is created. If graph is None (default) the value
+                       from the sweep.graph device is used.
                 title: string used for window title
                 out: list of devices to read. Can also be a single device.
                      This has the same syntax and overrides sweep.out.
@@ -699,87 +893,30 @@ class _Sweep(instruments.BaseInstrument):
                             after setting the first value. Use it when the first value produces
                             a large change that can temporarily overload some instruments
                             like lock-ins.
+                beforewait: it is the time to wait between setting the device and starting to
+                            read the out devices. When None it uses de sweep.beforewait device value.
+                progess: When True, the output will display the iteration status after 10s intervals.
+                The time column in the file is seconds since the epoch and represents the time at the
+                start of the current point (just before doing the set). See time.ctime to convert it to
+                text.
             SEE ALSO the sweep devices: before, after, beforewait, graph.
         """
-        dolinspace = True
-        if isinstance(start, (list, np.ndarray)):
-            span = np.asarray(start)
-            # make start stop extremes for now
-            start = min(span)
-            stop = max(span)
-            npts = len(span)
-            dolinspace = False
-        dev_orig = dev
-        dev, dev_opt = _get_dev_kw(dev)
-        try:
-            dev.check(start, **dev_opt)
-            dev.check(stop, **dev_opt)
-        except ValueError:
-            print 'Wrong start or stop values (outside of valid range). Aborting!'
-            return
-        # now make start stop of list, first and last values
-        if not dolinspace:
-            start = span[0]
-            stop = span[-1]
-        npts = int(npts)
-        if npts < 1:
-            raise ValueError, 'npts needs to be at least 1'
-        if dolinspace:
-            if logspace:
-                negative = False
-                if start == 0. or stop == 0.:
-                    raise ValueError("Neither start nor stop can be 0. when using logspace.")
-                if start < 0.:
-                    negative = True
-                    start *= -1.
-                    stop *= -1.
-                if stop < 0:
-                    raise ValueError('Both start and stop need to have the same sign when using logspace.')
-                span = np.logspace(np.log10(start), np.log10(stop), npts)
-                if negative:
-                    span *= -1.
+        span, start, stop, npts, dev_orig, dev, dev_opt, negative = self._find_span(dev, logspace, start, stop, npts)
+        filename, fullpath, fullpathrev, fwd, updown_same = self._get_filenames(filename, updown, start, stop, npts)
+        if beforewait is None:
+            beforewait = self.beforewait.get()
+        reset_raw = reset
+        if isinstance(reset, bool):
+            if reset:
+                reset = span[0] # return to first value
             else:
-                span = np.linspace(start, stop, npts)
-        if instruments_base.CHECKING:
-            # For checking only take first and last values
-            span = span[[0,-1]]
+                reset = None
         devs = self.get_alldevs(out)
-        updown_str = self.updown.getcache()
-        updown_same = False
-        if updown_str == None:
-            updown_str = ['', '']
-            updown_same = True
-        fullpath = None
-        fullpathrev = None
-        fwd = True
-        self._lastnames = []
-        if filename != None:
-            basepath = use_sweep_path(filename)
-            if updown == True:
-                basepath = self._fn_insert_updown(basepath)
-            ind = 0
-            if updown == -1:
-                ind = 1
-                fwd = False
-            now = time.time()
-            with self._lock_instrument:
-                # lock to protect manipulation of next_file_i across threads
-                fullpath, unique_i = _process_filename(basepath, now=now, start=start, stop=stop, npts=npts, updown=updown_str[ind])
-                self._lastnames.append(fullpath)
-                if updown == True and not updown_same:
-                    ni = self.next_file_i.getcache()-1
-                    fullpathrev, unique_i = _process_filename(basepath, now=now, next_i=ni, start_i=unique_i, search=False,
-                                                    start=start, stop=stop, npts=npts, updown=updown_str[1])
-                    self._lastnames.append(fullpathrev)
-            filename = os.path.basename(fullpath)
-        if extra_conf == None:
-            extra_conf = [sweep.out]
-        elif not isinstance(extra_conf, list):
-            extra_conf = [extra_conf, sweep.out]
-        else:
-            extra_conf = extra_conf[:] # make a copy so we don't change the user parameters
-            extra_conf.append(sweep.out)
-        if updown==True and updown_same:
+        extra_conf = self._get_extraconf(extra_conf)
+        npts_total = npts
+        if updown == True:
+            npts_total *= 2
+        if updown == True and updown_same:
             npts = 2*npts
         hdrs, graphsel, formats = _getheaders(dev_orig, devs, fullpath, npts, extra_conf=extra_conf)
         if fullpathrev != None:
@@ -787,84 +924,65 @@ class _Sweep(instruments.BaseInstrument):
         else:
             formatsrev = formats
         # hdrs and graphsel are the same as the rev versions
-        graph = self.graph.get()
+        if graph is None:
+            graph = self.graph.get()
         if graph:
-            t = traces.Trace()
-            if title == None:
-                title = filename
-            if title == None:
-                title = str(self._sweep_trace_num)
-            self._sweep_trace_num += 1
-            t.setWindowTitle('Sweep: '+title)
-            if logspace and negative:
-                t.setLim(-span)
-            else:
-                t.setLim(span)
-            if len(graphsel) == 0:
-                gsel = _itemgetter(0)
-            else:
-                gsel = _itemgetter(*graphsel)
-            hdrs_leg = hdrs[:] #copy
-            if logspace and negative:
-                hdrs_leg[0] = '- '+hdrs_leg[0]
-            t.setlegend(gsel(hdrs_leg))
-            t.set_xlabel(hdrs_leg[0])
-            if logspace:
-                t.set_xlogscale()
+            t, gsel = self._init_graph(title, filename, hdrs, 0, span, graphsel, logspace, negative, title_pre='Sweep: ')
+        else:
+            t = gsel = None
         try:
             f = None
             frev = None
             if filename != None:
                 # Make it unbuffered, windows does not handle line buffer correctly
                 f = open(fullpath, 'w', 0)
-                _write_conf(f, formats, extra_base='sweep_options', async=async, reset=reset, start=start, stop=stop, updown=updown)
+                _write_conf(f, formats, extra_base='sweep_options', async=async, reset=reset_raw, start=start, stop=stop,
+                            updown=updown, beforewait=beforewait, first_wait=first_wait)
                 writevec(f, hdrs+['time'], pre_str='#')
                 if fullpathrev != None:
                     frev = open(fullpathrev, 'w', 0)
-                    _write_conf(frev, formatsrev, extra_base='sweep_options', async=async, reset=reset, start=start, stop=stop, updown=updown)
+                    _write_conf(frev, formatsrev, extra_base='sweep_options', async=async, reset=reset_raw, start=start, stop=stop,
+                                updown=updown, beforewait=beforewait, first_wait=first_wait)
                     writevec(frev, hdrs+['time'], pre_str='#')
                 else:
                     frev = f
             ###############################
             # Start of loop
             ###############################
-            cycle_list = [(fwd, f, formats)]
-            ioffset = 0
-            if updown == True:
-                cycle_list = [(True, f, formats), (False, frev, formatsrev)]
-            for cfwd, cf, cformats in cycle_list:
-                cycle_span = span
-                if not cfwd: # doing reverse
-                    cycle_span = span[::-1]
-                for i,v in enumerate(cycle_span):
-                    i += ioffset
-                    tme = clock.get()
-                    dev.set(v, **dev_opt) # TODO replace with move
-                    iv = dev.getcache() # in case the instrument changed the value
-                    self.execbefore(i, v, cfwd)
-                    wait(self.beforewait.get())
-                    if i == 0 and cfwd and first_wait != None:
-                        wait(first_wait)
-                    if async:
-                        vals = _readall_async(devs, cformats, i)
-                    else:
-                        vals = _readall(devs, cformats, i)
-                    self.execafter(i, v, cfwd, [iv]+vals+[tme])
-                    if cf:
-                        writevec(cf, [iv]+vals+[tme])
-                    if graph:
-                        if logspace and negative:
-                            t.addPoint(-iv, gsel([-iv]+vals))
+            def iterator():
+                iter_partial = 0
+                ioffset = 0
+                clf = False
+                #dev, dev_opt, v, beforewait, doset
+                bwait = [beforewait]
+                sets = [[dev], [dev_opt], [], [], [True]]
+                cycle_list = [(fwd, f, formats)]
+                if updown == True:
+                    cycle_list = [(True, f, formats), (False, frev, formatsrev)]
+                for cfwd, cf, cformats in cycle_list:
+                    cycle_span = span
+                    if not cfwd: # doing reverse
+                        cycle_span = span[::-1]
+                    for i,v in enumerate(cycle_span):
+                        sets[2] = [v]
+                        if iter_partial == 0 and first_wait != None:
+                            sets[3] = [beforewait + first_wait]
                         else:
-                            t.addPoint(iv, gsel([iv]+vals))
-                        _checkTracePause(t)
-                        if t.abort_enabled:
-                            break
-                if updown_same:
-                    ioffset = i + 1
-                if graph:
-                    if t.abort_enabled:
-                        break
+                            sets[3] = bwait
+                        iter_partial += 1
+                        iter_info = i+ioffset, iter_partial, npts_total, cfwd
+                        yield iter_info, cf, cformats, sets, clf
+                    if updown_same:
+                        ioffset = i + 1
+
+            update_check = _time_check(10) # returns True once every 10s
+            if progress:
+                progress = instruments_base.mainStatusLine.new()
+            for iter_info, cf, cformats, sets, clf in iterator():
+                printit = progress if progress and update_check.check() else False
+                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negative, gsel, clf, printit)
+                if dobreak == 'break':
+                    break
         except KeyboardInterrupt:
             (exc_type, exc_value, exc_traceback) = sys.exc_info()
             raise KeyboardInterrupt('Interrupted sweep'), None, exc_traceback
@@ -875,21 +993,241 @@ class _Sweep(instruments.BaseInstrument):
                 frev.close()
         if graph and t.abort_enabled:
             raise KeyboardInterrupt('Aborted sweep')
-        if isinstance(reset, bool):
-            if reset:
-                reset = span[0] # return to first value
-            else:
-                reset = None
-        if reset != None:
-            if graph and t.abort_enabled:
-                pass
-            else:
-                dev.set(reset, **dev_opt)
+        elif reset != None:
+            dev.set(reset, **dev_opt)
         if graph and close_after:
             t = t.destroy()
             del t
 
+    def sweep_multi(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
+                  close_after=False, graph=None, title=None, out=None, extra_conf=None,
+                  async=False, reset=False, logspace=False, updown=False, first_wait=None, beforewait=None,
+                  progress=True, parallel=False):
+        """
+        The settings for sweep_multi have the same meaning as for the sweep command (see its documention).
+        However, many of the settings now require lists (dev, start, stop, npts, logspace, reset, close_after
+        first_wait, beforewait). For a N dimensioanl sweep, the need to be lists with N elements.
+        For many of them (not dev or start), if they are scalars, they are upgraded to a list with the
+        correct number of elements.
+        The first element is the slower changing one, the last one is the fastest (the inner loop one)
+        close_after except for the first (which closes the window), makes it clear the data once that
+        particular sub sweep is done.
+        The actual beforewait time used for an iteration will be the max of all the elements that
+        are changed for that iteration. Similarly for first_wait, which is used for the first point and
+        every time a sweep without updown jumps from last to first point.
+        The graph uses the fastest changing value for the x axis.
+        Only a single main file is ever created even when using updown (it does not use the sweep.updown device)
+
+        parallel: when True, all the devs are called for each cycle. All the pts are changed in parallel
+            so they need to have the same number of elements.
+        """
+        multiN = len(dev)
+        def mklist(v):
+            v = v if isinstance(v, (list, tuple, np.ndarray)) else [v]*multiN
+            if len(v) != multiN:
+                raise ValueError('A parameter does not have the correct number of elements')
+            return v
+        logspace = mklist(logspace)
+        npts = mklist(npts)
+        stop = mklist(stop)
+        updown = mklist(updown)
+        first_wait = mklist(first_wait)
+        if beforewait is None:
+            beforewait = self.beforewait.get()
+        beforewait = mklist(beforewait)
+        fbwait = []
+        for b, f in zip(beforewait, first_wait):
+            if f is None:
+                f = b
+            else:
+                f = f+b
+            fbwait.append(f)
+        first_wait = fbwait
+        del fbwait
+        close_after = mklist(close_after)
+        rate = mklist(rate)
+        reset_raw = reset
+        reset = mklist(reset)
+        spanl = []
+        startl = []
+        stopl = []
+        dev_origl = []
+        devl = []
+        dev_optl = []
+        negativel = []
+        for idev, ilogspace, istart, istop, inpts in zip(dev, logspace, start, stop, npts):
+            span, start, stop, npts, dev_orig, dev, dev_opt, negative = self._find_span(idev, ilogspace, istart, istop, inpts)
+            spanl.append(span)
+            startl.append(start)
+            stopl.append(stop)
+            dev_origl.append(dev_orig)
+            devl.append(dev)
+            dev_optl.append(dev_opt)
+            negativel.append(negative)
+        def conv_reset(reset, span):
+            if isinstance(reset, bool):
+                if reset:
+                    reset = span[0] # return to first values
+                else:
+                    reset = None
+            return reset
+        reset = [conv_reset(r, s) for r, s in zip(reset, spanl)]
+        spans = []
+        fwdrev = []
+        both_updown = []
+        for ud, span in zip(updown, spanl):
+            b = False
+            L = len(span)
+            if ud == True:
+                b = True
+                span = np.concatenate( (span, span[::-1]) )
+                f = [True]*L + [False]*L
+            elif ud == -1:
+                span = span[::-1]
+                f = [False]*L
+            else:
+                f = [True]*L
+            both_updown.append(b)
+            fwdrev.append(f)
+            spans.append(span)
+        del spanl
+        nptsl = [len(s) for s in spans] # This includes the effect of updown
+        if parallel:
+            # check all devs have the same number of points
+            npts = nptsl[0]
+            if any(n != npts for n in nptsl):
+                raise ValueError('For parallel, all the npts/updown comnination need to be the same length')
+            npts_total = npts
+        else:
+            npts_total = np.asarray(nptsl).prod()
+        # We never use updown filenames in multiN. Everything in one base file.
+        # start, stop and npts are the lists
+        filename, fullpath, fullpathrev, fwd, updown_same = self._get_filenames(filename, False, startl, stopl, npts_total)
+        devs = self.get_alldevs(out)
+        extra_conf = self._get_extraconf(extra_conf)
+        hdrs, graphsel, formats = _getheaders(dev_origl, devs, fullpath, npts_total, extra_conf=extra_conf)
+        if graph is None:
+            graph = self.graph.get()
+        if graph:
+            # We graph using last span
+            t, gsel = self._init_graph(title, filename, hdrs, multiN-1, spans[-1], graphsel, logspace[-1], negativel[-1], title_pre='Sweep_multi: ')
+        else:
+            t = gsel = None
+        try:
+            f = None
+            if filename != None:
+                # Make it unbuffered, windows does not handle line buffer correctly
+                f = open(fullpath, 'w', 0)
+                _write_conf(f, formats, extra_base='sweep_multi_options', async=async, reset=reset_raw, start=start, stop=stop,
+                                updown=updown, beforewait=beforewait, first_wait=first_wait, parallel=parallel)
+                # This needs to match the line in util.readfile
+                # TODO handle updown properly
+                read_dims = 'readback numpy shape for line part: '+(', '.join([str(n) for n in nptsl]))
+                writevec(f, [read_dims], pre_str='#')
+                writevec(f, hdrs+['time'], pre_str='#')
+
+            ###############################
+            # Start of loop
+            ###############################
+            if parallel:
+                def iterator():
+                    #dev, dev_opt, v, beforewait, doset
+                    sets = [devl, dev_optl, [], [], [True]*multiN]
+                    for i in range(npts_total):
+                        vs = []
+                        for cfwd, span in zip(fwdrev, spans):
+                            vs.append(span[i])
+                            fwd = cfwd[i]
+                        # fwd is last cfwd
+                        sets[2] = vs
+                        if i == 0:
+                            sets[3] = first_wait
+                        else:
+                            sets[3] = beforewait
+                        iter_info = i, i+1, npts_total, fwd
+                        yield iter_info, f, formats, sets, False
+            else:
+                def js_iterator():
+                    """ This increments the last element of js but
+                        carries to previous element any carryover above
+                        npts
+                    """
+                    js = [0]*multiN
+                    while True:
+                        yield js
+                        i = multiN -1
+                        while i >= 0:
+                            js[i] += 1
+                            if js[i] >= nptsl[i]:
+                                if i == 0:
+                                    return # we are done
+                                js[i] = 0
+                                i -= 1
+                            else:
+                                break
+
+                def iterator():
+                    #dev, dev_opt, v, beforewait, doset
+                    sets = [devl, dev_optl, [], [], []]
+                    i = 0
+                    js = [0]*multiN
+                    prev_js = [-1]*multiN
+                    for js in js_iterator():
+                        doset = []
+                        vs = []
+                        bwait = []
+                        clf = False
+                        for k, tmp in enumerate(zip(js, fwdrev, spans)):
+                            j, cfwd, span = tmp
+                            vs.append(span[j])
+                            fwd = cfwd[j]
+                            changing =  j != prev_js[k]
+                            doset.append(changing)
+                            if changing and i != 0 and k+1 < multiN:
+                                if close_after[k+1]:
+                                    clf = True
+                            if changing and j == 0 and not both_updown[k]:
+                                bwait.append(first_wait[k])
+                            else:
+                                bwait.append(beforewait[k])
+                        sets[2] = vs
+                        sets[4] = doset
+                        if i == 0:
+                            sets[3] = first_wait
+                        else:
+                            sets[3] = bwait
+                        iter_info = i, i+1, npts_total, fwd
+                        yield iter_info, f, formats, sets, clf
+                        i += 1
+                        prev_js = js[:] # need to make a copy
+
+            update_check = _time_check(10) # returns True once every 10s
+            if progress:
+                progress = instruments_base.mainStatusLine.new()
+            for iter_info, cf, cformats, sets, clf in iterator():
+                printit = progress if progress and update_check.check() else False
+                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negativel[-1], gsel, clf, printit)
+                if dobreak == 'break':
+                    break
+        except KeyboardInterrupt:
+            (exc_type, exc_value, exc_traceback) = sys.exc_info()
+            raise KeyboardInterrupt('Interrupted sweep_multi'), None, exc_traceback
+        finally:
+            if f:
+                f.close()
+        if graph and t.abort_enabled:
+            raise KeyboardInterrupt('Aborted sweep_multi')
+        else:
+            for dev, dev_opt, r in zip(devl, dev_optl, reset):
+                if r is not None:
+                    dev.set(r, **dev_opt)
+        if graph and close_after[0]:
+            t = t.destroy()
+            del t
+
+
 sweep = _Sweep()
+sweep_multi = sweep.sweep_multi
 
 
 def use_sweep_path(filename):
