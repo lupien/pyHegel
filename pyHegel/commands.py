@@ -1075,6 +1075,7 @@ class _Sweep(instruments.BaseInstrument):
         spans = []
         fwdrev = []
         both_updown = []
+        data_row_shape = []
         for ud, span in zip(updown, spanl):
             b = False
             L = len(span)
@@ -1082,6 +1083,7 @@ class _Sweep(instruments.BaseInstrument):
                 b = True
                 span = np.concatenate( (span, span[::-1]) )
                 f = [True]*L + [False]*L
+                data_row_shape.append(2)
             elif ud == -1:
                 span = span[::-1]
                 f = [False]*L
@@ -1090,6 +1092,7 @@ class _Sweep(instruments.BaseInstrument):
             both_updown.append(b)
             fwdrev.append(f)
             spans.append(span)
+            data_row_shape.append(L)
         del spanl
         nptsl = [len(s) for s in spans] # This includes the effect of updown
         if parallel:
@@ -1121,8 +1124,7 @@ class _Sweep(instruments.BaseInstrument):
                 _write_conf(f, formats, extra_base='sweep_multi_options', async=async, reset=reset_raw, start=start, stop=stop,
                                 updown=updown, beforewait=beforewait, first_wait=first_wait, parallel=parallel)
                 # This needs to match the line in util.readfile
-                # TODO handle updown properly
-                read_dims = 'readback numpy shape for line part: '+(', '.join([str(n) for n in nptsl]))
+                read_dims = 'readback numpy shape for line part: '+(', '.join([str(n) for n in data_row_shape]))
                 writevec(f, [read_dims], pre_str='#')
                 writevec(f, hdrs+['time'], pre_str='#')
 
