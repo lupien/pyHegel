@@ -54,7 +54,7 @@ from .logical import FunctionDevice
 from scipy.special import gamma
 
 def _get_zi_python_version(dev=None, host='localhost', port=8004):
-    if dev == None:
+    if dev is None:
         dev = zi.ziDAQServer(host, port, 1)
     python_ver = dev.version()
     python_rev = dev.revision()
@@ -83,7 +83,7 @@ class ChoiceIndex(_ChoiceIndex):
 
 def _tostr_helper(val, t):
     # This function converts from pyHegel val to ZI val (on set/write)
-    if t == None:
+    if t is None:
         return val
     if t == bool:
         return int(val)
@@ -97,7 +97,7 @@ def _tostr_helper(val, t):
 
 def _fromstr_helper(valstr, t):
     # This function converts from ZI val to pyHegel (on get/ask)
-    if t == None:
+    if t is None:
         return valstr
     if t == bool:
         return bool(valstr)
@@ -150,7 +150,7 @@ class ziDev(scpiDevice):
         self._input_sel = input_sel
         self._input_repeat = input_repeat
         ask_write_opt = kwarg.pop('ask_write_opt', None)
-        if ask_write_opt == None:
+        if ask_write_opt is None:
             t = input_type
             if t == 'auto':
                 if input_src == 'main':
@@ -159,7 +159,7 @@ class ziDev(scpiDevice):
                     t = None
             ask_write_opt = dict(t=t, src=input_src)
         kwarg.update(ask_write_opt=ask_write_opt)
-        if autoget and setstr != None:
+        if autoget and setstr is not None:
             getstr = setstr
         insert_dev_pre = '/{{dev}}/'
         if insert_dev and input_src=='main':
@@ -177,16 +177,16 @@ class ziDev(scpiDevice):
         t = self.type
         return _fromstr_helper(valstr, t)
     def _apply_sel(self, val):
-        if self._input_sel != None:
+        if self._input_sel is not None:
             return val[self._input_sel]
         return val
     def _setdev(self, val, **kwarg):
-        if self._setdev_p == None:
+        if self._setdev_p is None:
             raise NotImplementedError, self.perror('This device does not handle _setdev')
         options = self._combine_options(**kwarg)
         command = self._setdev_p
         repeat = self._input_repeat
-        if repeat == None:
+        if repeat is None:
             repeat = [1]
             val = [val]
         for i, rpt_i in enumerate(repeat):
@@ -195,7 +195,7 @@ class ziDev(scpiDevice):
             v = self._tostr(val[i])
             self.instr.write(cmd, v, **self._ask_write_opt)
     def _getdev(self, **kwarg):
-        if self._getdev_p == None:
+        if self._getdev_p is None:
             raise NotImplementedError, self.perror('This device does not handle _getdev')
         try:
             options = self._combine_options(**kwarg)
@@ -205,7 +205,7 @@ class ziDev(scpiDevice):
         command = self._getdev_p
         ret = []
         repeat = self._input_repeat
-        if repeat == None:
+        if repeat is None:
             repeat = [1]
         for i in repeat:
             options['rpt_i'] = i
@@ -214,7 +214,7 @@ class ziDev(scpiDevice):
             reti = self._apply_sel(reti)
             reti = self._fromstr(reti)
             ret.append(reti)
-        if self._input_repeat == None:
+        if self._input_repeat is None:
             return ret[0]
         return ret
 
@@ -342,7 +342,7 @@ class zurich_UHF(BaseInstrument):
         self._zi_zoomFFT = self._zi_daq.zoomFFT(timeout)
         self._zi_devs = ziu.devices(self._zi_daq)
         self._zi_sep = '/'
-        if zi_dev == None:
+        if zi_dev is None:
             try:
                 zi_dev = self._zi_devs[0]
                 print 'Using zi device ', zi_dev
@@ -363,9 +363,9 @@ class zurich_UHF(BaseInstrument):
         If you enter the bandwith frequency for tc, a time constant is returned.
         If you enter a timeconstant for tc, a bandwidth frequency is returned.
         """
-        if order == None:
+        if order is None:
             order = self.demod_order.getcache()
-        if tc == None:
+        if tc is None:
             tc = self.demod_tc.getcache()
         if enbw:
             return (1./(2*np.pi*tc)) * np.sqrt(np.pi)*gamma(order-0.5)/(2*gamma(order))
@@ -469,7 +469,7 @@ class zurich_UHF(BaseInstrument):
             pre = 'zoomFFT'
         else:
             raise ValueError, 'Invalid src'
-        if ret == None:
+        if ret is None:
             raise ValueError, 'Requested src is not available'
         return ret, pre
     def list_nodes(self, base='/', src='main', recursive=True, absolute=True, leafs_only=True, settings_only=False):
@@ -562,9 +562,9 @@ class zurich_UHF(BaseInstrument):
              obj.write('loopcount', 2, src='zoomFFT')
                 the 'sweepFFT/' is automatically inserted
         see _select_src for available src
-            it only affects t==None
+            it only affects t=None
             for src not 'main', the only choice is
-            t==None, and to give a single val.
+            t=None, and to give a single val.
         sync is for 'double' or 'int' and is to use the sync interface
 
         You can replace /dev2021/ by /{dev}/
@@ -582,10 +582,10 @@ class zurich_UHF(BaseInstrument):
                 self._zi_daq.syncSetInt(command, val)
             else:
                 self._zi_daq.setInt(command, val)
-        elif t==None:
+        elif t is None:
             src, pre = self._select_src(src)
             if pre == '':
-                if val == None:
+                if val is None:
                     src.set(command)
                 else:
                     src.set([(command, val)])
@@ -628,7 +628,7 @@ class zurich_UHF(BaseInstrument):
             return self._zi_daq.getSample(question)
         elif t=='dio':
             return self._zi_daq.getDIO(question)
-        elif t==None or t=='dict':
+        elif t is None or t=='dict':
             src, pre = self._select_src(src)
             if pre == '':
                 #ret = self._flat_dict(src.get(question))
@@ -695,7 +695,7 @@ class zurich_UHF(BaseInstrument):
         self.current_demod.set(current_ch)
         return channels_en
     def _fetch_ch_helper(self, ch):
-        if ch==None:
+        if ch is None:
             ch = self.find_all_active_channels()
         if not isinstance(ch, (list)):
             ch = [ch]
@@ -1131,7 +1131,7 @@ class zurich_UHF(BaseInstrument):
         # which is auto irrespective of sweep_auto_bw_fixed value.
         # The old behavior was not change to keep backwards compatibility (Juerg 23062014)
         #  Documentations errors should be fixed (done in 14.08)
-        if bw == None:
+        if bw is None:
             self.sweep_auto_bw_mode.set('manual')
             if self.sweep_auto_bw_fixed.getcache()<=0:
                 self.sweep_auto_bw_fixed.set(1)
@@ -1975,7 +1975,7 @@ class ziEvent(StructureImproved):
     @property
     def first_data(self):
         data = self.get_union()
-        if data != None:
+        if data is not None:
             return data.contents
     def __repr__(self):
         if self.count == 0:
@@ -2216,9 +2216,9 @@ class ziAPI(object):
         self._GetValueAsPollData(path)
     def get_error(self, result=None):
         """
-        if result==None, uses the last returned result
+        if result=None, uses the last returned result
         """
-        if result==None:
+        if result is None:
             result = self._last_result
         buf = c_char_p()
         base = c_int()

@@ -103,7 +103,7 @@ def main_start():
     # However this will not work if the get_ipython function has been deleted.
     n = 2
     g = get_parent_globals(n)
-    while g != None:
+    while g is not None:
         if g.has_key('get_ipython'):
             # execute start_code in the already running ipython session.
             #print 'Under ipython', n

@@ -110,10 +110,10 @@ class lecroy_dict(ChoiceBase):
         self.fmts_type = fmts_type
         self.fmts_lims = fmts_lims
         self.sep = sep
-        if required == None:
+        if required is None:
             required = cnt
         self.required = required
-        if repeats != None:
+        if repeats is not None:
             if not isinstance(repeats, (tuple, list)):
                 repeats = (repeats, repeats)
         else:
@@ -174,7 +174,7 @@ class lecroy_dict(ChoiceBase):
     def tostr(self, fromdict=None, **kwarg):
         # we assume check (__contains__) was called so we don't need to
         # do fmt.set_current_vals again
-        if fromdict == None:
+        if fromdict is None:
             fromdict = kwarg
         fromdict = fromdict.copy() # don't change incomning argument
         ret = []
@@ -504,7 +504,7 @@ class waveformdata(object):
 
 class lecroy_vbs_scpi(scpiDevice):
     def __init__(self, setstr=None, getstr=None, autoget=True, write_quotes=True, *arg, **kwarg):
-        if getstr == None and autoget:
+        if getstr is None and autoget:
             getstr = setstr
             if write_quotes:
                 setstr = setstr+'="{val}"'
@@ -571,7 +571,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self.current_channel.set(orig_ch)
         return ret
     def _fetch_ch_helper(self, ch):
-        if ch==None:
+        if ch is None:
             ch = self.find_all_active_channels()
         if not isinstance(ch, (list)):
             ch = [ch]
@@ -704,7 +704,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self.write('BUZZer BEEP')
     def histo_auto_range(self, ch=None):
         """ Adjust the range and center of an histogram. For F1-F12 """
-        if ch==None:
+        if ch is None:
             ch = self.current_channel.getcache()
         self.write('%s:Find_Ctr_Range'%ch)
     def message(self, msg=''):
@@ -732,7 +732,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         data_fmt is only usefull for data arrays and can be 'byte', 'word', or 'float'
         """
         extra = ''
-        if data_fmt != None:
+        if data_fmt is not None:
             extra = ',' + data_fmt
         ret = self.ask('%s:INSPect? %s%s'%(ch, info, extra))
         if do_print:

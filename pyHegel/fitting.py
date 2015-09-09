@@ -52,7 +52,7 @@ def getVarNames(func):
           defaults are the default values for the kwpara
     """
     (args, varargs, varkw, defaults) = inspect.getargspec(func)
-    if defaults == None:
+    if defaults is None:
         Nkw = 0
     else:
         Nkw = len(defaults)
@@ -114,7 +114,7 @@ def convVal(p, pe, signif=2):
                  '{0:.{prec}f}'.format(pe_rescaled, prec=frac_prec), '%i'%expEng )
 
 def _split_decimal(s):
-    if s == None:
+    if s is None:
         return '', ''
     try:
         l, r = s.split('.')
@@ -131,14 +131,14 @@ def _splitResult(names, ps, pes, signif=2):
     i = 0
     for name, p, pe, in zip(names, ps, pes):
         pstr, pestr, expstr = convVal(p, pe, signif=signif)
-        if expstr == None:
+        if expstr is None:
             pstr_l, pstr_r = pstr, ''
         else:
             pstr_l, pstr_r = _split_decimal(pstr)
         pestr_l, pestr_r = _split_decimal(pestr)
-        if expstr == None:
+        if expstr is None:
             expstr = ''
-        elif pestr == None:
+        elif pestr is None:
             noerr_i.append(i)
         else:
             full_i.append(i)
@@ -174,16 +174,16 @@ def strResult(func, p, pe, extra={}, signif=2):
         raise ValueError, "p and pe don't have the same dimension"
     if Npara > N:
         raise ValueError, "The function has too many positional parameters"
-    if Npara < N and varargs == None and kwpara == None:
+    if Npara < N and varargs is None and kwpara is None:
         raise ValueError, "The function has too little positional parameters"
-    if Npara < N and varargs != None:
+    if Npara < N and varargs is not None:
         # create extra names par1, par2, for all needed varargs
         para.extend(['par%i'%(i+1) for i in range(N-Npara)])
-    elif Npara < N and kwpara != None:
+    elif Npara < N and kwpara is not None:
         para.extend(kwpara[:N-Npara])
         kwpara = kwpara[N-Npara:]
         defaults = defaults[N-Npara:]
-    if defaults != None:
+    if defaults is not None:
         kw = collections.OrderedDict(zip(kwpara, defaults))
     else:
         kw = {}
@@ -268,7 +268,7 @@ def plotResult(func, p, pe, extra={}, signif=2, loc='upper right', ax=None, form
 
 
 def _handle_adjust(func, p0, adjust, noadjust):
-    if adjust == None and noadjust == None:
+    if adjust is None and noadjust is None:
         return slice(None)
     Np = len(p0)
     all_index = range(Np)
@@ -281,9 +281,9 @@ def _handle_adjust(func, p0, adjust, noadjust):
         adjust = all_index(adjust)
     if isinstance(noadjust, slice):
         adjust = all_index(noadjust)
-    if adjust == None:
+    if adjust is None:
         adjust = all_index
-    if noadjust == None:
+    if noadjust is None:
         noadjust = []
     #s = set() # This fails when running under pyHegel (not on import).
     s = __builtin__.set()
@@ -444,7 +444,7 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
     Ndof = y.size - len(p)
     chiNorm = chi2/Ndof
     sigmaCorr = np.sqrt(chiNorm)
-    if cov_x != None:
+    if cov_x is not None:
         pe = np.sqrt(cov_x.diagonal())
         pei = 1./pe
         covar =  cov_x*pei[None,:]*pei[:,None]

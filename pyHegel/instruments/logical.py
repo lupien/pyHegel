@@ -39,7 +39,7 @@ from ..instruments_registry import add_to_instruments
 def _asDevice(dev):
     if isinstance(dev, BaseInstrument):
         dev = dev.alias
-        if dev == None:
+        if dev is None:
             raise ValueError, 'We required a device, but the given instrument has no alias'
     return dev
 
@@ -123,14 +123,14 @@ class LogicalDevice(BaseDevice):
         self._basedev_orig = basedev
         self._basedevs_orig = basedevs
         basedev_kwarg={}
-        if basedev != None:
+        if basedev is not None:
             if isinstance(basedev, tuple):
                 basedev_kwarg = basedev[1]
                 basedev = basedev[0]
             basedev = _asDevice(basedev) # deal with instr.alias
         basedevs_kwarg=[]
-        if basedevs != None:
-            if basedev != None:
+        if basedevs is not None:
+            if basedev is not None:
                 print 'You should not use basedev and basedevs at the same time. basedev is now basedevs[0]'
             basedevs = basedevs[:] # make a copy of the list so we don't change the original
             for i, dev in enumerate(basedevs):
@@ -152,13 +152,13 @@ class LogicalDevice(BaseDevice):
         self._cached_data = []
         self._autoget = self._autoget_normalize(autoget)
         if basedev:
-            if autoinit == None:
+            if autoinit is None:
                 autoinit = basedev._autoinit
-            if setget == None:
+            if setget is None:
                 setget = basedev._setget
-        if autoinit != None:
+        if autoinit is not None:
             kwarg['autoinit'] = autoinit
-        if setget != None:
+        if setget is not None:
             kwarg['setget'] = setget
         self._quiet_del = quiet_del
         super(LogicalDevice, self).__init__(doc=doc, trig=True, **kwarg)
@@ -227,23 +227,23 @@ class LogicalDevice(BaseDevice):
         kw = kwarg.pop('kw', None)
         devs=[]
         kwargs=[]
-        if autoget == None:
+        if autoget is None:
             autoget = self._autoget
         autoget = self._autoget_normalize(autoget)
-        if autoget == False or (self._basedevs == None and self._basedev == None):
+        if autoget == False or (self._basedevs is None and self._basedev is None):
             pass
-        elif not self._basedevs and self._basedev != None:
+        elif not self._basedevs and self._basedev is not None:
             if autoget:
                 devs = [self._basedev]
                 base_kwarg, kwarg_clean = self._combine_kwarg(kwarg, self._basedev_kwarg, op)
-                if kw == None:
+                if kw is None:
                     kw = {}
                 if not isinstance(kw, dict):
                     raise ValueError, "kw option needs to be a dictionnary"
                 base_kwarg.update(kw)
                 kwargs = [base_kwarg]
         else:
-            if kw == None:
+            if kw is None:
                 kw = [{}]*len(self._basedevs)
             if not isinstance(kw, list):
                 raise ValueError, "kw option needs to be a list of dictionnary"
@@ -280,7 +280,7 @@ class LogicalDevice(BaseDevice):
             for dev, base_kwarg in gl:
                 self._cached_data.append(dev.get(**base_kwarg))
         ret = self._getdev_log(**kwarg)
-        if self._basedev != None:
+        if self._basedev is not None:
             self._last_filename = self._basedev._last_filename
         #else: # in async_task, we don't know data yet so return something temporary
         #    ret = 'To be replaced' # in getasync
@@ -320,21 +320,21 @@ class LogicalDevice(BaseDevice):
         # Overwrite this if necessary.
         # op can be 'get' 'set' 'check'
         # Note that the kw option is always stripped before calling this function.
-        if base == None:
+        if base is None:
             base = self._basedev_kwarg
         base_kwarg = base.copy()
         kwarg_clean = {}
         base_kwarg.update(kwarg_dict)
         return base_kwarg, kwarg_clean
     def _current_config_addbase(self, head, options=None):
-        if options==None:
+        if options is None:
             options={}
         gl, kwarg = self._get_auto_list(options, autoget='all', op='get') # pick op='get' here but we don't really know (could be 'set' or 'check')
         for dev, base_kwarg in gl:
             head.append('::'+dev.getfullname())
             frmt = dev.getformat(**base_kwarg)
             base = _get_conf_header(frmt)
-            if base != None:
+            if base is not None:
                 head.extend(base)
         head.append('::other_options=%r'%kwarg)
         return head
@@ -469,7 +469,7 @@ class LimitDevice(LogicalDevice):
     value to a user selectable limits.
     """
     def __init__(self, basedev, min=None, max=None, doc='', **extrak):
-        if min==None or max==None:
+        if min is None or max is None:
             raise ValueError, 'min and max need to be specified for LimitDevice'
         doc+= 'min,max=%g,%g (initial)'%(min, max)
         super(type(self), self).__init__(basedev=basedev, min=min, max=max, doc=doc, **extrak)
@@ -485,13 +485,13 @@ class LimitDevice(LogicalDevice):
            set_limits(min=-1) # same as above
            set_limits([-4,3]) # min=-4, max=3
         """
-        if min != None and len(min)==2 and max==None:
+        if min is not None and len(min)==2 and max is None:
             self.min = min[0]
             self.max = min[1]
             return
-        if min != None:
+        if min is not None:
             self.min = min
-        if max != None:
+        if max is not None:
             self.max = max
     def _current_config(self, dev_obj=None, options={}):
         head = ['Limiting:: min=%r max=%r basedev=%s'%(self.min, self.max, self._basedev.getfullname())]
@@ -591,7 +591,7 @@ class ExecuteDevice(LogicalDevice):
         doc+= 'command="%s"\n'%(command)
         super(type(self), self).__init__(basedev=basedev, doc=doc, **extrak)
         self._multi = multi
-        if multi != None:
+        if multi is not None:
             self._format['multi'] = multi
             self._format['graph'] = range(len(multi))
         self._getdev_p = True
@@ -608,14 +608,14 @@ class ExecuteDevice(LogicalDevice):
         ret = self._cached_data[0]
         command = self._command
         filename = self._basedev._last_filename
-        if filename != None:
+        if filename is not None:
             root, ext = os.path.splitext(filename)
             directory, basename = os.path.split(filename)
             basenoext = os.path.splitext(basename)[0]
             command = command.format(filename=filename, root=root, ext=ext,
                                  directory=directory, basename=basename,
                                  basenoext=basenoext)
-        if self._multi == None:
+        if self._multi is None:
             os.system(command)
         else:
             ret = subprocess.check_output(command, shell=True)

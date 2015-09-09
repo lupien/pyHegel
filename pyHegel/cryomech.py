@@ -182,7 +182,7 @@ class Cryomech(object):
         n = (n+1)%256
         self._serialno = max(0x10, n)
     def calc_chksum(self, message, cmd_rsp=0, serialno=None):
-        if serialno==None:
+        if serialno is None:
             serialno=0
         sum = self.addr+cmd_rsp+serialno
         for c in message:
@@ -270,7 +270,7 @@ class Cryomech(object):
             cmd = 0xe
             message = '\x4d\x00'+chr(index)
         elif isinstance(question, basestring):
-            if val == None:
+            if val is None:
                 cmd, message = self.cryo_readdict_messsage(self.HASHES[question], index=index)
             else:
                 cmd, message = self.cryo_writedict_messsage(self.HASHES[question], val, index=index)

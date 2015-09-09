@@ -64,7 +64,7 @@ class agilent_rf_33522A(visaInstrument):
                 opts += self._conf_helper('coupled_freq_ratio')
         curr_ch = self.current_ch.getcache()
         ch = options.get('ch', None)
-        if ch != None:
+        if ch is not None:
             self.current_ch.set(ch)
         opts += self._conf_helper('current_ch', 'out_en', 'ampl', 'ampl_autorange_en', 'ampl_unit', 'offset',
                                   'volt_limit_low', 'volt_limit_high', 'volt_limit_en', 'out_load_ohm', 'out_polarity',
@@ -158,7 +158,7 @@ class agilent_rf_33522A(visaInstrument):
     def phase_sync(self):
         self.write('PHASe:SYNChronize')
     def phase_ref(self, ch=None):
-        if ch != None:
+        if ch is not None:
             self.current_ch.set(ch)
         ch=self.current_ch.getcache()
         self.write('SOURce{ch}:PHASe:REFerence'.format(ch=ch))
@@ -758,7 +758,7 @@ class infiniiVision_3000(visaInstrument):
         """
         self.write(':SINGle')
     def _fetch_ch_helper(self, ch):
-        if ch==None:
+        if ch is None:
             ch = self.find_all_active_channels()
         if not isinstance(ch, (list)):
             ch = [ch]
@@ -785,7 +785,7 @@ class infiniiVision_3000(visaInstrument):
             -xaxis: Set to True (default) to return the timebase as the first column
         """
         ch = self._fetch_ch_helper(ch)
-        if ch==None:
+        if ch is None:
             ch = self.find_all_active_channels()
         if not isinstance(ch, (list)):
             ch = [ch]
@@ -900,7 +900,7 @@ class agilent_EXA(visaInstrumentAsync):
                                       'trace_detector', 'trace_detector_auto']
         ret = []
         for t in traces:
-            if t != None:
+            if t is not None:
                 self.current_trace.set(t)
             tret = []
             for n in trace_conf:
@@ -1052,9 +1052,9 @@ class agilent_EXA(visaInstrumentAsync):
         """
         if isinstance(traces, (tuple, list)):
             pass
-        elif traces != None:
+        elif traces is not None:
             traces = [traces]
-        else: # traces == None
+        else: # traces is None
             traces = []
             old_trace = self.current_trace.get()
             for t in range(1,7):
@@ -1159,7 +1159,7 @@ class agilent_EXA(visaInstrumentAsync):
         left  to find the left
         right to find the next peak to the right
         """
-        if mkr == None:
+        if mkr is None:
             mkr = self.current_mkr.getcache()
         if mkr<1 or mkr>12:
             raise ValueError, self.perror('mkr need to be between 1 and 12')
@@ -1171,7 +1171,7 @@ class agilent_EXA(visaInstrumentAsync):
             next = ''
         self.write('CALCulate:MARKer{mkr}:MAXimum'.format(mkr=mkr)+next)
     def marker_to_center_freq(self, mkr=None):
-        if mkr == None:
+        if mkr is None:
             mkr = self.current_mkr.getcache()
         if mkr<1 or mkr>12:
             raise ValueError, self.perror('mkr need to be between 1 and 12')
@@ -1424,12 +1424,12 @@ class agilent_PNAL(visaInstrumentAsync):
     @locked_calling
     def delete_measurement(self, name=None, ch=None):
         """ delete a measurement.
-            if name == None: delete all measurements for ch
+            if name=None: delete all measurements for ch
             see channel_list for the available measurments
         """
         ch_list = self.channel_list.get(ch=ch)
         ch=self.current_channel.getcache()
-        if name != None:
+        if name is not None:
             if name not in ch_list:
                 raise ValueError, self.perror('Invalid Trace name')
             command = 'CALCulate{ch}:PARameter:DELete "{name}"'.format(ch=ch, name=name)
@@ -1460,7 +1460,7 @@ class agilent_PNAL(visaInstrumentAsync):
         ch = kwarg.get('ch', None)
         traces = kwarg.get('traces', None)
         cook = kwarg.get('cook', False)
-        if ch != None:
+        if ch is not None:
             self.current_channel.set(ch)
         traces = self._fetch_traces_helper(traces)
         if xaxis:
@@ -1497,9 +1497,9 @@ class agilent_PNAL(visaInstrumentAsync):
         ch_list = self.channel_list.getcache()
         if isinstance(traces, (tuple, list)):
             traces = traces[:] # make a copy so it can be modified without affecting caller. I don't think this is necessary anymore but keep it anyway.
-        elif traces != None:
+        elif traces is not None:
             traces = [traces]
-        else: # traces == None
+        else: # traces is None
             traces = ch_list.keys()
         return traces
     def _fetch_getdev(self, ch=None, traces=None, unit='default', mem=False, xaxis=True, cook=False):
@@ -1518,7 +1518,7 @@ class agilent_PNAL(visaInstrumentAsync):
                      Note that not all the necessary settings are saved in the file headers.
                      Also it will NOT work when the format is complex (Smith, Polar ...)
         """
-        if ch != None:
+        if ch is not None:
             self.current_channel.set(ch)
         traces = self._fetch_traces_helper(traces)
         if cook:
@@ -1953,9 +1953,9 @@ class agilent_ENA(agilent_PNAL):
         self.select_trace.set(trace_orig)
         if isinstance(traces, (tuple, list)):
             traces = traces[:] # make a copy so it can be modified without affecting caller. I don't think this is necessary anymore but keep it anyway.
-        elif traces != None:
+        elif traces is not None:
             traces = [traces]
-        else: # traces == None
+        else: # traces is None
             traces = all_tr
         return traces
     @locked_calling
@@ -2503,7 +2503,7 @@ class agilent_AWG(visaInstrumentAsync):
         """
         When channels are coupled, both are affected.
         """
-        if ch!=None:
+        if ch is not None:
             self.current_channel.set(ch)
         ch = self.current_channel.getcache()
         if enable:
@@ -2516,11 +2516,11 @@ class agilent_AWG(visaInstrumentAsync):
         init_val is the DAC value to use for initialization. No initialization by default.
         """
         # TODO should check the lenght is valid
-        if ch!=None:
+        if ch is not None:
             self.current_channel.set(ch)
         ch = self.current_channel.getcache()
         extra=''
-        if init_val != None:
+        if init_val is not None:
             extra=',{init}'
         self.write((':TRACe{ch}:DELete:ALL;:TRACe{ch}:DEFine 1,{L}'+extra).format(ch=ch, L=sample_length, init=init_val))
     @locked_calling
@@ -2555,7 +2555,7 @@ class agilent_AWG(visaInstrumentAsync):
             padding='FILL'
         else:
             padding='FILL,%i'%fill
-        if ch!=None:
+        if ch is not None:
             self.current_channel.set(ch)
         ch = self.current_channel.getcache()
         # Make sure filename is reachable. Make it absolute.

@@ -215,9 +215,9 @@ def xlim_time(xmin=None, xmax=None, epoch=False):
     """
     if isinstance(xmin, tuple):
         xmin, xmax = xmin
-    if xmin != None:
+    if xmin is not None:
         xmin = str_epoch2num(xmin)
-    if xmax != None:
+    if xmax is not None:
         xmax = str_epoch2num(xmax)
     xmin, xmax = pylab.xlim(xmin, xmax)
     if epoch:
@@ -233,7 +233,7 @@ def time_stripdate(x, first=None):
     x, first and return are in seconds.
     x and first are since epoch (time.time())
     """
-    if first == None:
+    if first is None:
         try:
             first = x[0]
         except TypeError:
@@ -425,10 +425,10 @@ class Trace(TraceBase):
         if self.time_mode:
             # convert from sec since epoch to matplotlib date format
             x = time2date(x)
-        if self.xs == None:
+        if self.xs is None:
             self.xs = np.array([x])
         else:  self.xs = np.append(self.xs, x)
-        if self.ys == None:
+        if self.ys is None:
             self.ys = np.array([ys])
         else:  self.ys = np.append(self.ys, [ys], axis=0)
         self.update()
@@ -446,7 +446,7 @@ class Trace(TraceBase):
         self.canvas_resizeEvent_orig(event)
         self.do_resize()
     def do_resize(self, draw=True):
-        if self.xs == None:
+        if self.xs is None:
             return
         ndim = self.ys.shape[1]
         offset = self.offset
@@ -458,7 +458,7 @@ class Trace(TraceBase):
         if draw:
             self.draw()
     def update(self):
-        if self.xs == None:
+        if self.xs is None:
             self.draw()
             return
         if self.first_update:
@@ -577,7 +577,7 @@ class TraceLots(TraceBase):
     def readit(self, offset=0):
         self.fh.seek(offset*self.byte_per_point)
         vals = np.fromfile(self.fh, dtype=self.dtype, count=self.block_size)
-        if self.trans != None:
+        if self.trans is not None:
             vals = self.trans(vals)
         self.vals = vals
     def update(self):
@@ -600,13 +600,13 @@ class TraceWater(TraceBase):
         super(TraceWater, self).__init__(width=width, height=height, dpi=dpi)
         ax = self.fig.add_subplot(111)
         self.ax = ax
-        if y == None:
+        if y is None:
             self.y = xy[1]
             self.x = xy[0]
         else:
             self.y = y
             self.x = xy
-        if self.x == None:
+        if self.x is None:
             self.x = np.arange(self.y.shape[-1])+.01 # prevents divide by zero
         if self.x.ndim == 1:
             self.x = self.x[None, :]
@@ -822,7 +822,7 @@ class Sleeper(QtGui.QWidget):
         self.pause_length = 0.
         self.pause_start = self.start_time
         self.pause_button.setChecked(False)
-        if length != None:
+        if length is not None:
             self.sleep_length.setValue(length)
         self.pause(False)
         # They above two might not have produced a change

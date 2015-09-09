@@ -209,7 +209,7 @@ def _patch_pyvisa():
 
 def _old_load_visa(path=None):
     """
-    if path==None: obeys the try_agilent_first. If try_agilent_first is True
+    if path=None: obeys the try_agilent_first. If try_agilent_first is True
                    it overrides even a choice in .pyvisarc
     if path='': only load the default library, does not follow try_agilent_first
                 but listens to .pyvisarc
@@ -385,7 +385,7 @@ class WaitResponse(object):
         self._visalib = visalib
         self.timed_out = timed_out
     def __del__(self):
-        if self.context != None:
+        if self.context is not None:
             self._visalib.close(self.context)
 
 @property
@@ -841,7 +841,7 @@ def _clean_up_registry(path):
 
 def get_resource_manager(path=None):
     """
-    if path==None: obeys the try_agilent_first.
+    if path=None: obeys the try_agilent_first.
     if path='': only load the default library, does not follow try_agilent_first
     for any other path, load it.
     In case of problem it raises ImportError
@@ -1548,7 +1548,7 @@ class Handlers(object):
         self._exc_type = False
         self.block_time = 0.
     def install(self, event_type, userHandle=None):
-        if self.event_type != None:
+        if self.event_type is not None:
             raise RuntimeError('Handler %s is already installed'%self.name)
         if event_type == 'exc':
             self._exc_type = True
@@ -1566,7 +1566,7 @@ class Handlers(object):
             self._handler_func = None
         return res
     def uninstall(self):
-        if self.event_type == None:
+        if self.event_type is None:
             return True
         with visa_context(ok='OK', handler=self) as res:
             self.instr.uninstall_visa_handler(self.event_type, self._handler_func, self.userHandle)

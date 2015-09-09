@@ -77,14 +77,14 @@ class _sleep_signal_context_manager():
             _empty_async()
             return self # will be used for target in : with xxx as target
         except KeyboardInterrupt: # capture a break (possibly async)
-            if self.old_sig: # we can get here with old_sig == None, it is rare but I have seen it
+            if self.old_sig: # we can get here with old_sig=None, it is rare but I have seen it
                 signal.signal(signal.SIGINT, self.old_sig)
             raise
     def __exit__(self, exc_type, exc_value, exc_traceback):
         # exc_type, exc_value, exc_traceback are None if no exception occured
         if exc_type == KeyboardInterrupt:
             self.ctrlc_occured = True
-        if self.old_sig != None:
+        if self.old_sig is not None:
             signal.signal(signal.SIGINT, self.old_sig)
         if self.ctrlc_occured and self.absorb_ctrlc:
             return True # this will suppress the exception
@@ -143,12 +143,12 @@ class _delayed_signal_context_manager():
             _empty_async()
             return self # will be used for target in : with xxx as target
         except KeyboardInterrupt: # capture a break (possibly async)
-            if self.old_sig: # we can get here with old_sig == None, it is rare but I have seen it
+            if self.old_sig: # we can get here with old_sig=None, it is rare but I have seen it
                 signal.signal(signal.SIGINT, self.old_sig)
             raise
     def __exit__(self, exc_type, exc_value, exc_traceback):
         # exc_type, exc_value, exc_traceback are None if no exception occured
-        if self.old_sig != None:
+        if self.old_sig is not None:
             signal.signal(signal.SIGINT, self.old_sig)
             # Starting from here, delayed_sigint_handle will no longer be called
             # And if it was called before the switch, it completed because

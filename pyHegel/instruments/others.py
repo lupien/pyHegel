@@ -213,10 +213,10 @@ class sr830_lia(visaInstrument):
         By default time_constant and n_filter are the current ones
         When sec is True the input time is in sec, not in time_constants
         """
-        if n_filter == None:
+        if n_filter is None:
             n_filter = self.filter_slope.getcache()
             n_filter = self.filter_slope.choices.index(n_filter)+1
-        if time_constant == None:
+        if time_constant is None:
             time_constant = self.timeconstant.getcache()
         if sec:
             n_time_constant /= time_constant
@@ -244,10 +244,10 @@ class sr830_lia(visaInstrument):
         Here, given a fraction, we find the number of time_constants needed to wait.
         When sec is true, it returs the time in sec not in number of time_constants.
         """
-        if n_filter == None:
+        if n_filter is None:
             n_filter = self.filter_slope.getcache()
             n_filter = self.filter_slope.choices.index(n_filter)+1
-        if time_constant == None:
+        if time_constant is None:
             time_constant = self.timeconstant.getcache()
         func = lambda x: self.find_fraction(x, n_filter, time_constant)-frac
         n_time = brentq_rootsolver(func, 0, 100)
@@ -416,7 +416,7 @@ class sr780_analyzer(visaInstrumentAsync):
             return
         self._async_mode = 'srq'
         disp_org = self.current_display.getcache()
-        if disp==None:
+        if disp is None:
             disp = disp_org
         self.current_display.set(disp)
         # 0x2=A-linear avg, 0x4=A-settled, 0x200=B-linear, 0x400=B-settled
@@ -490,7 +490,7 @@ class sr780_analyzer(visaInstrumentAsync):
         # The instrument has 5 Traces that can be used for memory.
         # There is REFY? d,j to obtain pint j (0..length-1) in ref curve of display d
         #  DSPN? d to obtain lenght of data set
-        if disp != None:
+        if disp is not None:
             self.current_display.set(disp)
         disp = self.current_display.getcache()
         disp = self.current_display._tostr(disp)
@@ -783,7 +783,7 @@ class lakeshore_325(visaInstrument):
        fetch allows to read all channels
     """
     def _fetch_helper(self, ch=None):
-        if ch == None:
+        if ch is None:
             ch = self.enabled_list.getcache()
         if not isinstance(ch, (list, ChoiceBase)):
             ch = [ch]
@@ -887,7 +887,7 @@ class lakeshore_340(visaInstrument):
         self.current_ch.set(old_ch)
         return ret
     def _fetch_helper(self, ch=None):
-        if ch == None:
+        if ch is None:
             ch = self.enabled_list.getcache()
         if not isinstance(ch, (list, ChoiceBase)):
             ch = [ch]
@@ -1223,7 +1223,7 @@ class lakeshore_370(visaInstrument):
         self.current_ch.set(old_ch)
         return ret
     def _fetch_helper(self, ch=None):
-        if ch == None:
+        if ch is None:
             ch = self.enabled_list.getcache()
         if not isinstance(ch, (list, ChoiceBase)):
             ch = [ch]
@@ -1338,7 +1338,7 @@ class lakeshore_370(visaInstrument):
                 current_ch = ch
                 # In PID control we will repeat the control channel multiple times
                 # So check that. We will return the last one only
-                if ret[i*2] == None:
+                if ret[i*2] is None:
                     nmeas -= 1
             elif wait_new: # only
                 while True:

@@ -213,7 +213,7 @@ def _get_conf_header(format):
     return _get_conf_header_util(header, obj, options)
 
 def _replace_ext(filename, newext=None):
-    if newext == None:
+    if newext is None:
         return filename
     root, ext = os.path.splitext(filename)
     return root+newext
@@ -463,7 +463,7 @@ class asyncThread(threading.Thread):
     def change_cleanup(self, new_cleanup):
         self._async_cleanup = new_cleanup
     def replace_result(self, val, index=None):
-        if index == None:
+        if index is None:
             index = self._replace_index
             self._replace_index += 1
         self.results[index] = val
@@ -482,7 +482,7 @@ class asyncThread(threading.Thread):
             if self._async_trig and not CHECKING:
                 self._async_trig()
             #print 'Thread ready to detect ', time.time()-t0
-            if self._async_detect != None:
+            if self._async_detect is not None:
                 while not self._async_detect():
                     if self._stop:
                         break
@@ -527,7 +527,7 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
     except AttributeError: # just consider it a function
         docheck = task_or_event_or_func
     while True:
-        if max_time != None:
+        if max_time is not None:
             check_time = max_time - (time.time()-start_time)
             check_time = max(0., check_time) # make sure it is positive
             check_time = min(check_time, 0.2) # and smaller than 0.2 s
@@ -535,9 +535,9 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
             check_time = 0.2
         if docheck(check_time):
             return True
-        if max_time != None and time.time()-start_time > max_time:
+        if max_time is not None and time.time()-start_time > max_time:
             return False
-        if check_state != None and check_state._error_state:
+        if check_state is not None and check_state._error_state:
             break
         with _delayed_signal_context_manager():
             # processEvents is for the current Thread.
@@ -546,15 +546,15 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
 
 def _general_check(val, min=None, max=None, choices=None ,lims=None):
    # self is use for perror
-    if lims != None:
+    if lims is not None:
         if isinstance(lims, tuple):
             min, max = lims
         else:
             choices = lims
     mintest = maxtest = choicetest = True
-    if min != None:
+    if min is not None:
         mintest = val >= min
-    if max != None:
+    if max is not None:
         maxtest = val <= max
     if choices:
         choicetest = val in choices
@@ -651,17 +651,17 @@ class BaseDevice(object):
         return super(BaseDevice, self).__getattribute__(name)
     def _get_docstring(self, added=''):
         doc_base = BaseDevice.__doc__
-        if doc_base == None:
+        if doc_base is None:
             doc_base = ''
         doc = self._doc
         extra = ''
         if self.choices:
             extra = '\n-------------\n Possible value to set: %s\n'%repr(self.choices)
-        elif self.min != None and self.max != None:
+        elif self.min is not None and self.max is not None:
             extra = '\n-------------\n Value between %r and %r\n'%(self.min, self.max)
-        elif self.min != None:
+        elif self.min is not None:
             extra = '\n-------------\n Value at least %r\n'%(self.min)
-        elif self.max != None:
+        elif self.max is not None:
             extra = '\n-------------\n Value at most %r\n'%(self.max)
         return doc + added + extra + doc_base
     # for cache consistency
@@ -676,7 +676,7 @@ class BaseDevice(object):
         else:
             raise RuntimeError(self.perror('set can only have one positional parameter'))
         if self._allow_kw_as_dict:
-            if val == None:
+            if val is None:
                 val = dict()
                 for k in kwarg.keys():
                     if k in self.choices.field_names:
@@ -696,7 +696,7 @@ class BaseDevice(object):
             self._setdev(val, **kwarg)
             if self._setget:
                 val = self.get(**kwarg)
-        elif self._setdev_p == None:
+        elif self._setdev_p is None:
             raise NotImplementedError, self.perror('This device does not handle _setdev')
         # only change cache after succesfull _setdev
         self.setcache(val)
@@ -719,7 +719,7 @@ class BaseDevice(object):
                     ret = None
             else:
                 ret = self._getdev(**kwarg)
-        elif self._getdev_p == None:
+        elif self._getdev_p is None:
             raise NotImplementedError, self.perror('This device does not handle _getdev')
         else:
             ret = self.getcache()
@@ -745,7 +745,7 @@ class BaseDevice(object):
                 return None
         # local is False
         with self.instr._lock_instrument: # only local data, so don't need _lock_extra
-            if self._cache==None and self._autoinit:
+            if self._cache is None and self._autoinit:
                 # This can fail, but getcache should not care for
                 #InvalidAutoArgument exceptions
                 try:
@@ -805,7 +805,7 @@ class BaseDevice(object):
     def _getdev(self):
         raise NotImplementedError, self.perror('This device does not handle _getdev')
     def check(self, val):
-        if self._setdev_p == None:
+        if self._setdev_p is None:
             raise NotImplementedError, self.perror('This device does not handle check')
         try:
             _general_check(val, self.min, self.max, self.choices)
@@ -822,12 +822,12 @@ class BaseDevice(object):
         # we need to return a copy so changes to dict here and above does not
         # affect the devices dict permanently
         format = self._format.copy()
-        if graph != None:
+        if graph is not None:
             format['graph'] = graph
-        if bin != None:
+        if bin is not None:
             format['file'] = False
             format['bin'] = bin
-        if xaxis != None and format['xaxis'] != None:
+        if xaxis is not None and format['xaxis'] is not None:
             format['xaxis'] = xaxis
         format['extra_conf'] = extra_conf
         return format
@@ -844,9 +844,9 @@ class wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
         # auto insert documentation if setdev or getdev has one.
         if not extrak.has_key('doc'):
-            if setdev != None and setdev.__doc__:
+            if setdev is not None and setdev.__doc__:
                 extrak['doc'] = setdev.__doc__
-            elif getdev != None and getdev.__doc__:
+            elif getdev is not None and getdev.__doc__:
                 extrak['doc'] = getdev.__doc__
         BaseDevice.__init__(self, **extrak)
         # the methods are unbounded methods.
@@ -855,22 +855,22 @@ class wrapDevice(BaseDevice):
         self._check  = check
         self._getformat  = getformat
     def _setdev(self, val, **kwarg):
-        if self._setdev_p != None:
+        if self._setdev_p is not None:
             self._setdev_p(val, **kwarg)
         else:
             raise NotImplementedError, self.perror('This device does not handle _setdev')
     def _getdev(self, **kwarg):
-        if self._getdev_p != None:
+        if self._getdev_p is not None:
             return self._getdev_p(**kwarg)
         else:
             raise NotImplementedError, self.perror('This device does not handle _getdev')
     def check(self, val, **kwarg):
-        if self._check != None:
+        if self._check is not None:
             self._check(val, **kwarg)
         else:
             super(wrapDevice, self).check(val)
     def getformat(self, **kwarg):
-        if self._getformat != None:
+        if self._getformat is not None:
             return self._getformat(**kwarg)
         else:
             return super(wrapDevice, self).getformat(**kwarg)
@@ -879,9 +879,9 @@ class cls_wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
         # auto insert documentation if setdev or getdev has one.
         if not extrak.has_key('doc'):
-            if setdev != None and setdev.__doc__:
+            if setdev is not None and setdev.__doc__:
                 extrak['doc'] = setdev.__doc__
-            elif getdev != None and getdev.__doc__:
+            elif getdev is not None and getdev.__doc__:
                 extrak['doc'] = getdev.__doc__
         BaseDevice.__init__(self, **extrak)
         # the methods are unbounded methods.
@@ -890,22 +890,22 @@ class cls_wrapDevice(BaseDevice):
         self._check  = check
         self._getformat  = getformat
     def _setdev(self, val, **kwarg):
-        if self._setdev_p != None:
+        if self._setdev_p is not None:
             self._setdev_p(self.instr, val, **kwarg)
         else:
             raise NotImplementedError, self.perror('This device does not handle _setdev')
     def _getdev(self, **kwarg):
-        if self._getdev_p != None:
+        if self._getdev_p is not None:
             return self._getdev_p(self.instr, **kwarg)
         else:
             raise NotImplementedError, self.perror('This device does not handle _getdev')
     def check(self, val, **kwarg):
-        if self._check != None:
+        if self._check is not None:
             self._check(self.instr, val, **kwarg)
         else:
             super(cls_wrapDevice, self).check(val)
     def getformat(self, **kwarg):
-        if self._getformat != None:
+        if self._getformat is not None:
             return self._getformat(self.instr, **kwarg)
         else:
             return super(cls_wrapDevice, self).getformat(**kwarg)
@@ -1157,7 +1157,7 @@ class BaseInstrument(object):
         else:
             conf = None
         for devname, obj in self.devs_iter():
-            if once and obj.instr != None:
+            if once and obj.instr is not None:
                 continue
             obj.instr = weakref.proxy(self)
             obj.name = devname
@@ -1245,13 +1245,13 @@ class BaseInstrument(object):
     def __getattr__(self, name):
         if name in ['get', 'set', 'check', 'getcache', 'setcache', 'instr',
                     'name', 'getformat', 'getasync', 'getfullname']:
-            if self.alias == None:
+            if self.alias is None:
                 raise AttributeError, self.perror('This instrument does not have an alias for {nm}', nm=name)
             return getattr(self.alias, name)
         else:
             raise AttributeError, self.perror('{nm} is not an attribute of this instrument', nm=name)
     def __call__(self):
-        if self.alias == None:
+        if self.alias is None:
             raise TypeError, self.perror('This instrument does not have an alias for call')
         return self.alias()
     @locked_calling
@@ -1310,7 +1310,7 @@ class BaseInstrument(object):
         dic.update(instr=self, gname=self.find_global_name())
         return ('{gname}: '+error_str).format(**dic)
     def _header_getdev(self):
-        if self.header_val == None:
+        if self.header_val is None:
             return self.find_global_name()
         else:
             return self.header_val
@@ -1352,7 +1352,7 @@ class MemoryDevice(BaseDevice):
         self.setcache(initval, nolock=True)
         self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
         self._getdev_p = True # needed to enable BaseDevice get in Checking mode
-        if self.choices != None and isinstance(self.choices, ChoiceBase):
+        if self.choices is not None and isinstance(self.choices, ChoiceBase):
             self.type = self.choices
         else:
             self.type = type(initval)
@@ -1376,7 +1376,7 @@ def _tostr_helper(val, t):
     if t == float or t == int:
         # use repr instead of str to keep full precision
         return repr(val)
-    if t == None or (type(t) == type and issubclass(t, basestring)):
+    if t is None or (type(t) == type and issubclass(t, basestring)):
         return val
     return t.tostr(val)
 
@@ -1396,7 +1396,7 @@ def _fromstr_helper(valstr, t):
         #        raise
     if t == float or t == int:
         return t(valstr)
-    if t == None or (type(t) == type and issubclass(t, basestring)):
+    if t is None or (type(t) == type and issubclass(t, basestring)):
         return valstr
     return t(valstr)
 
@@ -1447,12 +1447,12 @@ class scpiDevice(BaseDevice):
            ask_write_options are options passed to the ask and write methods
 
         """
-        if setstr == None and getstr == None:
+        if setstr is None and getstr is None:
             raise ValueError, 'At least one of setstr or getstr needs to be specified'
-        if setstr != None and getstr == None and autoget == False:
+        if setstr is not None and getstr is None and autoget == False:
             # we don't have get, so we remove autoinit to prevent problems with cache and force_get (iprint)
             autoinit = False
-        if isinstance(choices, ChoiceBase) and str_type == None:
+        if isinstance(choices, ChoiceBase) and str_type is None:
             str_type = choices
         if autoinit == True:
             autoinit = 10
@@ -1461,7 +1461,7 @@ class scpiDevice(BaseDevice):
                 autoinit = 1
         BaseDevice.__init__(self, doc=doc, autoinit=autoinit, choices=choices, **kwarg)
         self._setdev_p = setstr
-        if setstr != None:
+        if setstr is not None:
             fmtr = string.Formatter()
             val_present = False
             for txt, name, spec, conv in fmtr.parse(setstr):
@@ -1471,10 +1471,10 @@ class scpiDevice(BaseDevice):
             if not val_present:
                 self._setdev_p = setstr + self._autoset_val_str
         self._getdev_cache = False
-        if getstr == None:
+        if getstr is None:
             if autoget:
                 getstr = setstr+'?'
-            elif get_cached_init != None:
+            elif get_cached_init is not None:
                 self.setcache(get_cached_init, nolock=True)
                 self._getdev_cache = True
         self._getdev_p = getstr
@@ -1497,19 +1497,19 @@ class scpiDevice(BaseDevice):
                 if optname[0] != '_':
                     added += '{optname}: has default value {optval!r}\n'.format(optname=optname, optval=optval)
                     lim = self._options_lim.get(optname, None)
-                    if lim != None:
+                    if lim is not None:
                         if basedev:
                             added += '        current choices (above device): '
                         else:
                             added += '        current choices: '
                         if isinstance(lim, tuple):
-                            if lim[0] == None and lim[1] == None:
+                            if lim[0] is None and lim[1] is None:
                                 added += 'any value allowed'
                             else:
-                                if lim[0] != None:
+                                if lim[0] is not None:
                                     added += '%r <= '%lim[0]
                                 added += '%s'%optname
-                                if lim[1] != None:
+                                if lim[1] is not None:
                                     added += ' <= %r'%lim[1]
                         else:
                             added += repr(lim)
@@ -1544,17 +1544,17 @@ class scpiDevice(BaseDevice):
         lim = self._options_lim.get(option)
         # if no limits were given but this is a device, use the limits from the device.
         # TODO use dev.check (trap error)
-        if lim == None and isinstance(self._options[option], BaseDevice):
+        if lim is None and isinstance(self._options[option], BaseDevice):
             dev = self._options[option]
             lim = (dev.min, dev.max)
-            if dev.choices != None:
+            if dev.choices is not None:
                 lim = dev.choices
         if isinstance(lim, tuple):
-            if lim[0] != None and val<lim[0]:
+            if lim[0] is not None and val<lim[0]:
                 return self.perror('Option "%s" needs to be >= %r, instead it was %r'%(option, lim[0], val))
-            if lim[1] != None and val>lim[1]:
+            if lim[1] is not None and val>lim[1]:
                 return self.perror('Option "%s" needs to be <= %r, instead it was %r'%(option, lim[1], val))
-        elif lim == None:
+        elif lim is None:
             pass
         else: # assume we have some list/set/Choice like object
             if val not in lim:
@@ -1565,10 +1565,10 @@ class scpiDevice(BaseDevice):
         # The list of correct values could be a subset so push them to kwarg
         # for testing.
         # clean up kwarg by removing all None values
-        kwarg = { k:v for k, v in kwarg.iteritems() if v != None}
+        kwarg = { k:v for k, v in kwarg.iteritems() if v is not None}
         for k, v in kwarg.iteritems():
             ck = self._check_option(k, v)
-            if ck != None:
+            if ck is not None:
                 # in case of error, raise it
                 raise InvalidArgument, ck
         # Some device need to keep track of current value so we set them
@@ -1584,7 +1584,7 @@ class scpiDevice(BaseDevice):
         for k,v in options.iteritems():
             if k not in kwarg:
                 ck = self._check_option(k, v)
-                if ck != None:
+                if ck is not None:
                     # There was an error, returned value not currently valid
                     # so return it instead of dictionnary
                     raise InvalidAutoArgument, ck
@@ -1609,7 +1609,7 @@ class scpiDevice(BaseDevice):
                 options[k] = tostr_val
         return options
     def _setdev(self, val, **kwarg):
-        if self._setdev_p == None:
+        if self._setdev_p is None:
             raise NotImplementedError, self.perror('This device does not handle _setdev')
         val = self._tostr(val)
         options = self._combine_options(**kwarg)
@@ -1617,7 +1617,7 @@ class scpiDevice(BaseDevice):
         command = command.format(val=val, **options)
         self.instr.write(command, **self._ask_write_opt)
     def _getdev(self, **kwarg):
-        if self._getdev_p == None:
+        if self._getdev_p is None:
             if self._getdev_cache:
                 if kwarg == {}:
                     return self.getcache()
@@ -1652,7 +1652,7 @@ class ReadvalDev(BaseDevice):
     """
     def __init__(self, dev, autoinit=None, **kwarg):
         self._slave_dev = dev
-        if autoinit == None:
+        if autoinit is None:
             autoinit = dev._autoinit
         super(ReadvalDev,self).__init__(redir_async=dev, autoinit=autoinit, **kwarg)
     def _getdev(self, **kwarg):
@@ -1716,7 +1716,7 @@ def _decode_block(s, t=np.float64, sep=None):
               or it can be entered as a string like 'float64'
     """
     block = _decode_block_base(s)
-    if sep == None:
+    if sep is None:
         return np.fromstring(block, t)
     return np.fromstring(block, t, sep=sep)
 
@@ -1726,7 +1726,7 @@ def _encode_block(v, sep=None):
     into either a scpi binary block (including header) when sep=None (default)
     or into a sep separated string. Often sep is ',' for scpi
     """
-    if sep != None:
+    if sep is not None:
         return ','.join(map(repr, v))
     s = v.tostring()
     return _encode_block_base(s)
@@ -1803,11 +1803,11 @@ class quoted_list(quoted_string):
     def __call__(self, quoted_l):
         unquoted = super(quoted_list,self).__call__(quoted_l)
         lst = unquoted.split(self._sep)
-        if self._element_type != None:
+        if self._element_type is not None:
             lst = [_fromstr_helper(elem, self._element_type) for elem in lst]
         return lst
     def tostr(self, unquoted_l):
-        if self._element_type != None:
+        if self._element_type is not None:
            unquoted_l = [_tostr_helper(elem, self._element_type) for elem in unquoted_l]
         unquoted = self._sep.join(unquoted_l)
         return super(quoted_list,self).tostr(unquoted)
@@ -1940,14 +1940,14 @@ class ChoiceSimpleMap(ChoiceBase):
         self.keys = input_dict.keys()
         self.values = input_dict.values()
         self.filter = filter
-        if filter != None:
+        if filter is not None:
             for x in self.keys:
                 if filter(x) != x:
                     raise ValueError, "The input dict has at least one key where filter(key)!=key."
     def __contains__(self, x):
         return x in self.values
     def __call__(self, input_key):
-        if self.filter != None:
+        if self.filter is not None:
             input_key = self.filter(input_key)
         return self.dict[input_key]
     def tostr(self, input_choice):
@@ -2024,7 +2024,7 @@ class ChoiceDevDep(ChoiceBase):
         A default choice can be given with a key of None
         sub_type is used to provide the proper from/to str converters.
         Works the same as str_type from scpi_device.
-        if sub_type==None, it calls the to/from str of the selected value of
+        if sub_type is None, it calls the to/from str of the selected value of
         the dictionnary (which should be an instance of ChoiceBase).
     """
     def __init__(self, dev, choices, sub_type=None):
@@ -2066,7 +2066,7 @@ class ChoiceDev(ChoiceBase):
 
      sub_type is used to provide the proper from/to str converters.
      Works the same as str_type from scpi_device.
-     sub_type==None (default) is the same as sub_type=str (i.e. no conversion).
+     sub_type=None (default) is the same as sub_type=str (i.e. no conversion).
      The tostr converter uses the key of the dict.
     """
     def __init__(self, dev, sub_type=None):
@@ -2187,7 +2187,7 @@ class ChoiceMultiple(ChoiceBase):
     def tostr(self, fromdict=None, **kwarg):
         # we assume check (__contains__) was called so we don't need to
         # do fmt.set_current_vals again or check validity if dictionnary keys
-        if fromdict == None:
+        if fromdict is None:
             fromdict = kwarg
         ret = []
         for k, fmt in zip(self.field_names, self.fmts_type):
@@ -2232,7 +2232,7 @@ class ChoiceMultipleDep(ChoiceBase):
 
         sub_type is used to provide the proper from/to str converters.
         Works the same as str_type from scpi_device.
-        if sub_type==None, it calls the to/from str of the selected value of
+        if sub_type is None, it calls the to/from str of the selected value of
         the dictionnary (which should be an instance of ChoiceBase).
 
         Note that the dependent option currently requires the key to come before.
@@ -2292,7 +2292,7 @@ class Dict_SubDevice(BaseDevice):
             raise IndexError, 'The key is not present in the subdevice'
         lims = subtype.fmts_lims[subtype.field_names.index(key)]
         min = max = choices = None
-        if lims == None:
+        if lims is None:
             pass
         elif isinstance(lims, tuple):
             min, max = lims
@@ -2323,7 +2323,7 @@ class Dict_SubDevice(BaseDevice):
             vals = self._subdevice.getcache(local=True)
         else:
             vals = self._subdevice.getcache()
-        if vals == None:
+        if vals is None:
             ret = None
         else:
             ret = vals[self._sub_key]
@@ -2342,7 +2342,7 @@ class Dict_SubDevice(BaseDevice):
               when False, it uses getcache.
         The default is in self._force_default
         """
-        if force == None:
+        if force is None:
             force = self._force_default
         if force:
             vals = self._subdevice.get(**kwarg)
@@ -2836,7 +2836,7 @@ class visaInstrumentAsync(visaInstrument):
             wait_resp = self.visa.wait_on_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                                 int(max_time*1000), capture_timeout=True)
             # context in wait_resp will be closed automatically
-            #if wait_resp.context != None:
+            #if wait_resp.context is not None:
             if not wait_resp.timed_out:
                 # only reset event flag. We know the bit that is set already (OPC)
                 self._async_last_esr = self._get_esr()

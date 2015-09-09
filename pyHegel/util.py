@@ -175,7 +175,7 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
         filename = [filename]
     filelist = []
     for fglob in filename:
-        if prepend != None:
+        if prepend is not None:
             fglob = os.path.join(prepend, fglob)
         fl = glob.glob(fglob)
         fl.sort()
@@ -191,7 +191,7 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
         multi = False
     hdrs = []
     titles = []
-    if dtype == None: # binary files don't have headers
+    if dtype is None: # binary files don't have headers
         with open(filelist[0], 'rU') as f: # only the first file
             while True:
                 line = f.readline()
@@ -215,7 +215,7 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     ret = []
     first_shape = None
     for fn in filelist:
-        if dtype != None:
+        if dtype is not None:
             current = np.fromfile(fn, dtype=dtype)
             ret.append(np.fromfile(fn, dtype=dtype))
         elif fn.lower().endswith('.npy'):
@@ -363,8 +363,8 @@ def print_file(filename, printer=None):
     use the system default printer (see list_printers)
     """
     default = _get_default_printer()
-    if printer == None:
-        if _default_printer != None:
+    if printer is None:
+        if _default_printer is not None:
             printer = _default_printer
         else:
             printer = default
@@ -450,7 +450,7 @@ def blueforsTlog(data, time_data, channels=[1,2,5,6], logdir='C:/BlueFors/Log-fi
         for i, (fn, s) in enumerate(vec):
             pv = prevfile[i]
             if fn != pv[0]:
-                if pv[1] != None:
+                if pv[1] is not None:
                     pv[1].close()
                     if pv[2] and sort_exist:
                         sort_file(pv[2], cleanup=cleanup)
@@ -484,7 +484,7 @@ def sort_file(filename, uniq=True, cleanup=False):
     with open(filename, 'rU') as f:
         lines = f.readlines()
         term = f.newlines
-    if term == None:
+    if term is None:
         term = os.linesep
     if isinstance(term, tuple):
         # there is no time order in the tuple

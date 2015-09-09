@@ -172,7 +172,7 @@ class bf_valves(BaseInstrument):
         """
         return self.ask('names', 'S04').split(',')
     def _names_helper(self, val):
-        if isinstance(val, basestring) or val == None:
+        if isinstance(val, basestring) or val is None:
             return val
         return ','.join(val)
     def status(self, valves=None):
@@ -199,7 +199,7 @@ class bf_valves(BaseInstrument):
         It locks out the Hardware interface.
           The remote enabled is deactivated if the connection is lost.
         """
-        if val == None:
+        if val is None:
             return bool(int(self.ask('remote', 'S06')))
         else:
             self.ask('remote %s'%int(val), 'S06')
@@ -209,7 +209,7 @@ class bf_valves(BaseInstrument):
         When a connection is in control, another one cannot become in control
         until the first one releases it, Otherwise you get E10: permission denied.
         """
-        if val == None:
+        if val is None:
             return self.ask('control', ['S07', 'S08'])
         else:
             self.ask('control %s'%int(val), ['S07', 'S08'])
@@ -247,7 +247,7 @@ class bf_valves(BaseInstrument):
         gage_num can be None or 1-6 for P1 to P6
         Multiple values are return in a dictionnary
         """
-        if gage_num == None:
+        if gage_num is None:
             return makedict(self.ask('mgstatus', 'S11')) # a list of p1=val, p2=val, ...
         else:
             return float(self.ask('mgstatus %s'%int(gage_num), 'S05'))
@@ -262,7 +262,7 @@ class bf_valves(BaseInstrument):
         returns the pressures in mBar.
         Multiple values are return in a dictionnary
         """
-        if gage_num == None:
+        if gage_num is None:
             return makedict(self.ask('mgstatuscode', 'S12'), self._gage_status_helper) # a list of p1=val, p2=val, ...
         else:
             s = self.ask('mgstatuscode %s'%int(gage_num), 'S10')
@@ -367,7 +367,7 @@ if os.name == 'nt':
     #setup_api = ctypes.windll.setupapi # can use ctypes.GetLastError, WinError, FormatError
     setup_api = ctypes.WinDLL('setupapi', use_last_error=True) # use get_last_error
     def format_err(err=None):
-        if err == None:
+        if err is None:
             err = get_last_error()
         #return str(WinError(err))
         return "[Error %i] %s"%(err, FormatError(err))

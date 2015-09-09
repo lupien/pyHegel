@@ -91,7 +91,7 @@ def _init_pyHegel_globals(g=None, show_greet=True):
         Setting show_greet to False skips displaying the greetings
     """
     global _globaldict
-    if g == None:
+    if g is None:
         from inspect import currentframe
         frame = currentframe()
         try:
@@ -333,13 +333,13 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     graphsel = []
     count = 0
     formats = []
-    if extra_conf != None and not isinstance(extra_conf, list):
+    if extra_conf is not None and not isinstance(extra_conf, list):
         extra_conf = [extra_conf]
-    elif extra_conf == None:
+    elif extra_conf is None:
         extra_conf = []
     else:
         extra_conf = extra_conf[:] # make a copy so we can change it locally
-    if setdev != None:
+    if setdev is not None:
         if not isinstance(setdev, list):
             setdev = [setdev]
         for s in setdev:
@@ -389,10 +389,10 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     return hdrs, graphsel, formats
 
 def _dev_filename(root, dev_name, npts, reuse, append=False):
-    if root==None:
+    if root is None:
         name = time.strftime('%Y%m%d-%H%M%S.txt')
         root = use_sweep_path(name)
-    if npts == None:
+    if npts is None:
         maxn = 99999
     else:
         maxn = npts-1
@@ -419,13 +419,13 @@ def _readall(devs, formats, i, async=None):
             filename = filename % i
         if fmt['file']:
             kwarg['filename']= filename
-        if async != None:
+        if async is not None:
             val = dev.getasync(async=async, **kwarg)
             if async != 3:
                 continue
         else:
             val = dev.get(**kwarg)
-        if val == None:
+        if val is None:
             val = i
         if isinstance(val, (list, tuple, np.ndarray, dict)):
             if isinstance(val, dict):
@@ -516,7 +516,7 @@ def _itemgetter(*args):
     return ig
 
 def _write_conf(f, formats, extra_base=None, **kwarg):
-    if extra_base != None:
+    if extra_base is not None:
         extra = dict(base_hdr_name=extra_base, base_conf=[repr(kwarg)])
         formats = formats[:] # make a copy
         formats.append(extra)
@@ -654,9 +654,9 @@ class _Sweep(instruments.BaseInstrument):
             filename = base+'{updown}'+ext
         return filename
     def get_alldevs(self, out=None):
-        if out == None:
+        if out is None:
             out =  self.out.get()
-        if out == None or out==[]:
+        if out is None or out==[]:
             return []
         elif not isinstance(out, list):
             out = [out]
@@ -717,14 +717,14 @@ class _Sweep(instruments.BaseInstrument):
     def _get_filenames(self, filename, updown=False, start=None, stop=None, npts=None):
         updown_str = self.updown.getcache()
         updown_same = False
-        if updown_str == None:
+        if updown_str is None:
             updown_str = ['', '']
             updown_same = True
         fullpath = None
         fullpathrev = None
         fwd = True
         self._lastnames = []
-        if filename != None:
+        if filename is not None:
             basepath = use_sweep_path(filename)
             if updown == True:
                 basepath = self._fn_insert_updown(basepath)
@@ -745,7 +745,7 @@ class _Sweep(instruments.BaseInstrument):
             filename = os.path.basename(fullpath)
         return filename, fullpath, fullpathrev, fwd, updown_same
     def _get_extraconf(self, extra_conf):
-        if extra_conf == None:
+        if extra_conf is None:
             extra_conf = [sweep.out]
         elif not isinstance(extra_conf, list):
             extra_conf = [extra_conf, sweep.out]
@@ -756,9 +756,9 @@ class _Sweep(instruments.BaseInstrument):
 
     def _init_graph(self, title, filename, hdrs, x_idx, span, graphsel, logspace, negative, title_pre='Sweep: '):
         t = traces.Trace()
-        if title == None:
+        if title is None:
             title = filename
-        if title == None:
+        if title is None:
             title = str(self._sweep_trace_num)
         self._sweep_trace_num += 1
         t.setWindowTitle(title_pre+title)
@@ -919,7 +919,7 @@ class _Sweep(instruments.BaseInstrument):
         if updown == True and updown_same:
             npts = 2*npts
         hdrs, graphsel, formats = _getheaders(dev_orig, devs, fullpath, npts, extra_conf=extra_conf)
-        if fullpathrev != None:
+        if fullpathrev is not None:
             hdrsrev, graphselrev, formatsrev = _getheaders(dev_orig, devs, fullpathrev, npts, extra_conf=extra_conf)
         else:
             formatsrev = formats
@@ -933,13 +933,13 @@ class _Sweep(instruments.BaseInstrument):
         try:
             f = None
             frev = None
-            if filename != None:
+            if filename is not None:
                 # Make it unbuffered, windows does not handle line buffer correctly
                 f = open(fullpath, 'w', 0)
                 _write_conf(f, formats, extra_base='sweep_options', async=async, reset=reset_raw, start=start, stop=stop,
                             updown=updown, beforewait=beforewait, first_wait=first_wait)
                 writevec(f, hdrs+['time'], pre_str='#')
-                if fullpathrev != None:
+                if fullpathrev is not None:
                     frev = open(fullpathrev, 'w', 0)
                     _write_conf(frev, formatsrev, extra_base='sweep_options', async=async, reset=reset_raw, start=start, stop=stop,
                                 updown=updown, beforewait=beforewait, first_wait=first_wait)
@@ -965,7 +965,7 @@ class _Sweep(instruments.BaseInstrument):
                         cycle_span = span[::-1]
                     for i,v in enumerate(cycle_span):
                         sets[2] = [v]
-                        if iter_partial == 0 and first_wait != None:
+                        if iter_partial == 0 and first_wait is not None:
                             sets[3] = [beforewait + first_wait]
                         else:
                             sets[3] = bwait
@@ -989,11 +989,11 @@ class _Sweep(instruments.BaseInstrument):
         finally:
             if f:
                 f.close()
-            if fullpathrev != None and frev:
+            if fullpathrev is not None and frev:
                 frev.close()
         if graph and t.abort_enabled:
             raise KeyboardInterrupt('Aborted sweep')
-        elif reset != None:
+        elif reset is not None:
             dev.set(reset, **dev_opt)
         if graph and close_after:
             t = t.destroy()
@@ -1118,7 +1118,7 @@ class _Sweep(instruments.BaseInstrument):
             t = gsel = None
         try:
             f = None
-            if filename != None:
+            if filename is not None:
                 # Make it unbuffered, windows does not handle line buffer correctly
                 f = open(fullpath, 'w', 0)
                 _write_conf(f, formats, extra_base='sweep_multi_options', async=async, reset=reset_raw, start=start, stop=stop,
@@ -1243,7 +1243,7 @@ def use_sweep_path(filename):
 
 def readfile(filename, nojoin=False, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None):
     global _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
-    if not nojoin and prepend == None:
+    if not nojoin and prepend is None:
         prepend = sweep.path.get()
     return util.readfile(filename, prepend=prepend, getnames=getnames, getheaders=getheaders, csv=csv, dtype=dtype)
 readfile.__doc__ = """
@@ -1336,31 +1336,31 @@ class _Snap(object):
         """
         new_out = False
         new_file = False
-        if async == None:
+        if async is None:
             async = self.async
         else:
             self.async = async
         new_file_mode = 'w'
         if append:
             new_file_mode = 'a'
-        if out == None:
+        if out is None:
             out = self.out
         elif out != self.out:
             new_out = True
             self.out = out
-        if out == None:
+        if out is None:
             raise ValueError, 'Snap. No devices set for out'
-        if filename != None:
+        if filename is not None:
             filename = use_sweep_path(filename)
             filename, unique_i = _process_filename(filename)
-        if filename == None:
+        if filename is None:
             filename = self.filename
         elif filename != self.filename:
             self.filename = filename
             new_file = True
             new_out = True
             self.cycle = 0
-        if filename == None:
+        if filename is None:
             raise ValueError, 'Snap. No filename selected'
         if new_file:
             f = open(filename, new_file_mode, 0)
@@ -1416,13 +1416,13 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
         devs = [devs]
     t = traces.Trace(time_mode=True)
     fullpath = None
-    if filename != None:
+    if filename is not None:
         fullpath = use_sweep_path(filename)
         fullpath, unique_i = _process_filename(fullpath)
         filename = os.path.basename(fullpath)
-    if title == None:
+    if title is None:
         title = filename
-    if title == None:
+    if title is None:
         title = str(_record_trace_num)
     _record_trace_num += 1
     t.setWindowTitle('Record: '+title)
@@ -1435,19 +1435,19 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     t.setlegend(gsel(hdrs))
     try:
         f = None
-        if filename != None:
+        if filename is not None:
             # Make it unbuffered, windows does not handle line buffer correctly
             f = open(fullpath, 'w', 0)
             _write_conf(f, formats, extra_base='record options', async=async, interval=interval)
             writevec(f, ['time']+hdrs, pre_str='#')
         i=0
-        while npoints == None or i < npoints:
+        while npoints is None or i < npoints:
             tme = clock.get()
             if async:
                 vals = _readall_async(devs, formats, i)
             else:
                 vals = _readall(devs, formats, i)
-            if after != None:
+            if after is not None:
                 _record_execafter(after, i, [tme]+vals)
             t.addPoint(tme, gsel(vals))
             if f:
@@ -1455,7 +1455,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
             if t.abort_enabled:
                 break
             i += 1
-            if npoints == None or i < npoints:
+            if npoints is None or i < npoints:
                 wait(interval)
             _checkTracePause(t)
     except KeyboardInterrupt:
@@ -1545,12 +1545,12 @@ def _process_filename(filename, now=None, next_i=None, start_i=0, search=True, *
     # Use lock to prevent threads from incrementing next_file_i
     # incorrectly.
     with sweep._lock_instrument:
-        if next_i == None:
+        if next_i is None:
             ni = sweep.next_file_i.getcache()
         else:
             ni = next_i
         auto_si = False
-        if start_i == None:
+        if start_i is None:
             start_i = ni
             auto_si = True
         filename_i = start_i
@@ -1564,7 +1564,7 @@ def _process_filename(filename, now=None, next_i=None, start_i=0, search=True, *
         si_changed = False
         changed = False
         for txt, name, spec, conv in fmtr.parse(filename):
-            if name != None:
+            if name is not None:
                 changed = True
             if name == 'next_i':
                 ni_present = True
@@ -1630,7 +1630,7 @@ def get(dev, filename=None, extra_conf=None, **kwarg):
         _write_conf(f, formats)
         kwarg['extra_conf'] = f.getvalue()
         f.close()
-    if filename != None:
+    if filename is not None:
         dev.force_get()
         filename = use_sweep_path(filename)
         filename, unique_i = _process_filename(filename)
@@ -1641,7 +1641,7 @@ def setget(dev, val=None, **kwarg):
     """
     Either calls set or get depending on the presence of a value.
     """
-    if val == None:
+    if val is None:
         return get(dev, **kwarg)
     else:
         set(dev, val, **kwarg)
@@ -1651,7 +1651,7 @@ def getasync(devs, filename=None, **kwarg):
     Performs a get of a list of devices (devs), using the async algorithm.
     Mostly useful for testing.
     """
-    if filename != None:
+    if filename is not None:
         raise ValueError, 'getasync does not currently handle the filename option'
     if not isinstance(devs, list):
         devs = [devs]
@@ -1749,7 +1749,7 @@ def checkmode(state=None):
        Called with no arguments, returns current checking mode state
        With a boolean, sets the check state
     """
-    if state == None:
+    if state is None:
         return instruments_base.CHECKING
     instruments_base.CHECKING = state
 
@@ -1838,7 +1838,7 @@ def load(names=None, newnames=None):
        For GPIB address you can enter just the address as an integer or the
        full visa name like those returned from find_all_instruments()
     """
-    if names == None or (isinstance(names, basestring) and names == ''):
+    if names is None or (isinstance(names, basestring) and names == ''):
         for name, entry in sorted(local_config.conf.items()):
             instr, para, kwargs = _load_helper(entry)
             if kwargs != {}:
@@ -1851,13 +1851,13 @@ def load(names=None, newnames=None):
         names = names.split(' ')
     if isinstance(newnames, basestring):
         newnames = newnames.split(' ')
-    if newnames == None:
+    if newnames is None:
         newnames = [None]
     if len(newnames) < len(names):
         newnames = newnames + [None]*(len(names)-len(newnames))
     for name, newname in zip(names, newnames):
         instr, param, kwargs = _load_helper(local_config.conf[name])
-        if newname == None:
+        if newname is None:
             newname = name
         i = instr(*param, **kwargs)
         _globaldict[newname] = i
@@ -1966,9 +1966,9 @@ class _Hegel_Task(threading.Thread):
         while not self.stopit:
             self.func(*self.args, **self.kwargs)
             i += 1
-            if self.count != None and i >= self.count:
+            if self.count is not None and i >= self.count:
                 break
-            elif self.interval != None:
+            elif self.interval is not None:
                 #Unblock every 1s
                 start_time = time.time()
                 diff = 0.

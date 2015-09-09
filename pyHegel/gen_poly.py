@@ -97,7 +97,7 @@ def gen_polyeval(X, pf, param=None, sel=None):
     p,func = pf
     if not func: func = DefaultPoly
     m=p.shape[0]
-    if sel != None:
+    if sel is not None:
         if isinstance(sel,tuple):
             p=p[ (slice(None),)+sel ]
         else:
@@ -253,10 +253,10 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
     if errors&1 == 0 : errors = 0 
     if not errors: covar=pe = []
     elif errors&2 == 0: # automatic mode
-        if s==None: errors |= 4  # fix pe
+        if s is None: errors |= 4  # fix pe
         else: errors &= ~4 #keep pe
     needloop=False
-    if s!=None:
+    if s is not None:
         s=np.asarray(s)
         ss=s.shape
         if s.ndim == 0:
@@ -271,7 +271,7 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
             needloop = True
         else:
             raise ValueError, 'shape mismatch: s is not a valid shape'
-    if adjust != None:
+    if adjust is not None:
         pind = np.arange(m)
         adjust = pind[adjust] # in case adjust is a selector
         #we make sure we don't change the order, and don't repeat
@@ -279,7 +279,7 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
         mm = len(sel)
         xo = xx
         xx = xo[:,sel]
-        if p0 != None:
+        if p0 is not None:
             p0 = np.asarray(p0) # if necessary, turn list into array
             if p0.shape[0] != m:
                 raise ValueError, 'shape mismatch: p0 is not a valid shape'
@@ -292,7 +292,7 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
                 y = y - np.tensordot(xo[:,unsel],p0[unsel],axes=(-1,0))
     else: mm = m
     ind=slice(None)
-    if filter != None:
+    if filter is not None:
         ind=np.flatnonzero(filter>0.5)
         if len(ind) == 0:
             ind = slice(None)
@@ -311,7 +311,7 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
             else:
                 p[:,i],resids[i], pe[:,i], (foo1,sv[:,i],foo2,rank,covar[:,:,i]) = lstsq_er(xxs,ys,cond=rcond)
     else:
-        if s != None:
+        if s is not None:
             xx/=s
             if multi:
                 y=y/s
@@ -323,14 +323,14 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
             p,resids,rank,sv = la.lstsq(xx,ys,cond=rcond)
         else:
             p,resids,pe, (foo1,sv,foo2,rank,covar) = lstsq_er(xx,ys,cond=rcond)
-    if adjust != None:
+    if adjust is not None:
         ptmp = p
         if nfits != 0:
             p=np.zeros((m,nfits))
         else:
             p=np.zeros(m)
         p[sel]=ptmp
-        if p0 != None:
+        if p0 is not None:
             p[unsel] = p0[unsel]
         if errors:
             petmp = pe
@@ -533,7 +533,7 @@ def report(X,Y,pf,func=None, s=1., param=None, adjust=None, filter=None):
         if s.ndim > 0:
             s = s.reshape((-1,))
     ind=slice(None)
-    if filter != None: 
+    if filter is not None:
         # this needs to match with gen_polyfit
         ind=np.flatnonzero(filter>0.5)
         if len(ind) == 0:
@@ -555,7 +555,7 @@ def report(X,Y,pf,func=None, s=1., param=None, adjust=None, filter=None):
     # X is now 1D always, even when it should not.
     # Because there correlation coefficient don't really
     # make sense there anyway. Need to event new ones.
-    if adjust != None:
+    if adjust is not None:
         baseAdj = np.arange(m)
         adjust = baseAdj[adjust] # in case adjust is a selector
         #we make sure we don't change the order, and don't repeat

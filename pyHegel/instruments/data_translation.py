@@ -98,7 +98,7 @@ class Ol_Device(scpiDevice):
     This device is for all OpenLayer object properties
     """
     def __init__(self, setstr=None, getstr=None, autoget=True, **kwarg):
-        if getstr == None and autoget and setstr != None:
+        if getstr is None and autoget and setstr is not None:
             if '{val}' not in setstr:
                 getstr = setstr
                 setstr = setstr+'={val}'
@@ -299,12 +299,12 @@ class DataTranslation(BaseInstrument):
             #self._analog_in.ChannelList.Add(OlBase.ChannelListEntry(self.all_channels[c])
         self._analog_in.Config()
         wanted_size = self.nb_samples.getcache() * len(clist)
-        if self._inbuffer != None:
+        if self._inbuffer is not None:
             if self._inbuffer.BufferSizeInSamples != wanted_size:
                 #print 'Erasing bnuffer'
                 self._inbuffer.Dispose()
                 self._inbuffer = None
-        if self._inbuffer == None:
+        if self._inbuffer is None:
             self._inbuffer = OlBase.OlBuffer(wanted_size, self._analog_in)
         self._analog_in.BufferQueue.QueueBuffer(self._inbuffer)
         self._analog_in.Start()
@@ -336,7 +336,7 @@ class DataTranslation(BaseInstrument):
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_getdev(self):
         clist = self._clean_channel_list()
-        if self._inbuffer == None:
+        if self._inbuffer is None:
             return None
         #This conversion is much faster than doing
         # v=array(list(buf.GetDataAsVolts()))
@@ -415,9 +415,9 @@ class DataTranslation(BaseInstrument):
         elif clock == 'min':
             clock = self.in_clock.min
             print 'Clock set to', clock, 'Hz'
-        if clock != None:
+        if clock is not None:
             self.in_clock.set(clock)
-        if channel_list == None:
+        if channel_list is None:
             channel_list = range(self.in_info['Nchan'])
         if type(channel_list) != list:
             channel_list = [channel_list]

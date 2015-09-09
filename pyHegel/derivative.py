@@ -127,7 +127,7 @@ def Dspline(x, y, sigma=None, s=None, k=3, n=1):
     """
     global tck
     extra={}
-    if sigma != None:
+    if sigma is not None:
        extra['w']=1./sigma
     tck = interpolate.splrep(x, y, k=k, s=s, **extra)
     return (x, interpolate.splev(x, tck, der=n))
