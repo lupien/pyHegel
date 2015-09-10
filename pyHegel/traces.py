@@ -346,8 +346,17 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
 
 def _offsetText_helper(self):
     self._update_offsetText_orig()
-    x,y = self.offsetText.xytext
-    self.offsetText.xytext = (x+self._offsetText_xshift, y)
+    new_xyann = False
+    try:
+        x,y = self.offsetText.xyann
+        new_xyann = True
+    except AttributeError:
+        x,y = self.offsetText.xytext
+    new_xy = (x+self._offsetText_xshift, y)
+    if new_xyann:
+        self.offsetText.xyann = new_xy
+    else:
+        self.offsetText.xytext = new_xy
 
 class Trace(TraceBase):
     def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False):
