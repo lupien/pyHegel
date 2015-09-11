@@ -240,6 +240,14 @@ def reset_pyHegel():
     main.reset_start(_globaldict)
 
 
+# Becausse of the way IPython (at least 2.4.1) handles the custom exc handler
+#  (see run_code in IPython/core/interactiveshell.py, except self.custom_exceptions)
+# the actual traceback has a circular reference to itself so it will only be
+# cleaned up on a garbage collection.
+
+# Note that quiet_KeyboardInterrupt() will prevent the exception from displaying
+# a traceback and also from being debugged (the sys.last_traceback, sys.last_type and
+# sys.last_value are not updated by IPython in this case)
 
 def _quiet_KeyboardInterrupt_Handler(self, exc_type, exc_value, traceback, tb_offset=None):
     print '\n ----- KeyboardInterrupt:', exc_value
@@ -827,8 +835,6 @@ class _Sweep(instruments.BaseInstrument):
 
 
 # TODO deal with dev set that return multiple values (like some logical devices)
-#      properly handle progress update after a stop with a graph. It seems to
-#        get stuck until a collect_garbage is done.
     def __call__(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
                   close_after=False, graph=None, title=None, out=None, extra_conf=None,
                   async=False, reset=False, logspace=False, updown=False, first_wait=None, beforewait=None,
@@ -986,9 +992,15 @@ class _Sweep(instruments.BaseInstrument):
                 if dobreak == 'break':
                     break
         except KeyboardInterrupt:
-            (exc_type, exc_value, exc_traceback) = sys.exc_info()
-            raise KeyboardInterrupt('Interrupted sweep'), None, exc_traceback
+            #(exc_type, exc_value, exc_traceback) = sys.exc_info()
+            #raise KeyboardInterrupt('Interrupted sweep'), None, exc_traceback
+            raise KeyboardInterrupt('Interrupted sweep'), None, sys.exc_info()[2]
         finally:
+            if progress:
+                # This is important when using quiet_KeyboardInterrupt(True)
+                # becasuse then the traceback cleanup is delayed until garbage collection
+                # but it contains progress. So for while, old status report will be kept around.
+                del progress
             if f:
                 f.close()
             if fullpathrev is not None and frev:
@@ -1214,9 +1226,15 @@ class _Sweep(instruments.BaseInstrument):
                 if dobreak == 'break':
                     break
         except KeyboardInterrupt:
-            (exc_type, exc_value, exc_traceback) = sys.exc_info()
-            raise KeyboardInterrupt('Interrupted sweep_multi'), None, exc_traceback
+            #(exc_type, exc_value, exc_traceback) = sys.exc_info()
+            #raise KeyboardInterrupt('Interrupted sweep_multi'), None, exc_traceback
+            raise KeyboardInterrupt('Interrupted sweep_multi'), None, sys.exc_info()[2]
         finally:
+            if progress:
+                # This is important when using quiet_KeyboardInterrupt(True)
+                # becasuse then the traceback cleanup is delayed until garbage collection
+                # but it contains progress. So for while, old status report will be kept around.
+                del progress
             if f:
                 f.close()
         if graph and t.abort_enabled:
@@ -1461,8 +1479,9 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
                 wait(interval)
             _checkTracePause(t)
     except KeyboardInterrupt:
-        (exc_type, exc_value, exc_traceback) = sys.exc_info()
-        raise KeyboardInterrupt('Interrupted record'), None, exc_traceback
+        #(exc_type, exc_value, exc_traceback) = sys.exc_info()
+        #raise KeyboardInterrupt('Interrupted record'), None, exc_traceback
+        raise KeyboardInterrupt('Interrupted record'), None, sys.exc_info()[2]
     finally:
         if f:
             f.close()
