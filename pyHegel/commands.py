@@ -569,6 +569,7 @@ class _Sweep(instruments.BaseInstrument):
       The variables i, v and vv represent the current cycle index, the current set value
       (the last one for multi sweep), and a vector of all set values.
       The variable fwd is forward(True)/reverse(False) state of v.
+      It should also have access to the globals present in the interactive environment.
       """)
     beforewait = instruments.MemoryDevice(0.02, doc="""
       Wait after the new value is set but before the out list is read.
@@ -592,6 +593,7 @@ class _Sweep(instruments.BaseInstrument):
       Note that v and vals[0] can be different for devices that use setget
       (those that perform a get after a set, because the instrument could be
       changing/rounding the value). v is the asked for value.
+      It should also have access to the globals present in the interactive environment.
 
       You can always read a value with get. Or to prevent actually talking to
       the device (and respond faster) you can obtain the cache value with
@@ -638,11 +640,11 @@ class _Sweep(instruments.BaseInstrument):
     def execbefore(self, i, fwd, v, vv):
         b = self.before.get()
         if b:
-            exec b
+            exec (b, _globaldict, locals())
     def execafter(self, i, fwd, v, vv, vals):
         b = self.after.get()
         if b:
-            exec b
+            exec (b, _globaldict, locals())
     def _fn_insert_updown(self, filename):
         fmtr = string.Formatter()
         present = False
