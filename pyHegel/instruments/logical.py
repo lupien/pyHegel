@@ -357,7 +357,7 @@ class ScalingDevice(LogicalDevice):
         self._scale = float(scale_factor)
         self._offset = offset
         doc+= 'scale_factor=%g (initial)\noffset=%g'%(scale_factor, offset)
-        super(type(self), self).__init__(basedev=basedev, doc=doc, **extrak)
+        super(type(self), self).__init__(basedev=basedev, doc=doc, setget=False, **extrak)
         self._format['multi'] = ['scale', 'raw']
         self._format['graph'] = [0]
         self._setdev_p = True
@@ -369,15 +369,18 @@ class ScalingDevice(LogicalDevice):
         return raw * self._scale + self._offset
     def conv_todev(self, val):
         return (val - self._offset) / self._scale
-    def _getdev_log(self):
-        raw = self._cached_data[0]
+    def _prep_output(self, raw):
         val = self.conv_fromdev(raw)
         return val, raw
+    def _getdev_log(self):
+        raw = self._cached_data[0]
+        return self._prep_output(raw)
     def _setdev(self, val, **kwarg):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
         basedev.set(self.conv_todev(val), **base_kwarg)
         # read basedev cache, in case the values is changed by setget mode.
-        self.setcache(self.conv_fromdev(self._basedev.getcache()))
+        raw = self._basedev.getcache()
+        self._set_delayed_cache = self._prep_output(raw)
     def check(self, val, **kwarg):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='check')
         raw = self.conv_todev(val)
@@ -406,7 +409,7 @@ class FunctionDevice(LogicalDevice):
             self._to_raw = to_raw
         else: # assume it is a function
             self.to_raw = to_raw
-        super(type(self), self).__init__(basedev=basedev, doc=doc, **extrak)
+        super(type(self), self).__init__(basedev=basedev, doc=doc, setget=False, **extrak)
         self._format['multi'] = ['conv', 'raw']
         self._format['graph'] = [0]
         self._setdev_p = True
@@ -424,13 +427,17 @@ class FunctionDevice(LogicalDevice):
         b += diff/1e6
         x = brentq_rootsolver(func, a, b)
         return x
-    def _getdev_log(self):
-        raw = self._cached_data[0]
+    def _prep_output(self, raw):
         val = self.from_raw(raw)
         return val, raw
+    def _getdev_log(self):
+        raw = self._cached_data[0]
+        return self._prep_output(raw)
     def _setdev(self, val, **kwarg):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
         basedev.set(self.to_raw(val), **base_kwarg)
+        raw = self._basedev.getcache()
+        self._set_delayed_cache = self._prep_output(raw)
     def check(self, val, **kwarg):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='check')
         raw = self.to_raw(val)
@@ -811,7 +818,6 @@ class FunctionWrap(LogicalDevice):
         self._getdev_p = getfunc
         self._checkfunc = checkfunc
         self._use_ret = use_ret_as_cache
-        self._last_setfunc_ret = None
         self._getformatfunc = getformatfunc
         self._basedev_as_param = basedev_as_param
     def _current_config(self, dev_obj=None, options={}):
@@ -825,15 +831,12 @@ class FunctionWrap(LogicalDevice):
            return self._getdev_p(self._cached_data, **kwarg)
         else:
             return self._getdev_p(**kwarg)
-    @locked_calling_dev
-    def set(self, val, **kwarg):
-        super(FunctionWrap, self).set(val, **kwarg)
-        if self._use_ret:
-            self.setcache(self._last_setfunc_ret)
     def _setdev(self, val, **kwarg):
         if not self._setdev_p:
             raise NotImplementedError('This FunctionWrap device does not have a setfunc')
-        self._last_setfunc_ret = self._setdev_p(val, **kwarg)
+        ret = self._setdev_p(val, **kwarg)
+        if self._use_ret:
+            self._set_delayed_cache = ret
     def check(self, val, **kwarg):
         if not self._checkfunc:
             super(FunctionWrap, self).check(val, **kwarg)
