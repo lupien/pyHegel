@@ -1115,6 +1115,10 @@ class _Sweep(instruments.BaseInstrument):
             if any(n != npts for n in nptsl):
                 raise ValueError('For parallel, all the npts/updown comnination need to be the same length')
             npts_total = npts
+            if all(both_updown):
+                data_row_shape = [2, npts/2]
+            else:
+                data_row_shape = [npts]
         else:
             npts_total = np.asarray(nptsl).prod()
         # We never use updown filenames in multiN. Everything in one base file.
