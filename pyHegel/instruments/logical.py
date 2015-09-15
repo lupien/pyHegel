@@ -352,14 +352,17 @@ class ScalingDevice(LogicalDevice):
        This class provides a wrapper around a device.
        On reading, it returns basedev.get()*scale_factor + offset
        On writing it will write basedev.set((val - offset)/scale_factor)
+       When only_val is False, get returns a tuple of (converted val, base_device raw)
     """
-    def __init__(self, basedev, scale_factor, offset=0., doc='', **extrak):
+    def __init__(self, basedev, scale_factor, offset=0., only_val=False, doc='', **extrak):
         self._scale = float(scale_factor)
         self._offset = offset
+        self._only_val = only_val
         doc+= 'scale_factor=%g (initial)\noffset=%g'%(scale_factor, offset)
         super(type(self), self).__init__(basedev=basedev, doc=doc, setget=False, **extrak)
-        self._format['multi'] = ['scale', 'raw']
-        self._format['graph'] = [0]
+        if not only_val:
+            self._format['multi'] = ['scale', 'raw']
+            self._format['graph'] = [0]
         self._setdev_p = True
         self._getdev_p = True
     def _current_config(self, dev_obj=None, options={}):
@@ -371,7 +374,10 @@ class ScalingDevice(LogicalDevice):
         return (val - self._offset) / self._scale
     def _prep_output(self, raw):
         val = self.conv_fromdev(raw)
-        return val, raw
+        if self._only_val:
+            return val
+        else:
+            return val, raw
     def _getdev_log(self):
         raw = self._cached_data[0]
         return self._prep_output(raw)
@@ -401,17 +407,20 @@ class FunctionDevice(LogicalDevice):
        to_raw is either a function (the inverse of from_raw).
         or it is the interval of possible raw values
         that is used for the function inversion (scipy.optimize.brent)
+       When only_val is False, get returns a tuple of (converted val, base_device raw)
        To check the functions match properly use check_funcs method
     """
-    def __init__(self, basedev, from_raw, to_raw=[-1e12, 1e12], doc='', **extrak):
+    def __init__(self, basedev, from_raw, to_raw=[-1e12, 1e12], only_val=False, doc='', **extrak):
         self.from_raw = from_raw
+        self._only_val = only_val
         if isinstance(to_raw, list):
             self._to_raw = to_raw
         else: # assume it is a function
             self.to_raw = to_raw
         super(type(self), self).__init__(basedev=basedev, doc=doc, setget=False, **extrak)
-        self._format['multi'] = ['conv', 'raw']
-        self._format['graph'] = [0]
+        if not only_val:
+            self._format['multi'] = ['conv', 'raw']
+            self._format['graph'] = [0]
         self._setdev_p = True
         self._getdev_p = True
     def _current_config(self, dev_obj=None, options={}):
@@ -429,7 +438,10 @@ class FunctionDevice(LogicalDevice):
         return x
     def _prep_output(self, raw):
         val = self.from_raw(raw)
-        return val, raw
+        if self._only_val:
+            return val
+        else:
+            return val, raw
     def _getdev_log(self):
         raw = self._cached_data[0]
         return self._prep_output(raw)
