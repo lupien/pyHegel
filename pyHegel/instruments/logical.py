@@ -692,12 +692,13 @@ class RThetaDevice(LogicalDevice):
 @add_to_instruments
 class PickSome(LogicalDevice):
     """
-       This class provides a wrapper around one device for reading only.
+       This class provides a wrapper around one device.
        It allows to take a device that returns many points which are
        usually dumped into a separate file and pick some of those points
-       to save in the main file.
+       to save in the main file. On writing it is just a passthrough (if
+       pick_cache_on_set=False).
     """
-    def __init__(self, basedev, selector, multi, doc='', **extrak):
+    def __init__(self, basedev, selector, multi, pick_cache_on_set=True, doc='', **extrak):
         """
         selector will be used to pick some data. The data returned from this
                  device is: basedev.get()[selector]
@@ -707,18 +708,36 @@ class PickSome(LogicalDevice):
         multi is either an integer that gives the number of data that will be
               returned (the number of columns added to the file)
               or a list with the names of the columns.
+              When the selector picks a single element, use multi=1
+        pick_cache_on_set: when True, the basedev cached value after the set is also picked
+                           to update this logical device cache.
         """
-        if not isinstance(multi, list):
+        if multi == 1:
+            multi = False
+        elif not isinstance(multi, list):
             multi = ['base-%i'%i for i in range(multi)]
         super(type(self), self).__init__(basedev=basedev, doc=doc, multi=multi, **extrak)
         self._selector = selector
+        self._pick_cache_on_set = pick_cache_on_set
         self._getdev_p = True
+        self._setdev_p = self._basedev._setdev_p
     def _current_config(self, dev_obj=None, options={}):
         head = ['PickSome:: %r, selector=%r'%(self._basedev, self._selector)]
         return self._current_config_addbase(head, options=options)
+    def _prep_output(self, raw):
+        return raw[self._selector]
     def _getdev_log(self):
         raw = self._cached_data[0]
-        return raw[self._selector]
+        return self._prep_output(raw)
+    def _setdev(self, val, **kwarg):
+        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
+        basedev.set(val, **base_kwarg)
+        if self._pick_cache_on_set:
+            raw = self._basedev.getcache(local=True)
+            self._set_delayed_cache = self._prep_output(raw)
+    def check(self, val, **kwarg):
+        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='check')
+        basedev.check(val, **base_kwarg)
 
 #######################################################
 ##    Logical average device
