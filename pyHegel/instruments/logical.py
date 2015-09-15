@@ -379,7 +379,7 @@ class ScalingDevice(LogicalDevice):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
         basedev.set(self.conv_todev(val), **base_kwarg)
         # read basedev cache, in case the values is changed by setget mode.
-        raw = self._basedev.getcache()
+        raw = self._basedev.getcache(local=True)
         self._set_delayed_cache = self._prep_output(raw)
     def check(self, val, **kwarg):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='check')
@@ -436,7 +436,7 @@ class FunctionDevice(LogicalDevice):
     def _setdev(self, val, **kwarg):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
         basedev.set(self.to_raw(val), **base_kwarg)
-        raw = self._basedev.getcache()
+        raw = self._basedev.getcache(local=True)
         self._set_delayed_cache = self._prep_output(raw)
     def check(self, val, **kwarg):
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='check')
