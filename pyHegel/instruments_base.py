@@ -608,6 +608,7 @@ class BaseDevice(object):
         # Use thread local data to keep the last_filename and a version of cache
         self._local_data = threading.local()
         self._cache = None
+        self._set_delayed_cache = None
         self._autoinit = autoinit
         self._setdev_p = None
         self._getdev_p = None
@@ -693,9 +694,12 @@ class BaseDevice(object):
             val = old_val
             self.check(val, **kwarg)
         if not CHECKING:
+            self._set_delayed_cache = None
             self._setdev(val, **kwarg)
             if self._setget:
                 val = self.get(**kwarg)
+            elif self._set_delayed_cache is not None:
+                val = self._set_delayed_cache
         elif self._setdev_p is None:
             raise NotImplementedError, self.perror('This device does not handle _setdev')
         # only change cache after succesfull _setdev
