@@ -51,7 +51,7 @@ from . import config
 
 local_config = config.load_local_config()
 
-from .instruments_base import _writevec as writevec, _normalize_usb, _normalize_gpib, _get_visa_idns
+from .instruments_base import _writevec as writevec, _normalize_usb, _normalize_gpib, _get_visa_idns, _writevec_flatten_list
 from .traces import wait
 from .util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
 
@@ -335,12 +335,22 @@ def _get_extra_confs(extra_conf):
         formats.append(f)
     return formats
 
+def _getheaders_multi_helper(fmt, hdr):
+    multi = fmt['multi']
+    if fmt['file'] != True and isinstance(multi, list):
+        hdr_list = [ hdr+'.'+h for h in multi]
+    else:
+        hdr_list = [hdr]
+    count = len(hdr_list)
+    return hdr_list, count
+
 
 def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
     hdrs = []
     graphsel = []
     count = 0
     formats = []
+    set_counts = []
     if extra_conf is not None and not isinstance(extra_conf, list):
         extra_conf = [extra_conf]
     elif extra_conf is None:
@@ -352,8 +362,17 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
             setdev = [setdev]
         for s in setdev:
             dev, kwarg = _get_dev_kw(s)
-            hdrs.append(dev.getfullname())
-            count += 1
+            f = dev.getformat(**kwarg)
+            if f['file']:
+                raise ValueError('set devices can not have the file format True: %s'%dev)
+            multi = f['multi']
+            if multi is True or isinstance(multi, tuple):
+                raise ValueError('set devices can not have multi True or a tuple: %s'%dev)
+            hdr = dev.getfullname()
+            hdr_list, c = _getheaders_multi_helper(f, hdr)
+            hdrs.extend(hdr_list)
+            count += c
+            set_counts.append(c)
             extra_conf.append(s)
     reuse_dict = {}
     for dev in getdevs:
@@ -385,16 +404,11 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
             graph = [graph]
         graph_list = [ g+count for g in graph]
         graphsel.extend(graph_list)
-        if f['file'] != True and isinstance(multi, list):
-            hdr_list = [ hdr+'.'+h for h in multi]
-            c = len(hdr_list)
-            hdrs.extend(hdr_list)
-            count += c
-        else:
-            hdrs.append(hdr)
-            count += 1
+        hdr_list, c = _getheaders_multi_helper(f, hdr)
+        hdrs.extend(hdr_list)
+        count += c
     formats.extend(_get_extra_confs(extra_conf))
-    return hdrs, graphsel, formats
+    return hdrs, graphsel, formats, set_counts
 
 def _dev_filename(root, dev_name, npts, reuse, append=False):
     if root is None:
@@ -438,14 +452,11 @@ def _readall(devs, formats, i, async=None):
         if isinstance(val, (list, tuple, np.ndarray, dict)):
             if isinstance(val, dict):
                 val = val.values()
-            if isinstance(fmt['multi'], list):
-                ret.extend(val)
-            else:
-                ret.append(i)
+            if not isinstance(fmt['multi'], list):
                 instruments_base._write_dev(val, filename, format=fmt, first= i==0)
-        else:
-            ret.append(val)
-    ret = instruments_base._writevec_flatten_list(ret)
+                val = i
+        ret.append(val)
+    ret = _writevec_flatten_list(ret)
     return ret
 
 def _readall_async(devs, formats, i):
@@ -549,7 +560,7 @@ def dump_conf(f, setdevs=None, getdevs=[], extra_conf=None):
         Returns a list of hdrs (which are the name of the devices) that can be used
         to create column headers.
     """
-    hdrs, graphsel, formats = _getheaders(setdevs, getdevs, extra_conf=extra_conf)
+    hdrs, graphsel, formats, set_counts = _getheaders(setdevs, getdevs, extra_conf=extra_conf)
     _write_conf(f, formats)
     return hdrs
 
@@ -799,12 +810,17 @@ class _Sweep(instruments.BaseInstrument):
         vv = []
         iv = []
         bwait = 0.
-        for dev, dev_opt, v, beforewait, doset in zip(*sets):
+        for dev, dev_opt, v, beforewait, doset, count in zip(*sets):
             vv.append(v)
             if doset:
                 dev.set(v, **dev_opt) # TODO replace with move
                 bwait = max(bwait, beforewait)
-            iv.append( dev.getcache() )# in case the instrument changed the value
+            val = dev.getcache() # in case the instrument changed the value
+            val = _writevec_flatten_list([val])
+            l = len(val)
+            if l != count:
+                raise RuntimeError('Got wrong number of values for set(%s). Expected %i, got %i.'%(dev, count, l))
+            iv.extend(val)
         if printit:
             printit('Sweep part: %3i/%-3i   %s'%(iter_part, iter_total, vv))
         self.execbefore(iter_n, cfwd, v, vv)
@@ -817,7 +833,7 @@ class _Sweep(instruments.BaseInstrument):
         if fobj:
             writevec(fobj, iv+vals+[tme])
         if trace_obj is not None:
-            giv = iv[-1]
+            giv = iv[-count] # use the first value of the last set device
             gvals = gsel(iv+vals)
             if negative: #for when doing negative logspace
                 giv = -giv
@@ -926,9 +942,9 @@ class _Sweep(instruments.BaseInstrument):
             npts_total *= 2
         if updown == True and updown_same:
             npts = 2*npts
-        hdrs, graphsel, formats = _getheaders(dev_orig, devs, fullpath, npts, extra_conf=extra_conf)
+        hdrs, graphsel, formats, set_counts = _getheaders(dev_orig, devs, fullpath, npts, extra_conf=extra_conf)
         if fullpathrev is not None:
-            hdrsrev, graphselrev, formatsrev = _getheaders(dev_orig, devs, fullpathrev, npts, extra_conf=extra_conf)
+            hdrsrev, graphselrev, formatsrev, set_countsrev = _getheaders(dev_orig, devs, fullpathrev, npts, extra_conf=extra_conf)
         else:
             formatsrev = formats
         # hdrs and graphsel are the same as the rev versions
@@ -961,9 +977,9 @@ class _Sweep(instruments.BaseInstrument):
                 iter_partial = 0
                 ioffset = 0
                 clf = False
-                #dev, dev_opt, v, beforewait, doset
+                #dev, dev_opt, v, beforewait, doset, set_counts
                 bwait = [beforewait]
-                sets = [[dev], [dev_opt], [], [], [True]]
+                sets = [[dev], [dev_opt], [], [], [True], set_counts]
                 cycle_list = [(fwd, f, formats)]
                 if updown == True:
                     cycle_list = [(True, f, formats), (False, frev, formatsrev)]
@@ -1126,12 +1142,13 @@ class _Sweep(instruments.BaseInstrument):
         filename, fullpath, fullpathrev, fwd, updown_same = self._get_filenames(filename, False, startl, stopl, npts_total)
         devs = self.get_alldevs(out)
         extra_conf = self._get_extraconf(extra_conf)
-        hdrs, graphsel, formats = _getheaders(dev_origl, devs, fullpath, npts_total, extra_conf=extra_conf)
+        hdrs, graphsel, formats, set_counts = _getheaders(dev_origl, devs, fullpath, npts_total, extra_conf=extra_conf)
         if graph is None:
             graph = self.graph.get()
         if graph:
             # We graph using last span
-            t, gsel = self._init_graph(title, filename, hdrs, multiN-1, spans[-1], graphsel, logspace[-1], negativel[-1], title_pre='Sweep_multi: ')
+            x_idx = np.sum(np.array(set_counts)[:-1])
+            t, gsel = self._init_graph(title, filename, hdrs, x_idx, spans[-1], graphsel, logspace[-1], negativel[-1], title_pre='Sweep_multi: ')
         else:
             t = gsel = None
         try:
@@ -1151,8 +1168,8 @@ class _Sweep(instruments.BaseInstrument):
             ###############################
             if parallel:
                 def iterator():
-                    #dev, dev_opt, v, beforewait, doset
-                    sets = [devl, dev_optl, [], [], [True]*multiN]
+                    #dev, dev_opt, v, beforewait, doset, set_counts
+                    sets = [devl, dev_optl, [], [], [True]*multiN, set_counts]
                     for i in range(npts_total):
                         vs = []
                         for cfwd, span in zip(fwdrev, spans):
@@ -1187,8 +1204,8 @@ class _Sweep(instruments.BaseInstrument):
                                 break
 
                 def iterator():
-                    #dev, dev_opt, v, beforewait, doset
-                    sets = [devl, dev_optl, [], [], []]
+                    #dev, dev_opt, v, beforewait, doset, set_counts
+                    sets = [devl, dev_optl, [], [], [], set_counts]
                     i = 0
                     js = [0]*multiN
                     prev_js = [-1]*multiN
@@ -1393,7 +1410,7 @@ class _Snap(object):
         else:
             f = open(filename, 'a', 0)
         if new_out:
-            hdrs, graphsel, formats = _getheaders(getdevs=out, root=filename)
+            hdrs, graphsel, formats, set_counts = _getheaders(getdevs=out, root=filename)
             self.formats = formats
             _write_conf(f, formats, extra_base='snap_options', async=async)
             writevec(f, ['time']+hdrs, pre_str='#')
@@ -1452,7 +1469,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
         title = str(_record_trace_num)
     _record_trace_num += 1
     t.setWindowTitle('Record: '+title)
-    hdrs, graphsel, formats = _getheaders(getdevs=devs, root=fullpath, npts=npoints, extra_conf=extra_conf)
+    hdrs, graphsel, formats, set_counts = _getheaders(getdevs=devs, root=fullpath, npts=npoints, extra_conf=extra_conf)
     if graphsel == []:
         # nothing selected to graph so pick first dev
         # It probably will be the loop index i
