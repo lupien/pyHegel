@@ -178,6 +178,8 @@ def _writevec_flatten_list(vals_list):
     for val in vals_list:
         if isinstance(val, np.ndarray):
             ret.extend(list(val.flatten()))
+        elif isinstance(val, (list, tuple)):
+            ret.extend(val)
         else:
             ret.append(val)
     return ret
