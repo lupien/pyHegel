@@ -354,12 +354,12 @@ class ScalingDevice(LogicalDevice):
        On writing it will write basedev.set((val - offset)/scale_factor)
        When only_val is False, get returns a tuple of (converted val, base_device raw)
     """
-    def __init__(self, basedev, scale_factor, offset=0., only_val=False, doc='', **extrak):
+    def __init__(self, basedev, scale_factor, offset=0., setget=False, only_val=False, doc='', **extrak):
         self._scale = float(scale_factor)
         self._offset = offset
         self._only_val = only_val
         doc+= 'scale_factor=%g (initial)\noffset=%g'%(scale_factor, offset)
-        super(type(self), self).__init__(basedev=basedev, doc=doc, setget=False, **extrak)
+        super(type(self), self).__init__(basedev=basedev, doc=doc, setget=setget, **extrak)
         if not only_val:
             self._format['multi'] = ['scale', 'raw']
             self._format['graph'] = [0]
@@ -410,14 +410,14 @@ class FunctionDevice(LogicalDevice):
        When only_val is False, get returns a tuple of (converted val, base_device raw)
        To check the functions match properly use check_funcs method
     """
-    def __init__(self, basedev, from_raw, to_raw=[-1e12, 1e12], only_val=False, doc='', **extrak):
+    def __init__(self, basedev, from_raw, to_raw=[-1e12, 1e12], setget=False, only_val=False, doc='', **extrak):
         self.from_raw = from_raw
         self._only_val = only_val
         if isinstance(to_raw, list):
             self._to_raw = to_raw
         else: # assume it is a function
             self.to_raw = to_raw
-        super(type(self), self).__init__(basedev=basedev, doc=doc, setget=False, **extrak)
+        super(type(self), self).__init__(basedev=basedev, doc=doc, setget=setget, **extrak)
         if not only_val:
             self._format['multi'] = ['conv', 'raw']
             self._format['graph'] = [0]
