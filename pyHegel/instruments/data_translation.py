@@ -23,6 +23,7 @@
 
 from __future__ import absolute_import
 
+import os.path
 import sys
 import numpy as np
 
@@ -54,7 +55,10 @@ def _delayed_imports():
         except ImportError as exc:
             raise RuntimeError('Unable to import windows clr/System: %s'%exc)
         try:
-            _datatranslation_dir = r'C:\Program Files (x86)\Data Translation\DotNet\OLClassLib\Framework 2.0 Assemblies (32-bit)'
+            _datatranslation_dir = r'C:\Program Files (x86)\Data Translation\DotNet\OLClassLib\Framework 2.0 Assemblies'
+            if not os.path.isdir(_datatranslation_dir):
+                # Version 6.1.0 has a slightly different directory name:
+                _datatranslation_dir += ' (32-bit)'
             if _datatranslation_dir not in sys.path:
                 sys.path.append(_datatranslation_dir)
             import OpenLayers.Base as OlBase
@@ -127,6 +131,8 @@ class Ol_ChoiceIndex(ChoiceIndex):
 ##    DataTranslation instrument
 #######################################################
 
+#@register_instrument('Data Translation', 'DT9847-3-1', 7.0.0.12)
+@register_instrument('Data Translation', 'DT9847-3-1')
 #@register_instrument('Data Translation', 'DT9837-C', '6.7.4.28')
 @register_instrument('Data Translation', 'DT9837-C')
 class DataTranslation(BaseInstrument):
