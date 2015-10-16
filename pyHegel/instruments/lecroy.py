@@ -533,7 +533,14 @@ class lecroy_wavemaster(visaInstrumentAsync):
     def __init__(self, visa_addr):
         # The SRQ for this intrument does not work
         # as of version 7.2.1.0
+        # SRQ still does not work in version 7.8.0 (The instruments never connects to this application
+        # open Interrupt channel port)
         super(lecroy_wavemaster, self).__init__(visa_addr, poll=True)
+        response = self.ask('Reference_CLocK?')
+        if response in  ['WARNING : CURRENT REMOTE CONTROL INTERFACE IS TCPIP',
+                         'WARNING : CURRENT REMOTE CONTROL INTERFACE IS LSIB',
+                         'WARNING : CURRENT REMOTE CONTROL INTERFACE IS OFF']:
+            raise RuntimeError('Make sure to set Utilities Setup/Remote to LXI(VXI11)')
     def init(self, full=False):
         self.write('Comm_ORDer LO') # can be LO or HI: LO=LSB first
         self.write('Comm_ForMaT DEF9,WORD,BIN') #DEF9=IEEE 488.2 block data, WORD (default is BYTE)
