@@ -943,7 +943,7 @@ class zurich_UHF(BaseInstrument):
             options_lim.update(_demod=(0,7)) #This prevents the use of the device check until the apply
             kwarg.update(options=options, options_apply=app, options_conv=options_conv, options_lim=options_lim)
             return ziDev_ch_sigouts(*arg, **kwarg)
-        self.sigouts_ampl_Vp = ziDev_ch_demod_sigouts(getstr='sigouts/{ch}/amplitudes/{_demod}', str_type=float, doc='Amplitude A of sin wave (it goes from -A to +A without an offset')
+        self.sigouts_ampl_Vp = ziDev_ch_demod_sigouts('sigouts/{ch}/amplitudes/{_demod}', str_type=float, doc='Amplitude A of sin wave (it goes from -A to +A without an offset')
         self.sigouts_50ohm_en = ziDev_ch_sigins('sigouts/{ch}/imp50', str_type=bool)
         # TODO: triggers, SYSTEM(/EXTCLK), EXTREFS, status stats
         #       conn, inputpwas, outputpwas
