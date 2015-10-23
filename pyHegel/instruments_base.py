@@ -83,6 +83,22 @@ class ProxyMethod(object):
 #######################################################
 ##    Have a status line active
 #######################################################
+
+class time_check(object):
+    def __init__(self, delay=10):
+        self.delay = delay
+        self.restart()
+    def restart(self):
+        self.last_update = time.time()
+    def check(self):
+        now = time.time()
+        if now >= self.last_update + self.delay:
+            self.last_update = now
+            return True
+        return False
+    def __call__(self):
+        return self.check()
+
 class UserStatusLine(object):
     """
     The is the object created by MainStatusLine.new
@@ -90,15 +106,41 @@ class UserStatusLine(object):
     To use, just call the object with the new string.
     If the new string is not empty, the status line is also output.
     You can force an output using the method output.
+    The timed, when True or a time in s (True is equivalent to 10s),
+    makes the screen update slower than that time.
     """
-    def __init__(self, main, handle):
+    def __init__(self, main, handle, timed=False):
         self.main = main
         self.handle = handle
+        if timed is not None and timed is not False:
+            if timed is True:
+                self._time_check = time_check()
+            else:
+                self._time_check = time_check(timed)
+        else:
+            self._time_check = None
+    @property
+    def delay(self):
+        if self._time_check is not None:
+            return self._time_check.delay
+        return 0
+    @delay.setter
+    def delay(self, d):
+        if self._time_check is not None:
+            self._time_check.delay = d
+    def restart_time(self):
+        if self._time_check is not None:
+            self._time_check.restart()
+    def check_time(self):
+        if self._time_check is not None:
+            return self._time_check()
+        return True
     def __del__(self):
         self.main.delete(self.handle)
     def __call__(self, new_status=''):
         self.main.change(self.handle, new_status)
-        if new_status != '':
+        do_update = self.check_time()
+        if new_status != '' and do_update:
             self.main.output()
     def output(self):
         self.main.output()
@@ -110,17 +152,18 @@ class MainStatusLine(object):
     a carriage return). To use, create a new user object (it will properly clean
     itself on deletion) using a single instance of this class (so should use:
     mainStatusLine.new()). You can select the priority you want for the status.
-    Larger priority will show before lower ones.
+    Larger priority will show before lower ones. You can also put a limit to the
+    update rate with timed (which is passed to UserStatusLine).
     For information on using the user object see UserStatusLine
     """
     def __init__(self):
         self.last_handle = 0
         self.users = {}
-    def new(self, priority=1):
+    def new(self, priority=1, timed=False):
         handle = self.last_handle + 1
         self.last_handle = handle
         self.users[handle] = [priority, '']
-        return UserStatusLine(self, handle)
+        return UserStatusLine(self, handle, timed)
         # higher priority shows before lower ones
     def delete(self, handle):
         del self.users[handle]
@@ -974,6 +1017,9 @@ class BaseInstrument(object):
         self._create_devs()
         self._async_local_data = threading.local()
         self._async_wait_check = True
+        # The _async_statusLinecan be used in _async_detect to update the user
+        # on the progress.
+        self._async_statusLine = mainStatusLine.new(timed=True)
         self._last_force = time.time()
         if not CHECKING:
             self.init(full=True)
@@ -998,14 +1044,15 @@ class BaseInstrument(object):
         return False
     @locked_calling
     def _async_trig(self): # subclasses can always call this
+        self._async_statusLine.restart_time()
         data = self._get_async_local_data()
         if self._async_mode.startswith('wait'):
             self._async_wait_check_helper()
         data = self._get_async_local_data()
         data.async_wait_start = time.time()
         data.async_wait = self.async_wait.getcache()
-    def _async_cleanup_after(self): # subclasses should change this. Called unconditionnaly after async/run_and_wait
-        pass
+    def _async_cleanup_after(self): # subclasses overides should call this. Called unconditionnaly after async/run_and_wait
+        self._async_statusLine('')
     def _async_wait_check_helper(self):
         if self._async_wait_check and self.async_wait.getcache() == 0.:
             print self.perror('***** WARNING You should give a value for async_wait *****')
@@ -2859,6 +2906,7 @@ class visaInstrumentAsync(visaInstrument):
                 ret = True
         return ret
     def _async_cleanup_after(self):
+        super(visaInstrumentAsync, self)._async_cleanup_after()
         if self._async_do_cleanup:
             self.visa.disable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ, visa_wrap.constants.VI_ALL_MECH)
             self._async_do_cleanup = False
