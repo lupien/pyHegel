@@ -51,7 +51,8 @@ from . import config
 
 local_config = config.load_local_config()
 
-from .instruments_base import _writevec as writevec, _normalize_usb, _normalize_gpib, _get_visa_idns, _writevec_flatten_list
+from .instruments_base import _writevec as writevec, _normalize_usb, _normalize_gpib, _get_visa_idns, _writevec_flatten_list,\
+                             time_check as _time_check
 from .traces import wait
 from .util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
 
@@ -565,18 +566,6 @@ def dump_conf(f, setdevs=None, getdevs=[], extra_conf=None):
     return hdrs
 
 
-class _time_check(object):
-    def __init__(self, delay=10):
-        self.last_update = time.time()
-        self.delay = delay
-    def check(self):
-        now = time.time()
-        if now > self.last_update + self.delay:
-            self.last_update = now
-            return True
-        return False
-
-
 class _Sweep(instruments.BaseInstrument):
     # This MemoryDevice will be shared among different instances
     # So there should only be one instance of this class
@@ -999,12 +988,10 @@ class _Sweep(instruments.BaseInstrument):
                     if updown_same:
                         ioffset = i + 1
 
-            update_check = _time_check(10) # returns True once every 10s
             if progress:
-                progress = instruments_base.mainStatusLine.new()
+                progress = instruments_base.mainStatusLine.new(timed=True)
             for iter_info, cf, cformats, sets, clf in iterator():
-                printit = progress if progress and update_check.check() else False
-                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negative, gsel, clf, printit)
+                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negative, gsel, clf, progress)
                 if dobreak == 'break':
                     break
         except KeyboardInterrupt:
@@ -1238,12 +1225,10 @@ class _Sweep(instruments.BaseInstrument):
                         i += 1
                         prev_js = js[:] # need to make a copy
 
-            update_check = _time_check(10) # returns True once every 10s
             if progress:
-                progress = instruments_base.mainStatusLine.new()
+                progress = instruments_base.mainStatusLine.new(timed=True)
             for iter_info, cf, cformats, sets, clf in iterator():
-                printit = progress if progress and update_check.check() else False
-                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negativel[-1], gsel, clf, printit)
+                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negativel[-1], gsel, clf, progress)
                 if dobreak == 'break':
                     break
         except KeyboardInterrupt:
