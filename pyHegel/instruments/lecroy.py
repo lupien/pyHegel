@@ -936,7 +936,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
                 self._async_statusLine('scope iter %i of %i'%(n, avgn))
                 # TODO find a wait arround this WAIT. Here it does absolutelly nothing
                 #  and *OPC returns quickly (for AUTO and NORM). For Single it works fine.
-                self.write('WAIT;*OPC')
+                self.write('WAIT 600;*OPC')
                 return False
         if mode in ['AutoStop', 'NormalStop']:
             self.stop_trig()
