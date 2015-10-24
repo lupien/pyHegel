@@ -522,19 +522,26 @@ class lecroy_vbs_scpi(scpiDevice):
 @register_instrument('LECROY', 'WM820ZI-A', alias='WM820ZI-A WaveMaster scope')
 class lecroy_wavemaster(visaInstrumentAsync):
     """
-    This instrument controls a LeCory WaveMaster 820Zi-A
+    This instrument controls a LeCroy WaveMaster 820Zi-A
      To use this instrument, the most useful devices are probably:
        fetch
        readval
        snap_png
+    To use sweep or record (or run_and_wait method) you shoud use the
+      set_trigmode method first.
+    When the processing stage on the scope takes a long time, it might produces
+    timeout on some devices. To avoid those you can increase the timeout by setting
+    the set_timeout attribute (which is in seconds).
     To work properly, make sure the instrument is set to use LXI(VXI11) as remote
     and not TCPIP(VICP).
     """
     def __init__(self, visa_addr):
-        # The SRQ for this intrument does not work
+        # BUG: The SRQ for this intrument does not work
         # as of version 7.2.1.0
         # SRQ still does not work in version 7.8.0 (The instruments never connects to this application
         # open Interrupt channel port)
+        self._trigmode_mode = None
+        self._trigmode_avgn = None
         super(lecroy_wavemaster, self).__init__(visa_addr, poll=True)
         response = self.ask('Reference_CLocK?')
         if response in  ['WARNING : CURRENT REMOTE CONTROL INTERFACE IS TCPIP',
@@ -547,7 +554,42 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self.write('Comm_HeaDeR OFF') #can be OFF, SHORT, LONG. OFF removes command echo and units
         super(lecroy_wavemaster, self).init(full=full)
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('memory_size', 'trig_coupling', options)
+        ch_info = []
+        orig_ch = self.current_channel.getcache()
+        orig_ich = self.current_input_channel.getcache()
+        orig_tch = self.current_trig_channel.getcache()
+        orig_fch = self.current_func_channel.getcache()
+        for ch in ['C%i'%i for i in range(1,5)]:
+            self.current_input_channel.set(ch)
+            self.current_channel.set(ch)
+            self.current_trig_channel.set(ch)
+            xx =self._conf_helper('trace_en', 'input_sel', 'input_invert', 'volts_div', 'attenuation',
+                                  'coupling', 'offset', 'offset_constant_mode',
+                                  'input_enh_resol', 'input_deskew', 'input_avg', 'interpolation')
+            # TODO, also deal with trigger channels LINE, EX, EX10, ...
+            xx +=self._conf_helper('trig_coupling', 'trig_level', 'trig_slope')
+            ch_info.append(ch+'=<'+','.join(xx)+'>')
+        # TODO also find a way to do this for F9-F12 and Z5-Z12
+        for ch in ['F%i'%i for i in range(1,9)] + ['Z%i'%i for i in range(1,5)]:
+            self.current_channel.set(ch)
+            self.current_func_channel.set(ch)
+            xx =self._conf_helper('trace_en', 'function_def')
+            ch_info.append(ch+'=<'+','.join(xx)+'>')
+        self.current_func_channel.set(orig_fch)
+        self.current_trig_channel.set(orig_tch)
+        self.current_input_channel.set(orig_ich)
+        self.current_channel.set(orig_ch)
+        para_mode_type = self.parameter_mode_type.get()
+        para_info = self._conf_helper('parameter_mode')
+        if para_mode_type != 'off':
+            para_info += self._conf_helper('parameter_stat_params')
+            para_info += 'Pn_en=%s'%[self.trace_enV.get(ch='P%i'%i) for i in range(1,13)]
+        base = self._conf_helper('RIS_mode_en', 'reference_clock', 'sample_clock',
+                                 'max_rate_memory', 'sample_rate', 'sample_rate_used',
+                                 'bandwith_limit',
+                                 'trig_select', 'trig_pos_s', 'time_div', 'trig_pattern',
+                                 'lecroy_options', 'memory_size', options)
+        return ch_info + base
     def arm_acquisition(self):
         """ This arms the oscilloscope """
         self.write('ARM_acquisition')
@@ -746,6 +788,174 @@ class lecroy_wavemaster(visaInstrumentAsync):
             print ret
         else:
             return ret
+    _trigmodes = ['Normal', 'Auto', 'NormalStop', 'AutoStop', 'Single', 'SingleForce']
+    def set_trigmode(self, mode='Single', avgn=1, ch='auto', quiet=False):
+        if mode not in self._trigmodes+['Stop', 'SingleForce_noClear']:
+            raise ValueError('Invalid mode used.')
+        avgn = int(avgn)
+        if avgn < 1:
+            raise ValueError('Invalid avgn (<1)')
+        if avgn > 1:
+            self._async_detect_acqn_find_ch(ch=ch) # this overrides _trigmode_mode and avgn
+        self._trigmode_mode = mode
+        self._trigmode_avgn = avgn
+        if not quiet:
+            if avgn > 1:
+                ch = self._trigmode_avgn_ch
+                print 'mode is %s, avgn is %i, acqn channel is %s'%(mode, avgn, ch)
+            else:
+                print 'mode is %s, avgn is %i'%(mode, avgn)
+    set_trigmode.__doc__ =         """
+        mode: one of %s
+              where for all modes except Normal and Auto the acquisition is stopped before transferring
+              Note that when the scope is processing, stopping or transferring data is delayed until the
+              processing is done. So if processing is long (and especially if acquisition is short) you
+              should probably use Single to prevent timeouts.
+              SingleForce will start a single acquisition and force the trigger (so in a way
+              it is the Single equivalent of Auto, if auto never gets a trigger)
+        avgn: the number of averages to wait for. The acquisition will wait until
+              this many acquisition have been performed.
+        ch:   The channel to use to detect the acquisition number (for averaging).
+              can be 'auto' or any of C1-C4, F1-F12, Z1-Z12, P1-P12
+              With auto, it tries and picks the first channel it thinks will work
+              among C1-C4, F1-F12, Z1-Z12, P12-P1 in that order and if they are enabled.
+              Only applies when avgn>2
+              And it will perform 2 acquisition to check find or check the channel
+              actually works for getting the acquisition number.
+              Note that for Ps to work properly, you need to choose a proper function.
+              Functions like freq can return multiple result on a single curve (and could
+              accidently screw up the detection code). Function like npoints should work
+              as long as they apply on a non averaged curve (for average curve the parameter
+              statistics don't update properly.)
+        """% _trigmodes
+    def _async_trigger_helper_rearm(self):
+        self.arm_acquisition()
+        if self._trigmode_mode.startswith('SingleForce'):
+            self.force_trigger()
+    def _async_trigger_helper(self):
+        mode = self._trigmode_mode
+        if self._trigmode_mode is None or self._trigmode_avgn is None:
+            print 'set_trigmode was not executed. Using default values.'
+            self.set_trigmode(quiet=False)
+        mode = self._trigmode_mode
+        clearit = True
+        noclear_str = '_noClear'
+        if mode.endswith(noclear_str):
+            mode = mode[:-len(noclear_str)]
+            clearit = False
+        if mode == 'Stop':
+            self.stop_trig()
+        if clearit:
+        #if mode != 'SingleForce_noClear':
+            self.clear_sweeps() # This resets averages and restart the current acquisition
+        #self._async_detect_acqn_find_ch()
+        # Here we assume that wait will only return when all the acquisition and calculation is done
+        if mode in ['Single', 'SingleForce']:
+            self._async_trigger_helper_rearm()
+        elif mode in ['Auto', 'AutoStop']:
+            self.trig_mode.set('AUTO')
+        elif mode in ['Normal', 'NormalStop']:
+            self.trig_mode.set('NORM')
+        # There is a wait with a timeout. Don't use it here
+        # If a wait is started after a clear_sweep it makes the
+        # scope wait during the trigger/acquisition before doing any other
+        # operation (read/write). After a triggers comes in, it will no longer
+        # wait for triggers....
+        # But the timeout is uncessary. Just physically pressing the stop button
+        # makes it go back (sending the stop command won't work)
+        #  to have the remote stop command work, does require setting a timeout
+        #  however I don't know how long it should be.
+        # Wait only seems to work with Single and on the first trigger of Normal/auto
+        #  after clear_sweeps
+        # make wait timeout after 10 min
+        # match this entry with the one in _async_detect
+        self.write('WAIT 600;*OPC')
+        #self.ask("vbs? 'app.WaitUntilIdle 30'") # This not any better, only blocks during processing (also limited by visa timeout)
+    def _async_detect_acqn_find_ch(self, ch='auto'):
+        self._trigmode_mode = 'Stop'
+        self._trigmode_avgn = 1
+        self.run_and_wait()
+        self._trigmode_mode = 'SingleForce_noClear'
+        self._trigmode_avgn = 1
+        self.run_and_wait()
+        self.run_and_wait()
+        sleep(1)
+        ch = ch.upper()
+        channels = ['C%i'%i for i in range(1,5)] +\
+                     ['F%i'%i for i in range(1,13)] +\
+                     ['Z%i'%i for i in range(1,13)]
+        channelsP = ['P%i'%i for i in range(1,13)]
+        if ch != 'AUTO':
+            if ch not in channels and ch not in channelsP:
+                raise ValueError('Invalid choice of ch for acquisition number detection')
+            if self._async_detect_acqn(ch=ch) != 2:
+                raise RuntimeError('Selected ch for acquisition detection is not usable (it does not seem to be incremented)')
+            self._trigmode_avgn_ch = ch
+            return
+        # we have auto mode, try the channels
+        for ch in channels:
+            # only channels that have averaging turned on will return
+            # 0 after clear and increase afterwards, otherwise they return always 1
+            # BUG: Also some channels, when not displayed, behave weirdly. It is like they sometimes cause
+            #  a trigger/clear. So only check enable channels
+            if self.trace_enV.get(ch=ch) and self._async_detect_acqn(ch=ch) == 2:
+                self._trigmode_avgn_ch = ch
+                return
+        if self.parameter_mode_type.get() != 'off':
+            para_l = self.parameter_stat_all_data.get(stat='sweeps')[::-1]
+            for i, p in enumerate(para_l):
+                if p == 2:
+                    self._trigmode_avgn_ch = 'P%i'%(12-i)
+                    return
+        raise RuntimeError('Could not find a ch to use for acquisition number detection')
+    def _async_detect_acqn(self, ch=None):
+        # Note that C,F and Z channels that can't count, always return 1 (even after a clear sweep)
+        if ch is None:
+            ch = self._trigmode_avgn_ch
+        if not isinstance(ch, basestring) or len(ch) < 2:
+            raise RuntimeError('The channel used for async detect of acquisition number is invalid')
+        if ch[0] in ['C', 'F', 'Z']:
+            return self.data_header.get(ch=ch).SWEEPS_PER_ACQ
+        elif ch[0] == 'P':
+            return self.parameter_stat_ch.get(ch=int(ch[1:]))['sweeps']
+        else:
+            raise RuntimeError('The channel used for async detect of acquisition number is invalid')
+    def _async_detect(self, max_time=.5): # 0.5 s max by default
+        ret = super(lecroy_wavemaster, self)._async_detect(max_time)
+        if not ret:
+            # This cycle is not finished
+            return ret
+        # cycle is finished, check acquisition numbers
+        avgn = self._trigmode_avgn
+        mode = self._trigmode_mode
+        if avgn > 1:
+            n = self._async_detect_acqn()
+            if n < avgn:
+                if mode in ['Single', 'SingleForce', 'SingleForce_noClear']:
+                    self._async_trigger_helper_rearm()
+                self._async_statusLine('scope iter %i of %i'%(n, avgn))
+                # TODO find a wait arround this WAIT. Here it does absolutelly nothing
+                #  and *OPC returns quickly (for AUTO and NORM). For Single it works fine.
+                self.write('WAIT;*OPC')
+                return False
+        if mode in ['AutoStop', 'NormalStop']:
+            self.stop_trig()
+            # Note that this does not stop processing.
+            # The stop will occur after processing.
+            # To pause/restart processing use
+            #   self.write('app.ProcessingResume', use_vbs=True)
+            #   self.write('app.ProcessingResume', use_vbs=True)
+        return True
+    def _trace_enV_getdev(self, ch=None):
+        # BUG: This device is needed because trace_en currently only works on
+        # C1-C4, F1-F8, Z1-Z4, M1-M4
+        # This version works on all of them
+        if ch is None:
+            ch = self.current_channel.getcache()
+        sel = dict(C='Acquisition', F='Math', Z='Zoom', P='Measure')
+        section = sel[ch[0]]
+        ret = self.ask('app.{section}.{ch}.View'.format(section=section, ch=ch), use_vbs=True)
+        return bool(int(ret))
     def _create_devs(self):
         self._devwrap('snap_png', autoinit=False)
         self.snap_png._format['bin']='.png'
@@ -772,19 +982,29 @@ class lecroy_wavemaster(visaInstrumentAsync):
                    ['F%i'%i for i in range(1,13)] +\
                    ['Z%i'%i for i in range(1,13)]
         channelsIn = ['C%i'%i for i in range(1,5)]
+        channelsTrig = channelsIn + ['EX', 'EX10', 'EX5', 'LINE']
+        channelsFunc = ['F%i'%i for i in range(1,9)] +\
+                       ['Z%i'%i for i in range(1,5)]
         # also XY, math(ET, SpecAn, Spectro, SpecWindow), trigger(EX, EX10, EX5, LINE)
         self.current_channel = MemoryDevice('C1', choices=channelsF)
+        self.current_input_channel = MemoryDevice('C1', choices=ChoiceStrings('C1', 'C2', 'C3', 'C4'))
+        self.current_trig_channel = MemoryDevice('C1', choices=channelsTrig)
+        self.current_func_channel = MemoryDevice('F1', choices=channelsFunc)
         #self.points = scpiDevice(':WAVeform:POINts', str_type=int) # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
         #self.waveform_count = scpiDevice(getstr=':WAVeform:COUNt?', str_type=int)
         #self.average_count = scpiDevice(':ACQuire:COUNt', str_type=int, min=2, max=65536)
         #self.acq_samplerate = scpiDevice(getstr=':ACQuire:SRATe?', str_type=float)
         #self.acq_npoints = scpiDevice(getstr=':ACQuire:POINts?', str_type=int)
-        def devChannelOption(*arg, **kwarg):
+        def devChannelBaseOption(ch_base, *arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
-            options.update(ch=self.current_channel)
+            options.update(ch=ch_base)
             app = kwarg.pop('options_apply', ['ch'])
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
+        devChannelOption = lambda *arg, **kwarg: devChannelBaseOption(self.current_channel, *arg, **kwarg)
+        devChannelInOption = lambda *arg, **kwarg: devChannelBaseOption(self.current_input_channel, *arg, **kwarg)
+        devChannelTrigOption = lambda *arg, **kwarg: devChannelBaseOption(self.current_trig_channel, *arg, **kwarg)
+        devChannelFuncOption = lambda *arg, **kwarg: devChannelBaseOption(self.current_func_channel, *arg, **kwarg)
         self.data = devChannelOption(getstr='{ch}:WaveForm? ALL', str_type=waveformdata(), autoinit=False, trig=True, raw=True)
         self.data_header = devChannelOption(getstr='{ch}:WaveForm? DESC', str_type=waveformdata(return_only_header=True), autoinit=False, trig=True, raw=True)
         data_setup_ch = lecroy_dict([('SP', 'steps'), ('NP', 'maxpnts'), ('FP', 'first'), ('SN', 'segment_n')], [int]*4)
@@ -794,7 +1014,6 @@ class lecroy_wavemaster(visaInstrumentAsync):
              first is 0 bases index of first point returned
              segment_n selects segment to return or all segements if set to 0""")
         self.trace_en = devChannelOption('{ch}:TRAce', choices=bool_lecroy)
-        self.current_input_channel = MemoryDevice('C1', choices=ChoiceStrings('C1', 'C2', 'C3', 'C4'))
         # TODO only channelsIn
         def lecChannelOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
@@ -808,29 +1027,29 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self.input_deskew = lecChannelOption('app.Acquisition.{ch}.Deskew', str_type=float)
         self.input_enh_resol = lecChannelOption('app.Acquisition.{ch}.EnhanceResType', choices=ChoiceStrings('0.5BITS', '1BITS', '1.5BITS', '2BITS', '2.5BITS', '3BITS', 'NONE'))
         self.input_invert = lecChannelOption('app.Acquisition.{ch}.Invert', choices=ChoiceDict({True:'-1', False:'0'}), write_quotes=False)
-        self.volts_div = devChannelOption('{ch}:Volt_DIV', str_type=float, setget=True)
-        self.attenuation = devChannelOption('{ch}:ATTeNuation', str_type=int, choices=[1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 10000])
-        self.coupling = devChannelOption('{ch}:CouPLing', choices=ChoiceStrings('D50', 'GND', 'D1M', 'A1M', 'OVL'), doc='OVL is returned on input overload in d50. Do not set it.')
+        self.volts_div = devChannelInOption('{ch}:Volt_DIV', str_type=float, setget=True)
+        self.attenuation = devChannelInOption('{ch}:ATTeNuation', str_type=int, choices=[1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 10000])
+        self.coupling = devChannelInOption('{ch}:CouPLing', choices=ChoiceStrings('D50', 'GND', 'D1M', 'A1M', 'OVL'), doc='OVL is returned on input overload in d50. Do not set it.')
         bwlim = ChoiceStrings('OFF', '16GHZ', '13GHZ', '8GHZ', '6GHZ', '4GHZ', '3GHZ', '1GHZ', '200MHZ', 'ON')
         cl = ['C%i'%i for i in range(1,5)] + ['C%iA'%i for i in range(1,5)] + ['C%iB'%i for i in range(1,5)]
         bwlim_choices = lecroy_dict(cl, bwlim)
-        self.bandwith_limit = devChannelOption('BandWidth_Limit', choices=bwlim_choices, doc='OFF=full, ON=20 MHz')
-        self.offset = devChannelOption('{ch}:OFfSeT', str_type=float)
+        self.bandwith_limit = scpiDevice('BandWidth_Limit', choices=bwlim_choices, doc='OFF=full, ON=20 MHz')
+        self.offset = devChannelInOption('{ch}:OFfSeT', str_type=float)
         self.offset_constant_mode = scpiDevice('OFFset_ConstanT', choices=ChoiceStrings('VOLTS', 'DIV'))
         self.time_div = scpiDevice('Time_DIV', str_type=float)
         self.memory_size = scpiDevice('Memory_SIZe', str_type=float)
         # C1-C4, EX, EX10, ETM10
-        self.trig_coupling = devChannelOption('{ch}:TRig_CouPling', choices=ChoiceStrings('DC', 'DC50', 'GND', 'DC1M', 'AC1M'))
-        self.trig_level = devChannelOption('{ch}:TRig_LeVel', str_type=float_stripUnit)
+        self.trig_coupling = devChannelTrigOption('{ch}:TRig_CouPling', choices=ChoiceStrings('DC', 'DC50', 'GND', 'DC1M', 'AC1M'))
+        self.trig_level = devChannelTrigOption('{ch}:TRig_LeVel', str_type=float_stripUnit)
         self.trig_mode = scpiDevice('TRig_MoDe', choices=ChoiceStrings('AUTO', 'NORM', 'SINGLE', 'STOP'))
-        self.trig_pattern = scpiDevice('TRig_PAttern', autoinit=False)
-        self.trig_slope = devChannelOption('{ch}:TRig_SLope', choices=ChoiceStrings('NEG', 'POS'))
+        self.trig_pattern = scpiDevice('TRig_PAttern')
+        self.trig_slope = devChannelTrigOption('{ch}:TRig_SLope', choices=ChoiceStrings('NEG', 'POS'))
         channelsTrig = ['C%i'%i for i in range(1,5)] + ['LINE', 'EX', 'EX10', 'PA', 'ETM10']
         channelsTrig = ChoiceStrings(*channelsTrig)
         trig_select_holdtype = ChoiceDict({'time':'TI', 'tl':'TL', 'event':'EV', 'ps':'PS', 'pl':'PL', 'is':'IS', 'il':'IL', 'p2':'P2', 'i2':'I2', 'off':'OFF'})
         trig_select_mode = ChoiceStrings('DROP', 'EDGE', 'GLIT', 'INTV', 'STD', 'SNG', 'SQ', 'TEQ')
         trig_select_opt = lecroy_dict([('', 'mode'), ('SR', 'ch', ), ('QL','ch2'), ('HT','holdtype'), ('HV','holdvalue'), ('HV2','holdvalue2')], [trig_select_mode, channelsTrig, channelsTrig, trig_select_holdtype, float_stripUnit, float_stripUnit])
-        self.trig_select = devChannelOption('TRig_SElect', choices=trig_select_opt)
+        self.trig_select = scpiDevice('TRig_SElect', choices=trig_select_opt)
         self.trig_pos_s = scpiDevice('TRig_DeLay', str_type=float, doc='The values are in seconds away from the center. Negative values move the trigger to the left of the screen.')
 
         self.current_parafunc = MemoryDevice('AMPL', doc="""
@@ -870,7 +1089,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
                                          options=dict(mode=self.parameter_mode_type),
                                          options_lim=dict(mode=pstat_modes),
                                          options_conv=dict(mode=takefirst))
-        self.function_def = devChannelOption('{ch}:DEFine', autoinit=False, doc="""
+        self.function_def = devChannelFuncOption('{ch}:DEFine', doc="""
             Note that doing set on the return of get might fail because of values with unit.
             Removes those and it will probably work.
             A full value for set might look like:
@@ -879,13 +1098,28 @@ class lecroy_wavemaster(visaInstrumentAsync):
             be the histogram of P1, using  1024 bins and using the last
             1000 values, i.e. the sum of all the bins will eventually add up
             to 1000.""")
+        self._devwrap('trace_enV', doc='Same as trace_en, but works on all the channels (even P1-12)')
         self._devwrap('fetch', autoinit=False, trig=True)
-        #self.readval = ReadvalDev(self.fetch)
+        self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(lecroy_wavemaster, self)._create_devs()
 
 # Directory for DISK option can use FLPY, HDD, C, D ...
 # Lots of unknown trig_select modes like cascaded
-#Functions like trace_en (C1:trace?) don't work for F9-f12, M5-M12, Z5-Z12
-#            same with PArameter_STatistics? {mode},P{ch} for P10-12
+#Functions like trace_en (C1:trace?) don't work for F9-f12, M5-M12, Z5-Z12 # still not working in 7.8.0
+#            same with PArameter_STatistics? {mode},P{ch} for P10-12 # This seems to work now in 7.8.0
 #            ...
+
+# For timming
+#  can use
+#    clear_sweeps
+#    and look at data.header.SWEEPS_PER_ACQ
+#       which goes up when channel is averaging
+#   lecr._async_trig_cleanup(); lecr.arm_acquisition(); lecr.force_trigger(); lecr.write('*OPC'); lecr.wait_after_trig()
+#     need force trigger if want auto trigger.
+#   lecr._async_trig_cleanup(); lecr.arm_acquisition();  lecr.write('wait;*OPC'); lecr.wait_after_trig()
+# can use lecr.data or lecr.data_header
+# I did not find how to stop processing
+#   asking for some info during a long processing could time out.
+# lecr.write('app.ProcessingResume', use_vbs=True)
+# lecr.write('app.ProcessingResume', use_vbs=True)
