@@ -1,5 +1,4 @@
 Main TODO list:
-- finish lecroy
 - Create a python analysis template
 - Make check function work
 - acq_histo2d,
