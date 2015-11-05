@@ -36,6 +36,7 @@ from ..instruments_registry import register_instrument, add_to_instruments
 
 clr = None
 Int32 = None
+Int64 = None
 IntPtr = None
 Marshal = None
 OlBase = None
@@ -47,10 +48,10 @@ _delayed_imports_done = False
 def _delayed_imports():
     global _delayed_imports_done
     if not _delayed_imports_done:
-        global clr, Int32, IntPtr, Marshal, OlBase, OlException
+        global clr, Int32, Int64, IntPtr, Marshal, OlBase, OlException
         try:
             import clr
-            from System import Int32, IntPtr
+            from System import Int32, Int64, IntPtr
             from System.Runtime.InteropServices import Marshal
         except ImportError as exc:
             raise RuntimeError('Unable to import windows clr/System: %s'%exc)
@@ -350,7 +351,7 @@ class DataTranslation(BaseInstrument):
         fullsize = buf.BufferSizeInSamples
         validsize = buf.ValidSamples
         v=np.ndarray(validsize, dtype=float)
-        Marshal.Copy(buf.GetDataAsVolts(), 0, IntPtr.op_Explicit(Int32(v.ctypes.data)), len(v))
+        Marshal.Copy(buf.GetDataAsVolts(), 0, IntPtr.op_Explicit(Int64(v.ctypes.data)), len(v))
         num_channel = len(clist)
         if num_channel != 1 and self.nb_samples.getcache() != 1:
             v.shape = (-1, num_channel)
