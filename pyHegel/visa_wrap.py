@@ -376,7 +376,10 @@ class WaitResponse(object):
     """Class used in return of wait_on_event. It properly closes the context upon delete.
     """
     def __init__(self, event_type, context, ret, visalib, timed_out=False):
-        self.event_type = event_type
+        if event_type == 0:
+            self.event_type = None
+        else:
+            self.event_type = event_type
         self.context = context
         self.ret = ret
         self._visalib = visalib
@@ -617,6 +620,7 @@ class new_Instrument(redirect_instr):
             self.visalib.disable_event(self.session, event_type, mechanism)
         def discard_events(self, event_type, mechanism):
             self.visalib.discard_events(self.session, event_type, mechanism)
+    if is_version('1.5', '1.7'):
         def wait_on_event(self, in_event_type, timeout, capture_timeout=False):
             try:
                 event_type, context, ret = self.visalib.wait_on_event(self.session, in_event_type, timeout)

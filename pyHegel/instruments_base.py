@@ -2425,8 +2425,8 @@ class visaInstrument(BaseInstrument):
     def __init__(self, visa_addr, skip_id_test=False, quiet_delete=False, **kwarg):
         # need to initialize visa before calling BaseInstrument init
         # which might require access to device
-        if type(visa_addr)==int:
-            visa_addr= 'GPIB0::%i::INSTR'%visa_addr
+        if isinstance(visa_addr, int):
+            visa_addr = _normalize_gpib(visa_addr)
         self.visa_addr = visa_addr
         if not CHECKING:
             self.visa = rsrc_mngr.open_resource(visa_addr, **kwarg)
@@ -2859,6 +2859,34 @@ def _normalize_usb(usb_resrc):
     interfaceN = int(interfaceN, base=0)
     return 'USB0::0x%04X::0x%04X::%s::%i'%(manuf, model, serial, interfaceN), manuf, model
 
+def _normalize_gpib(gpib_resrc):
+    if isinstance(gpib_resrc, basestring):
+        gpib_resrc = gpib_resrc.upper()
+        split = gpib_resrc.split('::')
+        bus = 0
+        # split[0] is 'GPIB'
+        if len(split[0]) > 4:
+            bus = int(split[0][4:])
+        if split[-1] == 'INSTR':
+            del split[-1]
+        prim = int(split[1])
+        ret = 'GPIB%i::%i'%(bus, prim)
+        if len(split) > 2:
+            sec = int(split[2])
+            ret += '::%i'%sec
+        return ret+'::INSTR'
+    elif isinstance(gpib_resrc, int):
+        return 'GPIB0::%i::INSTR'%gpib_resrc
+    else:
+        raise TypeError('the address is not in an acceptable type.')
+
+
+def _get_visa_idns(visa_addr, *args, **kwargs):
+    vi = visaInstrument(visa_addr, *args, skip_id_test=True, quiet_delete=True, **kwargs)
+    idns = vi.idn_split()
+    del vi
+    return idns
+
 
 class visaAutoLoader(visaInstrument):
     """
@@ -2881,9 +2909,7 @@ class visaAutoLoader(visaInstrument):
             else:
                 print 'Autoloading(USB) using instruments class "%s"'%cls.__name__
                 return cls(visa_addr, *args, **kwargs)
-        vi = visaInstrument(visa_addr, *args, skip_id_test=True, quiet_delete=True, **kwargs)
-        idns = vi.idn_split()
-        del vi
+        idns = _get_visa_idns(visa_addr, *args, **kwargs)
         try:
             cls = instruments_registry.find_instr(idns['vendor'], idns['model'], idns['firmware'])
         except KeyError:

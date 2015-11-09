@@ -127,11 +127,11 @@ def find_usb(vendor_id, product_id=None):
 
 def check_instr_id(instr, idn_manuf, product=None, firmware_version=None):
     """
-    idn is either the 3 element tuple (manuf, product, firmware version)
+    idn_manuf is either the 3 element tuple (manuf, product, firmware version)
     or the value of manuf
     Returns True if there is a match found. Otherwise False.
     Note that the check works for overrides.
-    If the full check does not work, it tries then tries to see if manuf/product is present
+    If the full check does not work, it tries to see if manuf/product is correct
     then if manuf is.
     """
     if not isinstance(idn_manuf, tuple):
@@ -280,7 +280,7 @@ def add_to_instruments(name=None):
         Note that if you don't specify name, it will use the class or function name.
         For an object that does not possess a __name__ attribute, you need to
         specify name.
-        When no specifyin a name, you can use it either like:
+        When not specifying a name, you can use it either like:
          @add_to_instruments()
          some_object....
         or:

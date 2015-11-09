@@ -50,14 +50,14 @@ class lecroy_dict(ChoiceBase):
         This handles commands that return a list of options like
            opt1,5,opt2,34,opt3,DC
         On reading, they will probably all be present.
-        On writing, it is not necessary to gave all. Values not given are not
+        On writing, it is not necessary to give all. Values not given are not
         changed by lecroy instrument.
-        fielnames is a list of ('SN', 'dict_name'), where SN is the shortname
+        field_names is a list of ('SN', 'dict_name'), where SN is the shortname
         used to communicate with the instrument, dict_name is the name
         used for the pyHegel dictionnary. It can also be a list of strings, in
         which case it is used as both SN and dict_name
         'SN' can be '', in which case it should be the first elements of the list.
-        and is not named. There can only be more than one.
+        and is not named. There can be more than one.
         'SN' are compared in a case insensitive way.
         required is to set the number of required '' parameters. By default
         all of them are, otherwise tell it a number.
@@ -517,7 +517,9 @@ class lecroy_vbs_scpi(scpiDevice):
 ##    LeCroy WaveMaster 820Zi-A
 #######################################################
 
-@register_instrument('LECROY', 'WM820ZI-A', '7.2.1', alias='WM820ZI-A WaveMaster scope')
+#@register_instrument('LECROY', 'WM820ZI-A', '7.2.1', alias='WM820ZI-A WaveMaster scope')
+#@register_instrument('LECROY', 'WM820ZI-A', '7.8.0', alias='WM820ZI-A WaveMaster scope')
+@register_instrument('LECROY', 'WM820ZI-A', alias='WM820ZI-A WaveMaster scope')
 class lecroy_wavemaster(visaInstrumentAsync):
     """
     This instrument controls a LeCory WaveMaster 820Zi-A
@@ -525,6 +527,8 @@ class lecroy_wavemaster(visaInstrumentAsync):
        fetch
        readval
        snap_png
+    To work properly, make sure the instrument is set to use LXI(VXI11) as remote
+    and not TCPIP(VICP).
     """
     def __init__(self, visa_addr):
         # The SRQ for this intrument does not work

@@ -181,6 +181,7 @@ def load_instruments(exclude=None):
     # Reverse paths so we load pyHegel internal first and let user override them if needed.
     paths = paths[::-1]
     loaded = {}
+    from .instruments_registry import add_to_instruments
     for p in paths:
         filenames = glob.glob(pjoin(p, '*.py'))
         for f in filenames:
@@ -192,14 +193,15 @@ def load_instruments(exclude=None):
                                     f)
             if name in loaded:
                 print 'Skipping loading "%s" because a module with that name is already loaded from %s'%(f, loaded[name])
-            name = INSTRUMENTS_BASE+'.'+name
+            fullname = INSTRUMENTS_BASE+'.'+name
             # instead of imp.load_source, could do
             #  insert path in sys.path
             #   import (using importlib.import_module)
             #  remove inserted path
             # But that makes reloading more complicated
-            imp.load_source(name, f)
-            loaded[name] = f
+            module = imp.load_source(fullname, f)
+            loaded[fullname] = f
+            add_to_instruments(name)(module)
     return loaded
 
 
