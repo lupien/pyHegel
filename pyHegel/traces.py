@@ -403,8 +403,37 @@ class Trace(TraceBase):
         self.rescale_button = QtGui.QPushButton('Rescale')
         self.toolbar.addWidget(self.rescale_button)
         self.rescale_button.clicked.connect(self.rescale_button_press)
+        # status
+        self.status_label = QtGui.QLabel(text='temporary')
+        self.toolbar.addWidget(self.status_label)
+        self.set_status(True)
+    def set_status(self, running, stop_reason='completed'):
+        """
+           running is True or False, or paused
+           stop_reason is completed, abort or ctrl-c.
+        """
+        if running:
+            if running == 'paused':
+                t = 'Paused'
+                c = 'red'
+            else:
+                t = 'Running'
+                c = 'green'
+        else:
+            self.pause_button.setEnabled(False)
+            self.abort_button.setEnabled(False)
+            t = {'completed':'Completed', 'abort':'Aborted', 'ctrl-c':'Terminated'}[stop_reason]
+            if t == 'Completed':
+                c = 'blue'
+            else:
+                c = 'red'
+        self.status_label.setText('<font color="%s">%s</font>'%(c, t))
     def pause_button_press(self, state):
         self.pause_enabled = state
+        if state:
+            self.set_status('paused')
+        else:
+            self.set_status(True)
     def abort_button_press(self, state):
         self.abort_enabled = state
     def rescale_button_press(self):
