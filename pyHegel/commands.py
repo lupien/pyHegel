@@ -997,6 +997,8 @@ class _Sweep(instruments.BaseInstrument):
         except KeyboardInterrupt:
             #(exc_type, exc_value, exc_traceback) = sys.exc_info()
             #raise KeyboardInterrupt('Interrupted sweep'), None, exc_traceback
+            if graph:
+                t.set_status(False, 'ctrl-c')
             raise KeyboardInterrupt('Interrupted sweep'), None, sys.exc_info()[2]
         finally:
             if progress:
@@ -1008,8 +1010,12 @@ class _Sweep(instruments.BaseInstrument):
                 f.close()
             if fullpathrev is not None and frev:
                 frev.close()
-        if graph and t.abort_enabled:
-            raise KeyboardInterrupt('Aborted sweep')
+        if graph:
+            if t.abort_enabled:
+                t.set_status(False, 'abort')
+                raise KeyboardInterrupt('Aborted sweep')
+            else:
+                t.set_status(False, 'completed')
         elif reset is not None:
             dev.set(reset, **dev_opt)
         if graph and close_after:
@@ -1234,6 +1240,8 @@ class _Sweep(instruments.BaseInstrument):
         except KeyboardInterrupt:
             #(exc_type, exc_value, exc_traceback) = sys.exc_info()
             #raise KeyboardInterrupt('Interrupted sweep_multi'), None, exc_traceback
+            if graph:
+                t.set_status(False, 'ctrl-c')
             raise KeyboardInterrupt('Interrupted sweep_multi'), None, sys.exc_info()[2]
         finally:
             if progress:
@@ -1243,8 +1251,12 @@ class _Sweep(instruments.BaseInstrument):
                 del progress
             if f:
                 f.close()
-        if graph and t.abort_enabled:
-            raise KeyboardInterrupt('Aborted sweep_multi')
+        if graph:
+            if t.abort_enabled:
+                t.set_status(False, 'abort')
+                raise KeyboardInterrupt('Aborted sweep_multi')
+            else:
+                t.set_status(False, 'completed')
         else:
             for dev, dev_opt, r in zip(devl, dev_optl, reset):
                 if r is not None:
@@ -1489,12 +1501,16 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     except KeyboardInterrupt:
         #(exc_type, exc_value, exc_traceback) = sys.exc_info()
         #raise KeyboardInterrupt('Interrupted record'), None, exc_traceback
+        t.set_status(False, 'ctrl-c')
         raise KeyboardInterrupt('Interrupted record'), None, sys.exc_info()[2]
     finally:
         if f:
             f.close()
     if t.abort_enabled:
-        raise KeyboardInterrupt('Aborted record')
+        t.set_status(False, 'abort')
+        raise KeyboardInterrupt('Aborted sweep_multi')
+    else:
+        t.set_status(False, 'completed')
 
 
 def trace(devs, interval=1, title=''):
