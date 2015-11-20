@@ -72,6 +72,7 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
 #             _Sweep _Snap _record_execafter _normalize_usb _normalize_gpib _get_visa_idns
 #             _Hegel_Task _quiet_KeyboardInterrupt_Handler
 #             _greetings _load_helper _get_extra_confs dump_conf _time_check
+#             _write_comment
 
 
 #instruments_base._globaldict = globals()
@@ -565,6 +566,9 @@ def dump_conf(f, setdevs=None, getdevs=[], extra_conf=None):
     _write_conf(f, formats)
     return hdrs
 
+def _write_comment(f, text):
+    # text should be unicode
+    writevec(f, [text.encode('utf_8')], pre_str='#C# ')
 
 class _Sweep(instruments.BaseInstrument):
     # This MemoryDevice will be shared among different instances
@@ -962,6 +966,7 @@ class _Sweep(instruments.BaseInstrument):
             ###############################
             # Start of loop
             ###############################
+            t_proxy = instruments_base.weakref.proxy(t)
             def iterator():
                 iter_partial = 0
                 ioffset = 0
@@ -973,6 +978,8 @@ class _Sweep(instruments.BaseInstrument):
                 if updown == True:
                     cycle_list = [(True, f, formats), (False, frev, formatsrev)]
                 for cfwd, cf, cformats in cycle_list:
+                    if graph and cf:
+                        t_proxy.set_comment_func(lambda text: _write_comment(cf, text))
                     cycle_span = span
                     if not cfwd: # doing reverse
                         cycle_span = span[::-1]
@@ -1006,6 +1013,8 @@ class _Sweep(instruments.BaseInstrument):
                 # becasuse then the traceback cleanup is delayed until garbage collection
                 # but it contains progress. So for while, old status report will be kept around.
                 del progress
+            if graph:
+                t.set_comment_func(None)
             if f:
                 f.close()
             if fullpathrev is not None and frev:
@@ -1155,6 +1164,8 @@ class _Sweep(instruments.BaseInstrument):
                 read_dims = 'readback numpy shape for line part: '+(', '.join([str(n) for n in data_row_shape]))
                 writevec(f, [read_dims], pre_str='#')
                 writevec(f, hdrs+['time'], pre_str='#')
+                if graph:
+                    t.set_comment_func(lambda text: _write_comment(f, text))
 
             ###############################
             # Start of loop
@@ -1249,6 +1260,8 @@ class _Sweep(instruments.BaseInstrument):
                 # becasuse then the traceback cleanup is delayed until garbage collection
                 # but it contains progress. So for while, old status report will be kept around.
                 del progress
+            if graph:
+                t.set_comment_func(None)
             if f:
                 f.close()
         if graph:
@@ -1480,6 +1493,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
             f = open(fullpath, 'w', 0)
             _write_conf(f, formats, extra_base='record options', async=async, interval=interval)
             writevec(f, ['time']+hdrs, pre_str='#')
+            t.set_comment_func(lambda text: _write_comment(f, text))
         i=0
         while npoints is None or i < npoints:
             tme = clock.get()
@@ -1504,6 +1518,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
         t.set_status(False, 'ctrl-c')
         raise KeyboardInterrupt('Interrupted record'), None, sys.exc_info()[2]
     finally:
+        t.set_comment_func(None)
         if f:
             f.close()
     if t.abort_enabled:
