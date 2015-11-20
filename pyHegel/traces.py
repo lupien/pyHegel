@@ -359,7 +359,7 @@ def _offsetText_helper(self):
         self.offsetText.xytext = new_xy
 
 class Trace(TraceBase):
-    def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False):
+    def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False, comment_func=None):
         super(Trace, self).__init__(width=width, height=height, dpi=dpi)
         ax = host_subplot_class(self.fig, 111)
         self.fig.add_subplot(ax)
@@ -399,6 +399,18 @@ class Trace(TraceBase):
         self.abort_button.setCheckable(True)
         self.toolbar.addWidget(self.abort_button)
         self.abort_button.toggled.connect(self.abort_button_press)
+        # add comment
+        self._comment_func = comment_func
+        self.comment_button = QtGui.QPushButton('Comment')
+        self.comment_button.setCheckable(True)
+        self.toolbar.addWidget(self.comment_button)
+        self.comment_button.toggled.connect(self.comment_button_press)
+        self.comment_entry = QtGui.QLineEdit(enabled=False)
+        self.comment_entry.returnPressed.connect(self.comment_entry_press)
+        self.comment_entry.textEdited.connect(self.comment_entry_edited)
+        self.comment_action = self.toolbar.addWidget(self.comment_entry)
+        # for addWidget on toolbars, need to use the action for show/hide
+        self.comment_action.setVisible(False)
         # Rescale
         self.rescale_button = QtGui.QPushButton('Rescale')
         self.toolbar.addWidget(self.rescale_button)
@@ -407,6 +419,8 @@ class Trace(TraceBase):
         self.status_label = QtGui.QLabel(text='temporary')
         self.toolbar.addWidget(self.status_label)
         self.set_status(True)
+    def set_comment_func(self, func):
+        self._comment_func = func
     def set_status(self, running, stop_reason='completed'):
         """
            running is True or False, or paused
@@ -422,6 +436,9 @@ class Trace(TraceBase):
         else:
             self.pause_button.setEnabled(False)
             self.abort_button.setEnabled(False)
+            self.comment_button.setEnabled(False)
+            self.comment_entry.setEnabled(False)
+            self.comment_action.setVisible(False)
             t = {'completed':'Completed', 'abort':'Aborted', 'ctrl-c':'Terminated'}[stop_reason]
             if t == 'Completed':
                 c = 'blue'
@@ -436,6 +453,21 @@ class Trace(TraceBase):
             self.set_status(True)
     def abort_button_press(self, state):
         self.abort_enabled = state
+    def comment_button_press(self, state):
+        self.comment_entry.setEnabled(state)
+        self.comment_action.setVisible(state)
+        self.comment_entry_edited()
+    def comment_entry_edited(self, text=None):
+        self.comment_entry.setStyleSheet('color: red;')
+    def comment_entry_press(self):
+        t = unicode(self.comment_entry.text())
+        self.comment_entry.setStyleSheet('color: green;')
+        f = self._comment_func
+        if f is not None:
+            f(t)
+        else:
+            print 'Unable to save comment: %s'%t
+        #print 'Got:', t
     def rescale_button_press(self):
         # TODO tell toolbar that a new set of scales exists
         for i,ax in enumerate(self.axs):
