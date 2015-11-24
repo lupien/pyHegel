@@ -305,7 +305,7 @@ class DataTranslation(BaseInstrument):
             self._analog_in.ChannelList[i].Gain = self.all_channels_info[c]['gain']
             #self._analog_in.ChannelList.Add(OlBase.ChannelListEntry(self.all_channels[c])
         self._analog_in.Config()
-        wanted_size = self.nb_samples.getcache() * len(clist)
+        wanted_size = int(self.nb_samples.getcache() * len(clist))
         if self._inbuffer is not None:
             if self._inbuffer.BufferSizeInSamples != wanted_size:
                 #print 'Erasing bnuffer'
