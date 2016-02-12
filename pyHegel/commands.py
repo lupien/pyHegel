@@ -1025,7 +1025,7 @@ class _Sweep(instruments.BaseInstrument):
                 raise KeyboardInterrupt('Aborted sweep')
             else:
                 t.set_status(False, 'completed')
-        elif reset is not None:
+        if reset is not None:
             dev.set(reset, **dev_opt)
         if graph and close_after:
             t = t.destroy()
@@ -1270,10 +1270,9 @@ class _Sweep(instruments.BaseInstrument):
                 raise KeyboardInterrupt('Aborted sweep_multi')
             else:
                 t.set_status(False, 'completed')
-        else:
-            for dev, dev_opt, r in zip(devl, dev_optl, reset):
-                if r is not None:
-                    dev.set(r, **dev_opt)
+        for dev, dev_opt, r in zip(devl, dev_optl, reset):
+            if r is not None:
+                dev.set(r, **dev_opt)
         if graph and close_after[0]:
             t = t.destroy()
             del t
