@@ -1039,7 +1039,8 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self.time_div = scpiDevice('Time_DIV', str_type=float)
         self.memory_size = scpiDevice('Memory_SIZe', str_type=float)
         # C1-C4, EX, EX10, ETM10
-        self.trig_coupling = devChannelTrigOption('{ch}:TRig_CouPling', choices=ChoiceStrings('DC', 'DC50', 'GND', 'DC1M', 'AC1M'))
+        #self.trig_coupling = devChannelTrigOption('{ch}:TRig_CouPling', choices=ChoiceStrings('DC', 'DC50', 'GND', 'DC1M', 'AC1M'))
+        self.trig_coupling = devChannelTrigOption('{ch}:TRig_CouPling', choices=ChoiceStrings('DC', 'AC', 'HFREJ', 'LFREJ'))
         self.trig_level = devChannelTrigOption('{ch}:TRig_LeVel', str_type=float_stripUnit)
         self.trig_mode = scpiDevice('TRig_MoDe', choices=ChoiceStrings('AUTO', 'NORM', 'SINGLE', 'STOP'))
         self.trig_pattern = scpiDevice('TRig_PAttern')
