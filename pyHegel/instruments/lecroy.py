@@ -31,7 +31,7 @@ from ..instruments_base import visaInstrumentAsync, visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceBase, _general_check, _fromstr_helper, _tostr_helper,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
-                            _decode_block_base, make_choice_list,\
+                            Dict_SubDeviceMultiKeys, _decode_block_base, make_choice_list,\
                             sleep, locked_calling
 from ..instruments_registry import register_instrument
 
@@ -527,8 +527,11 @@ class lecroy_wavemaster(visaInstrumentAsync):
        fetch
        readval
        snap_png
+       parameter_fetch
     To use sweep or record (or run_and_wait method) you shoud use the
       set_trigmode method first.
+    Note that the parameter_stat* devices depend on the parameter_vresol; they can be truncated.
+    parameter_value is not truncated.
     When the processing stage on the scope takes a long time, it might produces
     timeout on some devices. To avoid those you can increase the timeout by setting
     the set_timeout attribute (which is in seconds).
@@ -673,6 +676,8 @@ class lecroy_wavemaster(visaInstrumentAsync):
         This allows sending automation commands like
          'app.Acquisition.C1.VerScale=0.5'
          'app.Acquisition.C1.VerScale = 0.5'
+        and perform actions like
+         'app.SaveRecall.Utilities.DeleteFile'
         see also vbs_ask
         """
         self.write("VBS '%s'"%command)
@@ -956,6 +961,55 @@ class lecroy_wavemaster(visaInstrumentAsync):
         section = sel[ch[0]]
         ret = self.ask('app.{section}.{ch}.View'.format(section=section, ch=ch), use_vbs=True)
         return bool(int(ret))
+    def _parameter_fetch_ch_helper(self, ch):
+        orig_ch = self.current_para.getcache()
+        if ch is None:
+            ch = [c for c in range(self.current_para.min, self.current_para.max+1) if self.parameter_view_en.get(ch=c)]
+            self.current_para.set(orig_ch)
+        elif not isinstance(ch, (list)):
+            ch = [ch]
+        if len(ch) == 0:
+            raise RuntimeError('No parameter channels are currently viewable')
+        return ch
+    def _parameter_fetch_stat_helper(self, ch, stat):
+        # call this after ch becomes a proper list: _parameter_fetch_ch_helper
+        if not isinstance(stat, (list)):
+            stat = [stat]*len(ch)
+        else:
+            if len(stat) != len(ch):
+                raise RuntimeError('The shape of stat does not match that of ch')
+        return stat
+    def _parameter_fetch_getformat(self, **kwarg):
+        ch = kwarg.get('ch', None)
+        ch = self._parameter_fetch_ch_helper(ch)
+        stat = kwarg.get('stat', 'LAST')
+        stat = self._parameter_fetch_stat_helper(ch, stat)
+        multi = []
+        for s, c in zip(stat, ch):
+            multi.append('%s_P%i'%(s.lower(),c))
+        fmt = self.fetch._format
+        fmt.update(multi=multi)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _parameter_fetch_getdev(self, stat='LAST', ch=None):
+        """
+            reads all the parameter data (using parameter_value with the
+            selected stat which defaults to LAST (you might want MEAN)).
+            This way the parameter resolution does not affect the data.
+            stat can be a single value or a list the length of ch (to use a different
+            stat for each channel))
+            ch selects the parameter channels to read. If None, it selects all the view enabled ones.
+            ch can be a single value or a list of values.
+        """
+        orig_ch = self.current_para.getcache()
+        orig_stat = self.current_para_stat_vbs.getcache()
+        ch = self._parameter_fetch_ch_helper(ch)
+        stat = self._parameter_fetch_stat_helper(ch, stat)
+        ret = []
+        for s, c in zip(stat, ch):
+            ret.append(self.parameter_value.get(stat=s, ch=c))
+        self.current_para.set(orig_ch)
+        self.current_para_stat_vbs.set(orig_stat)
+        return ret
     def _create_devs(self):
         self._devwrap('snap_png', autoinit=False)
         self.snap_png._format['bin']='.png'
@@ -1069,13 +1123,40 @@ class lecroy_wavemaster(visaInstrumentAsync):
                                              options_apply=['ch', 'func'])
 
         self.current_para = MemoryDevice(1, min=1, max=12)
-        pstat_choice = lecroy_dict([('', 'mode'), ('', 'ch'), ('', 'func'), 'avg', 'high', 'last', 'low', 'sigma', 'sweeps'], [str]*4+[float_undef]*7, required=2, repeats=2)
+        # pkpk = max-min, maxnegdev= min-mean, maxposdev=max-mean, maxabsdev=max(-maxnegdev, maxposdev)
+        para_stat_vbs = ChoiceStrings('LAST', 'MEAN', 'MIN', 'MAX', 'SDEV', 'PKPK', 'NUM', 'MAXABSDEV', 'MAXPOSDEV', 'MAXNEGDEV')
+        self.current_para_stat_vbs = MemoryDevice('MEAN', choices=para_stat_vbs)
+        def lecParaOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_para)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return lecroy_vbs_scpi(*arg, **kwarg)
+        def lecParaOptionStat(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(stat=self.current_para_stat_vbs)
+            app = kwarg.pop('options_apply', ['ch', 'stat'])
+            kwarg.update(options=options, options_apply=app)
+            return lecParaOption(*arg, **kwarg)
+        # parameter_view_en is the same as trace_enV, except it uses 1-12 instead of 'P1'-'P12'
+        self.parameter_view_en = lecParaOption('app.Measure.P{ch}.View', choices=ChoiceDict({True:'-1', False:'0'}), write_quotes=False)
+        self.parameter_value = lecParaOptionStat('app.Measure.P{ch}.{stat}.Result.Value', str_type=float)
+        self.parameter_vresol = lecParaOptionStat('app.Measure.P{ch}.{stat}.Result.VerticalResolution', str_type=float)
+        pstat_choice = lecroy_dict([('', 'mode'), ('', 'ch'), ('', 'func'), 'avg', 'high', 'last', 'low', 'sigma', 'sweeps'], [str]*3+[float_undef]*6, required=2, repeats=2)
         pstat_modes = para_type[:3] # skip OFF
         self.parameter_stat_ch = scpiDevice(getstr='PArameter_STatistics? {mode},P{ch}', choices=pstat_choice, autoinit=False, trig=True,
                                          options=dict(ch=self.current_para, mode=self.parameter_mode_type),
                                          options_apply=['ch'],
                                          options_lim=dict(mode=pstat_modes),
                                          options_conv=dict(mode=lambda s,ts: s))
+        self.parameter_stat_ch_avg = Dict_SubDevice(self.parameter_stat_ch, 'avg')
+        self.parameter_stat_ch_last = Dict_SubDevice(self.parameter_stat_ch, 'last')
+        self.parameter_stat_ch_sigma = Dict_SubDevice(self.parameter_stat_ch, 'sigma')
+        self.parameter_stat_ch_high = Dict_SubDevice(self.parameter_stat_ch, 'high')
+        self.parameter_stat_ch_low = Dict_SubDevice(self.parameter_stat_ch, 'low')
+        self.parameter_stat_ch_sweeps = Dict_SubDevice(self.parameter_stat_ch, 'sweeps')
+        self.parameter_stat_ch_all = Dict_SubDeviceMultiKeys(self.parameter_stat_ch,
+                                                             ['last', 'avg', 'sigma', 'high', 'low', 'sweeps'])
         para_stat = ChoiceStrings('AVG', 'LOW', 'HIGH', 'SIGMA', 'SWEEPS', 'LAST')
         pstat_all_ch = lecroy_dict([('', 'mode'), ('', 'stat'), ('', 'data')], [str]*2 + [float_undef], required=2, repeats=2)
         def takefirst(x,y):
@@ -1085,6 +1166,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
                                          options_lim=dict(stat=para_stat, mode=pstat_modes),
                                          options_conv=dict(mode=takefirst, stat=takefirst))
         self.parameter_stat_all_data = Dict_SubDevice(self.parameter_stat_all, 'data')
+        self.parameter_stat_all_data._format['multi'] = ['P%i'%i for i in range(1,13)]
         pstat_params_ch = lecroy_dict([('', 'mode'), ('', 'stat'), ('', 'func'), ('', 'src')], [str]*4, required=2, repeats=(2,3))
         self.parameter_stat_params = scpiDevice(getstr='PArameter_STatistics? {mode},PARAM', choices=pstat_params_ch,
                                          options=dict(mode=self.parameter_mode_type),
@@ -1101,6 +1183,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
             to 1000.""")
         self._devwrap('trace_enV', doc='Same as trace_en, but works on all the channels (even P1-12)')
         self._devwrap('fetch', autoinit=False, trig=True)
+        self._devwrap('parameter_fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(lecroy_wavemaster, self)._create_devs()
