@@ -1125,6 +1125,10 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self.current_para = MemoryDevice(1, min=1, max=12)
         # pkpk = max-min, maxnegdev= min-mean, maxposdev=max-mean, maxabsdev=max(-maxnegdev, maxposdev)
         para_stat_vbs = ChoiceStrings('LAST', 'MEAN', 'MIN', 'MAX', 'SDEV', 'PKPK', 'NUM', 'MAXABSDEV', 'MAXPOSDEV', 'MAXNEGDEV')
+        #TODO find a way to extract the histogram:
+        #  lecr.ask('app.Measure.P1.histo.Result.bins', use_vbs=True)
+        #  lecr.ask('app.Measure.P1.histo.Result.binpopulations', use_vbs=True)
+        #    binpopulations is an array in XStream browser
         self.current_para_stat_vbs = MemoryDevice('MEAN', choices=para_stat_vbs)
         def lecParaOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
