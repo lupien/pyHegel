@@ -2356,7 +2356,7 @@ class Dict_SubDevice(BaseDevice):
         trig = subdevice._trig
         # TODO find a way to point to the proper subdevice in doc string
         doc = """This device set/get the '%s' dictionnary element of device.
-                 It uses the same options as that subdevice:
+                 It uses the same options as that subdevice (see _subdevice attribute)
               """%(key)
         super(Dict_SubDevice, self).__init__(min=min, max=max, choices=choices, doc=doc,
                 setget=setget, autoinit=autoinit, trig=trig, **kwarg)
@@ -2404,6 +2404,53 @@ class Dict_SubDevice(BaseDevice):
         vals = vals.copy()
         vals[self._sub_key] = val
         self._subdevice.set(vals)
+
+class Dict_SubDeviceMultiKeys(BaseDevice):
+    """
+    Use this to gain access to a many element of a device returning a dictionary
+    from dict_str.
+    """
+    def __init__(self, subdevice, keys, force_default=False, **kwarg):
+        """
+        This device and the subdevice need to be part of the same instrument
+        (otherwise async will not work properly)
+        keys is a list of dictionnary keys.
+        The subdevice needs to return a dictionary (use dict_str).
+        We can only use this to get values, not to set.
+        """
+        self._subdevice = subdevice
+        self._sub_keys = keys
+        self._force_default = force_default
+        subtype = self._subdevice.type
+        for key in keys:
+            if key not in subtype.field_names:
+                raise IndexError, "The key '%s' is not present in the subdevice"%key
+        autoinit = subdevice._autoinit
+        trig = subdevice._trig
+        # TODO find a way to point to the proper subdevice in doc string
+        doc = """This device set/get the '%s' dictionnary element of device.
+                 It uses the same options as that subdevice (see _subdevice attribute)
+              """%(key)
+        super(Dict_SubDeviceMultiKeys, self).__init__(doc=doc,
+                autoinit=autoinit, trig=trig, multi=keys, **kwarg)
+        self._getdev_p = True # needed to enable BaseDevice get in Checking mode
+    def getcache(self, local=False):
+        if local:
+            vals = self._subdevice.getcache(local=True)
+        else:
+            vals = self._subdevice.getcache()
+        if vals is None:
+            ret = None
+        else:
+            ret = [vals[key] for key in self._sub_keys]
+        # Lets set the _cache variable anyway but it should never
+        # be used. _cache should always be accessed with getcache and this will
+        # bypass the value we set here.
+        self.setcache(ret)
+        return ret
+    def _getdev(self, **kwarg):
+        vals = self._subdevice.get(**kwarg)
+        return [vals[key] for key in self._sub_keys]
 
 
 
