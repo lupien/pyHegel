@@ -2354,14 +2354,17 @@ class Dict_SubDevice(BaseDevice):
         setget = subdevice._setget
         autoinit = subdevice._autoinit
         trig = subdevice._trig
-        # TODO find a way to point to the proper subdevice in doc string
-        doc = """This device set/get the '%s' dictionnary element of device.
-                 It uses the same options as that subdevice (see _subdevice attribute)
-              """%(key)
-        super(Dict_SubDevice, self).__init__(min=min, max=max, choices=choices, doc=doc,
+        super(Dict_SubDevice, self).__init__(min=min, max=max, choices=choices,
                 setget=setget, autoinit=autoinit, trig=trig, **kwarg)
         self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
         self._getdev_p = True # needed to enable BaseDevice get in Checking mode
+    def _get_docstring(self, added=''):
+        # we don't include options starting with _
+        added = """
+                This device set/get the '%s' dictionnary element of a subdevice.
+                It uses the same options as that subdevice (%s)
+                """%(self._sub_key, self._subdevice)
+        return super(Dict_SubDevice, self)._get_docstring(added=added)
     def setcache(self, val, nolock=False):
         if nolock:
             # no handled because getcache can lock
