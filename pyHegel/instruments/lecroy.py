@@ -88,13 +88,13 @@ class lecroy_dict(ChoiceBase):
             cnt += 1
         self.nosn_cnt = cnt
         if '' in self.field_names_sn[cnt:]:
-            raise ValueError,'Only the first SNs can be the empty string'
+            raise ValueError('Only the first SNs can be the empty string')
         if len(set(self.field_names_sn[cnt:])) != len(self.field_names_sn[cnt:]):
-            raise ValueError,'There is a duplicated SN which is not allowed'
+            raise ValueError('There is a duplicated SN which is not allowed')
         self.field_names_dn = [dn.lower() for sn,dn in field_names]
         self.field_names = self.field_names_dn # needed for Dict_SubDevice
         if len(set(self.field_names_dn)) != len(self.field_names_dn):
-            raise ValueError,'There is a duplicated dict_name which is not allowed'
+            raise ValueError('There is a duplicated dict_name which is not allowed')
         if not isinstance(fmts, (list, np.ndarray)):
             fmts = [fmts]*len(field_names)
         fmts_type = []
@@ -122,7 +122,7 @@ class lecroy_dict(ChoiceBase):
     def __call__(self, fromstr):
         v_base = fromstr.split(self.sep)
         if len(v_base) < self.required:
-            raise ValueError, 'Returned result (%s) is too short.'%fromstr
+            raise ValueError('Returned result (%s) is too short.'%fromstr)
         names = []
         fmts = []
         vals = []
@@ -184,7 +184,7 @@ class lecroy_dict(ChoiceBase):
                 val = fromdict.pop(key)
             except KeyError:
                 if i < self.required:
-                    raise KeyError, 'The field with key "%s" is always required'%key
+                    raise KeyError('The field with key "%s" is always required'%key)
                 else:
                     break
             s = _tostr_helper(val, self.fmts_type[i])
@@ -200,7 +200,7 @@ class lecroy_dict(ChoiceBase):
         for i in range(self.required):
             key = self.field_names_dn[i]
             if key not in x:
-                raise KeyError, 'The field with key "%s" is always required'%key
+                raise KeyError('The field with key "%s" is always required'%key)
         for k, v in x.iteritems():
             i = self.field_names_dn.index(k)
             fmt = self.fmts_type[i]
@@ -474,7 +474,7 @@ class waveformdata(object):
         ptr += w
         w = header.RES_DESC1
         if header.RES_DESC1 or header.RES_ARRAY1 or header.RES_ARRAY2 or header.RES_ARRAY3:
-            raise ValueError, 'At least one reserved data arrays has non-zero size.'
+            raise ValueError('At least one reserved data arrays has non-zero size.')
         ptr += w
         w = header.TRIGTIME_ARRAY
         trigtime = fullblock[ptr:ptr+w]
@@ -796,10 +796,10 @@ class lecroy_wavemaster(visaInstrumentAsync):
     _trigmodes = ['Normal', 'Auto', 'NormalStop', 'AutoStop', 'Single', 'SingleForce']
     def set_trigmode(self, mode='Single', avgn=1, ch='auto', quiet=False):
         if mode not in self._trigmodes+['Stop', 'SingleForce_noClear']:
-            raise ValueError('Invalid mode used.')
+            raise ValueError(self.perror('Invalid mode used.'))
         avgn = int(avgn)
         if avgn < 1:
-            raise ValueError('Invalid avgn (<1)')
+            raise ValueError(self.perror('Invalid avgn (<1)'))
         if avgn > 1:
             self._async_detect_acqn_find_ch(ch=ch) # this overrides _trigmode_mode and avgn
         self._trigmode_mode = mode
@@ -892,9 +892,9 @@ class lecroy_wavemaster(visaInstrumentAsync):
         channelsP = ['P%i'%i for i in range(1,13)]
         if ch != 'AUTO':
             if ch not in channels and ch not in channelsP:
-                raise ValueError('Invalid choice of ch for acquisition number detection')
+                raise ValueError(self.perror('Invalid choice of ch for acquisition number detection'))
             if self._async_detect_acqn(ch=ch) != 2:
-                raise RuntimeError('Selected ch for acquisition detection is not usable (it does not seem to be incremented)')
+                raise RuntimeError(self.perror('Selected ch for acquisition detection is not usable (it does not seem to be incremented)'))
             self._trigmode_avgn_ch = ch
             return
         # we have auto mode, try the channels
@@ -912,19 +912,19 @@ class lecroy_wavemaster(visaInstrumentAsync):
                 if p == 2:
                     self._trigmode_avgn_ch = 'P%i'%(12-i)
                     return
-        raise RuntimeError('Could not find a ch to use for acquisition number detection')
+        raise RuntimeError(self.perror('Could not find a ch to use for acquisition number detection'))
     def _async_detect_acqn(self, ch=None):
         # Note that C,F and Z channels that can't count, always return 1 (even after a clear sweep)
         if ch is None:
             ch = self._trigmode_avgn_ch
         if not isinstance(ch, basestring) or len(ch) < 2:
-            raise RuntimeError('The channel used for async detect of acquisition number is invalid')
+            raise RuntimeError(self.perror('The channel used for async detect of acquisition number is invalid'))
         if ch[0] in ['C', 'F', 'Z']:
             return self.data_header.get(ch=ch).SWEEPS_PER_ACQ
         elif ch[0] == 'P':
             return self.parameter_stat_ch.get(ch=int(ch[1:]))['sweeps']
         else:
-            raise RuntimeError('The channel used for async detect of acquisition number is invalid')
+            raise RuntimeError(self.perror('The channel used for async detect of acquisition number is invalid'))
     def _async_detect(self, max_time=.5): # 0.5 s max by default
         ret = super(lecroy_wavemaster, self)._async_detect(max_time)
         if not ret:
@@ -969,7 +969,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         elif not isinstance(ch, (list)):
             ch = [ch]
         if len(ch) == 0:
-            raise RuntimeError('No parameter channels are currently viewable')
+            raise RuntimeError(self.perror('No parameter channels are currently viewable'))
         return ch
     def _parameter_fetch_stat_helper(self, ch, stat):
         # call this after ch becomes a proper list: _parameter_fetch_ch_helper
@@ -977,7 +977,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
             stat = [stat]*len(ch)
         else:
             if len(stat) != len(ch):
-                raise RuntimeError('The shape of stat does not match that of ch')
+                raise RuntimeError(self.perror('The shape of stat does not match that of ch'))
         return stat
     def _parameter_fetch_getformat(self, **kwarg):
         ch = kwarg.get('ch', None)
