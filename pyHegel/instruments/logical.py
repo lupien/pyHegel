@@ -30,9 +30,9 @@ from scipy.optimize import brentq as brentq_rootsolver
 import weakref
 import time
 
-from ..instruments_base import BaseDevice, BaseInstrument, ProxyMethod, MemoryDevice,\
+from ..instruments_base import BaseDevice, BaseInstrument, ProxyMethod,\
                         _find_global_name, _get_conf_header, locked_calling_dev,\
-                        FastEvent, wait_on_event
+                        FastEvent, wait_on_event, CHECKING
 from ..traces import wait
 from ..instruments_registry import add_to_instruments
 
@@ -115,7 +115,7 @@ class LogicalDevice(BaseDevice):
        you can use option kw with a dict (basedev) or a list of dict (basedevs).
     """
     def __init__(self, basedev=None, basedevs=None, autoget='all', doc='',
-                 quiet_del=False, setget=None, autoinit=None, **kwarg):
+                 quiet_del=False, setget=None, autoinit=None, get_has_check=True, **kwarg):
         # use either basedev (single one) or basedevs, multiple devices
         #   in the latter _basedev = _basedevs[0]
         # can also leave both blank
@@ -161,7 +161,7 @@ class LogicalDevice(BaseDevice):
         if setget is not None:
             kwarg['setget'] = setget
         self._quiet_del = quiet_del
-        super(LogicalDevice, self).__init__(doc=doc, trig=True, **kwarg)
+        super(LogicalDevice, self).__init__(doc=doc, trig=True, get_has_check=get_has_check, **kwarg)
         self._instr_internal = _LogicalInstrument(self)
         self._instr_parent = None
         self.async_delay = 0.
@@ -311,6 +311,10 @@ class LogicalDevice(BaseDevice):
             for dev, base_kwarg in gl:
                 dev.getasync(async, **base_kwarg)
         return super(LogicalDevice, self).getasync(async, **kwarg)
+    def _check_empty_kwarg(self, kwarg, set_check_cache=True):
+        if len(kwarg) != 0:
+            raise ValueError(self.perror('Invalid kwarg: %r')%kwarg.keys())
+        self._check_cache['set_kwarg'] = kwarg
     def _combine_kwarg(self, kwarg_dict, base=None, op='get'):
         # this combines the kwarg_dict with a base.
         # It returns the new base_device kwarg to use and
@@ -318,7 +322,7 @@ class LogicalDevice(BaseDevice):
         # This default ones removes all kwarg and transfer them
         # to the base devices.
         # Overwrite this if necessary.
-        # op can be 'get' 'set' 'check'
+        # op can be 'get' 'set' 'check'. set and check should be treated the same way.
         # Note that the kw option is always stripped before calling this function.
         if base is None:
             base = self._basedev_kwarg
@@ -381,16 +385,24 @@ class ScalingDevice(LogicalDevice):
     def _getdev_log(self):
         raw = self._cached_data[0]
         return self._prep_output(raw)
-    def _setdev(self, val, **kwarg):
-        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
-        basedev.set(self.conv_todev(val), **base_kwarg)
+    def _setdev(self, val):
+        basedev, base_kwarg = self._check_cache['gl']
+        raw = self._check_cache['raw']
+        basedev.set(raw, **base_kwarg)
         # read basedev cache, in case the values is changed by setget mode.
         raw = self._basedev.getcache(local=True)
         self._set_delayed_cache = self._prep_output(raw)
-    def check(self, val, **kwarg):
-        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='check')
+    def _checkdev(self, val, **kwarg):
+        op = self._check_cache['fnct_str']
+        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op=op)
+        self._check_empty_kwarg(kwarg)
+        self._check_cache['gl'] = (basedev, base_kwarg)
         raw = self.conv_todev(val)
-        basedev.check(raw, **base_kwarg)
+        self._check_cache['raw'] = raw
+        if op == 'check':
+            basedev.check(raw, **base_kwarg)
+        # otherwise, the check will be done by set in _setdev above
+
 
 
 #######################################################
@@ -445,15 +457,22 @@ class FunctionDevice(LogicalDevice):
     def _getdev_log(self):
         raw = self._cached_data[0]
         return self._prep_output(raw)
-    def _setdev(self, val, **kwarg):
-        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
-        basedev.set(self.to_raw(val), **base_kwarg)
+    def _setdev(self, val):
+        basedev, base_kwarg = self._check_cache['gl']
+        raw = self._check_cache['raw']
+        basedev.set(raw, **base_kwarg)
         raw = self._basedev.getcache(local=True)
         self._set_delayed_cache = self._prep_output(raw)
-    def check(self, val, **kwarg):
-        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='check')
+    def _checkdev(self, val, **kwarg):
+        op = self._check_cache['fnct_str']
+        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op=op)
+        self._check_empty_kwarg(kwarg)
+        self._check_cache['gl'] = (basedev, base_kwarg)
         raw = self.to_raw(val)
-        basedev.check(raw, **base_kwarg)
+        self._check_cache['raw'] = raw
+        if op == 'check':
+            basedev.check(raw, **base_kwarg)
+        # otherwise, the check will be done by set in _setdev above
     def check_funcs(self, start_or_list, stop=None, npoints=None, ret=False):
         """
         Either give a list of point or specify  start, stop and npoints
@@ -517,13 +536,19 @@ class LimitDevice(LogicalDevice):
         return self._current_config_addbase(head, options=options)
     def _getdev_log(self):
         return self._cached_data[0]
-    def _setdev(self, val, **kwarg):
-        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
+    def _setdev(self, val):
+        basedev, base_kwarg = self._check_cache['gl']
         basedev.set(val, **base_kwarg)
-    def check(self, val, **kwarg):
-        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='check')
-        basedev.check(val, **base_kwarg)
-        super(type(self), self).check(val)
+    def _checkdev(self, val, **kwarg):
+        #super(type(self), self)._checkdev(val)
+        super(LimitDevice, self)._checkdev(val)
+        op = self._check_cache['fnct_str']
+        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op=op)
+        self._check_empty_kwarg(kwarg)
+        self._check_cache['gl'] = (basedev, base_kwarg)
+        if op == 'check':
+            basedev.check(val, **base_kwarg)
+        # otherwise, the check will be done by set in _setdev above
 
 
 #######################################################
@@ -565,21 +590,26 @@ class CopyDevice(LogicalDevice):
     # i.e. cp.set(1, extra=5) and cp.set(1, kw=[dict(extra=5)]*cp._basedevs_N)
     # would do the same. Here we only allow the second one.
     def _combine_kwarg(self, kwarg_dict, base=None, op='get'):
-        if op=='set':
+        if op in ['set', 'check']:
             if kwarg_dict != {}:
                 raise TypeError,'Invalid Parameter for CopyDevice.set: %r'%kwarg_dict
             else:
                 base_kwarg, kwarg_clean = {}, {}
         base_kwarg, kwarg_clean = super(CopyDevice, self)._combine_kwarg(kwarg_dict, base, op)
         return base_kwarg, kwarg_clean
-    def _setdev(self, val, **kwarg): # only allow option kw
-        gl, kwarg = self._get_auto_list(kwarg, autoget='all', op='set')
+    def _setdev(self, val): # only allow option kw
+        gl = self._check_cache['gl']
         for dev, base_kwarg in gl:
             dev.set(val, **base_kwarg)
-    def check(self, val, kw=None):
-        gl, kwarg = self._get_auto_list(dict(kw=kw), autoget='all', op='check')
+    def _checkdev(self, val, kw=None):
+        # This repeats the checks that will be performed during set but we
+        # need to check all devices before starting any of the set so we have to repeat.
+        op = self._check_cache['fnct_str']
+        gl, kwarg = self._get_auto_list(dict(kw=kw), autoget='all', op=op)
+        self._check_empty_kwarg(kwarg)
         for dev, base_kwarg in gl:
             dev.check(val, **base_kwarg)
+        self._check_cache['gl'] = gl
 
 
 #######################################################
@@ -634,6 +664,7 @@ class ExecuteDevice(LogicalDevice):
             command = command.format(filename=filename, root=root, ext=ext,
                                  directory=directory, basename=basename,
                                  basenoext=basenoext)
+        self._get_para_checked()
         if self._multi is None:
             os.system(command)
         else:
@@ -729,15 +760,20 @@ class PickSome(LogicalDevice):
     def _getdev_log(self):
         raw = self._cached_data[0]
         return self._prep_output(raw)
-    def _setdev(self, val, **kwarg):
-        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='set')
+    def _setdev(self, val):
+        basedev, base_kwarg = self._check_cache['gl']
         basedev.set(val, **base_kwarg)
         if self._pick_cache_on_set:
             raw = self._basedev.getcache(local=True)
             self._set_delayed_cache = self._prep_output(raw)
-    def check(self, val, **kwarg):
-        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op='check')
-        basedev.check(val, **base_kwarg)
+    def _checkdev(self, val, **kwarg):
+        op = self._check_cache['fnct_str']
+        ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op=op)
+        self._check_empty_kwarg(kwarg)
+        self._check_cache['gl'] = (basedev, base_kwarg)
+        if op == 'check':
+            basedev.check(val, **base_kwarg)
+        # otherwise, the check will be done by set in _setdev above
 
 #######################################################
 ##    Logical average device
@@ -795,8 +831,13 @@ class Average(LogicalDevice):
         vals = [dev.get(**base_kwarg)]
         last = to
         now = to
-        while now - to < self._filter_time:
-            dt = self._repeat_time - (now-last)
+        filter_time = self._filter_time
+        repeat_time = self._repeat_time
+        if CHECKING():
+            filter_time = min(filter_time, 5.)
+            repeat_time = min(repeat_time, 1.)
+        while now - to < filter_time:
+            dt = repeat_time - (now-last)
             dt = max(dt, 0.020) # sleep at least 20 ms
             wait(dt)
             last = time.time() # do it here so we remove the time it takes to do the gets
@@ -835,7 +876,7 @@ class FunctionWrap(LogicalDevice):
         """
         Define at least one of setfunc or getfunc.
         checkfunc is called by a set. If not specified, the default one is used (can handle
-        choices or min/max).
+        choices or min/max, but will skip checking the extra kwarg).
         getformatfunc can be defined if necessary. There is a default one.
         use_ret_as_cache: will use the return value from set as the cached value.
         If you define a basedev or a basedevs list, those devices are included in the
@@ -856,21 +897,18 @@ class FunctionWrap(LogicalDevice):
                 self._setdev_p, self._getdev_p, self._checkfunc, self._getformatfunc, self._use_ret)]
         return self._current_config_addbase(head, options=options)
     def _getdev_log(self, **kwarg):
-        if not self._getdev_p:
-            raise NotImplementedError('This FunctionWrap device does not have a getfunc')
         if self._autoget and self._basedev_as_param:
            return self._getdev_p(self._cached_data, **kwarg)
         else:
             return self._getdev_p(**kwarg)
     def _setdev(self, val, **kwarg):
-        if not self._setdev_p:
-            raise NotImplementedError('This FunctionWrap device does not have a setfunc')
         ret = self._setdev_p(val, **kwarg)
         if self._use_ret:
             self._set_delayed_cache = ret
-    def check(self, val, **kwarg):
+    def _checkdev(self, val, **kwarg):
         if not self._checkfunc:
-            super(FunctionWrap, self).check(val, **kwarg)
+            # we skip checking kwarg without producing an error.
+            super(FunctionWrap, self)._checkdev(val)
         else:
             self._checkfunc(val, **kwarg)
     def getformat(self, **kwarg):

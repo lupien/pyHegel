@@ -31,7 +31,7 @@ from ..instruments_base import visaInstrumentAsync, visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceBase, _general_check, _fromstr_helper, _tostr_helper,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
-                            Dict_SubDeviceMultiKeys, _decode_block_base, make_choice_list,\
+                            KeyError_Choices, _decode_block_base, make_choice_list,\
                             sleep, locked_calling
 from ..instruments_registry import register_instrument
 
@@ -200,17 +200,17 @@ class lecroy_dict(ChoiceBase):
         for i in range(self.required):
             key = self.field_names_dn[i]
             if key not in x:
-                raise KeyError('The field with key "%s" is always required'%key)
+                raise KeyError_Choices('The field with key "%s" is always required'%key)
         for k, v in x.iteritems():
-            i = self.field_names_dn.index(k)
+            try:
+                i = self.field_names_dn.index(k)
+            except ValueError:
+                raise KeyError('The key "%s" is not a valid one'%k)
             fmt = self.fmts_type[i]
             lims = self.fmts_lims[i]
-            try:
-                if isinstance(fmt, ChoiceMultipleDep):
-                    fmt.set_current_vals(x)
-                _general_check(x[k], lims=lims)
-            except ValueError as e:
-                raise ValueError('for key %s: '%k + e.args[0], e.args[1])
+            if isinstance(fmt, ChoiceMultipleDep):
+                fmt.set_current_vals(x)
+            _general_check(x[k], lims=lims, msg_src='for key %s: '%k)
         return True
     def __repr__(self):
         r = ''
@@ -1159,7 +1159,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self.parameter_stat_ch_high = Dict_SubDevice(self.parameter_stat_ch, 'high')
         self.parameter_stat_ch_low = Dict_SubDevice(self.parameter_stat_ch, 'low')
         self.parameter_stat_ch_sweeps = Dict_SubDevice(self.parameter_stat_ch, 'sweeps')
-        self.parameter_stat_ch_all = Dict_SubDeviceMultiKeys(self.parameter_stat_ch,
+        self.parameter_stat_ch_all = Dict_SubDevice(self.parameter_stat_ch,
                                                              ['last', 'avg', 'sigma', 'high', 'low', 'sweeps'])
         para_stat = ChoiceStrings('AVG', 'LOW', 'HIGH', 'SIGMA', 'SWEEPS', 'LAST')
         pstat_all_ch = lecroy_dict([('', 'mode'), ('', 'stat'), ('', 'data')], [str]*2 + [float_undef], required=2, repeats=2)

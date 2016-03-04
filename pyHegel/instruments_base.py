@@ -61,7 +61,26 @@ try:
 except NameError:
     _globaldict = {} # This is set in pyHegel _init_pyHegel_globals (from pyHegel.commands)
 
-CHECKING = False
+class _CHECKING():
+    def __init__(self):
+        self.state = False
+    def get(self):
+        return self.state
+    def set(self, state):
+        if not isinstance(state, bool):
+            raise ValueError('The state needs to be a boolean')
+        self.state = state
+    def __call__(self, state=None):
+        """
+           Called with no arguments, returns current checking mode state
+           With a boolean, sets the check state
+        """
+        if state is None:
+            return self.get()
+        else:
+            self.set(state)
+
+CHECKING = _CHECKING()
 
 ###################
 ###  New exceptions
@@ -70,6 +89,27 @@ class InvalidArgument(ValueError):
 
 class InvalidAutoArgument(InvalidArgument):
     pass
+
+class KeyError_Choices (KeyError):
+    pass
+
+class Runtime_Get_Para_Checked(Exception):
+    """
+    This exception is to be used to mark the end of parameter checking in a get function
+    """
+    pass
+
+def get_para_checked(*val):
+    """
+       This function should be called in a _getdev after the parameters have been
+       checked for validity. When in CHECKING only mode, this will skip the rest of
+       the function.
+       you should call this with one parameter (passed to exception) or no parameters
+       When a parameter is given, it will be used as the get value (and cached)
+    """
+    if CHECKING():
+        raise Runtime_Get_Para_Checked(*val)
+
 ###################
 
 class ProxyMethod(object):
@@ -518,13 +558,13 @@ class asyncThread(threading.Thread):
         for f, args, kwargs in self._init_ops:
             f(*args, **kwargs)
         delay = self._async_delay
-        if delay and not CHECKING:
+        if delay and not CHECKING():
             func = lambda: self._stop
             _retry_wait(func, timeout=delay, delay=0.1)
         if self._stop:
             return
         try:
-            if self._async_trig and not CHECKING:
+            if self._async_trig and not CHECKING():
                 self._async_trig()
             #print 'Thread ready to detect ', time.time()-t0
             if self._async_detect is not None:
@@ -534,7 +574,7 @@ class asyncThread(threading.Thread):
             if self._stop:
                 return
         finally:
-            if self._async_cleanup and not CHECKING:
+            if self._async_cleanup and not CHECKING():
                 self._async_cleanup()
         #print 'Thread ready to read ', time.time()-t0
         for func, kwarg in self._operations:
@@ -589,7 +629,7 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
             # if a thread does not have and event loop, this does nothing (not an error)
             processEvents(max_time_ms = 20)
 
-def _general_check(val, min=None, max=None, choices=None ,lims=None):
+def _general_check(val, min=None, max=None, choices=None, lims=None, msg_src=None):
    # self is use for perror
     if lims is not None:
         if isinstance(lims, tuple):
@@ -611,7 +651,12 @@ def _general_check(val, min=None, max=None, choices=None ,lims=None):
             err='{val!s} is above MAX=%r'%max
         if not choicetest:
             err='invalid value({val!s}): use one of {choices!s}'
-        raise ValueError('Failed check: '+err, dict(val=val, choices=repr(choices)))
+        if msg_src is None:
+            err = 'Failed check: '+err
+        else:
+            err = 'Failed check for %s: '%msg_src + err
+        d = dict(val=val, choices=repr(choices))
+        raise ValueError(err.format(**d), d)
 
 
 #######################################################
@@ -633,7 +678,7 @@ class BaseDevice(object):
         They can have multiple keyword parameters
     """
     def __init__(self, autoinit=True, doc='', setget=False, allow_kw_as_dict=False,
-                  allow_missing_dict=False,
+                  allow_missing_dict=False, get_has_check=False,
                   min=None, max=None, choices=None, multi=False, graph=True,
                   trig=False, redir_async=None):
         # instr and name updated by instrument's _create_devs
@@ -648,12 +693,16 @@ class BaseDevice(object):
         # a choices.field_names list of values (like with ChoiceMultiple)
         # allow_missing_dict, will fill the missing elements of dict with values
         #  from a get
+        # get_has_check, make it true if the _getdev produces the Runtime_Get_Para_Checked
+        #  exception (calls _get_para_checked). This is needed for proper CHECKING mode
+        #  or if executing the get has not side effect.
         self.instr = None
         self.name = 'foo'
         # Use thread local data to keep the last_filename and a version of cache
         self._local_data = threading.local()
         self._cache = None
         self._set_delayed_cache = None
+        self._check_cache = {}
         self._autoinit = autoinit
         self._setdev_p = None
         self._getdev_p = None
@@ -666,6 +715,7 @@ class BaseDevice(object):
         self.choices = choices
         self._allow_kw_as_dict = allow_kw_as_dict
         self._allow_missing_dict = allow_missing_dict
+        self._get_has_check = get_has_check
         self._doc = doc
         # obj is used by _get_conf_header and _write_dev
         self._format = dict(file=False, multi=multi, xaxis=None, graph=graph,
@@ -714,62 +764,59 @@ class BaseDevice(object):
     #    get should return the same thing set uses
     @locked_calling_dev
     def set(self, *val, **kwarg):
-        nval = len(val)
-        if nval == 1:
-            val = val[0]
-        elif nval == 0:
-            val = None
+        if not CHECKING():
+            # So when checking, self.check will be seen as in a check instead
+            # of a set.
+            self._check_cache['in_set'] = True
+        self.check(*val, **kwarg)
+        if self._check_cache:
+            val = self._check_cache['val']
+            kwarg = self._check_cache['kwarg']
+            set_kwarg = self._check_cache['set_kwarg']
         else:
-            raise RuntimeError(self.perror('set can only have one positional parameter'))
-        if self._allow_kw_as_dict:
-            if val is None:
-                val = dict()
-                for k in kwarg.keys():
-                    if k in self.choices.field_names:
-                        val[k] = kwarg.pop(k)
-        elif nval == 0: # this permits to set a value to None
-                raise RuntimeError(self.perror('set requires a value.'))
-        try:
-            self.check(val, **kwarg)
-        except KeyError_Choices:
-            if not self._allow_missing_dict:
-                raise
-            old_val = self.get(**kwarg)
-            old_val.update(val)
-            val = old_val
-            self.check(val, **kwarg)
-        if not CHECKING:
-            self._set_delayed_cache = None
-            self._setdev(val, **kwarg)
+            val = val[0]
+            set_kwarg = kwarg
+        if not CHECKING():
+            self._set_delayed_cache = None  # used in logical devices
+            self._setdev(val, **set_kwarg)
             if self._setget:
                 val = self.get(**kwarg)
             elif self._set_delayed_cache is not None:
                 val = self._set_delayed_cache
-        elif self._setdev_p is None:
-            raise NotImplementedError, self.perror('This device does not handle _setdev')
         # only change cache after succesfull _setdev
         self.setcache(val)
+    def _get_para_checked(self, *val):
+        get_para_checked(*val)
     @locked_calling_dev
     def get(self, **kwarg):
-        if not CHECKING:
+        if self._getdev_p is None:
+            raise NotImplementedError, self.perror('This device does not handle _getdev')
+        if not CHECKING() or self._get_has_check:
             self._last_filename = None
             format = self.getformat(**kwarg)
             kwarg.pop('graph', None) #now remove graph from parameters (was needed by getformat)
             kwarg.pop('bin', None) #same for bin
             kwarg.pop('extra_conf', None)
+            to_finish = False
             if kwarg.get('filename', False) and not format['file']:
                 #we did not ask for a filename but got one.
                 #since _getdev probably does not understand filename
                 #we handle it here
                 filename = kwarg.pop('filename')
+                to_finish = True
+            try:
                 ret = self._getdev(**kwarg)
+            except Runtime_Get_Para_Checked as e:
+                if len(e.args) == 1:
+                    ret = e.args[0]
+                elif len(e.args) > 1:
+                    ret = e.args
+                else:
+                    ret = self.getcache()
+            if to_finish:
                 _write_dev(ret, filename, format=format)
                 if format['bin']:
                     ret = None
-            else:
-                ret = self._getdev(**kwarg)
-        elif self._getdev_p is None:
-            raise NotImplementedError, self.perror('This device does not handle _getdev')
         else:
             ret = self.getcache()
         self.setcache(ret)
@@ -779,7 +826,8 @@ class BaseDevice(object):
         """
         With local=True, returns thread local _cache. If it does not exist yet,
             returns None. Use this for the data from a last fetch if another
-            thread is also doing fetches.
+            thread is also doing fetches. (For example between after a get to make sure
+            getcache obtains the result from the current thread (unless they are protected with a lock))
         With local=False (default), returns the main _cache which is shared between threads
             (but not process). When the value is None and autoinit is set, it will
             return the result of get. Use this if another thread might be changing the cached value
@@ -794,7 +842,7 @@ class BaseDevice(object):
                 return None
         # local is False
         with self.instr._lock_instrument: # only local data, so don't need _lock_extra
-            if self._cache is None and self._autoinit:
+            if self._cache is None and self._autoinit and not CHECKING():
                 # This can fail, but getcache should not care for
                 #InvalidAutoArgument exceptions
                 try:
@@ -849,18 +897,97 @@ class BaseDevice(object):
         dic.update(name=self.name, instr=self.instr, gname=self.instr.find_global_name())
         return ('{gname}.{name}: '+error_str).format(**dic)
     # Implement these in a derived class
-    def _setdev(self, val):
+    def _setdev(self, val, **kwarg):
         raise NotImplementedError, self.perror('This device does not handle _setdev')
-    def _getdev(self):
+    def _getdev(self, **kwarg):
         raise NotImplementedError, self.perror('This device does not handle _getdev')
-    def check(self, val):
-        if self._setdev_p is None:
-            raise NotImplementedError, self.perror('This device does not handle check')
+    def _general_check(self, val, min=None, max=None, choices=None, lims=None, msg_src=None, str_return=False):
+        # This wraps the _general_check function to wrap the error message with perror
+        # with str_return, it either returns a error string or None instead of producting an exception
         try:
-            _general_check(val, self.min, self.max, self.choices)
-        except ValueError as e:
-            raise ValueError(self.perror(e.args[0],**e.args[1]))
+            _general_check(val, min, max, choices, lims, msg_src)
+        except (ValueError, KeyError) as e:
+            new_message = self.perror(e.args[0])
+            # new_message = self.perror(e.args[0],**e.args[1])
+            if str_return:
+                return new_message
+            raise e.__class__(new_message)
+    def _pre_check(self, *val, **kwarg):
+        # This cleans up *val and **kwarg to handle _allow_kw_as_dict
+        #  It returns a single val and a cleaned up kwarg.
+        # This will also always create a new _check_cache with at least the keys
+        #   fnct_set, val, kwarg, fnct_str, set_kwarg
+        #   in_set should be removed (so check after a set should work)
+        #  kwarg should contain all the keyword (except for the _allow_kw_as_dict)
+        #    that are needed for get
+        #  set_kwarg are the kwarg passed to setdev
+        #  Note that the returned kwarg is a copy so you can pop values out of it
+        #  without modifying _check_cache['kwarg']
+        in_set = self._check_cache.get('in_set', False)
+        fnct_str = 'set' if in_set else 'check'
+        self._check_cache = {'fnct_set':  in_set, 'fnct_str': fnct_str}
+        if self._setdev_p is None:
+            raise NotImplementedError, self.perror('This device does not handle %s'%fnct_str)
+        nval = len(val)
+        if nval == 1:
+            val = val[0]
+        elif nval == 0:
+            val = None
+        else:
+            raise RuntimeError(self.perror('%s can only have one positional parameter'%fnct_str))
+        if self._allow_kw_as_dict:
+            if val is None:
+                val = dict()
+                for k in kwarg.keys():
+                    if k in self.choices.field_names:
+                        val[k] = kwarg.pop(k)
+        elif nval == 0: # this permits to set a value to None
+                raise RuntimeError(self.perror('%s requires a value.'%fnct_str))
+        self._check_cache['val'] = val
+        self._check_cache['kwarg'] = kwarg
+        self._check_cache['set_kwarg'] = kwarg.copy()
+        return val, kwarg.copy()
+    def _set_missing_dict_helper(self, val, _allow=None, **kwarg):
+        """
+            This will replace missing values if necessary.
+            _allow can be None (which uses self._allow_missing_dict)
+                  or it can be False, True (which uses get) or 'cache'
+                  which uses the cache
+                  Actually using False is an error
+            it returns the possibly update val
+        """
+        if _allow is None:
+            _allow = self._allow_missing_dict
+        if _allow == 'cache':
+            old_val = self.getcache()
+        elif _allow is True:
+            old_val = self.get(**kwarg)
+        else:
+            raise ValueError(self.perror('Called _set_missing_dict_helper with _allow=False'))
+        old_val.update(val)
+        return old_val
+    def _checkdev(self, val):
+        # This default _checkdev handles a general check with _allow_missing_dict
+        # but no extra kwarg. The caller should have tested and removed them
+        try:
+            self._general_check(val, self.min, self.max, self.choices)
+        except KeyError_Choices:
+            # need to catch the exception instead of always filling all the variables
+            # some device might accept partial entries
+            # they could override _set_missing_dict_helper to only add some entries.
+            if not self._allow_missing_dict:
+                raise
+            kwarg = self._check_cache['kwarg']
+            val = self._set_missing_dict_helper(val, **kwarg)
+            self._check_cache['val'] = val
+            self._general_check(val, self.min, self.max, self.choices)
+    @locked_calling_dev
+    def check(self, *val, **kwarg):
+        # This raises an exception if set does not work (_setdev_p is None)
+        val, kwarg = self._pre_check(*val, **kwarg)
+        self._checkdev(val, **kwarg)
     def getformat(self, filename=None, **kwarg): # we need to absorb any filename argument
+        # This function should not communicate with the instrument.
         # first handle options we don't want saved in 'options'
         graph = kwarg.pop('graph', None)
         extra_conf = kwarg.pop('extra_conf', None)
@@ -890,7 +1017,7 @@ class BaseDevice(object):
         self.instr.force_get()
 
 class wrapDevice(BaseDevice):
-    def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
+    def __init__(self, setdev=None, getdev=None, checkdev=None, getformat=None, **extrak):
         # auto insert documentation if setdev or getdev has one.
         if not extrak.has_key('doc'):
             if setdev is not None and setdev.__doc__:
@@ -901,23 +1028,17 @@ class wrapDevice(BaseDevice):
         # the methods are unbounded methods.
         self._setdev_p = setdev
         self._getdev_p = getdev
-        self._check  = check
+        self._checkdev_p  = checkdev
         self._getformat  = getformat
     def _setdev(self, val, **kwarg):
-        if self._setdev_p is not None:
-            self._setdev_p(val, **kwarg)
-        else:
-            raise NotImplementedError, self.perror('This device does not handle _setdev')
+        self._setdev_p(val, **kwarg)
     def _getdev(self, **kwarg):
-        if self._getdev_p is not None:
-            return self._getdev_p(**kwarg)
+        return self._getdev_p(**kwarg)
+    def _checkdev(self, val, **kwarg):
+        if self._checkdev_p is not None:
+            self._checkdev_p(val, **kwarg)
         else:
-            raise NotImplementedError, self.perror('This device does not handle _getdev')
-    def check(self, val, **kwarg):
-        if self._check is not None:
-            self._check(val, **kwarg)
-        else:
-            super(wrapDevice, self).check(val)
+            super(wrapDevice, self)._checkdev(val, **kwarg)
     def getformat(self, **kwarg):
         if self._getformat is not None:
             return self._getformat(**kwarg)
@@ -925,7 +1046,7 @@ class wrapDevice(BaseDevice):
             return super(wrapDevice, self).getformat(**kwarg)
 
 class cls_wrapDevice(BaseDevice):
-    def __init__(self, setdev=None, getdev=None, check=None, getformat=None, **extrak):
+    def __init__(self, setdev=None, getdev=None, checkdev=None, getformat=None, **extrak):
         # auto insert documentation if setdev or getdev has one.
         if not extrak.has_key('doc'):
             if setdev is not None and setdev.__doc__:
@@ -936,23 +1057,17 @@ class cls_wrapDevice(BaseDevice):
         # the methods are unbounded methods.
         self._setdev_p = setdev
         self._getdev_p = getdev
-        self._check  = check
+        self._checkdev_p  = checkdev
         self._getformat  = getformat
     def _setdev(self, val, **kwarg):
-        if self._setdev_p is not None:
-            self._setdev_p(self.instr, val, **kwarg)
-        else:
-            raise NotImplementedError, self.perror('This device does not handle _setdev')
+        self._setdev_p(self.instr, val, **kwarg)
     def _getdev(self, **kwarg):
-        if self._getdev_p is not None:
-            return self._getdev_p(self.instr, **kwarg)
+        return self._getdev_p(self.instr, **kwarg)
+    def _checkdev(self, val, **kwarg):
+        if self._checkdev_p is not None:
+            self._checkdev_p(self.instr, val, **kwarg)
         else:
-            raise NotImplementedError, self.perror('This device does not handle _getdev')
-    def check(self, val, **kwarg):
-        if self._check is not None:
-            self._check(self.instr, val, **kwarg)
-        else:
-            super(cls_wrapDevice, self).check(val)
+            super(cls_wrapDevice, self)._checkdev(val, **kwarg)
     def getformat(self, **kwarg):
         if self._getformat is not None:
             return self._getformat(self.instr, **kwarg)
@@ -1021,8 +1136,7 @@ class BaseInstrument(object):
         # on the progress.
         self._async_statusLine = mainStatusLine.new(timed=True)
         self._last_force = time.time()
-        if not CHECKING:
-            self.init(full=True)
+        self.init(full=True)
     def __del__(self):
         if not self._quiet_delete:
             print 'Destroying '+repr(self)
@@ -1163,31 +1277,41 @@ class BaseInstrument(object):
     def _cls_devwrap(cls, name):
         # Only use this if the class will be using only one instance
         # Otherwise multiple instances will collide (reuse same wrapper)
-        setdev = getdev = check = getformat = None
+        setdev = getdev = checkdev = getformat = None
         for s in dir(cls):
             if s == '_'+name+'_setdev':
                 setdev = getattr(cls, s)
             if s == '_'+name+'_getdev':
                 getdev = getattr(cls, s)
-            if s == '_'+name+'_check':
-                check = getattr(cls, s)
+            if s == '_'+name+'_checkdev':
+                checkdev = getattr(cls, s)
             if s == '_'+name+'_getformat':
-                check = getattr(cls, s)
-        wd = cls_wrapDevice(setdev, getdev, check, getformat)
+                getformat = getattr(cls, s)
+        wd = cls_wrapDevice(setdev, getdev, checkdev, getformat)
         setattr(cls, name, wd)
+    def _getdev_para_checked(self, *val):
+        """
+           This function should be called in a _getdev (devwrap with get_has_check option enabled)
+           after the parameters have been
+           checked for validity. When in CHECKING only mode, this will skip the rest of
+           the function.
+           you should call this with one parameter (passed to exception) or no parameters
+           When a parameter is given, it will be used as the get value (and cached)
+        """
+        get_para_checked(*val)
     def _devwrap(self, name, **extrak):
-        setdev = getdev = check = getformat = None
+        setdev = getdev = checkdev = getformat = None
         cls = type(self)
         for s in dir(self):
             if s == '_'+name+'_setdev':
                 setdev = getattr(cls, s)
             if s == '_'+name+'_getdev':
                 getdev = getattr(cls, s)
-            if s == '_'+name+'_check':
-                check = getattr(cls, s)
+            if s == '_'+name+'_checkdev':
+                checkdev = getattr(cls, s)
             if s == '_'+name+'_getformat':
                 getformat = getattr(cls, s)
-        wd = cls_wrapDevice(setdev, getdev, check, getformat, **extrak)
+        wd = cls_wrapDevice(setdev, getdev, checkdev, getformat, **extrak)
         setattr(self, name, wd)
     def devs_iter(self):
         for devname in dir(self):
@@ -1387,7 +1511,6 @@ class BaseInstrument(object):
         self._lock_extra.release()
 
 
-
 #######################################################
 ##    Memory device
 #######################################################
@@ -1401,6 +1524,7 @@ class MemoryDevice(BaseDevice):
         """
         kwarg['autoinit'] = False
         kwarg['setget'] = False
+        kwarg['get_has_check'] = True
         BaseDevice.__init__(self, **kwarg)
         self.setcache(initval, nolock=True)
         self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
@@ -1410,6 +1534,8 @@ class MemoryDevice(BaseDevice):
         else:
             self.type = type(initval)
     def _getdev(self):
+        self._get_para_checked()  # This is not necessary, since in CHECKING we will read the cache anyway
+                                  # but place it here as an example and to test the code.
         return self.getcache()
     def _setdev(self, val):
         self.setcache(val)
@@ -1512,7 +1638,7 @@ class scpiDevice(BaseDevice):
             test = [ True for k,v in options.iteritems() if isinstance(v, BaseDevice)]
             if len(test):
                 autoinit = 1
-        BaseDevice.__init__(self, doc=doc, autoinit=autoinit, choices=choices, **kwarg)
+        BaseDevice.__init__(self, doc=doc, autoinit=autoinit, choices=choices, get_has_check=True, **kwarg)
         self._setdev_p = setstr
         if setstr is not None:
             fmtr = string.Formatter()
@@ -1530,6 +1656,7 @@ class scpiDevice(BaseDevice):
             elif get_cached_init is not None:
                 self.setcache(get_cached_init, nolock=True)
                 self._getdev_cache = True
+                getstr = True
         self._getdev_p = getstr
         self._options = options
         self._options_lim = options_lim
@@ -1592,6 +1719,12 @@ class scpiDevice(BaseDevice):
             self.setcache(None)
         return super(scpiDevice, self).getcache()
     def _check_option(self, option, val):
+        """
+        Checks the option with value val
+          If it is not an option, raise an KeyError
+          If it is not within min/max or choices for this option, returns an error string
+          If everything is fine, return None
+        """
         if option not in self._options.keys():
             raise KeyError, self.perror('This device does not handle option "%s".'%option)
         lim = self._options_lim.get(option)
@@ -1602,17 +1735,7 @@ class scpiDevice(BaseDevice):
             lim = (dev.min, dev.max)
             if dev.choices is not None:
                 lim = dev.choices
-        if isinstance(lim, tuple):
-            if lim[0] is not None and val<lim[0]:
-                return self.perror('Option "%s" needs to be >= %r, instead it was %r'%(option, lim[0], val))
-            if lim[1] is not None and val>lim[1]:
-                return self.perror('Option "%s" needs to be <= %r, instead it was %r'%(option, lim[1], val))
-        elif lim is None:
-            pass
-        else: # assume we have some list/set/Choice like object
-            if val not in lim:
-                return self.perror('Option "%s" needs to be one of %r, instead it was %r'%(option, lim, val))
-        return None
+        return self._general_check(val, lims=lim, msg_src='Option "%s"'%option, str_return=True)
     def _combine_options(self, **kwarg):
         # get values from devices when needed.
         # The list of correct values could be a subset so push them to kwarg
@@ -1623,7 +1746,7 @@ class scpiDevice(BaseDevice):
             ck = self._check_option(k, v)
             if ck is not None:
                 # in case of error, raise it
-                raise InvalidArgument, ck
+                raise InvalidArgument(ck)
         # Some device need to keep track of current value so we set them
         # if changed
         for k in self._options_apply:
@@ -1640,7 +1763,7 @@ class scpiDevice(BaseDevice):
                 if ck is not None:
                     # There was an error, returned value not currently valid
                     # so return it instead of dictionnary
-                    raise InvalidAutoArgument, ck
+                    raise InvalidAutoArgument(ck)
         # everything checks out so use those kwarg
         options.update(kwarg)
         self._option_cache = options.copy()
@@ -1661,22 +1784,19 @@ class scpiDevice(BaseDevice):
             except KeyError:
                 options[k] = tostr_val
         return options
-    def _setdev(self, val, **kwarg):
-        if self._setdev_p is None:
-            raise NotImplementedError, self.perror('This device does not handle _setdev')
+    def _setdev(self, val):
+        # We only reach here if self._setdev_p is not None
         val = self._tostr(val)
-        options = self._combine_options(**kwarg)
+        options = self._check_cache['options']
         command = self._setdev_p
         command = command.format(val=val, **options)
         self.instr.write(command, **self._ask_write_opt)
     def _getdev(self, **kwarg):
-        if self._getdev_p is None:
-            if self._getdev_cache:
-                if kwarg == {}:
-                    return self.getcache()
-                else:
-                    raise SyntaxError, self.perror('This device does not handle _getdev with optional arguments')
-            raise NotImplementedError, self.perror('This device does not handle _getdev')
+        if self._getdev_cache:
+            if kwarg == {}:
+                return self.getcache()
+            else:
+                raise SyntaxError, self.perror('This device does not handle _getdev with optional arguments')
         try:
             options = self._combine_options(**kwarg)
         except InvalidAutoArgument:
@@ -1684,12 +1804,15 @@ class scpiDevice(BaseDevice):
             raise
         command = self._getdev_p
         command = command.format(**options)
+        self._get_para_checked()
         ret = self.instr.ask(command, self._raw, **self._ask_write_opt)
         return self._fromstr(ret)
-    def check(self, val, **kwarg):
-        #TODO handle checking of kwarg
-        super(scpiDevice, self).check(val)
-
+    def _checkdev(self, val, **kwarg):
+        options = self._combine_options(**kwarg)
+        # all kwarg have been tested
+        self._check_cache['set_kwarg'] = {}
+        self._check_cache['options'] = options
+        super(scpiDevice, self)._checkdev(val)
 
 #######################################################
 ##    Readval device
@@ -1707,7 +1830,8 @@ class ReadvalDev(BaseDevice):
         self._slave_dev = dev
         if autoinit is None:
             autoinit = dev._autoinit
-        super(ReadvalDev,self).__init__(redir_async=dev, autoinit=autoinit, **kwarg)
+        super(ReadvalDev,self).__init__(redir_async=dev, autoinit=autoinit, get_has_check=True, **kwarg)
+        self._getdev_p = True
     def _getdev(self, **kwarg):
         self.instr._async_select([(self._slave_dev, kwarg)])
         self.instr.run_and_wait()
@@ -2189,9 +2313,6 @@ def make_choice_list(list_values, start_exponent, end_exponent):
     return (powers[:,None] * np.array(list_values)).flatten()
 
 
-class KeyError_Choices (KeyError):
-    pass
-
 class ChoiceMultiple(ChoiceBase):
     def __init__(self, field_names, fmts=int, sep=','):
         """
@@ -2228,7 +2349,7 @@ class ChoiceMultiple(ChoiceBase):
     def __call__(self, fromstr):
         v_base = fromstr.split(self.sep)
         if len(v_base) != len(self.field_names):
-            raise ValueError, 'Invalid number of parameters in class dict_str'
+            raise ValueError('Invalid number of parameters in class %s'%self.__class__.__name__)
         v_conv = []
         names = []
         for k, val, fmt in zip(self.field_names, v_base, self.fmts_type):
@@ -2249,20 +2370,20 @@ class ChoiceMultiple(ChoiceBase):
         ret = self.sep.join(ret)
         return ret
     def __contains__(self, x): # performs x in y; with y=Choice(). Used for check
+        # Returns True if everything is fine.
+        # Otherwise raise a ValueError, a KeyError or a KeyError_Choices (for missing values)
         xorig = x
         x = x.copy() # make sure we don't change incoming dict
         for k, fmt, lims in zip(self.field_names, self.fmts_type, self.fmts_lims):
+            if isinstance(fmt, ChoiceMultipleDep):
+                fmt.set_current_vals(xorig)
             try:
-                if isinstance(fmt, ChoiceMultipleDep):
-                    fmt.set_current_vals(xorig)
                 val = x.pop(k) # generates KeyError if k not in x
-                _general_check(val, lims=lims)
-            except ValueError as e:
-                raise ValueError('for key %s: '%k + e.args[0], e.args[1])
-            except KeyError as e:
-                raise KeyError_Choices('key %s not found'%k)
+            except KeyError:
+                raise KeyError_Choices('key %s is missing'%k)
+            _general_check(val, lims=lims, msg_src='key %s'%k)
         if x != {}:
-            raise KeyError_Choices('The following keys in the dictionnary are incorrect: %r'%x.keys())
+            raise KeyError('The following keys in the dictionnary are incorrect: %r'%x.keys())
         return True
     def __repr__(self):
         r = ''
@@ -2326,44 +2447,58 @@ class ChoiceMultipleDep(ChoiceBase):
 
 class Dict_SubDevice(BaseDevice):
     """
-    Use this to gain access to a single element of a device returning a dictionary
-    from dict_str.
+    Use this to gain access to a single/multiple element of a device returning a dictionary
+    from ChoiceMultiple.
     """
     def __init__(self, subdevice, key, force_default=False, **kwarg):
         """
         This device and the subdevice need to be part of the same instrument
         (otherwise async will not work properly)
-        The subdevice needs to return a dictionary (use dict_str).
         Here we will only modify the value of key in dictionary.
+        key can be a single value, or a list of values (in which case set/get will work
+        on a list)
         force_default, set the default value of force used in check/set.
+            It can be True, False or 'slave' which means to let the subdevice handle the
+            insertion of the missing parameters
         """
         self._subdevice = subdevice
         self._sub_key = key
         self._force_default = force_default
         subtype = self._subdevice.type
-        if key not in subtype.field_names:
-            raise IndexError, 'The key is not present in the subdevice'
-        lims = subtype.fmts_lims[subtype.field_names.index(key)]
-        min = max = choices = None
-        if lims is None:
-            pass
-        elif isinstance(lims, tuple):
-            min, max = lims
+        self._single_key = False
+        if not isinstance(key, list):
+            key = [key]
+            self._single_key = True
+            multi = False
         else:
-            choices = lims
+            multi = key
+        self._sub_key = key
+        lims = []
+        for k in key:
+            if k not in subtype.field_names:
+                raise IndexError, "The key '%s' is not present in the subdevice"%k
+            lims.append( subtype.fmts_lims[subtype.field_names.index(k)] )
+        self._sub_lims = lims
         setget = subdevice._setget
         autoinit = subdevice._autoinit
         trig = subdevice._trig
-        super(Dict_SubDevice, self).__init__(min=min, max=max, choices=choices,
-                setget=setget, autoinit=autoinit, trig=trig, **kwarg)
-        self._setdev_p = True # needed to enable BaseDevice set in checking mode and also the check function
+        get_has_check = True
+        super(Dict_SubDevice, self).__init__(
+                setget=setget, autoinit=autoinit, trig=trig, multi=multi, get_has_check=get_has_check, **kwarg)
+        self._setdev_p = subdevice._setdev_p # needed to enable BaseDevice set in checking mode and also the check function
         self._getdev_p = True # needed to enable BaseDevice get in Checking mode
     def _get_docstring(self, added=''):
         # we don't include options starting with _
-        added = """
-                This device set/get the '%s' dictionnary element of a subdevice.
-                It uses the same options as that subdevice (%s)
-                """%(self._sub_key, self._subdevice)
+        if self._single_key:
+            added = """
+                    This device set/get the '%s' dictionnary element of a subdevice.
+                    It uses the same options as that subdevice (%s)
+                    """%(self._sub_key[0], self._subdevice)
+        else:
+            added = """
+                    This device set/get the '%s' dictionnary elements of a subdevice.
+                    It uses the same options as that subdevice (%s)
+                    """%(self._sub_key, self._subdevice)
         return super(Dict_SubDevice, self)._get_docstring(added=added)
     def setcache(self, val, nolock=False):
         if nolock:
@@ -2372,7 +2507,12 @@ class Dict_SubDevice(BaseDevice):
         vals = self._subdevice.getcache()
         if vals is not None:
             vals = vals.copy()
-            vals[self._sub_key] = val
+            if self._single_key:
+                val = [val]
+            if len(self._sub_key) != len(val):
+                raise ValueError('This Dict_SubDevice requires %i elements'%len(self._sub_key))
+            for k, v in zip(self._sub_key, val):
+                vals[k] = v
         self._subdevice.setcache(vals)
     def getcache(self, local=False):
         if local:
@@ -2382,15 +2522,52 @@ class Dict_SubDevice(BaseDevice):
         if vals is None:
             ret = None
         else:
-            ret = vals[self._sub_key]
+            ret = [vals[k] for k in self._sub_key]
+            if self._single_key:
+                ret = ret[0]
         # Lets set the _cache variable anyway but it should never
         # be used. _cache should always be accessed with getcache and this will
         # bypass the value we set here.
-        self.setcache(ret)
+        super(Dict_SubDevice, self).setcache(ret)
         return ret
+    def _force_helper(self, force):
+        if force is None:
+            force = self._force_default
+        return force
+    def _checkdev(self, val, force=None, **kwarg):
+        if self._single_key:
+            val = [val]
+        self._check_cache['cooked_val'] = val
+        if len(self._sub_key) != len(val):
+            raise ValueError(self.perror('This Dict_SubDevice requires %i elements'%len(self._sub_key)))
+        # Lets check the parameters individually, in order to help the user with
+        # a more descriptive message.
+        for i, limv in enumerate(zip(self._sub_lims, val)):
+            lim, v = limv
+            msg_src = None
+            if not self._single_key:
+                msg_src = 'element %i'%i
+            self._general_check(v, lims=lim, msg_src=msg_src)
+        force = self._force_helper(force)
+        allow = {True:True, False:'cache', 'slave':False}[force]
+        self._check_cache['allow'] = allow
+        op = self._check_cache['fnct_str']
+        # otherwise, the check will be done by set in _setdev below
+        if op == 'check':
+            # we need to complete the test as much as possible
+            vals = {k:v for k, v in zip(self._sub_key, val)}
+            if allow:
+                vals = self._subdevice._set_missing_dict_helper(vals, _allow=allow, **kwarg)
+            self._subdevice.check(vals, **kwarg)
     def _getdev(self, **kwarg):
         vals = self._subdevice.get(**kwarg)
-        return vals[self._sub_key]
+        if vals is None: # When checking and value not initialized
+            ret = [0] * len(self._sub_key)
+        else:
+            ret = [vals[k] for k in self._sub_key]
+        if self._single_key:
+            ret = ret[0]
+        return ret
     def _setdev(self, val, force=None, **kwarg):
         """
         force when True, it make sure to obtain the
@@ -2398,63 +2575,14 @@ class Dict_SubDevice(BaseDevice):
               when False, it uses getcache.
         The default is in self._force_default
         """
-        if force is None:
-            force = self._force_default
-        if force:
-            vals = self._subdevice.get(**kwarg)
-        else:
-            vals = self._subdevice.getcache()
-        vals = vals.copy()
-        vals[self._sub_key] = val
-        self._subdevice.set(vals)
-
-class Dict_SubDeviceMultiKeys(BaseDevice):
-    """
-    Use this to gain access to a many element of a device returning a dictionary
-    from dict_str.
-    """
-    def __init__(self, subdevice, keys, force_default=False, **kwarg):
-        """
-        This device and the subdevice need to be part of the same instrument
-        (otherwise async will not work properly)
-        keys is a list of dictionnary keys.
-        The subdevice needs to return a dictionary (use dict_str).
-        We can only use this to get values, not to set.
-        """
-        self._subdevice = subdevice
-        self._sub_keys = keys
-        self._force_default = force_default
-        subtype = self._subdevice.type
-        for key in keys:
-            if key not in subtype.field_names:
-                raise IndexError, "The key '%s' is not present in the subdevice"%key
-        autoinit = subdevice._autoinit
-        trig = subdevice._trig
-        # TODO find a way to point to the proper subdevice in doc string
-        doc = """This device set/get the '%s' dictionnary element of device.
-                 It uses the same options as that subdevice (see _subdevice attribute)
-              """%(key)
-        super(Dict_SubDeviceMultiKeys, self).__init__(doc=doc,
-                autoinit=autoinit, trig=trig, multi=keys, **kwarg)
-        self._getdev_p = True # needed to enable BaseDevice get in Checking mode
-    def getcache(self, local=False):
-        if local:
-            vals = self._subdevice.getcache(local=True)
-        else:
-            vals = self._subdevice.getcache()
-        if vals is None:
-            ret = None
-        else:
-            ret = [vals[key] for key in self._sub_keys]
-        # Lets set the _cache variable anyway but it should never
-        # be used. _cache should always be accessed with getcache and this will
-        # bypass the value we set here.
-        self.setcache(ret)
-        return ret
-    def _getdev(self, **kwarg):
-        vals = self._subdevice.get(**kwarg)
-        return [vals[key] for key in self._sub_keys]
-
+        val = self._check_cache['cooked_val']
+        if self._single_key:
+            val = [val]
+        allow = self._check_cache['allow']
+        vals = {k:v for k, v in zip(self._sub_key, val)}
+        if allow:
+            vals = self._subdevice._set_missing_dict_helper(vals, _allow=allow, **kwarg)
+        self._subdevice.set(vals, **kwarg)
 
 
 class Lock_Visa(object):
@@ -2475,7 +2603,8 @@ class Lock_Visa(object):
         """
         timeout = max(int(timeout/1e-3),1) # convert from seconds to milliseconds
         try:
-            self._vi.lock_excl(timeout)
+            if not CHECKING():
+                self._vi.lock_excl(timeout)
         except visa_wrap.VisaIOError as exc:
             if exc.error_code == visa_wrap.constants.VI_ERROR_TMO:
                 # This is for Agilent IO visa library
@@ -2490,7 +2619,11 @@ class Lock_Visa(object):
             self._count += 1
             return True
     def release(self):
-        self._vi.unlock() # could produce VI_ERROR_SESN_NLOCKED
+        if not CHECKING():
+            self._vi.unlock() # could produce VI_ERROR_SESN_NLOCKED
+        else:
+            if self._count < 1:
+                raise visa_wrap.VisaIOError(visa_wrap.constants.VI_ERROR_SESN_NLOCKED)
         self._count -= 1
     def acquire(self):
         return wait_on_event(self._visa_lock)
@@ -2595,7 +2728,7 @@ class visaInstrument(BaseInstrument):
         if isinstance(visa_addr, int):
             visa_addr = _normalize_gpib(visa_addr)
         self.visa_addr = visa_addr
-        if not CHECKING:
+        if not CHECKING():
             self.visa = rsrc_mngr.open_resource(visa_addr, **kwarg)
             self._lock_extra = Lock_Visa(self.visa)
             #self.visa.timeout = 3 # in seconds
@@ -2607,7 +2740,7 @@ class visaInstrument(BaseInstrument):
         self._write_write_wait = 0.
         self._read_write_wait = 0.
         BaseInstrument.__init__(self, quiet_delete=quiet_delete)
-        if not CHECKING:
+        if not CHECKING():
             if not skip_id_test:
                 idns = self.idn_split()
                 if not instruments_registry.check_instr_id(self.__class__, idns['vendor'], idns['model'], idns['firmware']):
@@ -2628,6 +2761,8 @@ class visaInstrument(BaseInstrument):
         # since on serial visa does the *stb? request for us
         # might as well be explicit and therefore handle the rw_wait properly
         # and do the locking.
+        if CHECKING():
+            return 0
         if self.visa.is_serial():
             return int(self.ask('*stb?'))
         else:
@@ -2665,6 +2800,8 @@ class visaInstrument(BaseInstrument):
         #  For those reason I keep the 2 different so it can be tested later.
         # Unused state:
         #   VI_GPIB_REN_ASSERT_LLO : lockout only (no addressing)
+        if CHECKING():
+            return
         cnsts = visa_wrap.constants
         if all:
             if remote:
@@ -2707,6 +2844,8 @@ class visaInstrument(BaseInstrument):
             sleep(delta)
     @locked_calling
     def read(self, raw=False):
+        if CHECKING():
+            return ''
         if raw:
             ret = self.visa.read_raw()
         else:
@@ -2716,7 +2855,11 @@ class visaInstrument(BaseInstrument):
     @locked_calling
     def write(self, val):
         self._do_wr_wait()
-        self.visa.write(val)
+        if not CHECKING():
+            self.visa.write(val)
+        else:
+            if not isinstance(val, basestring):
+                raise ValueError(self.perror('The write val is not a string.'))
         self._last_rw_time.write_time = time.time()
     @locked_calling
     def ask(self, question, raw=False):
@@ -2737,6 +2880,8 @@ class visaInstrument(BaseInstrument):
         """ Returns the usb names attached to the vendor/product ids and the serial number
             The return is a tuple (vendor, product, serial)
         """
+        if CHECKING():
+            return ('vendor', 'product', 'serial')
         vendor = self.visa.get_visa_attribute(visa_wrap.constants.VI_ATTR_MANF_NAME)
         product = self.visa.get_visa_attribute(visa_wrap.constants.VI_ATTR_MODEL_NAME)
         serial = self.visa.get_visa_attribute(visa_wrap.constants.VI_ATTR_USB_SERIAL_NUM)
@@ -2767,9 +2912,13 @@ class visaInstrument(BaseInstrument):
             (it should reset the interface state, but not change the state of
              status/event registers, errors states. See clear for that.)
         """
+        if CHECKING():
+            return
         self.visa.clear()
     @property
     def set_timeout(self):
+        if CHECKING():
+            return None
         timeout_ms = self.visa.timeout
         if timeout_ms is None:
             return None
@@ -2778,9 +2927,12 @@ class visaInstrument(BaseInstrument):
     @set_timeout.setter
     def set_timeout(self, seconds):
         if seconds is None:
-            self.visa.timeout = None
+            val = None
         else:
-            self.visa.timeout = int(seconds*1000.)
+            val = int(seconds*1000.)
+        if CHECKING():
+            return
+        self.visa.timeout = val
     def get_error(self):
         return self.ask('SYSTem:ERRor?')
     def _info(self):
@@ -2790,6 +2942,8 @@ class visaInstrument(BaseInstrument):
     def trigger(self):
         # This should produce the hardware GET on gpib
         #  Another option would be to use the *TRG 488.2 command
+        if CHECKING():
+            return
         self.visa.trigger()
 
 
@@ -2836,6 +2990,12 @@ class visaInstrumentAsync(visaInstrument):
         self._async_do_cleanup = False
         super(visaInstrumentAsync, self).__init__(visa_addr)
         self._async_mode = 'srq'
+        if CHECKING():
+            is_gpib = False
+            is_agilent = False
+            self._async_polling = True
+            self._RQS_status = -1
+            return
         is_gpib = self.visa.is_gpib()
         is_agilent = rsrc_mngr.is_agilent()
         self._async_polling = False
@@ -2854,7 +3014,8 @@ class visaInstrumentAsync(visaInstrument):
             self._proxy_handler = ProxyMethod(self._RQS_handler)
             # _handler_userval is the ctype object representing the user value (0 here)
             # It is needed for uninstall
-            self._handler_userval = self.visa.install_visa_handler(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+            if not CHECKING():
+                self._handler_userval = self.visa.install_visa_handler(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                   self._proxy_handler, 0)
         else:
             self._RQS_status = -1
@@ -2907,9 +3068,14 @@ class visaInstrumentAsync(visaInstrument):
             #print 'Got it', vi
         return visa_wrap.constants.VI_SUCCESS
     def _get_esr(self):
+        if CHECKING():
+            return 0
         return int(self.ask('*esr?'))
     def  _async_detect_poll_func(self):
-        status = self.read_status_byte()
+        if CHECKING():
+            status = 0x40
+        else:
+            status = self.read_status_byte()
         if status & 0x40:
             self._async_last_status = status
             self._async_last_esr = self._get_esr()

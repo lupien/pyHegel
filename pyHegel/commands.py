@@ -52,7 +52,7 @@ from . import config
 local_config = config.load_local_config()
 
 from .instruments_base import _writevec as writevec, _normalize_usb, _normalize_gpib, _get_visa_idns, _writevec_flatten_list,\
-                             time_check as _time_check
+                             time_check as _time_check, CHECKING as checkmode
 from .traces import wait
 from .util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
 
@@ -724,7 +724,7 @@ class _Sweep(instruments.BaseInstrument):
                     span *= -1.
             else:
                 span = np.linspace(start, stop, npts)
-        if instruments_base.CHECKING:
+        if checkmode():
             # For checking only take first and last values
             span = span[[0,-1]]
         return span, start, stop, npts, dev_orig, dev, dev_opt, negative
@@ -1494,6 +1494,9 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
             writevec(f, ['time']+hdrs, pre_str='#')
             t.set_comment_func(lambda text: _write_comment(f, text))
         i=0
+        if checkmode():
+            if npoints is not None and npoints > 2:
+                npoints = 2
         while npoints is None or i < npoints:
             tme = clock.get()
             if async:
@@ -1803,19 +1806,15 @@ def find_all_instruments(use_aliases=True):
 
 test_gpib_srq_state = instruments_base.test_gpib_srq_state
 
-def checkmode(state=None):
-    """
-       Called with no arguments, returns current checking mode state
-       With a boolean, sets the check state
-    """
-    if state is None:
-        return instruments_base.CHECKING
-    instruments_base.CHECKING = state
-
 def check(batchfile):
     """
        Run batch without talking to devices.
-       Otherwise it is the same as the batch command
+       Otherwise it is the same as the batch command.
+       Sweep/record are shortened.
+       Some code will produce errors. Most parameters are checked, but
+       it can fail. When possible the cached values are used.
+       So you should load the device before running the check, and fill up
+       the cached values as much as possible (iprint instr, get instr.fetch ...)
     """
     before = checkmode()
     checkmode(True)
