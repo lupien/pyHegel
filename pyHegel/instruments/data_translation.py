@@ -30,7 +30,7 @@ import numpy as np
 
 from ..instruments_base import BaseInstrument, scpiDevice, ChoiceIndex,\
                             wait_on_event, BaseDevice, MemoryDevice, ReadvalDev,\
-                            _retry_wait, locked_calling
+                            _retry_wait, locked_calling, CHECKING
 
 from ..instruments_registry import register_instrument, add_to_instruments
 
@@ -147,6 +147,8 @@ class DataTranslation(BaseInstrument):
         _delayed_imports()
         devmgr = OlBase.DeviceMgr.Get()
         all_Ol = find_all_Ol()
+        if CHECKING():
+            raise RuntimeError('You cannot load DataTranslation in checking mode')
         try:
             name, info = all_Ol[dev_name]
         except TypeError:
@@ -230,6 +232,10 @@ class DataTranslation(BaseInstrument):
     def idn(self):
         return self._idn_string
     def _update_all_channels_info(self, init=False):
+        if CHECKING():
+            # Note that all_channels_info coupling and current_src key will not
+            # be updated properly. This will affect file headers when under checking
+            return
         if init:
             gain = 1.
             self.all_channels_info = [{'coupling':self._coupling_type[c.Coupling],
@@ -267,22 +273,30 @@ class DataTranslation(BaseInstrument):
         self._analog_out.SetSingleValueAsVolts(0, val)
     @locked_calling
     def write(self, string):
+        if CHECKING():
+            return
         exec('self.'+string)
     @locked_calling
     def ask(self, string, raw=False):
         # raw is not used here but is needed by scpiDevice methods
+        if CHECKING():
+            return ''
         return eval('self.'+string)
     @locked_calling
     def _async_trig(self):
         super(DataTranslation, self)._async_trig()
         self.run()
     def _async_detect(self, max_time=.5): # 0.5 s max by default
+        if CHECKING():
+            return True
         func = lambda: not self._analog_in.IsRunning
         return _retry_wait(func, timeout=max_time, delay=0.05)
         # Also ai.State
         #return instrument.wait_on_event(self._run_finished, check_state=self, max_time=max_time)
     @locked_calling
     def abort(self):
+        if CHECKING():
+            return
         self._analog_in.Abort()
     def _clean_channel_list(self):
         clist = self.channel_list.getcache()
@@ -298,6 +312,8 @@ class DataTranslation(BaseInstrument):
         clist = self._clean_channel_list()
         if len(clist) == 0:
             raise ValueError, 'You need to have at least one channel selected (see channel_list)'
+        if CHECKING():
+            return
         self._analog_in.ChannelList.Clear()
         for i,c in enumerate(clist):
             #self._analog_in.ChannelList.Add(self.all_channels[c].PhysicalChannelNumber)
@@ -317,10 +333,9 @@ class DataTranslation(BaseInstrument):
         self._analog_in.Start()
 
     def _current_config(self, dev_obj=None, options={}):
-        clist = self._clean_channel_list()
         self._update_all_channels_info()
         extra = ['AssemblyVersion=%r'%_assembly_Version, 'boxname=%r'%self._name,
-                 'cardinfo=%r'%self.info, 'all_channel_info=%r'%clist]
+                 'cardinfo=%r'%self.info, 'all_channel_info=%r'%self.all_channels_info]
         base = self._conf_helper('nb_samples', 'in_clock', 'channel_list',
                                  'in_trig_mode', 'in_trig_level', 'in_trig_threshold_ch',
                                  'in_reftrig_mode', 'in_reftrig_level', 'in_reftrig_threshold_ch',
