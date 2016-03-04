@@ -516,13 +516,25 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, sel=None, fig=None, skip=False,
     if not hold and col_fit == 'red':
         # skip red from color cycle.
         # here it gets hard coded
-        ax1.set_color_cycle(['b', 'g', 'c', 'm', 'y', 'k'])
+        try:
+            # new in matplotlib 1.5
+            ax1.set_prop_cycle('color', ['b', 'g', 'c', 'm', 'y', 'k'])
+        except AttributeError:
+            ax1.set_color_cycle(['b', 'g', 'c', 'm', 'y', 'k'])
     if col_data is None:
         # This is a bit of a hack, a matplotlib update could break this.
         # Another way would be to create a plot, use get_color() on it and remove the plot.
-        col_data = ax1._get_lines.color_cycle.next()
+        try:
+            # new in matplotlib 1.5
+            col_data = ax1._get_lines.prop_cycler.next()['color']
+        except AttributeError:
+            col_data = ax1._get_lines.color_cycle.next()
     if col_fit is None:
-        col_fit = ax1._get_lines.color_cycle.next()
+        try:
+            # new in matplotlib 1.5
+            col_fit = ax1._get_lines.prop_cycler.next()['color']
+        except AttributeError:
+            col_fit = ax1._get_lines.color_cycle.next()
     if col_unsel_data is None:
         col = matplotlib.colors.colorConverter.to_rgb(col_data)
         bgcol = matplotlib.colors.colorConverter.to_rgb(ax1.get_axis_bgcolor())
