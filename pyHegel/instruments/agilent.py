@@ -355,6 +355,8 @@ class agilent_rf_PSG(visaInstrument):
         self.mod_fm_en = scpiDevice(':FM:STATe', str_type=bool)
         self.mod_phase_en = scpiDevice(':PM:STATe', str_type=bool)
         self.mod_pulse_en = scpiDevice(':PULM:STATe', str_type=bool)
+        self.mod_pulse_period = scpiDevice(':PULM:INTernal:PERiod', str_type=float, min=10e-9, max = 42, setget=True, doc="Pulse period in s.")
+        self.mod_pulse_width = scpiDevice(':PULM:INTernal:PWIDth', str_type=float, min=10e-9, max = 42-20e-9, setget=True, doc="Pulse width duration in s.")
         self.alias = self.freq_cw
         # This needs to be last to complete creation
         super(agilent_rf_PSG,self)._create_devs()
