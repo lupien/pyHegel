@@ -2027,6 +2027,36 @@ class ChoiceBase(object):
     def __contains__(self, val):
         raise NotImplementedError, 'ChoiceBase subclass should overwrite __contains__'
 
+class ChoiceLimits(object):
+    """
+    This ChoiceBase implements a min/max check.
+    """
+    def __init__(self, min=None, max=None, str_type=None):
+        self.min = min
+        self.max = max
+        self.str_type = str_type
+    def __call__(self, input_str):
+        return _fromstr_helper(input_str, self.str_type)
+    def tostr(self, val):
+        return _tostr_helper(val, self.str_type)
+    def __contains__(self, val):
+        try:
+            _general_check(val, min=self.min, max=self.max)
+        except ValueError:
+            return False
+        else:
+            return True
+    def __repr__(self):
+        if self.min is None and self.max is None:
+            return 'Limits: any val'
+        elif self.min is None:
+            return 'Limits: val <= %s'%self.max
+        elif self.max is None:
+            return 'Limits: %s <= val'%self.min
+        else:
+            return 'Limits: %s <= val <= %s'%(self.min, self.max)
+
+
 class ChoiceStrings(ChoiceBase):
     """
        Initialize the class with a list of strings
