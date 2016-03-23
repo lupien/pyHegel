@@ -30,7 +30,7 @@ import os.path
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceMultiple, Choice_bool_OnOff, _repr_or_string,\
-                            quoted_string, quoted_list, quoted_dict,\
+                            quoted_string, quoted_list, quoted_dict, ChoiceLimits,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDev, ChoiceDevSwitch, ChoiceIndex,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
                             decode_uint16_bin, _decode_block_base, decode_float64_2col,\
@@ -2565,3 +2565,77 @@ class agilent_AWG(visaInstrumentAsync):
         self.write(':TRACe{ch}:IQIMPort 1,"{f}",BIN,BOTH,ON,{p}'.format(ch=ch, f=filename, p=padding))
         #self._async_trigger_helper_string = ':TRACe{ch}:IQIMPort 1,"{f}",BIN,BOTH,ON,{p};*OPC'.format(ch=ch, f=filename, p=padding)
         self.run_and_wait()
+
+
+#######################################################
+##    Agilent E3631A power supplpy
+#######################################################
+
+#@register_instrument('HEWLETT-PACKARD', 'E3631A', '2.1-5.0-1.0')
+@register_instrument('HEWLETT-PACKARD', 'E3631A', alias='E3631A')
+class agilent_power_supply_E363x(visaInstrument):
+    """
+    This is to control a E363x power supply.
+    Useful devices:
+      output_en
+      volt_level
+      volt_measured
+      current_level
+      current_measured
+    Note that the volt and current devices need a channel or use the current_ch.
+    Changing the output level can take a while depending on connected load impedance.
+    Output off means the volt level becomes 0, the current level is 0.05. It is not a relay.
+    """
+    def _current_config(self, dev_obj=None, options={}):
+        orig_ch = self.current_ch.getcache()
+        ch_list = ['current_ch', 'volt_level', 'current_level', 'volt_measured', 'current_measured', 'status']
+        res = []
+        for c in ['P6V', 'P25V', 'N25V']:
+            self.current_ch.set(c)
+            self.status.setcache(None)
+            res.extend(self._conf_helper(*ch_list))
+        self.current_ch.set(orig_ch)
+        return res+self._conf_helper('output_en', 'output_track_en', options)
+    def show_text(self, str=None):
+        if str is None:
+            self.write('DISPlay:TEXT:CLEar')
+        else:
+            self.write('DISPlay:TEXT "%s"'%str)
+    def _status_getdev(self, ch=None):
+        """
+        returns the status of the ch. ch=None uses the curren default
+        Status can be 'CC', 'CV' for current or voltage control
+                      'OFF' when not enable or 'FAIL' for a hardware failure
+        """
+        if ch is None:
+            ch = self.current_ch.getcache()
+        response_dict = {0:'OFF', 1:'CC', 2:'CV', 3:'FAIL'}
+        name2num = dict(P6V=1, P25V=2, N25V=3)
+        n = name2num[ch.upper()]
+        ret = self.ask('STATus:QUEStionable:INSTrument:ISUMmary%d:CONDition?'%n)
+        ret = response_dict[int(ret)]
+        return ret
+    def _create_devs(self):
+        ch_choices = ChoiceStrings('P6V', 'P25V', 'N25V')
+        self.current_ch =  scpiDevice('INSTrument:SELect', choices=ch_choices)
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_ch)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        volt_limits = ChoiceDevDep(self.current_ch, {ch_choices[[0]]:ChoiceLimits(min=0, max=6.18),
+                                                     ch_choices[[1]]:ChoiceLimits(min=0, max=25.75),
+                                                     ch_choices[[2]]:ChoiceLimits(min=-25.75, max=0),})
+        curr_limits = ChoiceDevDep(self.current_ch, {ch_choices[[0]]:ChoiceLimits(min=0, max=5.15),
+                                                     ch_choices[[1]]:ChoiceLimits(min=0, max=1.03),
+                                                     ch_choices[[2]]:ChoiceLimits(min=0, max=1.03),})
+        self.volt_level = devChOption('VOLTage', str_type=float, choices=volt_limits, setget=True) # SOURce:VOLTage:LEVel:IMMediate:AMPLitude
+        self.current_level = devChOption('CURRent', str_type=float, choices=curr_limits, setget=True)
+        #self.volt_measured = devChOption(getstr='MEASure:VOLTage? {ch}', str_type=float) # this does the same as changing current_ch
+        self.volt_measured = devChOption(getstr='MEASure:VOLTage?', str_type=float)
+        self.current_measured = devChOption(getstr='MEASure:CURRent?', str_type=float)
+        self.output_en = scpiDevice('OUTput', str_type=bool, setget=True) # setget just makes sure the ouput has been changed before returning
+        self.output_track_en = scpiDevice('OUTput:TRACk', str_type=bool, doc='Output tracking will make P25V match N25V and vice versa')
+        self._devwrap('status')
+        super(type(self),self)._create_devs()
