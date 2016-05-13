@@ -1463,9 +1463,12 @@ class agilent_PNAL(visaInstrumentAsync):
         ch = kwarg.get('ch', None)
         traces = kwarg.get('traces', None)
         cook = kwarg.get('cook', False)
+        cal = kwarg.get('cal', False)
+        if cal:
+            cook = False
         if ch is not None:
             self.current_channel.set(ch)
-        traces = self._fetch_traces_helper(traces)
+        traces = self._fetch_traces_helper(traces, cal)
         if xaxis:
             sweeptype = self.sweep_type.getcache()
             choice = self.sweep_type.choices
@@ -1481,49 +1484,73 @@ class agilent_PNAL(visaInstrumentAsync):
         else:
             multi = []
         # we don't handle cmplx because it cannot be saved anyway so no header or graph
-        if cook:
-            names = ['cook_val']
-        elif unit == 'db_deg':
-            names = ['dB', 'deg']
-        else:
-            names = ['real', 'imag']
         for t in traces:
-            name, param = self.select_trace.choices[t]
-            basename = "%s=%s_"%(name, param)
+            names = None
+            if cook:
+                f = self.trace_format.get(trace=t)
+                if f not in self.trace_format.choices[['POLar', 'SMITh', 'SADMittance']]:
+                    names = ['cook_val']
+            if names is None:
+                if unit == 'db_deg':
+                    names = ['dB', 'deg']
+                else:
+                    names = ['real', 'imag']
+            if cal:
+                if isinstance(t, tuple):
+                    basename = '%s_%i_%i_'%t
+                else:
+                    basename = t+'_'
+            else:
+                name, param = self.select_trace.choices[t]
+                basename = "%s=%s_"%(name, param)
             multi.extend( [basename+n for n in names])
         fmt = self.fetch._format
         multi = tuple(multi)
         fmt.update(multi=multi, graph=[], xaxis=xaxis)
         return BaseDevice.getformat(self.fetch, **kwarg)
-    def _fetch_traces_helper(self, traces):
+    def _fetch_traces_helper(self, traces, cal=False):
         # assume ch is selected
-        ch_list = self.channel_list.getcache()
-        if isinstance(traces, (tuple, list)):
+        if cal:
+            ch_list = self.calib_data_name_list.get()
+        else:
+            ch_list = self.channel_list.getcache()
+        if isinstance(traces, list) or ((not cal) and isinstance(traces, tuple)):
             traces = traces[:] # make a copy so it can be modified without affecting caller. I don't think this is necessary anymore but keep it anyway.
         elif traces is not None:
             traces = [traces]
         else: # traces is None
-            traces = ch_list.keys()
+            if cal:
+                traces = ch_list
+            else:
+                traces = ch_list.keys()
         return traces
-    def _fetch_getdev(self, ch=None, traces=None, unit='default', mem=False, xaxis=True, cook=False):
+    def _fetch_getdev(self, ch=None, traces=None, unit='default', mem=False, xaxis=True, cook=False, cal=False):
         """
            options available: traces, unit, mem and xaxis
             -traces: can be a single value or a list of values.
                      The values are strings representing the trace or the trace number
+                     or when cal is True, calibration names like 'Directivity(1,1)'
+                     or tuples like ('EDIR', 1, 1)
             -unit:   can be 'default' (real, imag)
                        'db_deg' (db, deg) , where phase is unwrapped
                        'cmplx'  (complexe number), Note that this cannot be written to file
             -mem:    when True, selects the memory trace instead of the active one.
             -xaxis:  when True(default), the first column of data is the xaxis
+            -cal:    when True, traces refers to the calibration curves, mem and cook are
+                     unused.
             -cook:   when True (default is False) returns the values from the display format
                      They include the possible effects from trace math(edelay, transforms, gating...)
-                     as well as smoothing. When this is selected, unit has no effect.
+                     as well as smoothing. When this is selected, unit has no effect unless the format is
+                     Smith, Polar or Inverted Smith (in which case both real and imaginary are read and
+                     converted appropriately)
                      Note that not all the necessary settings are saved in the file headers.
-                     Also it will NOT work when the format is complex (Smith, Polar ...)
+            If you try to read  from ch=200 (for example the ecal viewer), you probably need cook=True.
         """
         if ch is not None:
             self.current_channel.set(ch)
-        traces = self._fetch_traces_helper(traces)
+        if cal:
+            cook = False
+        traces = self._fetch_traces_helper(traces, cal)
         if cook:
             getdata = self.calc_fdata
         else:
@@ -1534,20 +1561,29 @@ class agilent_PNAL(visaInstrumentAsync):
             else:
                 getdata = self.calc_smem
         if xaxis:
-            # get the x axis of the first trace selected
-            self.select_trace.set(traces[0])
-            ret = [self.calc_x_axis.get()]
+            if cal:
+                ret = [self.calib_freq.get()]
+            else:
+                # get the x axis of the first trace selected
+                self.select_trace.set(traces[0])
+                ret = [self.calc_x_axis.get()]
         else:
             ret = []
         for t in traces:
-            v = getdata.get(trace=t)
+            if cal:
+                if isinstance(t, tuple):
+                    v = self.calib_data.get(eterm=t[0], p1=t[1], p2=t[2])
+                else:
+                    v = self.calib_data_name.get(eterm=t)
+            else:
+                v = getdata.get(trace=t)
             if cook:
-                # Here we assume v is the proper length, which is not the
-                # case with Smith and Polar format which returns complex numbers
-                # (so v is twice as long)
-                # TODO handle those complex formats
-                ret.append(v)
-            elif unit == 'db_deg':
+                f = self.trace_format.get(trace=t)
+                if f not in self.trace_format.choices[['POLar', 'SMITh', 'SADMittance']]:
+                    ret.append(v)
+                    continue
+                v = v[0::2] + 1j*v[1::2]
+            if unit == 'db_deg':
                 r = 20.*np.log10(np.abs(v))
                 theta = np.angle(v, deg=True)
                 theta = self.phase_unwrap(theta)
@@ -1606,25 +1642,35 @@ class agilent_PNAL(visaInstrumentAsync):
                               mxy, 'marker_discrete_en', 'marker_target')
         cook = False
         if dev_obj in [self.readval, self.fetch]:
+            cal = options.get('cal', False)
             cook = options.get('cook', False)
-            traces_opt = self._fetch_traces_helper(options.get('traces'))
-            cal = []
+            if cal:
+                cook = False
+            traces_opt = self._fetch_traces_helper(options.get('traces'), cal)
+            cal_en = []
             traces = []
             fmts = []
             for t in traces_opt:
-                cal.append(self.calib_en.get(trace=t))
-                name, param = self.select_trace.choices[t]
-                traces.append(name+'='+param)
+                if cal:
+                    cal_en.append('Unknown')
+                    if isinstance(t, tuple):
+                        traces.append('%s_%i_%i'%t)
+                    else:
+                        traces.append(t)
+                else:
+                    cal_en.append(self.calib_en.get(trace=t))
+                    name, param = self.select_trace.choices[t]
+                    traces.append(name+'='+param)
                 if cook:
                     fmts.append(self.trace_format.get())
         elif dev_obj == self.snap_png:
-            traces = cal='Unknown'
+            traces = cal_en='Unknown'
         else:
             t=self.select_trace.getcache()
-            cal = self.calib_en.get()
+            cal_en = self.calib_en.get()
             name, param = self.select_trace.choices[t]
             traces = name+'='+param
-        extra += ['calib_en=%r'%cal, 'selected_trace=%r'%traces]
+        extra += ['calib_en=%r'%cal_en, 'selected_trace=%r'%traces]
         if cook:
             extra += ['trace_format=%r'%fmts]
         base = self._conf_helper('current_channel', 'freq_cw', 'freq_start', 'freq_stop', 'ext_ref',
@@ -1655,7 +1701,7 @@ class agilent_PNAL(visaInstrumentAsync):
             app = kwarg.pop('options_apply', ['ch'])
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
-        self.channel_list = devChOption(getstr='CALCulate{ch}:PARameter:CATalog:EXTended?', str_type=quoted_dict(),
+        self.channel_list = devChOption(getstr='CALCulate{ch}:PARameter:CATalog:EXTended?', str_type=quoted_dict(protect_sep=('(',')')),
                                         autoinit=10, doc='Note that some "," are replaced by "_"')
         traceN_options = dict(trace=1)
         traceN_options_lim = dict(trace=(1,None))
@@ -1698,6 +1744,35 @@ class agilent_PNAL(visaInstrumentAsync):
         data_format = ChoiceStrings('MLINear', 'MLOGarithmic', 'PHASe', 'UPHase', 'IMAGinary', 'REAL', 'POLar', 'SMITh', 'SADMittance', 'SWR', 'GDELay', 'KELVin', 'FAHRenheit', 'CELSius')
         self.trace_format = devCalcOption('CALCulate{ch}:FORMat', choices=data_format) # needed when marker_format is 'DEF'
         self.calib_en = devCalcOption('CALC{ch}:CORR', str_type=bool)
+        calib_data_options = dict(eterm='EDIR', p1=1, p2=1)
+        eterm_options = ChoiceStrings('EDIR', 'ESRM', 'ERFT', 'ELDM', 'ETRT', 'EXTLK', 'ERSPT', 'ERSPI')
+        calib_data_options_lim = dict(eterm=eterm_options, p1=(1,4), p2=(1,4))
+        calib_data_options_conv = dict(eterm=lambda val, quoted_val: val)
+        self.calib_data = devChOption(getstr='SENSe{ch}:CORRection:CSET:DATA? {eterm},{p1},{p2}', str_type=decode_complex128, autoinit=False, raw=True,
+                                      options_conv=calib_data_options_conv, options=calib_data_options, options_lim=calib_data_options_lim,
+                                      doc="""
+                                         You should specify eterm, p1 and p2. They default to EDIR, 1, 1
+                                         The various values for eterm are:
+                                           EDIR:  directivity
+                                           ESRM:  source match
+                                           ERFT:  reflection tracking
+                                           ELDM:  load match
+                                           ETRT:  transmission tracking
+                                           EXTLK: crosstalk
+                                           ERSPT: response tracking
+                                           ERSPI: response isolation
+                                         p1 is the measured port when used (otherwise needs to be any valid number)
+                                         p2 is the source port when used (otherwise needs to be any valid number)
+                                      """)
+        self.calib_data_name = devChOption(getstr='SENSe{ch}:CORRection:CSET:ETERm? {eterm}', str_type=decode_complex128, autoinit=False,
+                                           options=dict(eterm='Directivity(1,1)'), raw=True,
+                                           doc="The eterm should be specified and is the name used in the cal viewer. see calib_data_name_list device")
+        self.calib_data_name_list = devChOption(getstr='SENSe{ch}:CORRection:CSET:ETERm:CATalog?',
+                                                str_type=quoted_list(protect_sep=('(', ')')), autoinit=False)
+        self.calib_current_name = devChOption(getstr='SENSe{ch}:CORRection:CSET:NAME?', str_type=quoted_string(), autoinit=False)
+        self.calib_current_desc = devChOption(getstr='SENSe{ch}:CORRection:CSET:DESCription?', str_type=quoted_string(), autoinit=False)
+        self.calib_list = scpiDevice(getstr='SENSe:CORRection:CSET:CATalog? NAME', str_type=quoted_list(), autoinit=False)
+        self.calib_freq = devChOption(getstr='SENSe{ch}:CORRection:CSET:STIMulus?', str_type=decode_float64, autoinit=False)
         self.snap_png = scpiDevice(getstr='HCOPy:SDUMp:DATA:FORMat PNG;:HCOPy:SDUMp:DATA?', raw=True, str_type=_decode_block_base, autoinit=False)
         self.snap_png._format['bin']='.png'
         self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
