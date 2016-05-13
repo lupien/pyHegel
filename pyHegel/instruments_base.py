@@ -1973,13 +1973,36 @@ class quoted_string(object):
         return quote_char+unquoted_str+quote_char
 
 class quoted_list(quoted_string):
-    def __init__(self, sep=',', element_type=None, **kwarg):
+    def __init__(self, sep=',', element_type=None, protect_sep=None, **kwarg):
         super(quoted_list,self).__init__(**kwarg)
         self._sep = sep
         self._element_type = element_type
+        self._protect_sep = protect_sep
     def __call__(self, quoted_l):
         unquoted = super(quoted_list,self).__call__(quoted_l)
-        lst = unquoted.split(self._sep)
+        if self._protect_sep is not None:
+            start_sym, end_sym = self._protect_sep
+            lst = []
+            s = 0
+            i = 0
+            while i<len(unquoted):
+                # skip a start_sym to end_sym region
+                c = unquoted[i]
+                if c in start_sym:
+                    ind = start_sym.find(c)
+                    i = unquoted.find(end_sym[ind],i+1)
+                    if i == -1:
+                        i = len(unquoted)
+                        break
+                elif c in self._sep:
+                    lst.append(unquoted[s:i])
+                    i += 1
+                    s = i
+                else:
+                    i += 1
+            lst.append(unquoted[s:])
+        else:
+            lst = unquoted.split(self._sep)
         if self._element_type is not None:
             lst = [_fromstr_helper(elem, self._element_type) for elem in lst]
         return lst
