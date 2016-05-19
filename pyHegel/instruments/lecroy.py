@@ -419,6 +419,7 @@ class _conv_undef(object):
             return self.undef_str
         return _tostr_helper(val, self.typ)
 float_undef = _conv_undef()
+vbs_float_nodata = _conv_undef(undef_val=np.NaN, undef_str='No Data Available')
 
 class _conv_upper(object):
     def __init__(self, typ):
@@ -1099,7 +1100,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self.trig_mode = scpiDevice('TRig_MoDe', choices=ChoiceStrings('AUTO', 'NORM', 'SINGLE', 'STOP'))
         self.trig_pattern = scpiDevice('TRig_PAttern')
         self.trig_slope = devChannelTrigOption('{ch}:TRig_SLope', choices=ChoiceStrings('NEG', 'POS'))
-        channelsTrig = ['C%i'%i for i in range(1,5)] + ['LINE', 'EX', 'EX10', 'PA', 'ETM10']
+        channelsTrig = ['C%i'%i for i in range(1,5)] + ['LINE', 'EX', 'EX10', 'PA', 'ETM10', 'FE']
         channelsTrig = ChoiceStrings(*channelsTrig)
         trig_select_holdtype = ChoiceDict({'time':'TI', 'tl':'TL', 'event':'EV', 'ps':'PS', 'pl':'PL', 'is':'IS', 'il':'IL', 'p2':'P2', 'i2':'I2', 'off':'OFF'})
         trig_select_mode = ChoiceStrings('DROP', 'EDGE', 'GLIT', 'INTV', 'STD', 'SNG', 'SQ', 'TEQ')
@@ -1117,7 +1118,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
           See the lecroy Remote control manual for more options.""")
         pval_state = ChoiceDict({'OK':'OK', 'averaged':'AV', 'period truncated':'PT', 'invalid':'IV', 'no pulse':'NP', 'greather than':'GT', 'less than':'LT', 'overflow':'OF', 'undeflow':'UF', 'over and under flow':'OU'})
         pval_choice = lecroy_dict([('','func'), ('', 'value'), ('', 'state')], [str, float_undef, pval_state], repeats=(0,2))
-        self.parameter_value = devChannelOption(getstr='{ch}:PArameter_VAlue? {func}', choices=pval_choice, autoinit=False, trig=True,
+        self.parameter_value_func = devChannelOption(getstr='{ch}:PArameter_VAlue? {func}', choices=pval_choice, autoinit=False, trig=True,
                                              doc="""This calculates some parameter on a waveform. See current_parafunc for some function examples.""",
                                              options=dict(func=self.current_parafunc),
                                              options_apply=['ch', 'func'])
@@ -1144,8 +1145,8 @@ class lecroy_wavemaster(visaInstrumentAsync):
             return lecParaOption(*arg, **kwarg)
         # parameter_view_en is the same as trace_enV, except it uses 1-12 instead of 'P1'-'P12'
         self.parameter_view_en = lecParaOption('app.Measure.P{ch}.View', choices=ChoiceDict({True:'-1', False:'0'}), write_quotes=False)
-        self.parameter_value = lecParaOptionStat('app.Measure.P{ch}.{stat}.Result.Value', str_type=float)
-        self.parameter_vresol = lecParaOptionStat('app.Measure.P{ch}.{stat}.Result.VerticalResolution', str_type=float)
+        self.parameter_value = lecParaOptionStat('app.Measure.P{ch}.{stat}.Result.Value', str_type=vbs_float_nodata)
+        self.parameter_vresol = lecParaOptionStat('app.Measure.P{ch}.{stat}.Result.VerticalResolution', str_type=vbs_float_nodata)
         pstat_choice = lecroy_dict([('', 'mode'), ('', 'ch'), ('', 'func'), 'avg', 'high', 'last', 'low', 'sigma', 'sweeps'], [str]*3+[float_undef]*6, required=2, repeats=2)
         pstat_modes = para_type[:3] # skip OFF
         self.parameter_stat_ch = scpiDevice(getstr='PArameter_STatistics? {mode},P{ch}', choices=pstat_choice, autoinit=False, trig=True,
