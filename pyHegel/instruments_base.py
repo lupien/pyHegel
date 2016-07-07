@@ -472,7 +472,10 @@ class FastEvent(threading._Event):
         self._Event__flag = False
 
 class FastCondition(threading._Condition):
-    def wait(self, timeout=None):
+    def wait(self, timeout=None, balancing=True): # Newer version of threading have added balencing
+                                                  # the old code is the same as balencing=True which is implemented here
+        if balancing is not True:
+            raise NotImplementedError("FastCondition does not handle balancing other than True")
         if not self._is_owned():
             raise RuntimeError("cannot wait on un-acquired lock")
         waiter = threading._allocate_lock()
