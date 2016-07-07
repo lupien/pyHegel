@@ -1351,6 +1351,8 @@ class BaseInstrument(object):
             "In seconds. This is the delay before the trigger in async and run_and_wait.")
         self.async_wait = MemoryDevice(0., doc=
             "In seconds. This is the wait time after a trig for devices that don't use a real trig/detect sequence.")
+        self._async_base_dev = MemoryDevice(0, doc="internal dummy device used for triggering", trig=True, autoinit=False, choices=[0])
+        self.run_and_wait_dev = ReadvalDev(self._async_base_dev, doc="This is a dummy device to be used when requiring a trigger (run_and_wait) from the instrument.")
         self._devwrap('header')
         self._create_devs_helper()
 #    def _current_config(self, dev_obj, get_options):
@@ -1464,6 +1466,8 @@ class BaseInstrument(object):
         ret = ''
         np.set_printoptions(threshold=50)
         for s, obj in self.devs_iter():
+            if obj is self._async_base_dev:
+                continue
             if self.alias == obj:
                 ret += 'alias = '
             val = obj.getcache()
@@ -1822,18 +1826,31 @@ class scpiDevice(BaseDevice):
 #######################################################
 
 class ReadvalDev(BaseDevice):
-    """
-    This devices behaves like doing a run_and_wait followed by
-    a fetch.
-    When in async mode, it simply does the fetch.
-    It has the same parameters as the fetch device, so look for the
-    documentation of fetch.
-    """
-    def __init__(self, dev, autoinit=None, **kwarg):
+    def _get_docstring(self, added=''):
+        if not self._do_local_doc:
+            return super(ReadvalDev, self)._get_docstring(added=added)
+        else:
+            basename = self._slave_dev.name
+            subdoc = self._slave_dev.__doc__
+            doc = """
+                  This device behaves like doing a run_and_wait followed by a
+                  {0}. When in async mode, it will trigger the device and then do
+                  the {0}. It has the same parameters as the {0} device, so look for
+                  its documentation.
+                  It is appended here for convenience:
+                  --- {0} doc
+                  {1}
+                  """.format(basename, subdoc)
+            return doc
+    def __init__(self, dev, autoinit=None, doc=None, **kwarg):
+        if doc is None:
+            self._do_local_doc = True
+        else:
+            self._do_local_doc = False
         self._slave_dev = dev
         if autoinit is None:
             autoinit = dev._autoinit
-        super(ReadvalDev,self).__init__(redir_async=dev, autoinit=autoinit, get_has_check=True, **kwarg)
+        super(ReadvalDev,self).__init__(redir_async=dev, autoinit=autoinit, doc=doc, get_has_check=True, **kwarg)
         self._getdev_p = True
     def _getdev(self, **kwarg):
         self.instr._async_select([(self._slave_dev, kwarg)])
