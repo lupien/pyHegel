@@ -432,44 +432,68 @@ def _dev_filename(root, dev_name, npts, reuse, append=False):
     n = int(np.log10(maxn))+1
     return root + '_'+ dev_name+'_%0'+('%ii'%n)+ext
 
-def _readall(devs, formats, i, async=None):
+def _readall(devs, formats, i, async=None, async_tmp=None, noflat=False, extra_kw={}):
     if devs == []:
         return []
     ret = []
-    for dev, fmt in zip(devs, formats):
-        dev, kwarg = _get_dev_kw(dev)
+    if async is not None and async_tmp is None:
+        async_tmp = [], [] # first list is for results, second for result status
+    for j, (dev, fmt) in enumerate(zip(devs, formats)):
+        dev, kwarg = _get_dev_kw(dev, **extra_kw)
         filename = fmt['basename']
         if not fmt['append']:
             filename = filename % i
         if fmt['file']:
-            kwarg['filename']= filename
+            kwarg['filename'] = filename
         if async is not None:
-            val = dev.getasync(async=async, **kwarg)
+            # we perform async 3 immediately after async 2
+            # this is needed for logical device that require the results from other ones (for example).
+            doasync2 = (async == 2 and not async_tmp[1][j])
+            if async < 2 or doasync2:
+                val = dev.getasync(async=async, **kwarg)
+            if async == 0:
+                async_tmp[0].append(None)
+                async_tmp[1].append(False)
+            elif doasync2:
+                if val:
+                    async_tmp[1][j] = True
+                    async_tmp[0][j] = dev.getasync(async=3, **kwarg)
+            elif async == 3:
+                val = async_tmp[0][j]
             if async != 3:
                 continue
         else:
             val = dev.get(**kwarg)
-        if val is None:
-            val = i
-        if isinstance(val, (list, tuple, np.ndarray, dict)):
-            if isinstance(val, dict):
-                val = val.values()
-            if not isinstance(fmt['multi'], list):
-                instruments_base._write_dev(val, filename, format=fmt, first= i==0)
+        if not noflat:
+            if val is None:
                 val = i
+            if isinstance(val, (list, tuple, np.ndarray, dict)):
+                if isinstance(val, dict):
+                    val = val.values()
+                if not isinstance(fmt['multi'], list):
+                    instruments_base._write_dev(val, filename, format=fmt, first= i==0)
+                    val = i
         ret.append(val)
-    ret = _writevec_flatten_list(ret)
-    return ret
+    if async is not None:
+        if async == 0:
+            return async_tmp
+        elif async == 2:
+            return all(async_tmp[1])
+    if noflat:
+        return ret
+    else:
+        return _writevec_flatten_list(ret)
 
-def _readall_async(devs, formats, i):
+def _readall_async(devs, formats, i, noflat=False, extra_kw={}):
     try:
-        _readall(devs, formats, i, async=0)
-        _readall(devs, formats, i, async=1)
-        _readall(devs, formats, i, async=2)
-        return _readall(devs, formats, i, async=3)
+        async_tmp = _readall(devs, formats, i, async=0, noflat=noflat, extra_kw=extra_kw)
+        _readall(devs, formats, i, async=1, async_tmp=async_tmp, noflat=noflat, extra_kw=extra_kw)
+        while not _readall(devs, formats, i, async=2, async_tmp=async_tmp, noflat=noflat, extra_kw=extra_kw):
+            pass
+        return _readall(devs, formats, i, async=3, async_tmp=async_tmp, noflat=noflat, extra_kw=extra_kw)
     except KeyboardInterrupt:
         print 'Rewinding async because of keyboard interrupt'
-        _readall(devs, formats, i, async=-1)
+        _readall(devs, formats, i, async=-1, noflat=noflat, extra_kw=extra_kw)
         raise
 
 def _checkTracePause(trace):
@@ -1712,21 +1736,14 @@ def getasync(devs, filename=None, **kwarg):
     """
     Performs a get of a list of devices (devs), using the async algorithm.
     Mostly useful for testing.
+    Does not handle a filename. See record or snap for that.
     """
     if filename is not None:
         raise ValueError, 'getasync does not currently handle the filename option'
     if not isinstance(devs, list):
         devs = [devs]
-    devs_kw = [_get_dev_kw(dev, **kwarg) for dev in devs]
-    for dev, kw in devs_kw:
-        dev.getasync(async=0, **kw)
-    for dev, kw in devs_kw:
-        dev.getasync(async=1, **kw)
-    for dev, kw in devs_kw:
-        dev.getasync(async=2, **kw)
-    ret = []
-    for dev, kw in devs_kw:
-        ret.append(dev.getasync(async=3, **kw))
+    fmts = [dict(basename='%i', append=False, file=False, multi=False)]*len(devs)
+    ret = _readall_async(devs, fmts, 0, noflat=True, extra_kw=kwarg)
     return ret
 
 def make_dir(directory, setsweep=True):

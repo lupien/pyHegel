@@ -1258,7 +1258,8 @@ class BaseInstrument(object):
             if data.async_level == 1: # First time through (no need to wait for subsequent calls)
                 wait_on_event(data.async_task)
                 data.async_level = -1
-            data.async_counter = 0
+                data.async_counter = 0
+            return True # return False when wait is not complete. When True should immediately call with async=3
         elif async == 3: # get values
             #print 'async', async, 'self', self, 'time', time.time()
             #return obj.getcache()

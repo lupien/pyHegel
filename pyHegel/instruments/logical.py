@@ -288,28 +288,35 @@ class LogicalDevice(BaseDevice):
     def _async_detect(self, max_time=.5): # 0.5 s max by default
         return wait_on_event(self._async_done_event, max_time=max_time)
     def getasync(self, async, **kwarg):
+        gl, kwarg = self._get_auto_list(kwarg)
+        autoget = self._autoget != False
         if async == 0:
-            if self._autoget != False:
+            if autoget:
                 self._async_done_event.clear()
+                self._cached_data = [None]*len(gl)
+                self._cached_data_read = [False]*len(gl)
             else:
                 self._async_done_event.set()
-        gl, kwarg = self._get_auto_list(kwarg)
-        if async == 2 and self._autoget != False:
-            self._cached_data = []
-            for dev, base_kwarg in gl:
-                dev.getasync(2, **base_kwarg)
-            for dev, base_kwarg in gl:
-                self._cached_data.append(dev.getasync(3, **base_kwarg))
-            self._async_done_event.set()
-            #ret = super(LogicalDevice, self).get(**kwarg)
-            # replace data with correct one
-            #d = self.instr._get_async_local_data()
-            #d.async_task.replace_result(ret)
-        elif async == 3 and self._autoget != False:
-            pass # we already did that async=3 on subdevices
-        else:
-            for dev, base_kwarg in gl:
-                dev.getasync(async, **base_kwarg)
+        if autoget:
+            if async == 2:
+                for i, (dev, base_kwarg) in enumerate(gl):
+                    if not self._cached_data_read[i]:
+                        val = dev.getasync(2, **base_kwarg)
+                        if val:
+                            self._cached_data_read[i] = True
+                            self._cached_data[i] = dev.getasync(3, **base_kwarg)
+                if not all(self._cached_data_read):
+                    return False
+                self._async_done_event.set()
+                #ret = super(LogicalDevice, self).get(**kwarg)
+                # replace data with correct one
+                #d = self.instr._get_async_local_data()
+                #d.async_task.replace_result(ret)
+            elif async == 3:
+                pass # we already did that async=3 on subdevices
+            else:
+                for dev, base_kwarg in gl:
+                    dev.getasync(async, **base_kwarg)
         return super(LogicalDevice, self).getasync(async, **kwarg)
     def _check_empty_kwarg(self, kwarg, set_check_cache=True):
         if len(kwarg) != 0:
@@ -882,6 +889,10 @@ class FunctionWrap(LogicalDevice):
         If you define a basedev or a basedevs list, those devices are included in the
         file headers. They are not read by default (autoget=False). If autoget is is set to 'all'
         then the getfunc function can use getcache(local=True) on the basedev(s) devices; otherwise it needs to use get.
+        However getcache(local=True) will not work when using the device in async mode.
+        You could then use getcache(), it uses locks so it might wait for the basedevice async thead to finish
+        (depending on calling order), and multiple thread will interfere with each other.
+        To avoid those problems, the recommended way to used the cached values it to enable basedev_as_param.
         With autoget enable, and basedev_as_param True, then the getfunc function is called with the first argument
         being the list of basedev values.
         """
