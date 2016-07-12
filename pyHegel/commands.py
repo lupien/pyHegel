@@ -432,12 +432,10 @@ def _dev_filename(root, dev_name, npts, reuse, append=False):
     n = int(np.log10(maxn))+1
     return root + '_'+ dev_name+'_%0'+('%ii'%n)+ext
 
-def _readall(devs, formats, i, async=None, async_tmp=None, noflat=False, extra_kw={}):
+def _readall(devs, formats, i, async=None, noflat=False, extra_kw={}):
     if devs == []:
         return []
-    ret = []
-    if async is not None and async_tmp is None:
-        async_tmp = [], [] # first list is for results, second for result status
+    ret = [None]*len(devs)
     for j, (dev, fmt) in enumerate(zip(devs, formats)):
         dev, kwarg = _get_dev_kw(dev, **extra_kw)
         filename = fmt['basename']
@@ -448,19 +446,12 @@ def _readall(devs, formats, i, async=None, async_tmp=None, noflat=False, extra_k
         if async is not None:
             # we perform async 3 immediately after async 2
             # this is needed for logical device that require the results from other ones (for example).
-            doasync2 = (async == 2 and not async_tmp[1][j])
-            if async < 2 or doasync2:
-                val = dev.getasync(async=async, **kwarg)
-            if async == 0:
-                async_tmp[0].append(None)
-                async_tmp[1].append(False)
-            elif doasync2:
-                if val:
-                    async_tmp[1][j] = True
-                    async_tmp[0][j] = dev.getasync(async=3, **kwarg)
-            elif async == 3:
-                val = async_tmp[0][j]
-            if async != 3:
+            if async == 3:
+                raise ValueError('_readall does not accept async=3 (it does it internally)')
+            val = dev.getasync(async=async, **kwarg)
+            if async == 2:
+                val = dev.getasync(async=3, **kwarg)
+            if async != 2:
                 continue
         else:
             val = dev.get(**kwarg)
@@ -473,12 +464,10 @@ def _readall(devs, formats, i, async=None, async_tmp=None, noflat=False, extra_k
                 if not isinstance(fmt['multi'], list):
                     instruments_base._write_dev(val, filename, format=fmt, first= i==0)
                     val = i
-        ret.append(val)
-    if async is not None:
-        if async == 0:
-            return async_tmp
-        elif async == 2:
-            return all(async_tmp[1])
+        if async is not None:
+            ret[j] = val
+        else:
+            ret.append(val)
     if noflat:
         return ret
     else:
@@ -486,11 +475,9 @@ def _readall(devs, formats, i, async=None, async_tmp=None, noflat=False, extra_k
 
 def _readall_async(devs, formats, i, noflat=False, extra_kw={}):
     try:
-        async_tmp = _readall(devs, formats, i, async=0, noflat=noflat, extra_kw=extra_kw)
-        _readall(devs, formats, i, async=1, async_tmp=async_tmp, noflat=noflat, extra_kw=extra_kw)
-        while not _readall(devs, formats, i, async=2, async_tmp=async_tmp, noflat=noflat, extra_kw=extra_kw):
-            pass
-        return _readall(devs, formats, i, async=3, async_tmp=async_tmp, noflat=noflat, extra_kw=extra_kw)
+        _readall(devs, formats, i, async=0, noflat=noflat, extra_kw=extra_kw)
+        _readall(devs, formats, i, async=1, noflat=noflat, extra_kw=extra_kw)
+        return _readall(devs, formats, i, async=2, noflat=noflat, extra_kw=extra_kw) # includes async3
     except KeyboardInterrupt:
         print 'Rewinding async because of keyboard interrupt'
         _readall(devs, formats, i, async=-1, noflat=noflat, extra_kw=extra_kw)

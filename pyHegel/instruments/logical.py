@@ -99,8 +99,7 @@ class LogicalDevice(BaseDevice):
        getasync. (use self._cached_data in logical _getdev). For a single basedev in can
        be True or False. For Basedevs it can be a list of True or False.
        When autoget is False, we assume the user will perform the get himself so we bypass
-       basedev handling in get and getasync (for async this probably only makes sense for devices
-       that don't have an async mode.)
+       basedev handling in get and getasync.
        force_get always forces all subdevice unless it is overriden.
        When using async, the attribute async_delay does the same as the async_delay device of
        a normal instrument.
@@ -294,29 +293,16 @@ class LogicalDevice(BaseDevice):
             if autoget:
                 self._async_done_event.clear()
                 self._cached_data = [None]*len(gl)
-                self._cached_data_read = [False]*len(gl)
             else:
                 self._async_done_event.set()
         if autoget:
-            if async == 2:
+            if async <= 2:
                 for i, (dev, base_kwarg) in enumerate(gl):
-                    if not self._cached_data_read[i]:
-                        val = dev.getasync(2, **base_kwarg)
-                        if val:
-                            self._cached_data_read[i] = True
-                            self._cached_data[i] = dev.getasync(3, **base_kwarg)
-                if not all(self._cached_data_read):
-                    return False
+                    val = dev.getasync(async, **base_kwarg)
+                    if async == 2:
+                        self._cached_data[i] = dev.getasync(3, **base_kwarg)
+            if async == 2:
                 self._async_done_event.set()
-                #ret = super(LogicalDevice, self).get(**kwarg)
-                # replace data with correct one
-                #d = self.instr._get_async_local_data()
-                #d.async_task.replace_result(ret)
-            elif async == 3:
-                pass # we already did that async=3 on subdevices
-            else:
-                for dev, base_kwarg in gl:
-                    dev.getasync(async, **base_kwarg)
         return super(LogicalDevice, self).getasync(async, **kwarg)
     def _check_empty_kwarg(self, kwarg, set_check_cache=True):
         if len(kwarg) != 0:
