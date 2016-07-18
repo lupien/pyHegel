@@ -1410,6 +1410,8 @@ class _Snap(object):
             self.out = out
         if out is None:
             raise ValueError, 'Snap. No devices set for out'
+        if not isinstance(out, list):
+            out = [out]
         if filename is not None:
             filename = use_sweep_path(filename)
             filename, unique_i = _process_filename(filename)
