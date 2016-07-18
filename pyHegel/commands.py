@@ -464,10 +464,7 @@ def _readall(devs, formats, i, async=None, noflat=False, extra_kw={}):
                 if not isinstance(fmt['multi'], list):
                     instruments_base._write_dev(val, filename, format=fmt, first= i==0)
                     val = i
-        if async is not None:
-            ret[j] = val
-        else:
-            ret.append(val)
+        ret[j] = val
     if noflat:
         return ret
     else:
