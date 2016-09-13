@@ -433,6 +433,10 @@ def blueforsTlog(data, time_data, channels=[1,2,5,6], logdir='C:/BlueFors/Log-fi
     WARNING:
         It is better to close all the open file that could be affected by this
         script.
+        Also you should not try to update a file that is being accessed by another program.
+        So if you are about the change the file into which the Bluefors log program is currently
+        writing you will possibly corrupt the file. Stop the logging before proceeding or don't
+        process the data for the current day (skip that data, or wait a day)
     example:
         a=readfile('some_log_file_from_record.txt')
         util.blueforsTlog(a[3:],a[0]) # assuming a record([sr1, tc3.fetch]), sr1 adds 2 columns

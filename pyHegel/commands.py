@@ -608,7 +608,7 @@ class _Sweep(instruments.BaseInstrument):
       The variables i, v and vv represent the current cycle index, the current set value
       (the last one for multi sweep), and a vector of all set values.
       The variable fwd is forward(True)/reverse(False) state of v.
-      The variable vars contain all the values read in out. It is a flat list
+      The variable vals contain all the values read in out. It is a flat list
       that contains all the data to be saved on a row of the main file.
       Note that v and vals[0] can be different for devices that use setget
       (those that perform a get after a set, because the instrument could be
