@@ -726,20 +726,32 @@ class agilent_rf_Attenuator(visaInstrument):
 #@register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 3054A', '01.10.2011031600', usb_vendor_product=[0x0957, 0x17a2])
 @register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 2024A', usb_vendor_product=[0x0957, 0x1796])
 @register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 3054A', usb_vendor_product=[0x0957, 0x17a2])
-class infiniiVision_3000(visaInstrument):
+class infiniiVision_3000(visaInstrumentAsync):
     """
      To use this instrument, the most useful devices are probably:
        fetch  (only works in the main timebase mode, not for roll or XY or zoom)
+       readval (press run/stop on scope to terminate it, or use clear_dev method)
        snap_png
+     Be warned that fetch, resets the current acquistion and waits for the next
+     when the scope is running (a firmware bug?).
+     fetch when stopped is ok.
+     Another way is to start an acq with single_trig, check the acq with
+     and then fetch it.
     """
     def init(self, full=False):
         self.write(':WAVeform:FORMat WORD') # can be WORD BYTE or ASCii
         self.write(':WAVeform:BYTeorder LSBFirst') # can be LSBFirst pr MSBFirst
         self.write(':WAVeform:UNSigned ON') # ON,1 or OFF,0
         super(infiniiVision_3000, self).init(full=full)
+    def _async_trigger_helper(self):
+        self.digitize()
+        self.write('*OPC')
+        #self.write(':DIGitize;*OPC')
     def _current_config(self, dev_obj=None, options={}):
         # TODO:  improve this
         return self._conf_helper('source', 'points_mode', 'preamble', options)
+    def clear_dev(self):
+        self.visa.instr.clear()
     def digitize(self):
         """
         Starts an acquisition
@@ -760,6 +772,13 @@ class infiniiVision_3000(visaInstrument):
         The same as pressing single
         """
         self.write(':SINGle')
+    def is_running(self):
+        status = int(self.ask('OPERegister:condition?'))
+        # OPERregister[:event]? is a latch of 0-> from OPERegister:condition?
+        # it goes through OPEE (mask) to affect OPER bit7 (128) of *STB
+        # OPER has bits 11(Overload), 9(masks), 5(arm, see AER?), 3(run state)
+        run_state = 8 # 2**3
+        return bool(status&run_state)
     def _fetch_ch_helper(self, ch):
         if ch is None:
             ch = self.find_all_active_channels()
@@ -849,7 +868,7 @@ class infiniiVision_3000(visaInstrument):
         self.timebase_scale= scpiDevice(':TIMebase:SCALe', str_type=float) # in seconds, per div
         #TODO: add a bunch of CHANNEL commands, Then MARKER and MEASure, TRIGger
         self._devwrap('fetch', autoinit=False, trig=True)
-        #self.readval = ReadvalDev(self.fetch)
+        self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
