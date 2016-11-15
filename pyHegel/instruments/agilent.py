@@ -34,7 +34,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDev, ChoiceDevSwitch, ChoiceIndex,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
                             decode_uint16_bin, _decode_block_base, decode_float64_2col,\
-                            decode_complex128, sleep, locked_calling
+                            decode_complex128, sleep, locked_calling, visa_wrap
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 register_usb_name('Agilent Technologies', 0x0957)
@@ -732,12 +732,15 @@ class infiniiVision_3000(visaInstrumentAsync):
        fetch  (only works in the main timebase mode, not for roll or XY or zoom)
        readval (press run/stop on scope to terminate it, or use clear_dev method)
        snap_png
+     See also the setup_trig_detection method.
      Be warned that fetch, resets the current acquistion and waits for the next
      when the scope is running (a firmware bug?).
      fetch when stopped is ok.
-     Another way is to start an acq with single_trig, check the acq with
+     Another way is to start an acq with single_trig, check the acq with is_running
      and then fetch it.
     """
+    def __init__(self, visa_addr, poll='force_handler'):
+        super(infiniiVision_3000, self).__init__(visa_addr, poll)
     def init(self, full=False):
         self.write(':WAVeform:FORMat WORD') # can be WORD BYTE or ASCii
         self.write(':WAVeform:BYTeorder LSBFirst') # can be LSBFirst pr MSBFirst
@@ -752,6 +755,22 @@ class infiniiVision_3000(visaInstrumentAsync):
         return self._conf_helper('source', 'points_mode', 'preamble', options)
     def clear_dev(self):
         self.visa.instr.clear()
+    def setup_trig_detection(self):
+        """ This setups trig detection. Only use this on one thread and not with readval (run_and_wait).
+            Undo its effect with reset_trig_detection.
+            After calling this use:
+              s.single_trig()
+              get(s.trig_status) # when True there was a trig event
+              get(s.lasttrig_time) # if not 0. then there it is the last trig time
+            The trig time accuracy is probably within 100 ms.
+        """
+        # lets presume we were started with poll='force_handler'
+        self.write('*sre 1')
+        self.visa.enable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
+                               visa_wrap.constants.VI_HNDLR)
+    def reset_trig_detection(self):
+        self.visa.disable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ, visa_wrap.constants.VI_ALL_MECH)
+        self.write('*sre 32')
     def digitize(self):
         """
         Starts an acquisition
@@ -771,6 +790,8 @@ class infiniiVision_3000(visaInstrumentAsync):
         """
         The same as pressing single
         """
+        self.trig_status.get() # reset trig
+        self._async_last_status_time = 0.
         self.write(':SINGle')
     def is_running(self):
         status = int(self.ask('OPERegister:condition?'))
@@ -779,6 +800,8 @@ class infiniiVision_3000(visaInstrumentAsync):
         # OPER has bits 11(Overload), 9(masks), 5(arm, see AER?), 3(run state)
         run_state = 8 # 2**3
         return bool(status&run_state)
+    def _lasttrig_time_getdev(self):
+        return self._async_last_status_time
     def _fetch_ch_helper(self, ch):
         if ch is None:
             ch = self.find_all_active_channels()
@@ -853,6 +876,7 @@ class infiniiVision_3000(visaInstrumentAsync):
         self.acq_samplerate = scpiDevice(getstr=':ACQuire:SRATe?', str_type=float)
         self.acq_npoints = scpiDevice(getstr=':ACQuire:POINts?', str_type=int)
         self.current_channel = MemoryDevice(1, min=1, max=4)
+        self.trig_status = scpiDevice(getstr=':TER?', str_type=bool, autoinit=False, doc="This returns True after the instrument has been triggered. It also resets the trig state.")
         def devChannelOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(ch=self.current_channel)
@@ -868,6 +892,7 @@ class infiniiVision_3000(visaInstrumentAsync):
         self.timebase_scale= scpiDevice(':TIMebase:SCALe', str_type=float) # in seconds, per div
         #TODO: add a bunch of CHANNEL commands, Then MARKER and MEASure, TRIGger
         self._devwrap('fetch', autoinit=False, trig=True)
+        self._devwrap('lasttrig_time', trig=False)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
