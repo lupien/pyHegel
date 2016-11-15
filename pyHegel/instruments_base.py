@@ -3055,6 +3055,7 @@ class visaInstrumentAsync(visaInstrument):
     def __init__(self, visa_addr, poll=False):
         # poll can be True (for always polling) 'not_gpib' for polling for lan and usb but
         # use the regular technique for gpib
+        # or force_handler to always use the handler
         # the _async_sre_flag should match an entry somewhere (like in init)
         self._async_sre_flag = 0x20 #=32 which is standard event status byte (contains OPC)
         self._async_last_status = 0
@@ -3075,7 +3076,7 @@ class visaInstrumentAsync(visaInstrument):
         if poll == True or (poll == 'not_gpib' and not is_gpib):
             self._async_polling = True
             self._RQS_status = -1
-        elif is_gpib and is_agilent:
+        elif (is_gpib and is_agilent) or poll == 'force_handler':
             # Note that the agilent visa using a NI usb gpib adapter (at least)
             # disables the autopoll settings of NI
             # Hence a SRQ on the bus produces events for all devices on the bus.
@@ -3151,6 +3152,7 @@ class visaInstrumentAsync(visaInstrument):
             status = self.read_status_byte()
         if status & 0x40:
             self._async_last_status = status
+            self._async_last_status_time = time.time()
             self._async_last_esr = self._get_esr()
             return True
         return False
@@ -3184,6 +3186,7 @@ class visaInstrumentAsync(visaInstrument):
                 self._async_last_esr = self._get_esr()
                 # only reset SRQ flag. We know the bit that is set already
                 self._async_last_status = self.read_status_byte()
+                self._async_last_status_time = time.time()
                 ret = True
         else:
             if self._RQS_done.wait(max_time):
