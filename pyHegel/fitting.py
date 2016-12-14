@@ -311,7 +311,24 @@ def _adjust_merge(padj, p0, adj):
     p0[adj] = padj
     return p0
 
-def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noadjust=None, sel=None, **kwarg):
+def _complex2real(z, reshape_real=True):
+    conv = lambda z, t: z.view(t).reshape(z.shape + (2,))
+    if np.iscomplexobj(z):
+        if z.ndim == 0:
+            z = z.reshape((1,))
+        if z.dtype == np.complex128:
+            return conv(z, np.float64)
+        elif z.dtype == np.complex64:
+            return conv(z, np.float32)
+        #elif z.dtype == np.complex256:
+        #    return conv(z., np.float128)
+        else:
+            raise NotImplementedError('complex type not handled')
+    elif reshape_real: # if not complex but want a matching shape
+        return z[..., np.newaxis]
+    raise NotImplementedError('type not handled')
+
+def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noadjust=None, sel=None, skip=False, **kwarg):
     """
     func is the function. It needs to be of the form:
           f(x, p1, p2, p3, ..., k1=1, k2=2, ...)
@@ -331,12 +348,14 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
     y is the dependent variable.
       y and funct(x,...) need to be of the same shape and need to be arrays.
         They can be multi-dimensional.
+        It can also be a complex value (minimizes real and imaginary parts)
     p0 is a vector of the initial parameters used for the fit. It needs to be
     at least as long as all the func parameters without default values.
 
     yerr when given is the value of the sigma (the error) of all the y.
          It needs a shape broadcastable to y, so it can be a constant.
          When not given, the minimazation proceeds using yerr=1. internally.
+         If complex, then the real(imag) is the error on the real(imag) of y.
 
     extra is a way to specify any of the function parameters that
           are not included in the fit. It needs to be a dictionnary.
@@ -372,6 +391,12 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
         tuple of those (you can also use the Ellipsis).
         It is applied on x, y and yerr to limit the range of samples used in
         the fit. When left as None, all the points are used.
+        For this to work in multiple dimensions requires y.shape to start with
+        the same as x.shape (unless Ellipsis are used.)
+        Can use numpy.s_ to build complicated indexing.
+
+    skip when True, functions does not perform fit and only returns
+        chi2, chiNorm
 
     The kwarg available are the ones for leastsq (see its documentation):
       The tolerances when set to 0 is the same as the machine precision
@@ -430,20 +455,33 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
         do_corr = True
     p0 = np.array(p0, dtype=float) # this allows complex indexing lik p0[[1,2,3]]
     adj = _handle_adjust(func, p0, adjust, noadjust)
+    y = np.asarray(y)
+    yerra = np.asarray(yerr)
     if sel is not None:
         y = y[sel]
         x = x[sel]
-        if np.asarray(yerr).size > 1:
-            yerr = yerr[sel]
+        if yerra.size > 1:
+            yerr = yerra = yerra[sel]
+    Ny = y.size
     # we returned a flat vector.
-    f = lambda p, x, y, yerr: ((func(x, *_adjust_merge(p, p0, adj), **extra)-y)/yerr).reshape(-1)
-    p, cov_x, infodict, mesg, ier = leastsq(f, p0[adj], args=(x, y, yerr), full_output=True, **kwarg)
-    if ier not in [1, 2, 3, 4]:
-        print 'Problems fitting:', mesg
-    chi2 = np.sum(f(p, x, y, yerr)**2)
-    Ndof = y.size - len(p)
+    if np.iscomplexobj(y):
+        Ny = y.size*2
+        yerra = _complex2real(yerra)
+        f = lambda p, x, y, yerr: (_complex2real(func(x, *_adjust_merge(p, p0, adj), **extra)-y)/yerr).reshape(-1)
+    else:
+        f = lambda p, x, y, yerr: ((func(x, *_adjust_merge(p, p0, adj), **extra)-y)/yerr).reshape(-1)
+    if not skip:
+        p, cov_x, infodict, mesg, ier = leastsq(f, p0[adj], args=(x, y, yerra), full_output=True, **kwarg)
+        if ier not in [1, 2, 3, 4]:
+            print 'Problems fitting:', mesg
+    else:
+        p = p0[adj]
+    chi2 = np.sum(f(p, x, y, yerra)**2)
+    Ndof = Ny - len(p)
     chiNorm = chi2/Ndof
     sigmaCorr = np.sqrt(chiNorm)
+    if skip:
+        return chi2, chiNorm
     if cov_x is not None:
         pe = np.sqrt(cov_x.diagonal())
         pei = 1./pe
@@ -463,6 +501,36 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
     return p_all, chi2, pe_all, extras
 
 
+def _errorbar(ax, x, y, yerr=None, label=None, **kwarg):
+    if yerr is not None:
+        yerr = np.asarray(yerr)
+    labels = None
+    if np.iscomplexobj(y):
+        y = _complex2real(y)
+        if yerr is not None:
+            yerr = _complex2real(yerr)
+        labels = ['_real', '_imag']
+    if y.ndim > 1:
+        if yerr is not None:
+            yerr = np.broadcast_to(yerr, y.shape)
+        N = y.shape[-1]
+        ret = []
+        if labels is None:
+            labels = ['_%i'%i for i in range(N)]
+        for i in range(N):
+            if label not in [None, '_nolegend_']:
+                l = label+labels[i]
+            else:
+                l = label
+            if yerr is not None:
+                ye = yerr[..., i]
+            ret.append(ax.errorbar(x, y[...,i], yerr=ye, label=l, **kwarg))
+    else:
+        ret = ax.errorbar(x, y, yerr=yerr, **kwarg)
+    return ret
+
+
+# TODO: better handling of colors with multiple curves
 def fitplot(func, x, y, p0, yerr=None, extra={}, sel=None, fig=None, skip=False, hold=False,
                   col_fit='red', col_data=None, col_unsel_data=None, label=None, result_loc='upper right',
                   xpts=1000, xlabel=None, ylabel=None, title_fmt={}, **kwarg):
@@ -554,7 +622,7 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, sel=None, fig=None, skip=False,
             yerrsel = yerr[sel]
         else:
             yerrsel = yerr
-        ax1.errorbar(x, y, yerr=yerr, fmt='.', label='_nolegend_', color=col_unsel_data)
+        _errorbar(ax1, x, y, yerr=yerr, fmt='.', label='_nolegend_', color=col_unsel_data)
     else:
         xsel = x
         ysel = y
@@ -569,9 +637,13 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, sel=None, fig=None, skip=False,
         xx = np.linspace(x.min(), x.max(), xpts)
     err_func = lambda x, y, p: func(x, *p, **extra) - y
     if skip:
-        pld1 = ax1.errorbar(xsel, ysel, yerr=yerrsel, fmt='.', label=data_label, color=col_data)
-        pld2 = ax2.errorbar(xsel, err_func(xsel, ysel, p0), yerr=yerrsel, fmt='.', label=data_label, color=col_data)
-    pl = ax1.plot(xx, func(xx, *p0, **extra), '-', color=col_fit, label=fit_label)[0]
+        pld1 = _errorbar(ax1, xsel, ysel, yerr=yerrsel, fmt='.', label=data_label, color=col_data)
+        pld2 = _errorbar(ax2, xsel, err_func(xsel, ysel, p0), yerr=yerrsel, fmt='.', label=data_label, color=col_data)
+    if np.iscomplexobj(ysel):
+        func_z = lambda *args, **kwargs: _complex2real(func(*args, **kwargs))
+    else:
+        func_z = func
+    pl = ax1.plot(xx, func_z(xx, *p0, **extra), '-', color=col_fit, label=fit_label)
     try:
         plt.title(func.display_str, **title_fmt)
     except AttributeError: # No display_str
@@ -582,11 +654,15 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, sel=None, fig=None, skip=False,
         p, resids, pe, extras = fitcurve(func, xsel, ysel, p0, yerr=yerrsel, extra=extra, **kwarg)
         printResult(func, p, pe, extra=extra)
         #pld1.remove()
-        ax1.errorbar(xsel, ysel, yerr=extras['s'], fmt='.', label=data_label, color=col_data)
-        pl.set_ydata(func(xx, *p, **extra))
+        _errorbar(ax1, xsel, ysel, yerr=extras['s'], fmt='.', label=data_label, color=col_data)
+        fz = func_z(xx, *p, **extra)
+        if fz.ndim == 1:
+            fz = fz[..., np.newaxis]
+        for i in range(len(pl)):
+            pl[i].set_ydata(fz[..., i])
         ax1.relim() # this is needed for the autoscaling to use the new data
         #pld2.remove()
-        ax2.errorbar(xsel, err_func(xsel, ysel, p), yerr=extras['s'], fmt='.', label=data_label, color=col_data)
+        _errorbar(ax2, xsel, err_func(xsel, ysel, p), yerr=extras['s'], fmt='.', label=data_label, color=col_data)
         ax2.autoscale_view(scalex=False) # only need to rescale y
         ax1.autoscale_view(scalex=False) # only need to rescale y
         for t in ax1.texts:
@@ -599,12 +675,7 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, sel=None, fig=None, skip=False,
         #plt.draw()
         return p, resids, pe, extras
     else:
-        if yerrsel is None:
-            yerrsel = 1
-        f = lambda p, x, y, yerr: ((func(x, *p, **extra)-y)/yerr)**2.
-        chi2 = np.sum(f(p0, xsel, ysel, yerrsel))
-        Ndof = len(xsel)- len(p0)
-        chiNorm = chi2/Ndof
+        chi2, chiNorm = fitcurve(func, xsel, ysel, p0, yerr=yerrsel, extra=extra, skip=True, **kwarg)
         return chi2, chiNorm
 
 if __name__ == "__main__":
