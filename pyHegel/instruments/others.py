@@ -552,7 +552,7 @@ class sr780_analyzer(visaInstrumentAsync):
             return scpiDevice(*arg, **kwarg)
         self.input_mode = devChOption('I{ch}MD', choices=ChoiceIndex(['Analog', 'Capture']))
         self.input_grounding = devChOption('I{ch}GD', choices=ChoiceIndex(['Float', 'Ground']))
-        self.input_coupling = devChOption('I{ch}GD', choices=ChoiceIndex(['DC', 'AC', 'ICP']))
+        self.input_coupling = devChOption('I{ch}CP', choices=ChoiceIndex(['DC', 'AC', 'ICP']))
         self.input_range_dBV = devChOption('I{ch}RG', str_type=int, choices=range(-50, 36, 2))
         self.input_autorange_en = devChOption('A{ch}RG', str_type=bool)
         self.input_autorange_mode = devChOption('I{ch}AR', choices=ChoiceIndex(['Normal', 'Tracking']))
