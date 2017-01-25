@@ -2064,7 +2064,9 @@ class agilent_ENA(agilent_PNAL):
                                  'bandwidth', 'bandwidth_auto_en', 'bandwidth_auto_limit', 'cont_trigger',
                                  'average_count', 'average_en', options)
         return extra+base
-    def _fetch_traces_helper(self, traces):
+    def _fetch_traces_helper(self, traces, cal=False):
+        if cal:
+            raise NotImplementedError('cal=True is not implemented for ena1')
         count = self.select_trace_count.getcache()
         trace_orig = self.select_trace.getcache()
         all_tr = range(1,count+1)
