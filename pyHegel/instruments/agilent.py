@@ -1624,6 +1624,11 @@ class agilent_PNAL(visaInstrumentAsync):
             if cook:
                 f = self.trace_format.get(trace=t)
                 if f not in self.trace_format.choices[['POLar', 'SMITh', 'SADMittance']]:
+                    # This next check is required for ENA1 at least
+                    if v.size == 2*self.npoints.get():
+                        if not np.all(v[1::2] == 0):
+                            print self.perror("WARNING: Discarding non-null data")
+                        v = v[::2]
                     ret.append(v)
                     continue
                 v = v[0::2] + 1j*v[1::2]
