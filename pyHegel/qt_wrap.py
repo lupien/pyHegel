@@ -169,7 +169,7 @@ def load_Qt4():
 
 
 def load_Qt5():
-    from PyQt4 import QtGui, QtCore, QtWidgets
+    from PyQt5 import QtGui, QtCore, QtWidgets
 
     # Alias PyQt-specific functions for PySide compatibility.
     QtCore.Signal = QtCore.pyqtSignal
