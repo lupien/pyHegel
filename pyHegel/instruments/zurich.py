@@ -223,10 +223,14 @@ class ziDev(scpiDevice):
 # sweeper structure
 #  sweep/averaging/sample
 #  sweep/averaging/tc
+#  sweep/averaging/time    (new 16.12)
+#  sweep/awgcontrol        (new 16.12)
 #  sweep/bandwidth
 #  sweep/bandwidthcontrol
+#  sweep/bandwidthoverlap  (new 16.12)
 #  sweep/clearhistory
 #  sweep/device
+#  sweep/directory         (new 16.12)
 #  sweep/endless
 #  sweep/fileformat
 #  sweep/filename
@@ -239,7 +243,7 @@ class ziDev(scpiDevice):
 #  sweep/phaseunwrap
 #  sweep/remainingtime     (new 15.05, undocumented)
 #  sweep/samplecount
-#  sweep/savepath          (new 14.08)
+#  sweep/savepath          (new 14.08, gone? in 16.12)
 #  sweep/scan
 #  sweep/settling/inaccuracy (new 14.08)
 #  sweep/settling/tc
@@ -257,9 +261,16 @@ class ziDev(scpiDevice):
 #  trigger/0/delay
 #  trigger/0/duration
 #  trigger/0/edge
+#  trigger/0/eventcount/mode (new in 16.12)
 #  trigger/0/findlevel
 #  trigger/0/holdoff/count
 #  trigger/0/holdoff/time
+#  trigger/0/grid/cols        (new in 16.12)
+#  trigger/0/grid/direction   (new in 16.12)
+#  trigger/0/grid/mode        (new in 16.12)
+#  trigger/0/grid/operation   (new in 16.12)
+#  trigger/0/grid/repetitions (new in 16.12)
+#  trigger/0/grid/rows        (new in 16.12)
 #  trigger/0/hwtrigsource (new in 13.10)
 #  trigger/0/hysteresis   (new 14.08)
 #  trigger/0/level        (new 15.05)
@@ -268,16 +279,20 @@ class ziDev(scpiDevice):
 #  trigger/0/pulse/min
 #  trigger/0/retrigger
 #  trigger/0/source
+#  trigger/0/triggernode  (new in 16.12)
 #  trigger/0/type
+#  trigger/awgcontrol     (new in 15.12)
 #  trigger/buffersize
 #  trigger/clearhistory
 #  trigger/device
+#  trigger/directory     (new in 16.12)
 #  trigger/endless
 #  trigger/fileformat    (new 14.08)
 #  trigger/filename
+#  trigger/flags         (new in 16.12)
 #  trigger/forcetrigger (new in 13.10)
 #  trigger/historylength
-#  trigger/savepath      (new 14.08)
+#  trigger/savepath      (new 14.08, gone? in 16.12)
 #  trigger/triggered
 #          14.08 removed trigger/0/highlevel, trigger/0/lowlevel
 
@@ -322,7 +337,8 @@ class zurich_UHF(BaseInstrument):
         # To free up the memory of sweep, call sweep.clear() before deleting
         # (or replacing) it.
         #APIlevel = 4 # 1 or 4 for version 14.02, 14.08
-        APIlevel = 4 # 1, 4 or 5 for version 15.05
+        #APIlevel = 4 # 1, 4 or 5 for version 15.05
+        APIlevel = 5 # 1, 4 or 5 for version 16.12
         try:
             self._zi_daq = zi.ziDAQServer(host, port, APIlevel)
         except RuntimeError as e:
@@ -336,10 +352,17 @@ class zurich_UHF(BaseInstrument):
                                    'Zurich Instrument/LabOne Servers/LabOne Data Server UHF (make sure that at least '
                                    'the DATA server runs. The WEB can run but it is not used from python.)')
             raise
+        self._ziPython = zi
         _check_zi_python_version(self._zi_daq)
-        self._zi_record = self._zi_daq.record(10, timeout) # 10s length
-        self._zi_sweep = self._zi_daq.sweep(timeout)
-        self._zi_zoomFFT = self._zi_daq.zoomFFT(timeout)
+        #  Settings parameters in class instantation is deprecated so do it after
+        #  also timeout option is depracated
+        #self._zi_record = self._zi_daq.record(10, timeout) # 10s length
+        self._zi_record = self._zi_daq.record()
+        self._zi_record.set('trigger/buffersize', 10) # 10s length
+        #self._zi_sweep = self._zi_daq.sweep(timeout)
+        #self._zi_zoomFFT = self._zi_daq.zoomFFT(timeout)
+        self._zi_sweep = self._zi_daq.sweep()
+        self._zi_zoomFFT = self._zi_daq.zoomFFT()
         self._zi_devs = ziu.devices(self._zi_daq)
         self._zi_sep = '/'
         if zi_dev is None:
@@ -594,7 +617,7 @@ class zurich_UHF(BaseInstrument):
         else:
             raise ValueError, 'Invalid value for t=%r'%t
     @locked_calling
-    def ask(self, question, src='main', t=None, strip_timestamp=True):
+    def ask(self, question, src='main', t=None, strip_timestamp=True, settings_only=True):
         """
         use like:
             obj.ask('/dev2021/sigins/0/on', t='int')
@@ -607,6 +630,8 @@ class zurich_UHF(BaseInstrument):
               strip_timestamp when True, checks if entries are dict with
               timestamp and valies and only return the value (make APIlevel=4
               return similar results to APIlevel=1)
+              settings_only, when False allow reading some read only values.
+                However it can add a long wait when reading some roots or using '*'
             obj.ask('')
             obj.ask('*')
             obj.ask('/dev2021/sigins')
@@ -616,6 +641,7 @@ class zurich_UHF(BaseInstrument):
             obj.ask('*', src='sweep')
             obj.ask('/{dev}/demods/0/sample', t='sample')
             obj.ask('/{dev}/dios/0/input', t='dio')
+            obj.ask('/zi', settings_only=False)
         """
         question = self._conv_command(question)
         if t=='byte':
@@ -629,10 +655,12 @@ class zurich_UHF(BaseInstrument):
         elif t=='dio':
             return self._zi_daq.getDIO(question)
         elif t is None or t=='dict':
+            # int(zhinst.ziPython.ziListEnum.settingsonly) is 8
+            flag = self._ziPython.ziListEnum.settingsonly if settings_only else self._ziPython.none
             src, pre = self._select_src(src)
             if pre == '':
                 #ret = self._flat_dict(src.get(question))
-                ret = src.get(question, True) # True makes it flat
+                ret = src.get(question, True, flag) # True makes it flat
                 if strip_timestamp:
                     for k,v in ret.items():
                         if isinstance(v, dict) and len(v) == 2 and 'timestamp' in v:
@@ -661,21 +689,21 @@ class zurich_UHF(BaseInstrument):
         name = 'Zurich Instrument'
         python_ver, python_rev = _get_zi_python_version(self._zi_daq)
         python_rev = str(python_rev)
-        server_ver = self.ask('/zi/about/version')[0]
+        server_ver = self.ask('/zi/about/version', settings_only=False)[0]
         #server_rev = self.ask('/zi/about/revision')[0]
         server_rev = self.ask('/zi/about/revision', t='int')
-        server_fw_rev = str(self.ask('/zi/about/fwrevision')[0])
-        system_devtype = self.ask('/{dev}/features/devtype')[0]
-        system_serial = self.ask('/{dev}/features/serial')[0]
+        server_fw_rev = str(self.ask('/zi/about/fwrevision', settings_only=False)[0])
+        system_devtype = self.ask('/{dev}/features/devtype', settings_only=False)[0]
+        system_serial = self.ask('/{dev}/features/serial', settings_only=False)[0]
         #system_code = self.ask('/{dev}/features/code')[0] # not available in vs 13.10, in 14.02, 14.08 it returns an empty dict after a long timeout. It is a write only node.
-        system_options = self.ask('/{dev}/features/options')[0]
+        system_options = self.ask('/{dev}/features/options', settings_only=False)[0]
         #system_analog_board_rev = self.ask('/{dev}/system/analogboardrevision')[0]
         #system_digital_board_rev = self.ask('/{dev}/system/digitalboardrevision')[0]
-        system_analog_board_rev = self.ask('/{dev}/system/boardrevisions/1')[0] # To match web interface, 1=analog, 0=digital
-        system_digital_board_rev = self.ask('/{dev}/system/boardrevisions/0')[0]
-        system_fpga_rev = str(self.ask('/{dev}/system/fpgarevision')[0])
-        system_fw_rev = str(self.ask('/{dev}/system/fwrevision')[0])
-        system_fx2_usb = self.ask('/{dev}/system/fx2revision')[0]
+        system_analog_board_rev = self.ask('/{dev}/system/boardrevisions/1', settings_only=False)[0] # To match web interface, 1=analog, 0=digital
+        system_digital_board_rev = self.ask('/{dev}/system/boardrevisions/0', settings_only=False)[0]
+        system_fpga_rev = str(self.ask('/{dev}/system/fpgarevision', settings_only=False)[0])
+        system_fw_rev = str(self.ask('/{dev}/system/fwrevision', settings_only=False)[0])
+        system_fx2_usb = self.ask('/{dev}/system/fx2revision', settings_only=False)[0]
         #return '{name} {system_devtype} #{system_serial} (analog/digital/fpga/fw_rev:{system_analog_board_rev}/{system_digital_board_rev}/{system_fpga_rev}/{system_fw_rev}, code:{system_code}, opt:{system_options}  [server {server_ver}-{server_rev} fw:{server_fw_rev}] [python {python_ver}-{python_rev}])'.format(
         return '{name},{system_devtype},{system_serial},(analog/digital/fpga/fw_rev/fx2_usb:{system_analog_board_rev}/{system_digital_board_rev}/{system_fpga_rev}/{system_fw_rev}/{system_fx2_usb}, opt:{system_options}  [server {server_ver}-{server_rev} fw:{server_fw_rev}] [python {python_ver}-{python_rev}])'.format(
              name=name, python_ver=python_ver, python_rev=python_rev,
@@ -2330,3 +2358,66 @@ class ziAPI(object):
 #   the data is now always properly normalize (no more jumps when tcmeas suddenly grows.
 #           see sweeper, X, 900 t0 1110Hz, 20 points, log, Noise amplitude sweep(with only sample count changed to 10000
 #                1.7kSa/s), look at TC changes(jumps between 18.6 to 9.3 ms), on X.)
+
+# Version 16.12
+#    reading some nodes is disabled unles get uses 3 options as 0 instead of default 8
+#    however, with that option it can be very slow if asking for a root device or using *
+#
+#  15.11
+#  Added /DEV*/SIGINS/*/DIFF
+#  16.04
+# Added /DEV*/AWGS/* (UHF-AWG)
+# Added /DEV*/CNTS/* (UHF-CNT)
+# Added /DEV*/TRIGGERS/OUT/*/DELAY
+# Added /DEV*/DIOS/*/MODE
+# Added /DEV*/SYSTEM/PROPERTIES/*
+# Added /DEV*/AUXINS/VALUES/VALUE0
+# Added /DEV*/AUXINS/VALUES/VALUE1
+# Added /DEV*/SYSTEM/STALL
+#  16.12
+# Added/DEV*/PIDS/*/STREAM/EFFECTIVERATE
+# Added /DEV*/EXTREFS/AUTOMODE
+# Added /DEV*/EXTREFS/DEMODSELECT
+# Added /DEV*/EXTREFS/OSCSELECT
+# Added /DEV*/EXTREFS/LOCKED
+# Removed /DEV*/SCOPES/*/TRIGPREDELAY (use TRIGDELAY)
+# Added /DEV*/SCOPES/*/TRIGSTATE
+# Added /DEV*/SCOPES/*/TRIGSLOPE
+# Added /DEV*/DIOS/*/AUXDRIVE
+# Added /DEV*/AWGS/*/RATE
+# Added /DEV*/AWGS/*/OUTPUTS/*/ENABLES/*
+# Added /DEV*/AWGS/*/TRIGGERS/*/STATE
+# Added /DEV*/AWGS/*/TRIGGERS/*/SLOPE
+# Added /DEV*/AWGS/*/AUXTRIGGERS/*/SLOPE
+# Added /DEV*/MDS/*
+# Deprecated /DEV*/AWGS/TRIGGERS/*/RISING (use SLOPE)
+# Deprecated /DEV*/AWGS/TRIGGERS/*/FALLING (use SLOPE)
+# Renamed /DEV*/PIDS/*/OVERFLOW to /DEV*/PIDS/*/STREAM/OVERFLOW
+# Removed /DEV*/PIDS/*/STREAM/DECIMATION (use /DEV*/PIDS/*/STREAM/EFFECTIVERATE)
+# Added /DEV*/PIDS/*/DEMOD/ADCSELECT
+# Added /DEV*/PIDS/*/DEMOD/ORDER
+# Added /DEV*/PIDS/*/DEMOD/TIMECONSTANT
+# Added /DEV*/PIDS/*/DEMOD/HARMONIC
+# Added /DEV*/PIDS/*/PLL/AUTOMODE
+# Added /DEV*/PIDS/*/PLL/LOCKED
+# Added /DEV*/PIDS/*/SETPOINTTOGGLE/SETPOINT
+# Added /DEV*/PIDS/*/SETPOINTTOGGLE/RATE
+# Added /DEV*/PIDS/*/SETPOINTTOGGLE/ENABLE
+# Removed /DEV*/PLLS/*/RATE                (use /DEV*/PIDS/*/RATE)
+# Removed /DEV*/PLLS/*/SETPOINT            (use /DEV*/PIDS/*/SETPOINT)
+# Removed /DEV*/PLLS/*/DLIMITTIMECONSTANT  (use /DEV*/PIDS/*/DLIMITTIMECONSTANT)
+# Removed /DEV*/PLLS/*/LIMITUPPER          (use /DEV*/PIDS/*/LIMITUPPER)
+# Removed /DEV*/PLLS/*/LIMITLOWER          (use /DEV*/PIDS/*/LIMITLOWER)
+# Removed /DEV*/PLLS/*/AUTOCOEFF           (use /DEV*/PIDS/*/PLL/AUTOMODE)
+# Removed /DEV*/PLLS/*/P                   (use /DEV*/PIDS/*/P)
+# Removed /DEV*/PLLS/*/I                   (use /DEV*/PIDS/*/I)
+# Removed /DEV*/PLLS/*/D                   (use /DEV*/PIDS/*/D)
+# Removed /DEV*/PLLS/*/DEMODSELECT         (use /DEV*/PIDS/*/INPUT  and /DEV*/PIDS/*/INPUTCHANNEL)
+# Removed /DEV*/PLLS/*/OSCSELECT           (use /DEV*/PIDS/*/OUTPUT and /DEV*/PIDS/*/OUTPUTCHANNEL)
+# Removed /DEV*/PLLS/*/ORDER               (use /DEV*/PIDS/*/DEMOD/ORDER)
+# Removed /DEV*/PLLS/*/TIMECONSTANT        (use /DEV*/PIDS/*/DEMOD/TIMECONSTANT)
+# Removed /DEV*/PLLS/*/AUTOBW              (use /DEV*/PIDS/*/PLL/AUTOMODE)
+# Removed /DEV*/PLLS/*/LOWBW               (use /DEV*/PIDS/*/PLL/AUTOMODE)
+# Removed /DEV*/PLLS/*/CENTER              (use /DEV*/PIDS/*/CENTER)
+# Removed /DEV*/PLLS/*/PHASEUNWRAP         (use /DEV*/PIDS/*/PHASEUNWRAP)
+# Removed /DEV*/PLLS/*/ENABLE              (use /DEV*/PIDS/*/ENABLE)
