@@ -78,7 +78,7 @@ class yokogawa_gs200(visaInstrument):
         self.alias = self.level
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
-    def _level_check(self, val):
+    def _level_checkdev(self, val):
         rnge = 1.2*self.range.getcache()
         if self.function.getcache()=='CURR' and rnge>.2:
             rnge = .2
