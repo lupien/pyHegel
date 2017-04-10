@@ -1777,19 +1777,27 @@ class scpiDevice(BaseDevice):
         for k in options.iterkeys():
             val = options[k]
             option_dev  = self._options[k]
+            option_lim = self._options_lim.get(k, None)
             if isinstance(option_dev, BaseDevice):
                 try:
                     tostr_val = option_dev._tostr(val)
                 except AttributeError:
                     # Some devices like BaseDevice, cls_WrapDevice don't have _tostr
                     tostr_val = repr(val)
+            #elif isinstance(option_lim, ChoiceBase):
+            elif option_lim is not None:
+                try:
+                    tostr_val = option_lim.tostr(val)
+                except AttributeError:
+                    tostr_val = repr(val)
             else:
                 tostr_val = repr(val)
             try:
                 conv = self._options_conv[k]
-                options[k] = conv(val, tostr_val)
             except KeyError:
                 options[k] = tostr_val
+            else:
+                options[k] = conv(val, tostr_val)
         return options
     def _setdev(self, val):
         # We only reach here if self._setdev_p is not None
