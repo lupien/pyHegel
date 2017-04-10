@@ -741,7 +741,9 @@ class keithley_2450_smu(visaInstrumentAsync):
         self.src_delay_auto_en = srcDevOption('SOURce:{mode}:DELay:AUTO', str_type=bool)
         self.src_high_cap_mode_en = srcDevOption('SOURce:{mode}:HIGH:CAPacitance', str_type=bool)
         src_level_choices = ChoiceDevDep(self.src_mode, {src_mode_opt[['CURRent']]:ChoiceLimits(-1.05, 1.05), meas_mode_opt[['voltage']]:ChoiceLimits(-210, 210)})
-        self.src_level = srcDevOption('SOURce:{mode}', str_type=float, choices=src_level_choices, setget=True)
+        #self.src_level = srcDevOption('SOURce:{mode}', str_type=float, choices=src_level_choices, setget=True)
+        self._devwrap('src_level', setget=True)
+
         #self.src_V_limit = scpiDevice('SOURce:VOLTage:ILIMIt', str_type=float, min=1e-9, max=1.05, setget=True)
         #self.src_I_limit = scpiDevice('SOURce:CURRent:VLIMIt', str_type=float, min=0.02, max=210, setget=True)
         limit_choices = {'VOLTage:ILIMit':ChoiceLimits(1e-9, 1.05), 'CURRent:VLIMit':ChoiceLimits(0.02, 210)}
@@ -846,6 +848,29 @@ class keithley_2450_smu(visaInstrumentAsync):
         self.readval = ReadvalDev(self.fetch)
         #self.alias = self.readval
         super(type(self),self)._create_devs()
+
+    def _src_level_getdev(self, mode=None):
+        if mode is not None:
+            self.src_mode.set(mode)
+        mode = self.src_mode.getcache()
+        return float(self.ask('SOURce:{mode}?'.format(mode=mode)))
+    def  _src_level_checkdev(self, val, mode=None):
+        if mode is not None:
+            self.src_mode.set(mode)
+        mode = self.src_mode.getcache()
+        autorange = self.src_range_auto_en.getcache()
+        if autorange:
+            if mode in self.src_mode.choices[['voltage']]:
+                rnge = 200.
+            else:
+                rnge = 1.
+        else:
+            rnge = self.src_range.getcache()
+        if abs(val) > rnge*1.05:
+            raise ValueError, self.perror('level is outside current range')
+    def _src_level_setdev(self, val, mode=None):
+        mode = self.src_mode.getcache()
+        self.write('SOURce:{mode} {val!r}'.format(mode=mode, val=val))
 
 #       Timing test for not using the trigger system:
 #         The fastest transfer of data to instrument memory is with
