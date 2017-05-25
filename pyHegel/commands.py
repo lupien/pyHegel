@@ -974,7 +974,8 @@ class _Sweep(instruments.BaseInstrument):
             ###############################
             # Start of loop
             ###############################
-            t_proxy = instruments_base.weakref.proxy(t)
+            if graph:
+                t_proxy = instruments_base.weakref.proxy(t)
             def iterator():
                 iter_partial = 0
                 ioffset = 0
