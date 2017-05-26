@@ -108,8 +108,8 @@ class dict_improved(OrderedDict):
         -adding new elements to the dict as attribute (obj.newkey=val)
          (could already do obj['newkey']=val)
     Note that it can be initialized like dict(a=1, b=2) but the order is not
-    conserved: dict_improved(a=1, b=2) is not exactly the same as
-    dict_improved(b=1, a=2). So to recreate a dict, use the output from repr_raw
+    conserved: dict_improved(a=1, b=2) is the same as dict_improved(b=2, a=1) but is not the same
+    as dict_improved([('b', 2), ('a', 1)]). So to recreate a dict, use the output from repr_raw
     not from str.
     show_all method shows all the entry, one per line by default.
     the option _freeze=True prevents adding/removing elements to the dict (defaults to False).
