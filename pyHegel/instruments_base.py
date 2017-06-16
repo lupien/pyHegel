@@ -2395,7 +2395,7 @@ def make_choice_list(list_values, start_exponent, end_exponent):
 
 
 class ChoiceMultiple(ChoiceBase):
-    def __init__(self, field_names, fmts=int, sep=','):
+    def __init__(self, field_names, fmts=int, sep=',', ending_sep=False, ending_sep_get=None):
         """
         This handles scpi commands that return a list of options like
          1,2,On,1.34
@@ -2410,6 +2410,9 @@ class ChoiceMultiple(ChoiceBase):
         it as the type. It is automatically used as a choice also.
         If one element of a list can affect the choices for a subsequent one,
         see ChoiceMultipleDev
+        ending_sep, when True it adds (on writing) or remove (on reading) an extra sep
+        at the end of the string
+        ending_sep_get, when not None it overrides ending_sep for reading.
         """
         self.field_names = field_names
         if not isinstance(fmts, (list, np.ndarray)):
@@ -2427,7 +2430,16 @@ class ChoiceMultiple(ChoiceBase):
         self.fmts_type = fmts_type
         self.fmts_lims = fmts_lims
         self.sep = sep
+        self.ending_sep_set = ending_sep
+        self.ending_sep_get = ending_sep
+        if ending_sep_get is not None:
+            self.ending_sep_get = ending_sep_get
     def __call__(self, fromstr):
+        if self.ending_sep_get:
+            if fromstr.endswith(self.sep):
+                fromstr = fromstr[:-len(self.sep)]
+            else:
+                raise ValueError('Expected ending sep in class %s'%self.__class__.__name__)
         v_base = fromstr.split(self.sep)
         if len(v_base) != len(self.field_names):
             raise ValueError('Invalid number of parameters in class %s'%self.__class__.__name__)
@@ -2449,6 +2461,8 @@ class ChoiceMultiple(ChoiceBase):
             v = fromdict[k]
             ret.append(_tostr_helper(v, fmt))
         ret = self.sep.join(ret)
+        if self.ending_sep_set:
+            ret += self.sep
         return ret
     def __contains__(self, x): # performs x in y; with y=Choice(). Used for check
         # Returns True if everything is fine.
@@ -2657,8 +2671,6 @@ class Dict_SubDevice(BaseDevice):
         The default is in self._force_default
         """
         val = self._check_cache['cooked_val']
-        if self._single_key:
-            val = [val]
         allow = self._check_cache['allow']
         vals = {k:v for k, v in zip(self._sub_key, val)}
         if allow:
