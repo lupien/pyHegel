@@ -790,11 +790,11 @@ def dB2P(dB):
     """
     return 10.**(dB/10.)
 
-def P2dB(A):
-    """ Returns the corresponding dB value for an amplitude ratio A
+def P2dB(P):
+    """ Returns the corresponding dB value for a power ratio P
         see also: dB2A, dB2P, A2dB
     """
-    return 10.*np.log10(A)
+    return 10.*np.log10(P)
 
 
 def rt2xy(r, phase=None, deg=True, cmplx=False, dB=True):
