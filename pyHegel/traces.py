@@ -44,8 +44,13 @@ _sleep = kbint_util.sleep
 
 # same as in fullmpcanvas.py
 # follows new_figure_manager
-from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt4 import FigureManagerQT
+if qt_wrap.api == 'pyqt5':
+    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.backends.backend_qt5 import FigureManagerQT
+else:
+    from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.backends.backend_qt4 import FigureManagerQT
+
 from matplotlib.figure import Figure
 
 # see from mpl_toolkits.axes_grid1 import host_subplot
