@@ -40,6 +40,8 @@
 # if you need to access the commands in a script/import import pyHegel.commands
 
 from __future__ import absolute_import
+import sys
+import pkgutil
 
 def fix_scipy():
     """ This fixes a problem with scipy 0.14.0-7 from python(x,y) 2.7.6.1
@@ -90,11 +92,45 @@ _init_pyHegel_globals()
 """
 
 _start_code = """
-get_ipython().run_line_magic('pylab', 'qt')
+get_ipython().run_line_magic('pylab', '%s')
 get_ipython().run_line_magic('autocall', '1') # smart
 """ + _base_start_code + """
 quiet_KeyboardInterrupt(True)
 """
+
+def in_module(base, submods):
+    if base in sys.modules:
+        return True
+    for m in submods:
+        if base+'.'+m in sys.modules:
+            return True
+    return False
+
+_which_qt_cache = None
+def which_qt():
+    global _which_qt_cache
+    if _which_qt_cache is not None:
+        return _which_qt_cache
+    # first check modules:
+    if in_module('PyQt5', ['QtCore', 'QtGui', 'QtWidgets']):
+        ret = 'qt5'
+    elif in_module('PyQt4', ['QtCore', 'QtGui']):
+        ret = 'qt'
+    elif in_module('PySide', ['QtCore', 'QtGui']):
+        ret = 'qt'
+    else:
+        # now check paths
+        if pkgutil.find_loader('PyQt5') is not None:
+            ret = 'qt5'
+        elif pkgutil.find_loader('PyQt4') is not None:
+            ret = 'qt'
+        elif pkgutil.find_loader('PySide') is not None:
+            ret = 'qt'
+        else:
+            raise RuntimeError('Unable to find a version of Qt')
+    _which_qt_cache = ret
+    return ret
+
 
 def main_start():
     # we check if we are called from an ipython session
@@ -103,11 +139,13 @@ def main_start():
     # However this will not work if the get_ipython function has been deleted.
     n = 2
     g = get_parent_globals(n)
+    qt = which_qt()
+    start_code = _start_code%qt
     while g is not None:
         if g.has_key('get_ipython'):
             # execute start_code in the already running ipython session.
             #print 'Under ipython', n
-            exec(_start_code, g)
+            exec(start_code, g)
             return
         n += 1
         g = get_parent_globals(n)
@@ -116,7 +154,8 @@ def main_start():
     # need to fix before importing IPython (which imports time...)
     fix_scipy()
     import IPython
-    IPython.start_ipython(argv=['--matplotlib=qt', '--InteractiveShellApp.exec_lines=%s'%_start_code.split('\n')])
+    IPython.start_ipython(argv=['--matplotlib=%s'%qt, '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
+    #IPython.start_ipython(argv=['--matplotlib=qt', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     #IPython.start_ipython(argv=['--matplotlib=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     #IPython.start_ipython(argv=['--pylab=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     # qt and qt4 are both Qt4Agg
@@ -129,7 +168,7 @@ def reset_start(globals_env):
         you can obtain it from running globals() in the interactive env.
     """
     if globals_env.has_key('get_ipython'):
-        exec(_start_code, globals_env)
+        exec(_start_code%which_qt(), globals_env)
     else:
         exec(_base_start_code, globals_env)
 
