@@ -1276,7 +1276,7 @@ class agilent_EXA(visaInstrumentAsync):
         self.sweep_time_rule_auto = scpiDevice(':SWEep:TIME:AUTO:RULes:AUTO', str_type=bool)
         self.sweep_type = scpiDevice(':SWEep:TYPE', choices=ChoiceStrings('FFT', 'SWEep'))
         self.sweep_type_auto = scpiDevice(':SWEep:TYPE:AUTO', str_type=bool)
-        self.sweep_type_rule = scpiDevice(':SWEep:TYPE:AUTO:RULes', choices=ChoiceStrings('SPEEd', 'DRANge'))
+        self.sweep_type_rule = scpiDevice(':SWEep:TYPE:AUTO:RULes', choices=ChoiceStrings('SPEed', 'DRANge'))
         self.sweep_type_rule_auto = scpiDevice(':SWEep:TYPE:AUTO:RULes:AUTO', str_type=bool)
         self.sweep_fft_width = scpiDevice(':SWEep:FFT:WIDTh', str_type=float)
         self.sweep_fft_width_auto = scpiDevice(':SWEep:FFT:WIDTh:AUTO', str_type=bool)
