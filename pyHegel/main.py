@@ -137,6 +137,8 @@ def main_start():
     # we detect the presence of a running ipython by get_ipython being present in the
     # caller (or caller of caller, if called from pyHegel.start_pyHegel, and so one...)
     # However this will not work if the get_ipython function has been deleted.
+    #   Note that if we are running under IPython, there should be (since?) a __IPYTHON__
+    #   with the value True
     n = 2
     g = get_parent_globals(n)
     qt = which_qt()
@@ -154,6 +156,12 @@ def main_start():
     # need to fix before importing IPython (which imports time...)
     fix_scipy()
     import IPython
+    # Force readlinelike behavior (completion in a list instead of a window) for newer ipython (5?) that uses prompt_toolkit
+    try:
+        if 'readlinelike' in IPython.terminal.interactiveshell.TerminalInteractiveShell.display_completions.values:
+           IPython.terminal.interactiveshell.TerminalInteractiveShell.display_completions.default_value = 'readlinelike'
+    except AttributeError: # display_completion not present
+        pass
     IPython.start_ipython(argv=['--matplotlib=%s'%qt, '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     #IPython.start_ipython(argv=['--matplotlib=qt', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     #IPython.start_ipython(argv=['--matplotlib=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
