@@ -103,8 +103,18 @@ entry_points = {
 
 options = {}
 
+# Parse the arguments for extra flags
+do_post = True
+if '--no-post' in sys.argv:
+    do_post = False
+    sys.argv.remove('--no-post')
+
+
 post_script = 'pyHegel_postinstall.py'
 def _post_install(cmd='install'):
+    if not do_post:
+        print 'Skipping post install'
+        return
     print 'Running post install'
     from subprocess import call
     if cmd == 'install':
@@ -126,9 +136,9 @@ if os.name == 'nt':
     if 'bdist_wininst' not in sys.argv:
         # needed by postinstall scripts
         setup_requires.append('pywin32')
-    if 'bdist_msi' in sys.argv:
+    if 'bdist_msi' in sys.argv and do_post:
         options.update({'bdist_msi': {'install_script': post_script}})
-    if 'bdist_wininst' in sys.argv:
+    if 'bdist_wininst' in sys.argv and do_post:
         options.update({'bdist_wininst': {'install_script': post_script}})
     from setuptools.command.install import install as _install
     from setuptools.command.develop import develop as _develop
