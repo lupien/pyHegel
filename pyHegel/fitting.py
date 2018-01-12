@@ -526,6 +526,8 @@ def _errorbar(ax, x, y, yerr=None, label=None, **kwarg):
                 ye = yerr[..., i]
             ret.append(ax.errorbar(x, y[...,i], yerr=ye, label=l, **kwarg))
     else:
+        if yerr is not None and yerr.shape == ():
+            yerr = yerr[()] # convert numpy 0d array (scalar) to scalar. matplotlib 2.1.0 does not like 0d array.
         ret = ax.errorbar(x, y, yerr=yerr, **kwarg)
     return ret
 
