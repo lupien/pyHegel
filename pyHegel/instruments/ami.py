@@ -43,6 +43,9 @@ from numpy import sign, abs
 class AmericanMagnetics_model430(visaInstrument):
     """
     TODO
+    address in the form:
+       tcpip::A5076_Z-AX.local::7180::socket
+       port is 7180
     """
     def __init__(self, *args, **kwargs):
         kwargs['read_termination'] = '\r\n'
