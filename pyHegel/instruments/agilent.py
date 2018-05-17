@@ -2395,7 +2395,7 @@ class agilent_FieldFox(agilent_PNAL):
         self.calc_x_axis = self.x_axis # needed by fetch
         self.npoints = scpiDevice('SENSe:SWEep:POINts', str_type=int, min=2, max=10001)
         self.sweep_time = scpiDevice('SENSe:SWEep:TIME', str_type=float, min=0, max=100., doc='This changes the minimum sweep time, it can be longer.')
-        self.bandwidth = scpiDevice('SENSe:BWID', str_type=float, min=300, max=30e3, setget=True, doc="only certain values are available")
+        self.bandwidth = scpiDevice('SENSe:BWID', str_type=float, min=10., max=30e3, setget=True, doc="only certain values are available")
         self.average_count = scpiDevice('SENSe:AVERage:COUNt', str_type=int, min=1, max=100, doc='count of 1 disables averaging')
         self.average_mode = scpiDevice('SENSe:AVERage:MODE', choices=ChoiceStrings('POINt', 'SWEep'))
         self.calib_en = scpiDevice('SENSe:CORRection:STATe', str_type=bool)
