@@ -35,7 +35,7 @@ from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsy
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep, ChoiceSimpleMap,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list, _fromstr_helper,\
-                            decode_float64, visa_wrap, locked_calling
+                            decode_float64, visa_wrap, locked_calling, Lock_Instruments, _sleep_signal_context_manager
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -1800,6 +1800,153 @@ class MagnetController_SMC(visaInstrument):
         self.alias = self.field
         # This needs to be last to complete creation
         super(MagnetController_SMC, self)._create_devs()
+
+
+#######################################################
+##    Pfeiffer DCU400 TC400
+#######################################################
+
+#import serial
+import threading
+import weakref
+
+class pfeiffer_turbo_loop(threading.Thread):
+    def __init__(self, master):
+        super(pfeiffer_turbo_loop, self).__init__()
+        self.master = master
+        self._stop = False
+    def cancel(self):
+        self._stop = True
+    def run(self):
+        while True:
+            if self._stop:
+                return
+            string = self.master.read()
+            res = self.master.parse(string)
+            if res is None:
+                continue
+            param, data = res
+            self.master._alldata_lock.acquire()
+            self.master._alldata[param] = data, time.time()
+            self.master._alldata_lock.release()
+    def wait(self, timeout=None):
+        # we use a the context manager because join uses sleep.
+        with _sleep_signal_context_manager():
+            self.join(timeout)
+        return not self.is_alive()
+
+class pfeiffer_dev(BaseDevice):
+    def __init__(self, param, type, *args, **kwargs):
+        super(pfeiffer_dev, self).__init__(*args, **kwargs)
+        self._param = param
+        self._param_type = type
+        self._getdev_p = 'foo'
+    def _getdev(self):
+        return self.instr.get_param(self._param, self._param_type)
+
+@register_instrument('Pfeiffer Serial', 'dummy', '1.0')
+class pfeiffer_turbo_log(BaseInstrument):
+    """
+        This reads the information from a Pfeiffer pump
+        using a serial to rs-485 converter.
+        The pump is connected to a DCU unit that requests and reads
+        all the values. We just capture all of them.
+    """
+    # we had trouble with the Visa serial connection that kept frezzing.
+    # So we use the serial module instead.
+    def __init__(self, address):
+        import serial
+        super(pfeiffer_turbo_log, self).__init__()
+        self._serial = serial.Serial(address, timeout=5)
+        self._alldata = dict()
+        self._alldata_lock = Lock_Instruments()
+        s = weakref.proxy(self)
+        self._helper_thread = pfeiffer_turbo_loop(s)
+        self._helper_thread.start()
+    def __del__(self):
+        self._helper_thread.cancel()
+        self._helper_thread.wait(.1)
+        super(pfeiffer_turbo_log, self).__del__()
+    def read(self):
+        s = ''
+        while True:
+            x = self._serial.read()
+            if x == '\r':
+                return s
+            s += x
+    def parse(self, string):
+        chksum = string[-3:]
+        try:
+            chksum = int(chksum)
+        except ValueError:
+            print 'Invalid Checksum value', string
+            return None
+        if np.sum(bytearray(string[:-3]))%256 != chksum:
+            print 'Invalid Checksum', string
+            return None
+        addr = string[:3]
+        if addr != '001':
+            print 'Invalid address', string
+            return None
+        action = string[3:5]
+        if action != '10':
+            if action != '00':
+                print 'Invalid action', string
+            return None
+        # action == '00' is for a question
+        param = int(string[5:8])
+        len = int(string[8:10])
+        data = string[10:10+len]
+        return param, data
+    def get_param(self, param, type='string'):
+        """ possible type:
+                boolean
+                string
+                integer
+                real
+                expo
+                vector
+                boolean_new
+                short_int
+                tms_old
+                expo_new
+                string16
+                string8
+        """
+        self._alldata_lock.acquire()
+        val = self._alldata.get(param)
+        self._alldata_lock.release()
+        if val is None:
+            print 'Data not available yet'
+            return None
+        val, last = val
+        if type in ['boolean',  'boolean_new']:
+            return bool(int(val))
+        elif type in ['integer', 'short_int']: #integer is 6 digits, short is 3
+            return int(val)
+        elif type == 'real':
+            return int(val)/100.
+        elif type == 'expo':
+            return float(val)
+        elif type == 'expo_new':
+            return val[:4]/1000. * 10**(int(val[4:])-20)
+        elif type in ['string', 'string16', 'string8']: # string is 6 long
+            return val
+        # TODO: We have not handled vector or tms_old, return as string
+        return val
+    def _create_devs(self):
+        self.temp_power_stage = pfeiffer_dev(324, 'integer')
+        self.temp_elec = pfeiffer_dev(326, 'integer')
+        self.temp_pump_bottom = pfeiffer_dev(330, 'integer')
+        self.temp_bearing = pfeiffer_dev(342, 'integer')
+        self.temp_motor = pfeiffer_dev(346, 'integer')
+        self.actual_speed = pfeiffer_dev(309, 'integer')
+        self.drive_current = pfeiffer_dev(310, 'real')
+        self.drive_power = pfeiffer_dev(316, 'integer')
+        #self._devwrap('temp_pump_bottom')
+        #self.alias = self.field
+        # This needs to be last to complete creation
+        super(pfeiffer_turbo_log, self)._create_devs()
 
 
 #######################################################
