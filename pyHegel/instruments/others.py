@@ -41,6 +41,16 @@ from ..instruments_registry import register_instrument, register_usb_name, regis
 
 from .logical import FunctionDevice
 
+# for pfeiffer
+#import serial  # not a standard package, so import it inside class
+import threading
+import weakref
+
+# for BIAS-DAC
+import ctypes
+import struct
+import time
+
 #######################################################
 ##    Yokogawa source
 #######################################################
@@ -1806,10 +1816,6 @@ class MagnetController_SMC(visaInstrument):
 ##    Pfeiffer DCU400 TC400
 #######################################################
 
-#import serial
-import threading
-import weakref
-
 class pfeiffer_turbo_loop(threading.Thread):
     def __init__(self, master):
         super(pfeiffer_turbo_loop, self).__init__()
@@ -1947,6 +1953,231 @@ class pfeiffer_turbo_log(BaseInstrument):
         #self.alias = self.field
         # This needs to be last to complete creation
         super(pfeiffer_turbo_log, self)._create_devs()
+
+#######################################################
+##    Delft BIAS-DAC
+#######################################################
+
+#@register_instrument('Delft', 'BIAS-DAC', '1.4')
+@register_instrument('Delft', 'BIAS-DAC')
+class delft_BIAS_DAC(visaInstrument):
+    """
+       This is to set the voltages on a Delft made BIAS-DAC.
+       It works with version 1.4 of the fiber control box.
+       The box is only connected with a serial port.
+       WARNING: the voltages that are read are only what the
+         control box remembers it sent to the hardware. If the
+         power is lost on the hardware or the control box, the
+         values are INVALID until new ones are set.
+       For the voltages to be valid, the programs needs to
+       know the settings of the 4 dials. You should set them
+       up properly before using the device.
+
+       Useful device:
+          level
+          level_all
+          current_ch
+       Useful methods:
+          set_config
+          get_config
+    """
+    def __init__(self, address):
+        self._last_error_val = 0
+        self._dac_modes_blocks = [None]*4
+        self._last_dac_read_time = None
+        self._last_dac_read_vals = None
+        cnsts = visa_wrap.constants
+        super(delft_BIAS_DAC, self).__init__(address, parity=cnsts.Parity.odd, baud_rate=115200, data_bits=8,
+             stop_bits=cnsts.StopBits.one, write_termination=None, read_termination=None, end_input=cnsts.SerialTermination.none)
+        # Note that end_input default is cnsts.SerialTermination.termination_char
+        #  the read code works even in that case. However to be clearer about our intentions we set it properly here
+        #  (the difference is that self.visa.read_raw_n will stop at term char (newline). read_raw_n_all will
+        #   repeat the read until the full count is received)
+    def _base_command(self, command, *args):
+        """
+        This handles commands 'set_dac', 'read_dacs', 'get_version', 'set_interface_bits'
+                              and even 'continues_send_data'
+        The args for 'set_dac', 'continues_send_data' are
+            channel number (1-16)
+            dac value (uint16)
+        The args for 'set_interface_bits' are
+            values: uint32
+                     note that value 1<<27 turns the LED on.
+                     some bits cannot be toggle (masked with 0xff00a0a0)
+        The return value is None except for:
+            'get_version': where is is an integer (divide by 10 to get version number)
+            'read_dacs': where it is 16 uint16
+        """
+        send_header = '>bbbb' # size, error, out_size, action
+        recv_header = '>bb'   # size, error
+        if command in ('set_dac','continues_send_data') :
+            send_header += 'bH' # channel, dac_value(uint16)
+            cmd_val = 1 if command == 'set_dac' else 3
+            n_arg = 2
+            ch = args[0]
+            daq_val = args[1]
+            if ch<1 or ch>16:
+                raise ValueError('Invalid channel number. Should be 1<=ch<=16')
+            if daq_val<0 or daq_val>0xffff:
+                raise ValueError('Invalid daq_val. Should be 0<= val <= 0xffff')
+        elif command == 'read_dacs':
+            cmd_val = 2
+            n_arg = 0
+            recv_header += '16H'
+        elif command == 'get_version':
+            cmd_val = 4
+            n_arg = 0
+            recv_header += 'b'
+        elif command == 'set_interface_bits':
+            send_header += 'bH4s' # channel, dac_value(uint16), inteface_bits(uint32)
+            cmd_val= 5
+            n_arg = 3
+            ib = struct.pack('<I', args[0]&0xff00a0a0)
+            # the inteface bit has the wrong endianness
+            args = (0,0)+(ib,)+args[1:]
+        else:
+            raise ValueError('Invalid Command')
+        if len(args) != n_arg:
+            raise ValueError('Invalid number of arguments')
+        send_len = struct.calcsize(send_header)
+        recv_len = struct.calcsize(recv_header)
+        send_str = struct.pack(send_header, send_len, 0, recv_len, cmd_val, *args)
+        self.write(send_str)
+        res = self.read(count=recv_len)
+        ret_vals = struct.unpack(recv_header, res)
+        n_read, error = ret_vals[:2]
+        self._last_error_val = error
+        if n_read != recv_len:
+            raise RuntimeError('Unexpected return value header length')
+        if error != 0:
+            if error & 0x20:
+                print "WARNING: The controller was reset (watchdog) (%i)"%error
+                #raise RuntimeError('The controller was reset (watchdog) (%i)'%error)
+            if error & 0x40:
+                raise RuntimeError('Invalid dac channel (%i)'%error)
+            if error & 0x80:
+                raise RuntimeError('Wrong Action (%i)'%error)
+            raise RuntimeError('Unknown error (%i)'%error)
+        rest = ret_vals[2:]
+        if len(rest):
+            return rest
+        else:
+            return None
+    def _get_ch_mode(self, ch):
+        block_index = (ch-1)//4
+        mode = self._dac_modes_blocks[block_index]
+        return mode
+    def _set_ch_command(self, val, ch):
+        mode = self._get_ch_mode(ch)
+        if mode is None:
+            raise RuntimeError(self.perror('You did not initialize the mode for ch=%i. See set_config method.'%ch))
+        dac_val = self._v2dac_conv(val, mode)
+        self._base_command('set_dac', ch, dac_val)
+        self._last_dac_read_time = None
+    def _get_all_command(self):
+        last = self._last_dac_read_time
+        now = time.time()
+        if last is None or last+0.5 < now:
+            # force a read after a set, or after more than 0.5s since last read
+            #print 'READING DAC'
+            data = self._base_command('read_dacs')
+            self._last_dac_read_time = now
+            self._last_dac_read_vals = data
+            return data
+        else:
+            return self._last_dac_read_vals
+    def _get_ch_command(self, ch, do_exc=True):
+        data = self._get_all_command()
+        val = data[ch-1]
+        mode = self._get_ch_mode(ch)
+        if mode is None:
+            if do_exc:
+                raise RuntimeError(self.perror('You did not initialize the mode for ch=%i. See set_config method.'%ch))
+            else:
+                return val
+        return self._dac2v_conv(val, mode)
+    def read(self, raw=False, count=2, chunk_size=None):
+        # change the count default.
+        return super(delft_BIAS_DAC, self).read(count=count)
+    def idn(self):
+        firm_version = self._base_command('get_version')[0]/10.
+        return 'Delft,BIAS-DAC,serial-unknown,%r'%firm_version
+    def get_error(self):
+        return self._last_error_val
+    _mode_offset = dict(neg=4., bip=2., pos=0.)
+    _dac_full_range = 2**16
+    def _dac2v_conv(self, dac, mode):
+        v = dac*4./self._dac_full_range
+        v -= self._mode_offset[mode]
+        return v
+    def _v2dac_conv(self, v, mode):
+        full_range = self._dac_full_range
+        v += self._mode_offset[mode]
+        dac = v/4. * full_range
+        dac = int(round(dac))
+        # make sure 0 <= dac < full_range
+        dac = min(max(dac, 0), full_range-1)
+        return dac
+    def set_config(self, dac_mode_1_4=None, dac_mode_5_8=None, dac_mode_9_12=None, dac_mode_13_16=None):
+        """
+        For all the blocks the valid options are None, 'pos', 'neg', 'bip'
+        where None means keep the previous value,
+        'pos', 'neg', 'bip' mean positive (0 - 4V), negative (-4 - 0V) and bipolar (-2 - 2V)
+        """
+        modes = [dac_mode_1_4, dac_mode_5_8, dac_mode_9_12, dac_mode_13_16]
+        for i, m in enumerate(modes):
+            if m is None:
+                continue
+            if m not in ['pos', 'neg', 'bip']:
+                raise ValueError(self.perror('invalid mode'))
+            self._dac_modes_blocks[i] = m
+    def get_config(self, do_return=False):
+        blocks = self._dac_modes_blocks
+        if do_return:
+            return blocks
+        print 'Current dac mode is:'
+        for i in range(4):
+            mode = blocks[i]
+            print '   DAC mode %2i - %2i: %s'%(i*4+1, i*4+4, mode)
+    def _level_helper(self, ch):
+        if ch is None:
+            return self.current_ch.get()
+        if ch<1 or ch>16:
+            raise ValueError(self.perror('channel is outside the 1-16 range.'))
+        self.current_ch.set(ch)
+        return ch
+    def _level_checkdev(self, val, ch=None):
+        ch = self._level_helper(ch)
+    def _level_setdev(self, val, ch=None):
+        ch = self._level_helper(ch)
+        self._set_ch_command(val, ch)
+    def _level_getdev(self, ch=None):
+        ch = self._level_helper(ch)
+        return self._get_ch_command(ch)
+    def _level_all_setdev(self, all_values):
+        if len(all_values) != 16:
+            raise ValueError(self.perror('Need to provide a vector of 16 elements'))
+        for i, val in enumerate(all_values):
+            self._set_ch_command(val, i+1)
+    def _level_all_getdev(self):
+        return np.array([self._get_ch_command(ch) for ch in range(1,17)])
+    def _current_config(self, dev_obj=None, options={}):
+        modes = self.get_config(do_return=True)
+        values = [self._get_ch_command(ch, do_exc=False) for ch in range(1,17)]
+        for i, m in enumerate(modes):
+            if m is None:
+                for ch in range(i*4, i*4+4):
+                    values[ch] = '%#06x'%values[ch]
+        base = ['modes=%r'%modes, 'values=%r'%values]
+        return base+self._conf_helper('current_ch', options)
+    def _create_devs(self):
+        self.current_ch = MemoryDevice(1, choices=range(1,17))
+        self._devwrap('level', autoinit=False, setget=True, doc='option ch: it is the channel to use (1-16). When not given it reuses the last one.')
+        titles = ['dac_%02i'%i for i in range(1, 17)]
+        self._devwrap('level_all', setget=True, autoinit=False, multi=titles)
+        self.alias = self.level
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
 
 
 #######################################################
