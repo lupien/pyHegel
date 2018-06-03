@@ -1,6 +1,7 @@
 *~
 *.pyc
 .spyderproject
+.spyproject
 
 # eliminate latex output
 *.out
