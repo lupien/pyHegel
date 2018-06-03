@@ -2936,13 +2936,23 @@ class visaInstrument(BaseInstrument):
         if delta >0:
             sleep(delta)
     @locked_calling
-    def read(self, raw=False):
+    def read(self, raw=False, count=None, chunk_size=None):
+        """ reads data.
+            The default is to read until an end is resived in chunk_size blocks
+             (if chunk_size is not given, uses the default chunk_size)
+            It then strips then termination characters unless raw is False.
+            When a count is given, it does not wait for an end. It
+            only reads exactly count characters. It never strips the
+            termination characters.
+        """
         if CHECKING():
             return ''
-        if raw:
-            ret = self.visa.read_raw()
+        if count:
+            ret = self.visa.read_raw_n_all(count, chunk_size=chunk_size)
+        elif raw:
+            ret = self.visa.read_raw(size=chunk_size)
         else:
-            ret = self.visa.read()
+            ret = self.visa.read(chunk_size=chunk_size)
         self._last_rw_time.read_time = time.time()
         return ret
     @locked_calling
