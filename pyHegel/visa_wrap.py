@@ -341,24 +341,41 @@ def _write_helper(self, message, termination='default'):
             message += termination
     self.write_raw(message)
 
-def _read_helper(self, termination='default'):
+def _read_helper(self, termination='default', chunk_size=None):
     # For old: improved termination handling, matches new interface
     # For new: overides the resource read to remove handling of encoding and add stripping of termination
     #          It does not change the hardware termination handling
     termination = self.read_termination if termination == 'default' else termination
-    return _strip_termination(self.read_raw(), termination)
+    return _strip_termination(self.read_raw(size=chunk_size), termination)
 
-def _query_helper(self, message, termination='default', read_termination='default', write_termination='default', raw=False):
+def _read_raw_n_all_helper(self, count, chunk_size=None):
+    """ Read until count is obtained, possibly asking data in chunks of chunk (unless it is None)
+        It will pass through ends detected because of AttrVI_ATTR_ASRL_END_IN set to
+          SerialTermination.termination_char
+    """
+    if chunk_size is None:
+        chunk_size = count
+    n_read = 0
+    result = bytearray(count)
+    while n_read<count:
+        chunk_size = min(chunk_size, count-n_read)
+        s = self.read_raw_n(chunk_size)
+        n = len(s)
+        result[n_read:n_read+n] = s
+        n_read += n
+    return result
+
+def _query_helper(self, message, termination='default', read_termination='default', write_termination='default', raw=False, chunk_size=None):
     if termination != 'default':
-        if read_termination != 'default':
+        if read_termination == 'default':
             read_termination = termination
-        if write_termination != 'default':
+        if write_termination == 'default':
             write_termination = termination
     self.write(message, termination=write_termination)
     if raw:
-        return self.read_raw()
+        return self.read_raw(size=chunk_size)
     else:
-        return self.read(termination=read_termination)
+        return self.read(termination=read_termination, chunk_size=chunk_size)
 
 def _cleanup_timeout(timeout):
     if timeout is None or _isinf(timeout):
@@ -538,7 +555,21 @@ class old_Instrument(redirect_instr):
         finally:
             visa._removefilter("ignore", "VI_SUCCESS_MAX_CNT")
         return ret
-    # read_raw is ok
+    read_raw_n_all = _read_raw_n_all_helper
+    def read_raw(self, size=None):
+        # the pyvisa one does not have the size option
+        # It uses self.chunk_size internally
+        if size is None:
+            return self.instr.read_raw()
+        orig_chunk = self.chunk_size
+        try:
+            self.chunk_size = size
+            ret = self.instr.read_raw()
+        except:
+            raise
+        finally:
+            self.chunk_size = orig_chunk
+        return ret
     def write_raw(self, message):
         vpp43.write(self.vi, message)
     write = _write_helper
@@ -652,7 +683,7 @@ class new_Instrument(redirect_instr):
     def read_raw_n(self, size):
         with self.ignore_warning(constants.VI_SUCCESS_MAX_CNT):
             return self.visalib.read(self.session, size)[0]
-
+    read_raw_n_all = _read_raw_n_all_helper
 
 
 ####################################################################
