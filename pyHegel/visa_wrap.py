@@ -575,6 +575,8 @@ class old_Instrument(redirect_instr):
     write = _write_helper
     read = _read_helper
     query = _query_helper
+    def flush(self, mask):
+        vpp43.flush(self.vi, mask)
 
 
 class new_Instrument(redirect_instr):
@@ -671,6 +673,9 @@ class new_Instrument(redirect_instr):
                 self.instr.read_termination = '\n'
             self.instr.read_termination = value
         flow_control = flow_control_helper
+    if version == '1.5':
+        def flush(self, mask):
+            self.visalib.flush(self.session, mask)
     def control_ren(self, mode):
         try:
             self.instr.control_ren(mode)
