@@ -35,21 +35,19 @@ from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsy
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep, ChoiceSimpleMap,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list, _fromstr_helper,\
-                            decode_float64, visa_wrap, locked_calling, Lock_Instruments, _sleep_signal_context_manager
+                            decode_float64, visa_wrap, locked_calling,\
+                            Lock_Extra, Lock_Instruments, _sleep_signal_context_manager
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 from .logical import FunctionDevice
 
 # for pfeiffer
-#import serial  # not a standard package, so import it inside class
 import threading
 import weakref
 
 # for BIAS-DAC
-import ctypes
 import struct
-import time
 
 #######################################################
 ##    Yokogawa source
@@ -1824,6 +1822,10 @@ class pfeiffer_turbo_loop(threading.Thread):
     def cancel(self):
         self._stop = True
     def run(self):
+        # empty buffer
+        self.master.visa.flush(visa_wrap.constants.VI_IO_IN_BUF_DISCARD)
+        # trow away first partial data
+        self.master.read()
         while True:
             if self._stop:
                 return
@@ -1832,9 +1834,9 @@ class pfeiffer_turbo_loop(threading.Thread):
             if res is None:
                 continue
             param, data = res
-            self.master._alldata_lock.acquire()
+            #self.master._alldata_lock.acquire()
             self.master._alldata[param] = data, time.time()
-            self.master._alldata_lock.release()
+            #self.master._alldata_lock.release()
     def wait(self, timeout=None):
         # we use a the context manager because join uses sleep.
         with _sleep_signal_context_manager():
@@ -1842,44 +1844,59 @@ class pfeiffer_turbo_loop(threading.Thread):
         return not self.is_alive()
 
 class pfeiffer_dev(BaseDevice):
-    def __init__(self, param, type, *args, **kwargs):
+    def __init__(self, param, type, enable_set=False, *args, **kwargs):
         super(pfeiffer_dev, self).__init__(*args, **kwargs)
         self._param = param
         self._param_type = type
         self._getdev_p = 'foo'
+        if enable_set:
+            self._setdev_p = 'foo'
     def _getdev(self):
-        return self.instr.get_param(self._param, self._param_type)
+        if self.instr._monitor_mode:
+            return self.instr.get_param(self._param, self._param_type)
+        else:
+            request = self.instr._create_req(self._param)
+            self.instr.write(request)
+            return self.instr.get_param(self._param, self._param_type)
+    def _setdev(self, val):
+        if self.instr._monitor_mode:
+            raise NotImplementedError(self.perror('The set for this device is not available'))
+        request = self.instr._create_req(self._param, val, self._param_type)
+        self.instr.write(request)
+        ret = self.instr.get_param(self._param, self._param_type)
+        self.setcache(ret)
 
-@register_instrument('Pfeiffer Serial', 'dummy', '1.0')
-class pfeiffer_turbo_log(BaseInstrument):
+@register_instrument('Pfeiffer', 'TC400')
+class pfeiffer_turbo_log(visaInstrument):
     """
         This reads the information from a Pfeiffer pump
         using a serial to rs-485 converter.
         The pump is connected to a DCU unit that requests and reads
-        all the values. We just capture all of them.
+        all the values. We just capture all of them (when monitor_mode == True,
+        the default).
     """
     # we had trouble with the Visa serial connection that kept frezzing.
     # So we use the serial module instead.
-    def __init__(self, address):
-        import serial
-        super(pfeiffer_turbo_log, self).__init__()
-        self._serial = serial.Serial(address, timeout=5)
-        self._alldata = dict()
-        self._alldata_lock = Lock_Instruments()
-        s = weakref.proxy(self)
-        self._helper_thread = pfeiffer_turbo_loop(s)
-        self._helper_thread.start()
+    def __init__(self, address, monitor_mode=True):
+        cnsts = visa_wrap.constants
+        super(pfeiffer_turbo_log, self).__init__(address, timeout=5, parity=cnsts.Parity.none, baud_rate=9600, data_bits=8,
+             stop_bits=cnsts.StopBits.one, write_termination='\r', read_termination='\r', end_input=cnsts.SerialTermination.termination_char)
+        self._monitor_mode = monitor_mode
+        if monitor_mode:
+            # Locking makes the get code go slow so don't do it
+            self._lock_extra = Lock_Extra()
+            self._lock_instrument = Lock_Extra()
+            self._alldata = dict()
+            self._alldata_lock = threading.Lock()
+            s = weakref.proxy(self)
+            self._helper_thread = pfeiffer_turbo_loop(s)
+            self._helper_thread.start()
     def __del__(self):
         self._helper_thread.cancel()
         self._helper_thread.wait(.1)
         super(pfeiffer_turbo_log, self).__del__()
-    def read(self):
-        s = ''
-        while True:
-            x = self._serial.read()
-            if x == '\r':
-                return s
-            s += x
+    def idn(self):
+        return 'Pfeiffer,TC400,no_serial,no_firmare'
     def parse(self, string):
         chksum = string[-3:]
         try:
@@ -1904,6 +1921,66 @@ class pfeiffer_turbo_log(BaseInstrument):
         len = int(string[8:10])
         data = string[10:10+len]
         return param, data
+    def _create_req(self, param, data=None, type='string'):
+        """ if data is None, creates a request for a value.
+            possible types:
+                boolean
+                string
+                integer
+                real
+                expo
+                vector
+                boolean_new
+                short_int
+                tms_old
+                expo_new
+                string16
+                string8
+        """
+        addr = '001'
+        action = '00'
+        param_s = '%03i'%param
+        if data is None:
+            data_str = '=?'
+        else:
+            data_str = ''
+            def check(data, min_val, max_val):
+                if data>max_val or data<min_val:
+                    raise ValueError(self.perror('Value(%s) outside of valid range(%s,%s)'%(data, min_val, max_val)))
+                return data
+            if type == 'boolean':
+                s = '1' if data else '0'
+                s = s*6
+            elif type == 'boolean_new':
+                s = '1' if data else '0'
+            elif type in ['string', 'string16', 'string8']:
+                l = dict(string=6, string16=16, string8=8)[type]
+                s = '%-*s'%(l, data[:l])
+            elif type == 'integer':
+                s = '%06i'%check(data, 0, 999999)
+            elif type == 'short_int':
+                s = '%03i'%check(data,0,999)
+            elif type == 'real':
+                s = '%06i'%check(data*100, 0, 999999)
+            elif type == 'expo_new':
+                fexp = int(np.floor(np.log10(check(data, 0, 9.9994e79))))
+                fman = int(np.round(data/10.**(fexp-3)))
+                if fman>9999:
+                    fman = fman//10
+                    fexp += 1
+                check(fexp, -20, 79)
+                check(fman, 0, 9999)
+                s = '%04i%02i'%(fman, fexp+20)
+            elif type in ['expo', 'tms_old', 'vector']:
+                raise NotImplementedError(self.perror('tms_old and vector are not implemented yet'))
+            else:
+                raise ValueError(self.perror('Invalid type'))
+            data_str = s
+        data_len = '%02i'%len(data_str)
+        req = addr + action + param_s + data_len + data_str
+        chksum = np.sum(bytearray(req))%256
+        req += '%03i'%chksum
+        return req
     def get_param(self, param, type='string'):
         """ possible type:
                 boolean
@@ -1919,13 +1996,19 @@ class pfeiffer_turbo_log(BaseInstrument):
                 string16
                 string8
         """
-        self._alldata_lock.acquire()
-        val = self._alldata.get(param)
-        self._alldata_lock.release()
-        if val is None:
-            print 'Data not available yet'
-            return None
-        val, last = val
+        if self._monitor_mode:
+            self._alldata_lock.acquire()
+            val = self._alldata.get(param)
+            self._alldata_lock.release()
+            if val is None:
+                print 'Data not available yet'
+                return None
+            val, last = val
+        else:
+            val_str = self.read()
+            param_read, val = self.parse(val_str)
+            if param_read != param:
+                raise RuntimeError(self.perror('Received unexpected param (%i!=%i)'%(param_read, param)))
         if type in ['boolean',  'boolean_new']:
             return bool(int(val))
         elif type in ['integer', 'short_int']: #integer is 6 digits, short is 3
@@ -1938,7 +2021,10 @@ class pfeiffer_turbo_log(BaseInstrument):
             return val[:4]/1000. * 10**(int(val[4:])-20)
         elif type in ['string', 'string16', 'string8']: # string is 6 long
             return val
-        # TODO: We have not handled vector or tms_old, return as string
+        elif type in ['tms_old', 'vector']:
+            raise NotImplementedError(self.perror('tms_old and vector are not implemented yet'))
+        else:
+            raise ValueError(self.perror('Invalid type'))
         return val
     def _create_devs(self):
         self.temp_power_stage = pfeiffer_dev(324, 'integer')
