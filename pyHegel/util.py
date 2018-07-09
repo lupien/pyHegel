@@ -117,10 +117,19 @@ def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0):
         return X.T
     return X
 
+def _shape_compare(shape1, shape2, concatenate):
+    if concatenate is True:
+        concatenate = -1
+    if concatenate is not False:
+        axes = list(range(len(shape1)))[concatenate]
+        shape1 = [s for i,s in enumerate(shape1) if i != axes]
+        shape2 = [s for i,s in enumerate(shape2) if i != axes]
+    return shape1 == shape2
+
 _readfile_lastnames = []
 _readfile_lastheaders = []
 _readfile_lasttitles = []
-def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True):
+def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True, concatenate=False):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -143,6 +152,7 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     so selecting a column in a data file is the first index dimension.
     For multiple files, the shape is (n_columns, n_files, n_rows)
      or (nfiles, n_rows) if the files contain only a single column
+     or (n_comuns, n_rows*n_files) if using concatenate
     When multi_sweep is True and the file was created from a multi sweep,
      n_rows is replaced by the correct shape to handle the multiple dimensions of the sweep
      if possible.
@@ -157,6 +167,10 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
 
     If the file extension ends with .npy, it is read with np.load as a numpy
     file.
+
+    concatenante, when True, will merge rows from multiple files together.
+      It can also be set to an integer to select the axes to merge (it
+      is -1 when using True)
 
     The list of files is saved in the global variable _readfile_lastnames.
     When the parameter getnames=True, the return value is a tuple
@@ -212,12 +226,13 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
         shape = tuple([int(s) for s in shape_s])
     else:
         shape = None
+    if concatenate is True:
+        concatenate = -1
     ret = []
     first_shape = None
     for fn in filelist:
         if dtype is not None:
             current = np.fromfile(fn, dtype=dtype)
-            ret.append(np.fromfile(fn, dtype=dtype))
         elif fn.lower().endswith('.npy'):
             current = np.load(fn)
         else:
@@ -234,12 +249,14 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
                 current = np.loadtxt(fn).T
         if first_shape is None:
             first_shape = current.shape
-        elif first_shape != current.shape:
+        elif not _shape_compare(first_shape, current.shape, concatenate):
             raise RuntimeError('Not all objects have same shape. "%s"=%s and "%s"=%s'%
                                 (filelist[0], first_shape, fn, current.shape))
         ret.append(current)
     if not multi:
         ret = ret[0]
+    elif concatenate is not False:
+        ret = np.concatenate(ret, axis=concatenate)
     else:
         # convert into a nice numpy array. The data is copied and made contiguous
         ret = np.array(ret)
