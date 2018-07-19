@@ -93,6 +93,9 @@ def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0):
         reader = csv.reader(f)
         for line in reader:
             try:
+                if line[-1] is '':
+                    # some files have an ending , sep which produces an empty last field
+                    line = line [:-1]
                 conv = map(dtype, line)
             except ValueError:
                 # skip this line
