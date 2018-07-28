@@ -32,7 +32,7 @@ import time
 
 from ..instruments_base import BaseDevice, BaseInstrument, ProxyMethod,\
                         _find_global_name, _get_conf_header, locked_calling_dev,\
-                        FastEvent, wait_on_event, CHECKING
+                        FastEvent, wait_on_event, CHECKING, sleep
 from ..traces import wait
 from ..instruments_registry import add_to_instruments
 
@@ -852,6 +852,128 @@ class Average(LogicalDevice):
         else:
             ret = list(avg)+list(std)
         return ret + [N]
+
+
+#######################################################
+##    Logical ramp device
+#######################################################
+
+@add_to_instruments
+class RampDevice(LogicalDevice):
+    """
+    This class provides a wrapper around a device that ramps the value from current to target
+    at a certain rate (in basedev unit/s) or for a certain time interval in s.
+    """
+    def __init__(self, basedev, rate=None, interval=None, internal_dt=0.1, doc='', **extrak):
+        self._dt = np.abs(internal_dt)
+        if rate is None and interval is None:
+            raise ValueError('You need to specify either rate or interval')
+        if rate is not None and interval is not None:
+            raise ValueError('You need to specify only one of rate or interval')
+        if rate is not None:
+            self._mode_is_rate = True
+            rate = np.abs(rate)
+            if rate == 0:
+                raise ValueError('rate cannot be 0')
+            doc += 'rate=%g (initial)'%rate
+        else:
+            self._mode_is_rate = False
+            if interval < self._dt:
+                raise ValueError('interval cannot be less than internal_dt')
+            interval = np.abs(interval)
+            doc += 'interval=%g (initial)'%interval
+        self._rate = rate
+        self._interval = interval
+        super(RampDevice, self).__init__(basedev=basedev, doc=doc, autoget=False, **extrak)
+        self._setdev_p = True # needed to enable BaseDevice Check, set (Checking mode)
+        self._getdev_p = self._basedev._getdev_p # needed to enable Checking mode of BaseDevice get
+    @property
+    def rate(self):
+        if self._mode_is_rate:
+            return self._rate
+        else:
+            print 'Mode is currently in interval'
+    @rate.setter
+    def rate(self, rate):
+        self._rate = np.abs(rate)
+        self._mode_is_rate = True
+    @property
+    def interval(self):
+        if self._mode_is_rate:
+            print 'Mode is currently in rate'
+        else:
+            return self._interval
+    @interval.setter
+    def interval(self, interval):
+        self._interval = np.abs(interval)
+        self._mode_is_rate = False
+    def _current_config(self, dev_obj=None, options={}):
+        if self._mode_is_rate:
+            head1 = 'rate=%r'%self._rate
+        else:
+            head1 = 'interval=%r'%self._interval
+        head = ['Ramp:: %s dt_interval=%r, basedev=%s'%(head1, self._dt, self._basedev.getfullname())]
+        return self._current_config_addbase(head, options=options)
+    def _getdev_log(self, **kwarg):
+        gl, foo = self._get_auto_list(kwarg, autoget='all', op='get')
+        dev, base_kwarg  = gl[0]
+        return dev.get(**base_kwarg)
+    def _setdev(self, val, **kwarg):
+        dt = self._dt
+        basedev, base_kwarg = self._check_cache['gl'][0]
+        start_val = self.get() # to fill cache
+        dval_total = val - start_val
+        if dval_total == 0:
+            return
+        if self._mode_is_rate:
+            rate = self._rate
+            done = False
+            # TODO, might prefer time.clock on windows
+            too = to = time.time()
+            dt_next = dt
+            while not done:
+                sleep(dt_next)
+                tf = time.time()
+                dval_next = (tf-too)*rate*np.sign(dval_total)
+                if np.abs(dval_next) < np.abs(dval_total):
+                    nval = start_val + dval_next
+                else:
+                    nval = val
+                    done = True
+                basedev.set(nval, **base_kwarg)
+                dt_next = dt - (time.time()- to - dt)
+                dt_next = max(dt_next, 0.01)
+                to = tf
+        else: #interval
+            interval = self._interval
+            to = time.time()
+            tf = to + interval
+            prev_t = now = to
+            dt_next = dt
+            dval_total = val - start_val
+            while now < tf:
+                sleep(dt_next)
+                now = time.time()
+                if now >= tf:
+                    break
+                nval = (now-to)/interval * dval_total + start_val
+                basedev.set(nval, **base_kwarg)
+                now = time.time()
+                dt_next = dt - (now- prev_t - dt)
+                dt_next = max(dt_next, 0.01)
+                prev_t = now
+            basedev.set(val, **base_kwarg)
+
+    def _checkdev(self, val, **kwarg):
+        super(RampDevice, self)._checkdev(val, **kwarg)
+        op = self._check_cache['fnct_str']
+        gl, kwarg = self._get_auto_list(kwarg, autoget='all', op=op)
+        self._check_empty_kwarg(kwarg)
+        self._check_cache['gl'] = gl
+        #if op == 'check':
+        (basedev, base_kwarg) = gl[0]
+        basedev.check(val, **base_kwarg)
+        # otherwise, the check will be done by set in _setdev above
 
 
 #######################################################
