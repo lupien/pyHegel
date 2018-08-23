@@ -863,6 +863,9 @@ class RampDevice(LogicalDevice):
     """
     This class provides a wrapper around a device that ramps the value from current to target
     at a certain rate (in basedev unit/s) or for a certain time interval in s.
+
+    If internal_dt is too small, the ramping rate is slowed to make sure the steps are
+    below rate*4*dt. After a waste of 10 s, a warning is displayed (see also the attribute _accumulated_fix)
     """
     def __init__(self, basedev, rate=None, interval=None, internal_dt=0.1, doc='', **extrak):
         self._dt = np.abs(internal_dt)
@@ -884,6 +887,8 @@ class RampDevice(LogicalDevice):
             doc += 'interval=%g (initial)'%interval
         self._rate = rate
         self._interval = interval
+        self._accumulated_fix = 0
+        self._accumulated_fix_warned = False
         super(RampDevice, self).__init__(basedev=basedev, doc=doc, autoget=False, **extrak)
         self._setdev_p = True # needed to enable BaseDevice Check, set (Checking mode)
         self._getdev_p = self._basedev._getdev_p # needed to enable Checking mode of BaseDevice get
@@ -934,6 +939,16 @@ class RampDevice(LogicalDevice):
             while not done:
                 sleep(dt_next)
                 tf = time.time()
+                # If the time difference is too great (computer was busy running something else)
+                # there could be a big jump. To prevent that, if the timedifference is greater than 3*dt
+                #  we calculate the voltage increase equivalent of only 3*dt
+                if tf-to > dt*3:
+                    fix_too = tf-to - dt*3
+                    too += fix_too
+                    self._accumulated_fix += fix_too
+                    if self._accumulated_fix > 10 and not self._accumulated_fix_warned:
+                        print self.perror('The dt time is probably too small. Many dt*3 overruns.')
+                        self._accumulated_fix_warned = True
                 dval_next = (tf-too)*rate*np.sign(dval_total)
                 if np.abs(dval_next) < np.abs(dval_total):
                     nval = start_val + dval_next
