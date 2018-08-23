@@ -55,6 +55,27 @@ import struct
 
 register_usb_name('Yokogawa Electric Corporation', 0x0B21)
 
+# To implement hardware sweeping:
+#  can use program with interval and slope.
+#   interval needs to be >= slope
+#  They both are time with resolution of .1 s
+#  can have 10000 program steps
+#  cannot readback ramping state or program
+#  can use pause/cont  or hold/hold to pause and restart
+#    pause/cont produce errors
+#  the program steps consists of level,range,function
+#  can define program like:
+#     :prog:memory "0,1,V\n.5,1,V"
+#  When the range changes (between prog steps or between current and first step),
+#   the slope is not working.
+#  Count is incremented will the program is running. Goes back to 1 at the end
+#  Can see level/steps/prog completion with :status:event? bits 5,6,7 (32,64,128)
+#      level is set when slope is done, steps when interval is done.
+#  the :status:event bit 8 (256) is toggled by changing the program (prog:edit:start, prog:edit:end, or frontpanel)
+#   but not by prog:memory
+# can't run a program if the output is disabled
+# OPC does not work for programs
+
 @register_instrument('YOKOGAWA', 'GS210', usb_vendor_product=[0x0B21, 0x0039])
 #@register_instrument('YOKOGAWA', 'GS210', '1.05')
 #@register_instrument('YOKOGAWA', 'GS210', '1.02')
