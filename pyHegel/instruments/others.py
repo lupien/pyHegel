@@ -2329,3 +2329,29 @@ class dummy(BaseInstrument):
         self.alias = self.current
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+
+
+#######################################################
+##    Loop instrument
+#######################################################
+
+@register_instrument('pyHegel_Instrument', 'loop', '1.0')
+class loop(BaseInstrument):
+    """
+        This is a dummy instrument (just in memory) to use for
+        looping/repeating (multi_sweep).
+        There are 5 devices: loop1 to loop5
+    """
+    def idn(self):
+        return 'pyHegel_Instrument,dummy,00000,1.0'
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('loop1', 'loop2',  'loop3', 'loop4', 'loop5', options)
+    def _create_devs(self):
+        self.loop1 = MemoryDevice(0.)
+        self.loop2 = MemoryDevice(0.)
+        self.loop3 = MemoryDevice(0.)
+        self.loop4 = MemoryDevice(0.)
+        self.loop5 = MemoryDevice(0.)
+        self.alias = self.loop1
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
