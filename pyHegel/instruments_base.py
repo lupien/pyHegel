@@ -2090,7 +2090,7 @@ class ChoiceBase(object):
     def __contains__(self, val):
         raise NotImplementedError, 'ChoiceBase subclass should overwrite __contains__'
 
-class ChoiceLimits(object):
+class ChoiceLimits(ChoiceBase):
     """
     This ChoiceBase implements a min/max check.
     """
