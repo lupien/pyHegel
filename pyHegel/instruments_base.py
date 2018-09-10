@@ -1984,6 +1984,18 @@ def decode_float64_meanstd(s):
     data = _decode_block_auto(s, t=np.float64)
     return data.std(ddof=1)/np.sqrt(len(data))
 
+class scaled_float(object):
+    def __init__(self, scale):
+        """ scale is used as:
+              python_val = instrument_val * scale
+              instrument_val = python_val / scale
+        """
+        self.scale = scale
+    def __call__(self,  input_str):
+        return _fromstr_helper(input_str, float)*self.scale
+    def tostr(self, val):
+        return _tostr_helper(val/self.scale, float)
+
 class quoted_string(object):
     def __init__(self, quote_char='"'):
         self._quote_char = quote_char
