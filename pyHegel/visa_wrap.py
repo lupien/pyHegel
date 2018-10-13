@@ -897,12 +897,20 @@ def get_resource_manager(path=None):
                 # for UnicodeDecodeError see: https://github.com/hgrecco/pyvisa/issues/136
                 print 'Unable to load Agilent visa library. Will try the default one (National Instruments?).'
                 _clean_up_registry(agilent_path)
+            except ValueError:
+                # If we get here we are in pyVisa 1.9.1 at least and no standard visa dll is found
+                # from pyvisa.ctwrapper.highlevel.NIVisaLibrary.get_library_paths
+                # This means NI visa is not installed and if agilent is installed, it is as secondary
+                # so it did not create the standard names. We skip the error, it will be caught again.
+                if _os.path.exists(agilent_path):
+                    raise ImportError('Agilent library exists without NI base libraries.')
         if path is None:
             path = ''
         try:
             return new_WrapResourceManager(pyvisa.ResourceManager(path))
-        except (pyvisa.errors.LibraryError, UnicodeDecodeError, OSError) as exc:
+        except (pyvisa.errors.LibraryError, UnicodeDecodeError, OSError, ValueError) as exc:
             # We get OSError when no libraries are found
+            # We get ValueError since 1.9.1 if no NI dll is found
             raise ImportError('Unable to load backend: %s'%exc)
 
 
