@@ -1997,14 +1997,16 @@ class scaled_float(object):
         return _tostr_helper(val/self.scale, float)
 
 class quoted_string(object):
-    def __init__(self, quote_char='"'):
+    def __init__(self, quote_char='"', quiet=False):
         self._quote_char = quote_char
+        self._quiet = quiet
     def __call__(self, quoted_str):
         quote_char = self._quote_char
-        if quote_char == quoted_str[0] and quote_char == quoted_str[-1]:
+        if len(quoted_str) and quote_char == quoted_str[0] and quote_char == quoted_str[-1]:
             return quoted_str[1:-1]
         else:
-            print 'Warning, string <%s> does not start and end with <%s>'%(quoted_str, quote_char)
+            if not self._quiet:
+                print 'Warning, string <%s> does not start and end with <%s>'%(quoted_str, quote_char)
             return quoted_str
     def tostr(self, unquoted_str):
         quote_char = self._quote_char
@@ -2136,11 +2138,15 @@ class ChoiceStrings(ChoiceBase):
        normalizelong and normalizeshort return the above
          (short is upper, long is lower)
        Long and short name can be the same.
+       redirects option is a dictionnary of input strings to some other element.
+          It can be useful for device that list ON or 1 as possible values.
+          use it like {'1': 'ON'}
     """
     def __init__(self, *values, **kwarg):
         # use **kwarg because we can't have keyword arguments after *arg
         self.quotes = kwarg.pop('quotes', False)
         no_short = kwarg.pop('no_short', False)
+        self.redirects = kwarg.pop('redirects', {})
         if kwarg != {}:
             raise TypeError, 'ChoiceStrings only has quotes=False and no_short=False as keyword arguments'
         self.values = values
@@ -2170,6 +2176,7 @@ class ChoiceStrings(ChoiceBase):
         return self.short[self.index(x)].upper()
     def __call__(self, input_str):
         # this is called by dev._fromstr to convert a string to the needed format
+        input_str = self.redirects.get(input_str, input_str)
         if self.quotes:
             if input_str[0] != '"' or input_str[-1] != '"':
                 raise ValueError, 'The value --%s-- is not quoted properly'%input_str
