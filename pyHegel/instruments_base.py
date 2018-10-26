@@ -724,6 +724,9 @@ class BaseDevice(object):
         self._format = dict(file=False, multi=multi, xaxis=None, graph=graph,
                             append=False, header=None, bin=False, extra_conf=None,
                             options={}, obj=self)
+    def  _delayed_init(self):
+        """ This function is called by instrument's _create_devs once initialization is complete """
+        pass
 
     @property
     def _last_filename(self):
@@ -1343,6 +1346,7 @@ class BaseInstrument(object):
             obj.name = devname
             if conf and not obj._format['header']:
                 obj._format['header'] = conf
+            obj._delayed_init()
     def _create_devs(self):
         # devices need to be created here (not at class level)
         # because we want each instrument instance to use its own
@@ -1595,7 +1599,9 @@ class scpiDevice(BaseDevice):
     _autoset_val_str = ' {val}'
     def __init__(self,setstr=None, getstr=None, raw=False, autoinit=True, autoget=True, get_cached_init=None,
                  str_type=None, choices=None, doc='',
+                 auto_min_max=False,
                  options={}, options_lim={}, options_apply=[], options_conv={},
+                 extra_check_func=None, extra_set_func=None, extra_set_after_func=None,
                  ask_write_opt={}, **kwarg):
         """
            str_type can be float, int, None
@@ -1608,6 +1614,8 @@ class scpiDevice(BaseDevice):
            the cache is used instead of get and is initialized to the value of
            get_cached_init. You probably should initialize it during the instrument
            init.
+           auto_min_max can be False, True, 'min' or 'max'. True will do both 'min' and
+            'max'. It will call the getstr with min, max to obtain the limits.
            raw when True will use read_raw instead of the default raw (in get)
 
            options is a list of optional parameters for get and set.
@@ -1630,11 +1638,23 @@ class scpiDevice(BaseDevice):
            options_apply is a list of options that need to be set. In that order when defined.
            By default, autoinit=True is transformed to 10 (higher priority)
            unless options contains another device, then it is set to 1.
+           extra_check_func, extra_set_func, extra_set_after_func are all functions called
+           before or after (when in the name) the internal
+           implementation proceeds. They allow modification of the default behavior
+           (useful for more complicated range check). There signatures are:
+              extra_check_func(val, dev_obj)
+               can return "__SKIP__NEXT__" to jump the internal implementation
+              extra_set_func(val, dev_obj, **kwargs)
+               can return "__SKIP__NEXT__" to jump the internal implementation
+              extra_set_after_func(val, dev_obj, **kwargs)
            ask_write_options are options passed to the ask and write methods
 
         """
         if setstr is None and getstr is None:
             raise ValueError, 'At least one of setstr or getstr needs to be specified'
+        if auto_min_max not in [False, True, 'min', 'max']:
+            raise ValueError('Invalid auto_min_max values')
+        self._auto_min_max = auto_min_max
         if setstr is not None and getstr is None and autoget == False:
             # we don't have get, so we remove autoinit to prevent problems with cache and force_get (iprint)
             autoinit = False
@@ -1670,9 +1690,41 @@ class scpiDevice(BaseDevice):
         self._options_apply = options_apply
         self._options_conv = options_conv
         self._ask_write_opt = ask_write_opt
+        self._extra_check_func = extra_check_func
+        self._extra_set_func = extra_set_func
+        self._extra_set_after_func = extra_set_after_func
         self.type = str_type
         self._raw = raw
         self._option_cache = {}
+
+    def _delayed_init(self):
+        """ This is called after self.instr is set """
+        auto_min_max = self._auto_min_max
+        if auto_min_max in ['min', 'max']:
+            self._auto_set_min_max(auto_min_max)
+        elif auto_min_max:
+            self._auto_set_min_max()
+        super(scpiDevice, self)._delayed_init()
+    def _auto_set_min_max(self, ask='both'):
+        mnmx = self._get_dev_min_max(ask)
+        self._set_dev_min_max(*mnmx)
+    def _get_dev_min_max(self, ask='both'):
+        """ ask can be both, min or max. It always returns a tuple (min, max).
+            If the value was not obtained it will be None """
+        if ask not in ['both', 'min', 'max']:
+            raise ValueError('Invalid ask in _get_dev_min_max')
+        min = max = None
+        if ask in ['both', 'min']:
+            min = self._fromstr(self.instr.ask(self._getdev_p+' min'))
+        if ask in ['both', 'max']:
+            max = self._fromstr(self.instr.ask(self._getdev_p+' max'))
+        return min, max
+    def _set_dev_min_max(self, min=None, max=None):
+        if min is not None:
+            self.min = min
+        if max is not None:
+            self.max = max
+
     def _get_docstring(self, added=''):
         # we don't include options starting with _
         if len(self._options) > 0:
@@ -1801,11 +1853,16 @@ class scpiDevice(BaseDevice):
         return options
     def _setdev(self, val):
         # We only reach here if self._setdev_p is not None
+        if self._extra_set_func:
+            if self._extra_set_func(val, self) == "__SKIP__NEXT__":
+                return
         val = self._tostr(val)
         options = self._check_cache['options']
         command = self._setdev_p
         command = command.format(val=val, **options)
         self.instr.write(command, **self._ask_write_opt)
+        if self._extra_set_after_func:
+            self._extra_set_after_func(val, self)
     def _getdev(self, **kwarg):
         if self._getdev_cache:
             if kwarg == {}:
@@ -1827,6 +1884,9 @@ class scpiDevice(BaseDevice):
         # all kwarg have been tested
         self._check_cache['set_kwarg'] = {}
         self._check_cache['options'] = options
+        if self._extra_check_func:
+            if self._extra_check_func(val, self) == "__SKIP__NEXT__":
+                return
         super(scpiDevice, self)._checkdev(val)
 
 #######################################################
