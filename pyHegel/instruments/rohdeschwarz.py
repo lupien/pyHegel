@@ -44,17 +44,6 @@ register_usb_name('Rohde & Schwarz', 0x0aad)
 #######################################################
 ##    R&S SGMA generator
 #######################################################
-class apply_scpiDevice(scpiDevice):
-    def __init__(self, apply_func, *args, **kwargs):
-        """
-        subdevice should probably be a proxy
-        apply_func should probably be a proxy
-        """
-        super(apply_scpiDevice, self).__init__(*args, **kwargs)
-        self._apply_func = apply_func
-    def _setdev(self, val, **kwargs):
-        super(apply_scpiDevice, self)._setdev(val, **kwargs)
-        self._apply_func()
 
 #@register_instrument('Rohde&Schwarz', 'SGU100A', '3.1.19.26-3.50.124.74')
 #@register_instrument('Rohde&Schwarz', 'SGS100A', '3.1.19.26-3.50.124.73')
@@ -78,8 +67,21 @@ class rs_sgma(visaInstrument):
             othergenset_func = ProxyMethod(self._internal_othergen)
         self._othergenset = othergenset_func
         super(rs_sgma, self).__init__(visa_addr, **kwargs)
+
+    def init(self, full=False):
+        super(rs_sgma, self).init(full)
+        if full:
+            min, max = self.power_level_dbm._get_dev_min_max()
+            offset = self.power_level_offset_db.get()
+            min -= offset
+            max -= offset
+            self._power_level_min = min
+            self._power_level_max = max
+            self.power_level_dbm._doc = 'Range is affected by offset. With offset=0 it is min=%f, max=%f'%(min, max)
+
     def _internal_othergen(self, freq, power):
         print "Other gen should be at %r Hz, %r dBm"%(freq, power)
+
     def _current_config(self, dev_obj=None, options={}):
         opts = ['opt=%s'%self.available_options]
         if self._is_SGS:
@@ -99,14 +101,17 @@ class rs_sgma(visaInstrument):
         if self._is_SGS:
             opts += self._conf_helper('ref_output_signal', 'operation_mode', 'LO_source')
         return opts + self._conf_helper(options)
+
     def apply_settings(self):
         """ For SGU only: This is required after output_en, frequency or amplitude changes """
         if not self._is_SGS:
             self.write('SETTings:APPLy')
         else:
             print 'Only useful for SGU devices.'
+
     def reset_tripped_state(self):
         self.write('OUTPut:PROTection:CLEar')
+
     def conf_traits(self):
         """ For SGU only: Return a dictionnary of information about all the frequency bands """
         if self._is_SGS:
@@ -126,7 +131,7 @@ class rs_sgma(visaInstrument):
                 d[name] = v
         return ret
 
-    def _apply_helper(self):
+    def _apply_helper(self, val, dev_obj):
         lo_f = self.LO_freq.get()
         lo_p = self.LO_power.get()
         self._othergenset(lo_f, lo_p)
@@ -221,8 +226,10 @@ class rs_sgma(visaInstrument):
             To read the list of errors, call the get_error method.
         """
         return self.ask('SYSTem:SERRor?')
-    def startup_complete(self):
+
+    def startup_completed(self):
         return _fromstr_helper(self.ask('SYSTem:STARtup:COMPlete?'), bool)
+
     def reset(self):
         """ All instrument settings are reset to their default values (except for network settings ...). """
         # I think all the 2 lines perform the same operation.
@@ -230,10 +237,11 @@ class rs_sgma(visaInstrument):
         self.write('*RST')
         #self.write('SYSTem:PRESet')
 
-    def _get_min_max(self, command):
-        min = self.ask(command+'? min')
-        max = self.ask(command+'? max')
-        return min, max
+
+    def _power_level_extra_range_check(self, val, dev_obj):
+        offset = self.power_level_offset_db.getcache()
+        min, max = self._power_level_min, self._power_level_max
+        dev_obj._general_check(val, min=min+offset, max=max+offset)
 
     def _create_devs(self):
         opt = self.ask('*OPT?')
@@ -245,15 +253,14 @@ class rs_sgma(visaInstrument):
                 raise RuntimeError('Your SGU is currently in EXTENSION mode. You should connect to and use the SGS instead.')
             apply_helper = ProxyMethod(self._apply_helper)
             def l_apply_scpiDevice(*args, **kwargs):
-                return apply_scpiDevice(apply_helper, *args, **kwargs)
+                return scpiDevice(*args, extra_set_after_func=apply_helper, **kwargs)
             if self._override_extension:
                 self.rem_opmode = scpiDevice('REMote:OPMode', choices=ChoiceStrings('EXTension', 'STDalone'))
             self.output_en_raw = scpiDevice('OUTPut', str_type=bool)
             self.LO_freq = scpiDevice(getstr='LOSCillator:FREQuency?', str_type=float)
             self.LO_power = scpiDevice(getstr='LOSCillator:POWer?', str_type=float)
-            min, max = self._get_min_max('FREQuency')
-            self.freq_request = scpiDevice('FREQuency', str_type=float, min=min, max=max, doc="See LO_freq and LO_power")
-            self.power_level_dbm_raw = scpiDevice('POWer', str_type=float, min=-120, max=25)
+            self.freq_request = scpiDevice('FREQuency', str_type=float, auto_min_max=True, doc="See LO_freq and LO_power")
+            self.power_level_dbm_raw = scpiDevice('POWer', str_type=float, auto_min_max=True)
         else:
             l_apply_scpiDevice = scpiDevice
             self.ref_output_signal = scpiDevice('CONNector:REFLo:OUTPut', choices=ChoiceStrings('REF', 'LO', 'OFF'))
@@ -264,18 +271,15 @@ class rs_sgma(visaInstrument):
         self.output_poweron = scpiDevice('OUTPut:PON', choices=ChoiceStrings('OFF', 'UNCHanged'))
         self.output_same_attenuator_min_dBm = scpiDevice('OUTPut:AFIXed:RANGe:LOWer', str_type=float)
         self.output_same_attenuator_max_dBm = scpiDevice('OUTPut:AFIXed:RANGe:UPPer', str_type=float)
-        self.freq = l_apply_scpiDevice('FREQuency', str_type=float, min=1e6, max=40e9)
+        self.freq = l_apply_scpiDevice('FREQuency', str_type=float, auto_min_max=True)
         self.power_mode = scpiDevice('POWer:LMODe', choices=ChoiceStrings('NORMal', 'LNOISe', 'LDIStortion'))
         self.power_characteristic = scpiDevice('POWer:SCHaracteristic', choices=ChoiceStrings('AUTO', 'UNINterrupted', 'CVSWr', 'USER', 'MONotone'), doc='CVSWr means Constant VSWR.')
-        # TODO: handle proper min, max. POWer limits depend on POWER:offset
-        #   for example I have -20,+25 for 0 offset and -10, 35 for 10 offset.
-        #min, max = self._get_min_max('POWer') # These limits
-        min, max = -120, 125
-        self.power_level_dbm = l_apply_scpiDevice('POWer', str_type=float, min=min, max=max)
-        min, max = self._get_min_max('POWer:POWer')
-        self.power_level_no_offset_dbm = scpiDevice('POWer:POWer', str_type=float, min=min, max=max, doc='This bypasses the power offset')
-        self.power_level_offset_db = scpiDevice('POWer:OFFSet', str_type=float, min=-100, max=100)
-        self.power_level_limit_dbm = scpiDevice('POWer:LIMit', str_type=float, min=-300, max=30)
+        # see init for set power_level_dbm min max
+        self.power_level_dbm = l_apply_scpiDevice('POWer', str_type=float,
+                extra_check_func=ProxyMethod(self._power_level_extra_range_check))
+        self.power_level_no_offset_dbm = l_apply_scpiDevice('POWer:POWer', str_type=float, auto_min_max=True, doc='This bypasses the power offset')
+        self.power_level_offset_db = scpiDevice('POWer:OFFSet', str_type=float, auto_min_max=True)
+        self.power_level_limit_dbm = scpiDevice('POWer:LIMit', str_type=float, auto_min_max=True)
         self.power_range_max = scpiDevice(getstr='POWer:RANGe:UPPer?', str_type=float, doc='Queries the maximum power in the current level mode')
         self.power_range_min = scpiDevice(getstr='POWer:RANGe:LOWer?', str_type=float, doc='Queries the minimum power in the current level mode')
         self.power_alc_state = scpiDevice('POWer:ALC', choices=ChoiceStrings('OFFTable', 'ONTable', 'ON', redirects={'1':'ON'}))
