@@ -2293,6 +2293,7 @@ class ChoiceSimpleMap(ChoiceBase):
         return repr(self.values)
 
 Choice_bool_OnOff = ChoiceSimpleMap(dict(ON=True, OFF=False), filter=string.upper)
+Choice_bool_YesNo = ChoiceSimpleMap(dict(YES=True, NO=False), filter=string.upper)
 
 class ChoiceIndex(ChoiceBase):
     """
