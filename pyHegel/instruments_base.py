@@ -438,7 +438,21 @@ def locked_calling(func, extra=''):
     """
     argspec = inspect.getargspec(func)
     (args, varargs, varkw, defaults) = argspec
-    def_arg = inspect.formatargspec(*argspec) # this is: (self, arg1, arg2, kw1=1, kw2=5, *arg, *kwarg)
+    # find and replace class (like float), functions in defaults
+    # will use obj.__name__ but could also try to find the object name in the
+    # calling locals, globals, __builtin__
+    if defaults is not None:
+        defaults_repl = [(d.__name__, d) for d in defaults if getattr(d, '__name__', None)]
+    else:
+        defaults_repl = []
+    defaults_repl_obj = [d[1] for d in defaults_repl]
+    def def_repl_func(obj):
+        try:
+            ind = defaults_repl_obj.index(obj)
+        except ValueError:
+            return '='+repr(obj)
+        return '='+defaults_repl[ind][0]
+    def_arg = inspect.formatargspec(*argspec, formatvalue=def_repl_func) # this is: (self, arg1, arg2, kw1=1, kw2=5, *arg, *kwarg)
     use_arg = inspect.formatargspec(*argspec, formatvalue=lambda name: '') # this is: (self, arg1, arg2, kw1, kw2, *arg, *kwarg)
     selfname = args[0]+extra
     def_str = """
@@ -450,6 +464,7 @@ def locked_call_wrapper{def_arg}:
     """.format(def_arg=def_arg, use_arg=use_arg, self=selfname)
     lcl = locals()
     lcl.update(functools=functools)
+    lcl.update(defaults_repl)
     #code = compile(def_str, inspect.getsourcefile(func), 'exec')
     #exec(code, lcl)
     exec(def_str, lcl)
