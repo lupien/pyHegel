@@ -88,23 +88,6 @@ class Choice_float_extra(ChoiceLimits):
             return True
         return super(Choice_float_extra, self).__contains__(val)
 
-class scpiDevice_ExtraCheck(scpiDevice):
-    def __init__(self, extra_check_func, extra_message, *args, **kwargs):
-        self._extra_check_func = extra_check_func
-        self._extra_message = extra_message
-        super(scpiDevice_ExtraCheck, self).__init__(*args, **kwargs)
-    def _checkdev(self, val, **kwargs):
-        self._extra_check_func(val, self._extra_message, **kwargs)
-        super(scpiDevice_ExtraCheck, self)._checkdev(val, **kwargs)
-
-class scpiDevice_ExtraSet(scpiDevice):
-    def __init__(self, extra_set_func, *args, **kwargs):
-        self._extra_set_func = extra_set_func
-        super(scpiDevice_ExtraSet, self).__init__(*args, **kwargs)
-    def _setdev(self, val, **kwargs):
-        self._extra_set_func(val, **kwargs)
-        super(scpiDevice_ExtraSet, self)._setdev(val, **kwargs)
-
 
 @register_instrument('ITEST', '2102')
 #@register_instrument('ITEST', '2102', 'firmware_version???')
@@ -230,11 +213,11 @@ class iTest_be2102(visaInstrument):
         result = self.ask(pre+'CALibration:GAIN1?; OFFset1?; GAIN2?; OFFset2?')
         return dict(zip(['gain1', 'offset1', 'gain2', 'offset2'], result.split(';')))
 
-    def _extra_check_output_en(self, val, extra_message, **kwarg):
+    def _extra_check_output_en(self, val, dev_obj):
         if self.output_en.getcache():
-            raise RuntimeError(self.perror('You cannot change %s while output is enabled.'%extra_message))
+            raise RuntimeError(dev_obj.perror('dev cannot be changed while output is enabled.'))
 
-    def _extra_check_level(self, val, extra_message,**kwarg):
+    def _extra_check_level(self, val, dev_obj):
         #max_volt = 12
         max_volt = max(self.range.choices)
         curr_range = self.range.getcache()
@@ -243,7 +226,7 @@ class iTest_be2102(visaInstrument):
         rg_min, rg_max = -curr_range, +curr_range
         if (not output_en) and auto_range:
             rg_min, rg_max = -max_volt, max_volt
-        _general_check(val, min=rg_min, max=rg_max)
+        dev_obj._general_check(val, min=rg_min, max=rg_max)
 
     def _current_config(self, dev_obj=None, options={}):
         base = self._conf_helper('output_en', 'level', 'range', 'range_auto_en', 'slope', 'filter_fast_en',
@@ -268,7 +251,7 @@ class iTest_be2102(visaInstrument):
     #        # This is to update the cache so level check works correctly
     #        self.range.get()
     #    self.write((self._pre+';OUTPut %s'%_tostr_helper(val, bool)))
-    def _output_en_extraset(self, val):
+    def _output_en_extraset(self, val, dev_obj):
         if val and self.range_auto_en.getcache():
             # This is to update the cache so level check works correctly
             self.range.get()
@@ -276,7 +259,7 @@ class iTest_be2102(visaInstrument):
             # we go from on to off, ramp down
             self.level.set(0)
             self._ramp_wait()
-    def _range_auto_en_extraset(self, val):
+    def _range_auto_en_extraset(self, val, dev_obj):
         # This is to update the cache so level check works correctly
         self.range.get()
 
@@ -314,7 +297,7 @@ class iTest_be2102(visaInstrument):
         self.module_name = scpiDevice(pre+'NAMe', str_type=quoted_string())
         self.module_channels_indep = scpiDevice(getstr=pre+'IMC?', str_type=bool)
         extra_check_level = ProxyMethod(self._extra_check_level)
-        self.level =  scpiDevice_ExtraCheck(extra_check_level, 'level', pre+'VOLTage', str_type=float)
+        self.level = scpiDevice(pre+'VOLTage', str_type=float, extra_check_func=extra_check_level)
 
         range_list = map(float, self.ask('VOLTage:RANGe:LIST?').split(','))
         extra_check_output_en = ProxyMethod(self._extra_check_output_en)
@@ -322,20 +305,18 @@ class iTest_be2102(visaInstrument):
         The range can only be changed when the output is disabled.
         Changing to a smaller range than the current level will reset the level to 0V (pyHegel cache not updated).
         """
-        self.range =  scpiDevice_ExtraCheck(extra_check_output_en, 'range', pre+'VOLTage:RANGe', str_type=range_type(), choices=range_list, doc=range_doc)
+        self.range = scpiDevice(pre+'VOLTage:RANGe', str_type=range_type(), choices=range_list, doc=range_doc, extra_check_func=extra_check_output_en)
         self._devwrap('ramp')
-        #self.range_auto_en =  scpiDevice(pre+'VOLTage:RANGe:AUTO', str_type=bool)
         range_auto_en_extra_set = ProxyMethod(self._range_auto_en_extraset)
-        self.range_auto_en =  scpiDevice_ExtraSet(range_auto_en_extra_set, pre+'VOLTage:RANGe:AUTO', str_type=bool)
-        # TODO need to convert V/s to V/ms
+        self.range_auto_en = scpiDevice(pre+'VOLTage:RANGe:AUTO', str_type=bool, extra_set_func=range_auto_en_extra_set)
         self.slope =  scpiDevice(pre+'VOLTage:SLOPe', str_type=scaled_float(1e3), doc='in V/s', min=1.2e-3, max=1e3)
         self.remote_sense_en =  scpiDevice(pre+'VOLTage:REMote', str_type=bool)
         # STATE seems to do the same as output but has more options: ),0,OFF ;1 ON ; 2 WARNING ; 3,ALARm
         #self.output_en =  scpiDevice(pre+'OUTPut', str_type=bool)
         #self._devwrap('output_en')
         output_en_extra_set = ProxyMethod(self._output_en_extraset)
-        self.output_en =  scpiDevice_ExtraSet(output_en_extra_set, pre+'OUTPut', str_type=bool)
-        self.filter_fast_en =  scpiDevice_ExtraCheck(extra_check_output_en, 'filter', pre+'VOLTage:FILter', str_type=bool, doc='slow is 100ms, fast is 10ms')
+        self.output_en = scpiDevice(pre+'OUTPut', str_type=bool, extra_set_func=output_en_extra_set)
+        self.filter_fast_en = scpiDevice(pre+'VOLTage:FILter', str_type=bool, extra_check_func=extra_check_output_en, doc='slow is 100ms, fast is 10ms')
         self.temp_ready_status = scpiDevice(getstr=pre+'TEMPerature:STATus?', str_type=bool)
         self.meas_out = scpiDevice(getstr=pre+'MEASure:VOLTage?', str_type=float)
         self.meas_out_minmax = scpiDevice(getstr=pre+'MMX:VOLTage?', str_type=decode_float64, doc='get the minimum/maximum measurements since the last call', multi=['min', 'max'])
