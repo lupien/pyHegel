@@ -1606,6 +1606,21 @@ def _fromstr_helper(valstr, t):
     return t(valstr)
 
 
+def _get_dev_min_max(instr, ask_str, str_type=float, ask='both'):
+    """ ask_str is the question string.
+        ask can be both, min or max. It always returns a tuple (min, max).
+        If the value was not obtained it will be None
+        See also dev._get_dev_min_max, instr._get_dev_min_max
+    """
+    if ask not in ['both', 'min', 'max']:
+        raise ValueError('Invalid ask in _get_dev_min_max')
+    min = max = None
+    if ask in ['both', 'min']:
+        min = _fromstr_helper(instr.ask(ask_str+' min'), str_type)
+    if ask in ['both', 'max']:
+        max = _fromstr_helper(instr.ask(ask_str+' max'), str_type)
+    return min, max
+
 #######################################################
 ##    SCPI device
 #######################################################
@@ -1723,17 +1738,13 @@ class scpiDevice(BaseDevice):
     def _auto_set_min_max(self, ask='both'):
         mnmx = self._get_dev_min_max(ask)
         self._set_dev_min_max(*mnmx)
+    @locked_calling_dev
     def _get_dev_min_max(self, ask='both'):
         """ ask can be both, min or max. It always returns a tuple (min, max).
-            If the value was not obtained it will be None """
-        if ask not in ['both', 'min', 'max']:
-            raise ValueError('Invalid ask in _get_dev_min_max')
-        min = max = None
-        if ask in ['both', 'min']:
-            min = self._fromstr(self.instr.ask(self._getdev_p+' min'))
-        if ask in ['both', 'max']:
-            max = self._fromstr(self.instr.ask(self._getdev_p+' max'))
-        return min, max
+            If the value was not obtained it will be None.
+            See also instr._get_dev_min_max
+        """
+        return _get_dev_min_max(self.instr, self._getdev_p, self.type, ask)
     def _set_dev_min_max(self, min=None, max=None):
         if min is not None:
             self.min = min
@@ -3143,6 +3154,14 @@ class visaInstrument(BaseInstrument):
         if CHECKING():
             return
         self.visa.trigger()
+    @locked_calling
+    def _get_dev_min_max(self, ask_str, str_type=float, ask='both'):
+        """ ask_str is the question string.
+            ask can be both, min or max. It always returns a tuple (min, max).
+            If the value was not obtained it will be None
+            See also dev._get_dev_min_max
+        """
+        return _get_dev_min_max(self, ask_str, str_type, ask)
 
 
 #######################################################
