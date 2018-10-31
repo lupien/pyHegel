@@ -2073,6 +2073,9 @@ decode_float32 = functools.partial(_decode_block_auto, t=np.float32)
 decode_uint32 = functools.partial(_decode_block_auto, t=np.uint32)
 decode_uint8_bin = functools.partial(_decode_block, t=np.uint8)
 decode_uint16_bin = functools.partial(_decode_block, t=np.uint16)
+decode_int32 = functools.partial(_decode_block_auto, t=np.int32)
+decode_int8 = functools.partial(_decode_block_auto, t=np.int8)
+decode_int16 = functools.partial(_decode_block_auto, t=np.int16)
 decode_complex128 = functools.partial(_decode_block_auto, t=np.complex128)
 
 def decode_float64_2col(s):
