@@ -1627,7 +1627,7 @@ def _get_dev_min_max(instr, ask_str, str_type=float, ask='both'):
 
 class scpiDevice(BaseDevice):
     _autoset_val_str = ' {val}'
-    def __init__(self,setstr=None, getstr=None, raw=False, autoinit=True, autoget=True, get_cached_init=None,
+    def __init__(self,setstr=None, getstr=None, raw=False, chunk_size=None, autoinit=True, autoget=True, get_cached_init=None,
                  str_type=None, choices=None, doc='',
                  auto_min_max=False,
                  options={}, options_lim={}, options_apply=[], options_conv={},
@@ -1647,6 +1647,7 @@ class scpiDevice(BaseDevice):
            auto_min_max can be False, True, 'min' or 'max'. True will do both 'min' and
             'max'. It will call the getstr with min, max to obtain the limits.
            raw when True will use read_raw instead of the default raw (in get)
+           chunk_size is the option for ask.
 
            options is a list of optional parameters for get and set.
                   It is a dictionnary, where the keys are the option name
@@ -1725,6 +1726,7 @@ class scpiDevice(BaseDevice):
         self._extra_set_after_func = extra_set_after_func
         self.type = str_type
         self._raw = raw
+        self._chunk_size = chunk_size
         self._option_cache = {}
 
     def _delayed_init(self):
@@ -1903,7 +1905,7 @@ class scpiDevice(BaseDevice):
         command = self._getdev_p
         command = command.format(**options)
         self._get_para_checked()
-        ret = self.instr.ask(command, self._raw, **self._ask_write_opt)
+        ret = self.instr.ask(command, raw=self._raw, chunk_size=self._chunk_size, **self._ask_write_opt)
         return self._fromstr(ret)
     def _checkdev(self, val, **kwarg):
         options = self._combine_options(**kwarg)
@@ -3071,7 +3073,7 @@ class visaInstrument(BaseInstrument):
                 raise ValueError(self.perror('The write val is not a string.'))
         self._last_rw_time.write_time = time.time()
     @locked_calling
-    def ask(self, question, raw=False):
+    def ask(self, question, raw=False, chunk_size=None):
         """
         Does write then read.
         With raw=True, replaces read with a read_raw.
@@ -3081,7 +3083,7 @@ class visaInstrument(BaseInstrument):
         # we prevent CTRL-C from breaking between write and read using context manager
         with _delayed_signal_context_manager():
             self.write(question)
-            ret = self.read(raw)
+            ret = self.read(raw=raw, chunk_size=chunk_size)
         return ret
     def idn(self):
         return self.ask('*idn?')
