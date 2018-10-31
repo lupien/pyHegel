@@ -2085,10 +2085,14 @@ class scaled_float(object):
         return _tostr_helper(val/self.scale, float)
 
 class quoted_string(object):
-    def __init__(self, quote_char='"', quiet=False):
+    def __init__(self, quote_char='"', quiet=False, tostr=True, fromstr=True):
         self._quote_char = quote_char
         self._quiet = quiet
+        self._fromstr = fromstr
+        self._tostr = tostr
     def __call__(self, quoted_str):
+        if not self._fromstr:
+            return quoted_str
         quote_char = self._quote_char
         if len(quoted_str) and quote_char == quoted_str[0] and quote_char == quoted_str[-1]:
             return quoted_str[1:-1]
@@ -2097,6 +2101,8 @@ class quoted_string(object):
                 print 'Warning, string <%s> does not start and end with <%s>'%(quoted_str, quote_char)
             return quoted_str
     def tostr(self, unquoted_str):
+        if not self._tostr:
+            return unquoted_str
         quote_char = self._quote_char
         if quote_char in unquoted_str:
             raise ValueError, 'The given string already contains a quote :%s:'%quote_char
