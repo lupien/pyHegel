@@ -1974,10 +1974,13 @@ def _decode_block_header(s):
     if s[0] != '#':
         return slice(None), -1, 0
     nh = int(s[1])
-    nbytes = int(s[2:2+nh])
+    if nh: # a value of 0 is possible
+        nbytes = int(s[2:2+nh])
+    else:
+        nbytes = -1 # nh=0 is used for unknown length or lengths that require more than 9 digits.
     return slice(2+nh, None), nbytes, 2+nh
 
-def _decode_block_base(s):
+def _decode_block_base(s, skip=None):
     sl, nb, nh = _decode_block_header(s)
     block = s[sl]
     lb = len(block)
@@ -1990,6 +1993,14 @@ def _decode_block_base(s):
             elif lb-nb == 2 and s[-2:] == '\r\n':
                 return block[:-2]
             raise IndexError, 'Extra data in for decoding. Got %i ("%s ..."), expected %i'%(lb, block[nb:nb+10], nb)
+    elif skip:
+        if isinstance(skip, basestring):
+            if block.endswith(skip):
+                return block[:-len(skip)]
+            else:
+                raise RuntimeError('Data is not terminated by requested skip string.')
+        else:
+            return block[:-skip]
     return block
 
 def _encode_block_base(s):
@@ -1999,16 +2010,22 @@ def _encode_block_base(s):
     """
     N = len(s)
     N_as_string = str(N)
-    header = '#%i'%len(N_as_string) + N_as_string
+    if len(N_as_string) > 1: # starting at 1G
+        header = '#0'
+    else:
+        header = '#%i'%len(N_as_string) + N_as_string
     return header+s
 
-def _decode_block(s, t=np.float64, sep=None):
+def _decode_block(s, t=np.float64, sep=None, skip=None):
     """
         sep can be None for binaray encoding or ',' for ascii csv encoding
         type can be np.float64 float32 int8 int16 int32 uint8 uint16 ...
               or it can be entered as a string like 'float64'
+        skip can be used when the data length is unknown (#0....)
+             than you can enter the termination string you want removed from
+             the end, or an integer of the number of character to remove from the end.
     """
-    block = _decode_block_base(s)
+    block = _decode_block_base(s, skip=skip)
     if sep is None:
         return np.fromstring(block, t)
     return np.fromstring(block, t, sep=sep)
@@ -2024,19 +2041,20 @@ def _encode_block(v, sep=None):
     s = v.tostring()
     return _encode_block_base(s)
 
-def _decode_block_auto(s, t=np.float64):
+def _decode_block_auto(s, t=np.float64, skip=None):
     if s[0] == '#':
         sep = None
     else:
         sep = ','
-    return _decode_block(s, t, sep=sep)
+    return _decode_block(s, t, sep=sep, skip=skip)
 
 class Block_Codec(object):
-    def __init__(self, dtype=np.float64, sep=None):
+    def __init__(self, dtype=np.float64, sep=None, skip=None):
         self._dtype = dtype
         self._sep = sep
+        self._skip = skip
     def __call__(self, input_str):
-        return _decode_block(input_str, self._dtype, self._sep)
+        return _decode_block(input_str, self._dtype, self._sep, self._skip)
     def tostr(self, array):
         if array.dtype != self._dtype:
             array = array.astype(self._dtype)
