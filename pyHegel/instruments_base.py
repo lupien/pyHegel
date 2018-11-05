@@ -2016,7 +2016,7 @@ def _encode_block_base(s):
         header = '#%i'%len(N_as_string) + N_as_string
     return header+s
 
-def _decode_block(s, t=np.float64, sep=None, skip=None):
+def _decode_block(s, t='<f8', sep=None, skip=None):
     """
         sep can be None for binaray encoding or ',' for ascii csv encoding
         type can be np.float64 float32 int8 int16 int32 uint8 uint16 ...
@@ -2041,7 +2041,7 @@ def _encode_block(v, sep=None):
     s = v.tostring()
     return _encode_block_base(s)
 
-def _decode_block_auto(s, t=np.float64, skip=None):
+def _decode_block_auto(s, t='<f8', skip=None):
     if s[0] == '#':
         sep = None
     else:
@@ -2049,7 +2049,7 @@ def _decode_block_auto(s, t=np.float64, skip=None):
     return _decode_block(s, t, sep=sep, skip=skip)
 
 class Block_Codec(object):
-    def __init__(self, dtype=np.float64, sep=None, skip=None):
+    def __init__(self, dtype='<f8', sep=None, skip=None):
         self._dtype = dtype
         self._sep = sep
         self._skip = skip
@@ -2061,36 +2061,36 @@ class Block_Codec(object):
         return _encode_block(array, self._sep)
 
 class Block_Codec_Raw(object):
-    def __init__(self, dtype=np.float64, sep=None):
+    def __init__(self, dtype='<f8', sep=None):
         self._dtype = dtype
     def __call__(self, input_str):
         return np.fromstring(input_str, self._dtype)
     def tostr(self, array):
         return array.tostring()
 
-decode_float64 = functools.partial(_decode_block_auto, t=np.float64)
-decode_float32 = functools.partial(_decode_block_auto, t=np.float32)
-decode_uint32 = functools.partial(_decode_block_auto, t=np.uint32)
+decode_float64 = functools.partial(_decode_block_auto, t='<f8') # np.float64, little-endian
+decode_float32 = functools.partial(_decode_block_auto, t='<f4') # np.float32, little-endian
+decode_uint32 = functools.partial(_decode_block_auto, t='<u4') # np.uint32, little-endian
 decode_uint8_bin = functools.partial(_decode_block, t=np.uint8)
-decode_uint16_bin = functools.partial(_decode_block, t=np.uint16)
-decode_int32 = functools.partial(_decode_block_auto, t=np.int32)
+decode_uint16_bin = functools.partial(_decode_block, t='<u2') # np.uint16, little-endian
+decode_int32 = functools.partial(_decode_block_auto, t='<i4') # np.int32, little-endian
 decode_int8 = functools.partial(_decode_block_auto, t=np.int8)
-decode_int16 = functools.partial(_decode_block_auto, t=np.int16)
-decode_complex128 = functools.partial(_decode_block_auto, t=np.complex128)
+decode_int16 = functools.partial(_decode_block_auto, t='<i2') # np.int16, little-endian
+decode_complex128 = functools.partial(_decode_block_auto, t='<c16') # np.complex128, little-endian
 
 def decode_float64_2col(s):
-    v = _decode_block_auto(s, t=np.float64)
+    v = _decode_block_auto(s, t='<f8')
     v.shape = (-1,2)
     return v.T
 
 def decode_float64_avg(s):
-    return _decode_block_auto(s, t=np.float64).mean()
+    return _decode_block_auto(s, t='<f8').mean()
 
 def decode_float64_std(s):
-    return _decode_block_auto(s, t=np.float64).std(ddof=1)
+    return _decode_block_auto(s, t='<f8').std(ddof=1)
 
 def decode_float64_meanstd(s):
-    data = _decode_block_auto(s, t=np.float64)
+    data = _decode_block_auto(s, t='<f8')
     return data.std(ddof=1)/np.sqrt(len(data))
 
 class scaled_float(object):
