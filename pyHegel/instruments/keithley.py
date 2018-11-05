@@ -29,7 +29,7 @@ import time
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceBase, ChoiceLimits, ChoiceStrings, ChoiceDevDep,\
-                            locked_calling, visa_wrap
+                            locked_calling, visa_wrap, _decode_block_auto
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 #hex(1510) = 0x05E6
@@ -85,14 +85,10 @@ class ChoiceMultipleStrings(ChoiceBase):
         return ChoiceMultipleStrings(self.choice_strings[index])
 
 def decode_block_auto(s, t=np.float64):
-    if s[0:2] == '#0':
-        block = s[2:][:-1] # remove #0 and ending \n
-        return np.fromstring(block, t)
-    else:
-        return np.fromstring(s, t, sep=',')
+    return _decode_block_auto(s, t, skip='\n')
 
 #######################################################
-##    Keithley 245S ourceMeter
+##    Keithley 245S SourceMeter
 #######################################################
 
 # The instrument needs to be in SCPI mode
