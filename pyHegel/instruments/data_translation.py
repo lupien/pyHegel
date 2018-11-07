@@ -277,8 +277,8 @@ class DataTranslation(BaseInstrument):
             return
         exec('self.'+string)
     @locked_calling
-    def ask(self, string, raw=False):
-        # raw is not used here but is needed by scpiDevice methods
+    def ask(self, string, raw=False, chunk_size=None):
+        # raw, chunk_size is not used here but is needed by scpiDevice methods
         if CHECKING():
             return ''
         return eval('self.'+string)
