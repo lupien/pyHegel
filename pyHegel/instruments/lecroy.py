@@ -631,6 +631,9 @@ class lecroy_wavemaster(visaInstrumentAsync):
         return ch
     def _fetch_getformat(self, **kwarg):
         xaxis = kwarg.get('xaxis', True)
+        raw = kwarg.get('raw', False)
+        if raw:
+            xaxis = False
         ch = kwarg.get('ch', None)
         ch = self._fetch_ch_helper(ch)
         if xaxis:
@@ -651,7 +654,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
                     If obtaining more than one channels, they should have the same xaxis
             -xaxis: Set to True (default) to return the timebase as the first colum
             -raw: Set to true to return the vertical values as raw integers, otherwise
-                  they are converted floats
+                  they are converted floats. xaxis is not returned anymore
         """
         # TODO handle complex ffts...
         ch = self._fetch_ch_helper(ch)
@@ -660,7 +663,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         for c in ch:
             data = self.data.get(ch=c)
             header = data.header
-            if xaxis and first:
+            if xaxis and first and not raw:
                 first = False
                 ret = [header.HORIZ_INTERVAL*np.arange(header.WAVE_ARRAY_COUNT) + header.HORIZ_OFFSET]
             if raw:
@@ -694,11 +697,11 @@ class lecroy_wavemaster(visaInstrumentAsync):
             self.vbs_write(command)
         else:
             super(lecroy_wavemaster, self).write(command)
-    def ask(self, command, raw=False, use_vbs=False):
+    def ask(self, command, raw=False, chunk_size=None, use_vbs=False):
         if use_vbs:
             return self.vbs_ask(command)
         else:
-            return super(lecroy_wavemaster, self).ask(command, raw=raw)
+            return super(lecroy_wavemaster, self).ask(command, raw=raw, chunk_size=chunk_size)
     def _snap_png_getdev(self, area='dso', white_back=False):
         """
         Use like this: get(wave.snap_png, filename='testname.png')
@@ -1060,7 +1063,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         devChannelInOption = lambda *arg, **kwarg: devChannelBaseOption(self.current_input_channel, *arg, **kwarg)
         devChannelTrigOption = lambda *arg, **kwarg: devChannelBaseOption(self.current_trig_channel, *arg, **kwarg)
         devChannelFuncOption = lambda *arg, **kwarg: devChannelBaseOption(self.current_func_channel, *arg, **kwarg)
-        self.data = devChannelOption(getstr='{ch}:WaveForm? ALL', str_type=waveformdata(), autoinit=False, trig=True, raw=True)
+        self.data = devChannelOption(getstr='{ch}:WaveForm? ALL', str_type=waveformdata(), autoinit=False, trig=True, raw=True, chunk_size=1024*1024*10)
         self.data_header = devChannelOption(getstr='{ch}:WaveForm? DESC', str_type=waveformdata(return_only_header=True), autoinit=False, trig=True, raw=True)
         data_setup_ch = lecroy_dict([('SP', 'steps'), ('NP', 'maxpnts'), ('FP', 'first'), ('SN', 'segment_n')], [int]*4)
         self.data_setup = scpiDevice('WaveForm_SetUp', choices=data_setup_ch, doc="""
