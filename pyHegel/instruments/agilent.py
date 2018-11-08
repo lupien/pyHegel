@@ -34,7 +34,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDev, ChoiceDevSwitch, ChoiceIndex,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
                             decode_uint16_bin, _decode_block_base, decode_float64_2col,\
-                            decode_complex128, sleep, locked_calling, visa_wrap
+                            decode_complex128, sleep, locked_calling, visa_wrap, _encode_block
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 register_usb_name('Agilent Technologies', 0x0957)
@@ -1491,16 +1491,61 @@ class agilent_PNAL(visaInstrumentAsync):
         ch=self.current_channel.getcache()
         command = 'SENSe{ch}:AVERage:CLEar'.format(ch=ch)
         self.write(command)
-    def get_file(self, remote_file, local_file):
+    def get_file(self, remote_file, local_file=None):
         """
             Obtain the file remote_file from the analyzer and save it
-            on this computer as local_file
+            on this computer as local_file if given, otherwise returns the data
         """
         s = self.ask('MMEMory:TRANsfer? "%s"'%remote_file, raw=True)
         s = _decode_block_base(s)
-        f = open(local_file, 'wb')
-        f.write(s)
-        f.close()
+        if local_file:
+            with open(local_file, 'wb') as f:
+                f.write(s)
+        else:
+            return s
+    def remote_ls(self, remote_path=None):
+        """
+            if remote_path is None, get catalog of device remote_cwd.
+            It only list files (not directories).
+            returns None for empty and invalid directories.
+        """
+        extra = ""
+        if remote_path:
+            extra = ' "%s"'%remote_path
+        res = self.ask('MMEMory:CATalog?'+extra)
+        res = quoted_string()(res)
+        if res == 'NO CATALOG':
+            return None
+        else:
+            return res.split(',')
+    def send_file(self, dest_file, local_src_file=None, src_data=None, overwrite=False):
+        """
+            dest_file: is the file name (absolute or relative to device remote_cwd)
+                       you can use / to separate directories
+            overwrite: when True will skip testing for the presence of the file on the
+                       instrument and proceed to overwrite it without asking confirmation.
+            Use one of local_src_file (local filename) or src_data (data string)
+            Maximum file size is 20 MB.
+        """
+        if not overwrite:
+            # split seeks both / and \
+            directory, filename = os.path.split(dest_file)
+            ls = self.remote_ls(directory)
+            if ls:
+                ls = map(lambda s: s.lower(), ls)
+                if filename.lower() in ls:
+                    raise RuntimeError('Destination file already exists. Will not overwrite.')
+        if src_data is local_src_file is None:
+            raise ValueError('You need to specify one of local_src_file or src_data')
+        if src_data and local_src_file:
+            raise ValueError('You need to specify only one of local_src_file or src_data')
+        if local_src_file:
+            with open(local_src_file, 'rb') as f:
+                src_data = f.read()
+        data_str = _encode_block(src_data)
+        # manually add terminiation to prevent warning if data already ends with termination
+        self.write('MMEMory:TRANsfer "%s",%s\n'%(dest_file, data_str), termination=None)
+
     def _fetch_getformat(self, **kwarg):
         unit = kwarg.get('unit', 'default')
         xaxis = kwarg.get('xaxis', True)
@@ -1888,6 +1933,12 @@ class agilent_PNAL(visaInstrumentAsync):
         self.power_dbm_port2 = devChOption(':SOURce{ch}:POWer2', str_type=float)
         self.power_mode_port1 = devChOption(':SOURce{ch}:POWer1:MODE', choices=ChoiceStrings('AUTO', 'ON', 'OFF'))
         self.power_mode_port2 = devChOption(':SOURce{ch}:POWer2:MODE', choices=ChoiceStrings('AUTO', 'ON', 'OFF'))
+        self.remote_cwd = scpiDevice('MMEMory:CDIRectory', str_type=quoted_string(),
+                                     doc=r"""
+                                          instrument default is C:/Program Files/Agilent/Network Analyzer/Documents
+                                          You can use / (if you are using \, make sure to use raw string r"" or
+                                          double them \\)
+                                          """)
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
