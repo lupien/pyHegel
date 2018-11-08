@@ -2010,10 +2010,11 @@ def _encode_block_base(s):
     """
     N = len(s)
     N_as_string = str(N)
-    if len(N_as_string) > 1: # starting at 1G
+    N_as_string_len = len(N_as_string)
+    if N_as_string_len >= 10: # starting at 1G
         header = '#0'
     else:
-        header = '#%i'%len(N_as_string) + N_as_string
+        header = '#%i'%N_as_string_len + N_as_string
     return header+s
 
 def _decode_block(s, t='<f8', sep=None, skip=None):
@@ -2032,13 +2033,16 @@ def _decode_block(s, t='<f8', sep=None, skip=None):
 
 def _encode_block(v, sep=None):
     """
-    Encodes the iterable v (array, list ...)
+    Encodes the iterable v (array, list ..., or just a string)
     into either a scpi binary block (including header) when sep=None (default)
     or into a sep separated string. Often sep is ',' for scpi
     """
     if sep is not None:
         return ','.join(map(repr, v))
-    s = v.tostring()
+    if isinstance(v, basestring):
+        s = v
+    else:
+        s = np.asarray(v).tostring()
     return _encode_block_base(s)
 
 def _decode_block_auto(s, t='<f8', skip=None):
@@ -3091,10 +3095,10 @@ class visaInstrument(BaseInstrument):
         self._last_rw_time.read_time = time.time()
         return ret
     @locked_calling
-    def write(self, val):
+    def write(self, val, termination='default'):
         self._do_wr_wait()
         if not CHECKING():
-            self.visa.write(val)
+            self.visa.write(val, termination=termination)
         else:
             if not isinstance(val, basestring):
                 raise ValueError(self.perror('The write val is not a string.'))
