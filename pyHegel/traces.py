@@ -35,7 +35,8 @@ import gc
 from . import qt_wrap  # This is used for reset_pyhegel command
 from .qt_wrap import QtCore, QtGui, processEvents
 import numpy as np
-from matplotlib import pylab, rcParams
+import matplotlib
+from matplotlib import pylab, rcParams, __version__ as mpl_version
 import dateutil
 from . import config
 
@@ -52,6 +53,7 @@ else:
     from matplotlib.backends.backend_qt4 import FigureManagerQT
 
 from matplotlib.figure import Figure
+from distutils.version import LooseVersion
 
 # see from mpl_toolkits.axes_grid1 import host_subplot
 # matplotlib/Examples/axes_grid/demo_parasite_axes2.py
@@ -59,6 +61,22 @@ from matplotlib.figure import Figure
 from mpl_toolkits.axes_grid1.parasite_axes import host_subplot_class_factory
 import mpl_toolkits.axisartist as AA
 host_subplot_class = host_subplot_class_factory(AA.Axes)
+
+# This problem affects Anaconda 5.2
+# see https://github.com/matplotlib/matplotlib/issues/12208
+if LooseVersion('2.2.0') <= mpl_version < LooseVersion('2.2.4') or \
+   mpl_version == LooseVersion('3.0.0'):
+       def transform_non_affine_wrapper(self, points):
+           if not isinstance(points, np.ndarray):
+               points = np.array(points)
+           return self._transform_non_affine_cl_org(points)
+       BGT = matplotlib.transforms.BlendedGenericTransform
+       #print 'About to fix mpl_toolkit log scale transform bug of 2.2.x'
+       if not hasattr(BGT, '_transform_non_affine_cl_org'):
+           print 'Fixing mpl_toolkit log scale transform bug of 2.2.x'
+           BGT._transform_non_affine_cl_org = BGT.transform_non_affine
+           BGT.transform_non_affine = transform_non_affine_wrapper
+
 
 _figlist = []
 
