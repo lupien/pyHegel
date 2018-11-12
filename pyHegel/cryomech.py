@@ -32,13 +32,6 @@ import os
 import serial
 import sys
 import time
-import win32com.client
-# Result from C:\Python27\Lib\site-packages\win32com\client\makepy.py -i "SMDP_SVR 1.0 Type Library"
-#SMDP_SVR 1.0 Type Library
-# {59B51FF9-6181-41E6-9662-146ECA120832}, lcid=0, major=1, minor=0
-# # Use these commands in Python code to auto generate .py support
-from win32com.client import gencache
-gencache.EnsureModule('{59B51FF9-6181-41E6-9662-146ECA120832}', 0, 1, 0)
 
 
 def do_escape(message):
@@ -124,6 +117,15 @@ class Cryomech(object):
         self.active_x = active_x
         self.addr=addr
         if active_x:
+            import win32com.client
+            from win32com.client import gencache
+            # Result from C:\Python27\Lib\site-packages\win32com\client\makepy.py -i "SMDP_SVR 1.0 Type Library"
+            #SMDP_SVR 1.0 Type Library
+            # {59B51FF9-6181-41E6-9662-146ECA120832}, lcid=0, major=1, minor=0
+            # Use those results to generate static cache with gencache.
+            # The cache is created under:  $USERPROFILE/AppData/Local/Temp/gen_py/2.7
+            # gencache is needed to handle win32com.client.constants.PROT0_SMDP
+            gencache.EnsureModule('{59B51FF9-6181-41E6-9662-146ECA120832}', 0, 1, 0)
             self.com_obj = win32com.client.Dispatch('SMDP_SVR.ProtEngine')
             co = self.com_obj
             co.Baud = baudrate
