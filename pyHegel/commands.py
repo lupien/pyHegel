@@ -432,10 +432,13 @@ def _dev_filename(root, dev_name, npts, reuse, append=False):
     n = int(np.log10(maxn))+1
     return root + '_'+ dev_name+'_%0'+('%ii'%n)+ext
 
-def _readall(devs, formats, i, async=None, noflat=False, extra_kw={}):
+def _readall(devs, formats, i, async=None, noflat=False, extra_kw={}, output_full=False):
     if devs == []:
+        if output_full:
+            return [], []
         return []
     ret = [None]*len(devs)
+    ret_full = [None]*len(devs)
     for j, (dev, fmt) in enumerate(zip(devs, formats)):
         dev, kwarg = _get_dev_kw(dev, **extra_kw)
         filename = fmt['basename']
@@ -455,6 +458,7 @@ def _readall(devs, formats, i, async=None, noflat=False, extra_kw={}):
                 continue
         else:
             val = dev.get(**kwarg)
+        val_full = val
         if not noflat:
             if val is None:
                 val = i
@@ -467,19 +471,21 @@ def _readall(devs, formats, i, async=None, noflat=False, extra_kw={}):
                     instruments_base._write_dev(val, filename, format=fmt, first= i==0)
                     val = i
         ret[j] = val
-    if noflat:
-        return ret
-    else:
-        return _writevec_flatten_list(ret)
+        ret_full[j] = val_full
+    if not noflat:
+        ret = _writevec_flatten_list(ret)
+    if output_full:
+        return ret, ret_full
+    return ret
 
-def _readall_async(devs, formats, i, noflat=False, extra_kw={}):
+def _readall_async(devs, formats, i, noflat=False, extra_kw={}, output_full=False):
     try:
-        _readall(devs, formats, i, async=0, noflat=noflat, extra_kw=extra_kw)
-        _readall(devs, formats, i, async=1, noflat=noflat, extra_kw=extra_kw)
-        return _readall(devs, formats, i, async=2, noflat=noflat, extra_kw=extra_kw) # includes async3
+        _readall(devs, formats, i, async=0, noflat=noflat, extra_kw=extra_kw, output_full=output_full)
+        _readall(devs, formats, i, async=1, noflat=noflat, extra_kw=extra_kw, output_full=output_full)
+        return _readall(devs, formats, i, async=2, noflat=noflat, extra_kw=extra_kw, output_full=output_full) # includes async3
     except KeyboardInterrupt:
         print 'Rewinding async because of keyboard interrupt'
-        _readall(devs, formats, i, async=-1, noflat=noflat, extra_kw=extra_kw)
+        _readall(devs, formats, i, async=-1, noflat=noflat, extra_kw=extra_kw, output_full=output_full)
         raise
 
 def _checkTracePause(trace):
@@ -588,10 +594,27 @@ class _Sweep(instruments.BaseInstrument):
       When this is a string (not None), it will be executed after the new values is
       set but BEFORE the out list is read.
       If you only want a delay, you can also change the beforewait device.
-      The variables i, v and vv represent the current cycle index, the current set value
-      (the last one for multi sweep), and a vector of all set values.
+      The variables i, v, vv, iv represent the current cycle index, the current set value
+      (the last one for multi sweep), a vector of all set values and a vector of
+      all resulting cached values for set.
       The variable fwd is forward(True)/reverse(False) state of v.
+      The variables iter_part and iter_total are also available (see description below).
       It should also have access to the globals present in the interactive environment.
+
+      It can also be a function. The function signature is:
+         func(data_dict)
+      where data_dict is a dictionnary with contents:
+             i: current cycle index (not the same as iter_part in single sweep
+                 with updown in multiple file. It depends on fwd)
+             ask_vals: vv from above. It is a list of all requested sets.
+             v: is vv[-1], the last set value requested (same as above)
+             fwd: see above
+             set_vals: is the values of all cached values after set (like iv above)
+                       Some instruments round requested values. When the device
+                       is setup properly this should be the value the instrument
+                       actually used.
+             iter_part:  the number of the current interation (goes 1-iter_total)
+             iter_total: the total number of iterations.
       """)
     beforewait = instruments.MemoryDevice(0.02, doc="""
       Wait after the new value is set but before the out list is read.
@@ -607,15 +630,39 @@ class _Sweep(instruments.BaseInstrument):
     after = instruments.MemoryDevice(doc="""
       When this is a string (not None), it will be executed AFTER the out list is read
       but before the next values is set.
-      The variables i, v and vv represent the current cycle index, the current set value
-      (the last one for multi sweep), and a vector of all set values.
+      The variables i, v, vv, iv represent the current cycle index, the current set value
+      (the last one for multi sweep), a vector of all set values and a vector of
+      all resulting cached values for set.
       The variable fwd is forward(True)/reverse(False) state of v.
+      The variables iter_part and iter_total are also available (see description below).
       The variable vals contain all the values read in out. It is a flat list
       that contains all the data to be saved on a row of the main file.
       Note that v and vals[0] can be different for devices that use setget
       (those that perform a get after a set, because the instrument could be
-      changing/rounding the value). v is the asked for value.
+      changing/rounding the value). v is the asked for value. vals starts with iv.
+      Also have variables vals_only, vals_full which are a list of all the get values.
+      vals_full still has vector data (saved in extra files) and is unflattened,
+      while they are replaced by index in vals_only. Note that vals = iv+vals_only+[time]
       It should also have access to the globals present in the interactive environment.
+
+      It can also be a function. The function signature is:
+         func(data_dict)
+      where data_dict is a dictionnary with contents:
+             i: current cycle index (not the same as iter_part in single sweep
+                 with updown in multiple file. It depends on fwd)
+             ask_vals: vv from above. It is a list of all requested sets.
+             v: is vv[-1], the last set value requested (same as above)
+             fwd: see above
+             set_vals: is the values of all cached values after set (like iv above)
+                       Some instruments round requested values. When the device
+                       is setup properly this should be the value the instrument
+                       actually used.
+             saved_vals: the data to be saved in the file (like vals above)
+             read_vals:  only the read vales in saved_vals (minus set_vals and time)
+                         (like vals_only above)
+             read_vals_full: all the data read, not flatten (like vals_full above)
+             iter_part:  the number of the current interation (goes 1-iter_total)
+             iter_total: the total number of iterations.
 
       You can always read a value with get. Or to prevent actually talking to
       the device (and respond faster) you can obtain the cache value with
@@ -659,14 +706,33 @@ class _Sweep(instruments.BaseInstrument):
     This number is used, and incremented automatically when {next_i:02} is used (for 00 to 99).
      {next_i:03}  is used for 000 to 999, etc
     """)
-    def execbefore(self, i, fwd, v, vv):
-        b = self.before.get()
+    def execbefore(self, i, fwd, v, vv, iv, other_options):
+        # i, fwd are the same as iter_n and cfwd
+        iter_info = other_options.get('iter_info', (i, 1, 2, fwd))
+        iter_n, iter_part, iter_total, cfwd = iter_info
+        b = other_options.get('before', None)
+        if b is None:
+            b = self.before.get()
         if b:
-            exec (b, _globaldict, locals())
-    def execafter(self, i, fwd, v, vv, vals):
-        b = self.after.get()
+            if isinstance(b, basestring):
+                exec (b, _globaldict, locals())
+            else:
+                info = dict(i=i, fwd=fwd, v=v, ask_vals=vv, set_vals=iv, iter_part=iter_part, iter_total=iter_total)
+                b(info)
+    def execafter(self, i, fwd, v, vv, iv, vals, vals_only, vals_full, other_options):
+        # i, fwd are the same as iter_n and cfwd
+        iter_info = other_options.get('iter_info', (None, None, None, True))
+        iter_n, iter_part, iter_total, cfwd = iter_info
+        b = other_options.get('after', None)
+        if b is None:
+            b = self.after.get()
         if b:
-            exec (b, _globaldict, locals())
+            if isinstance(b, basestring):
+                exec (b, _globaldict, locals())
+            else:
+                info = dict(i=i, fwd=fwd, v=v, ask_vals=vv, set_vals=iv, iter_part=iter_part, iter_total=iter_total,
+                            saved_vals=vals, read_vals=vals_only, read_vals_full=vals_full)
+                b(info)
     def _fn_insert_updown(self, filename):
         fmtr = string.Formatter()
         present = False
@@ -803,12 +869,14 @@ class _Sweep(instruments.BaseInstrument):
             t.set_xlogscale()
         return t, gsel
 
-    def _do_inner_loop(self, iter_info, sets, devs, cformats, fobj, async, trace_obj, negative, gsel, clf=False, printit=False):
+    def _do_inner_loop(self, iter_info, sets, devs, cformats, fobj, async, trace_obj, negative, gsel, clf=False, printit=False, other_options={}):
         # iter_n is used for filenames and exec_before/after (could depend on separate fwd/rev files)
         # iter_partial between 1 and iter_total: they are both used for progress update.
         #   iter_partial can sometimes be iter_n+1
         # cfwd is True when we are currently doing a forward sweep (uses for exec before/after)
         iter_n, iter_part, iter_total, cfwd = iter_info
+        other_options = other_options.copy()
+        other_options.update(iter_info=iter_info)
         tme = clock.get()
         vv = []
         iv = []
@@ -826,13 +894,13 @@ class _Sweep(instruments.BaseInstrument):
             iv.extend(val)
         if printit:
             printit('Sweep part: %3i/%-3i   %s'%(iter_part, iter_total, vv))
-        self.execbefore(iter_n, cfwd, v, vv)
+        self.execbefore(iter_n, cfwd, v, vv, iv, other_options)
         wait(bwait)
         if async:
-            vals = _readall_async(devs, cformats, iter_n)
+            vals, vals_full = _readall_async(devs, cformats, iter_n, output_full=True)
         else:
-            vals = _readall(devs, cformats, iter_n)
-        self.execafter(iter_n, cfwd, v, vv, iv+vals+[tme])
+            vals, vals_full = _readall(devs, cformats, iter_n, output_full=True)
+        self.execafter(iter_n, cfwd, v, vv, iv, iv+vals+[tme], vals, vals_full, other_options)
         if fobj:
             writevec(fobj, iv+vals+[tme])
         if trace_obj is not None:
@@ -857,7 +925,7 @@ class _Sweep(instruments.BaseInstrument):
     def __call__(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
                   close_after=False, graph=None, title=None, out=None, extra_conf=None,
                   async=False, reset=False, logspace=False, updown=False, first_wait=None, beforewait=None,
-                  progress=True):
+                  progress=True, exec_before=None, exec_after=None):
         """
             Usage:
                 dev is the device to sweep. For more advanced uses (devices with options),
@@ -923,6 +991,10 @@ class _Sweep(instruments.BaseInstrument):
                 beforewait: it is the time to wait between setting the device and starting to
                             read the out devices. When None it uses de sweep.beforewait device value.
                 progess: When True, the output will display the iteration status after 10s intervals.
+                exec_before: is either a string or a function. It overrides the settings in the sweep.before
+                             device (see it for more details)
+                exec_after: is either a string or a function. It overrides the settings in the sweep.after
+                             devic (see it for more details).
                 The time column in the file is seconds since the epoch and represents the time at the
                 start of the current point (just before doing the set). See time.ctime to convert it to
                 text.
@@ -1008,8 +1080,9 @@ class _Sweep(instruments.BaseInstrument):
 
             if progress:
                 progress = instruments_base.mainStatusLine.new(timed=True)
+            other_options = dict(before=exec_before, after=exec_after)
             for iter_info, cf, cformats, sets, clf in iterator():
-                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negative, gsel, clf, progress)
+                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negative, gsel, clf, progress, other_options)
                 if dobreak == 'break':
                     break
         except KeyboardInterrupt:
@@ -1045,7 +1118,7 @@ class _Sweep(instruments.BaseInstrument):
     def sweep_multi(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
                   close_after=False, graph=None, title=None, out=None, extra_conf=None,
                   async=False, reset=False, logspace=False, updown=False, first_wait=None, beforewait=None,
-                  progress=True, parallel=False):
+                  progress=True, exec_before=None, exec_after=None, parallel=False):
         """
         The settings for sweep_multi have the same meaning as for the sweep command (see its documention).
         However, many of the settings now require lists (dev, start, stop, npts, logspace, reset, close_after
@@ -1255,8 +1328,9 @@ class _Sweep(instruments.BaseInstrument):
 
             if progress:
                 progress = instruments_base.mainStatusLine.new(timed=True)
+            other_options = dict(before=exec_before, after=exec_after)
             for iter_info, cf, cformats, sets, clf in iterator():
-                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negativel[-1], gsel, clf, progress)
+                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negativel[-1], gsel, clf, progress, other_options)
                 if dobreak == 'break':
                     break
         except KeyboardInterrupt:
