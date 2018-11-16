@@ -63,7 +63,8 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
            '_process_filename', 'get', 'setget', 'getasync', 'make_dir',
            'iprint', 'ilist', 'dlist', 'find_all_instruments', 'checkmode', 'check',
            'batch', 'sleep', 'load', 'load_all_usb', 'load_all_gpib', 'test_gpib_srq_state',
-           'task', 'top', 'kill', '_init_pyHegel_globals', '_faster_timer', 'quiet_KeyboardInterrupt']
+           'task', 'top', 'kill', '_init_pyHegel_globals', '_faster_timer', 'quiet_KeyboardInterrupt',
+           'Loop_Control']
 
 # not in __all__: local_config _globaldict
 #             _Clock _update_sys_path writevec _get_dev_kw _getheaders
@@ -586,6 +587,18 @@ def _write_comment(f, text):
     # text should be unicode
     writevec(f, [text.encode('utf_8')], pre_str='#C# ')
 
+class Loop_Control(object):
+    def __init__(self):
+        self.reset_all()
+    def reset(self):
+        self.abort_enabled = False
+        self.finished = False
+        self.abort_completed = False
+    def reset_all(self):
+        self.reset()
+        self.pause_enabled = False
+
+
 class _Sweep(instruments.BaseInstrument):
     # This MemoryDevice will be shared among different instances
     # So there should only be one instance of this class
@@ -877,6 +890,7 @@ class _Sweep(instruments.BaseInstrument):
         iter_n, iter_part, iter_total, cfwd = iter_info
         other_options = other_options.copy()
         other_options.update(iter_info=iter_info)
+        loop_control = other_options.get('loop_control', None)
         tme = clock.get()
         vv = []
         iv = []
@@ -918,6 +932,10 @@ class _Sweep(instruments.BaseInstrument):
             _checkTracePause(trace_obj)
             if trace_obj.abort_enabled:
                 return 'break'
+        if loop_control:
+            _checkTracePause(loop_control)
+            if loop_control.abort_enabled:
+                return 'break'
         return None
 
 
@@ -925,7 +943,7 @@ class _Sweep(instruments.BaseInstrument):
     def __call__(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
                   close_after=False, graph=None, title=None, out=None, extra_conf=None,
                   async=False, reset=False, logspace=False, updown=False, first_wait=None, beforewait=None,
-                  progress=True, exec_before=None, exec_after=None):
+                  progress=True, exec_before=None, exec_after=None, loop_control=None):
         """
             Usage:
                 dev is the device to sweep. For more advanced uses (devices with options),
@@ -994,7 +1012,10 @@ class _Sweep(instruments.BaseInstrument):
                 exec_before: is either a string or a function. It overrides the settings in the sweep.before
                              device (see it for more details)
                 exec_after: is either a string or a function. It overrides the settings in the sweep.after
-                             devic (see it for more details).
+                             device (see it for more details).
+                loop_control: pass an instance of Loop_Control. You can then pause/abort by changing its attributes
+                              pause_enabled, abort_enabled
+                              (useful in GUI or background sweep)
                 The time column in the file is seconds since the epoch and represents the time at the
                 start of the current point (just before doing the set). See time.ctime to convert it to
                 text.
@@ -1080,7 +1101,9 @@ class _Sweep(instruments.BaseInstrument):
 
             if progress:
                 progress = instruments_base.mainStatusLine.new(timed=True)
-            other_options = dict(before=exec_before, after=exec_after)
+            if loop_control:
+                loop_control.reset()
+            other_options = dict(before=exec_before, after=exec_after, loop_control=loop_control)
             for iter_info, cf, cformats, sets, clf in iterator():
                 dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negative, gsel, clf, progress, other_options)
                 if dobreak == 'break':
@@ -1111,6 +1134,10 @@ class _Sweep(instruments.BaseInstrument):
                 t.set_status(False, 'completed')
         if reset is not None:
             dev.set(reset, **dev_opt)
+        if loop_control:
+            if loop_control.abort_enabled:
+                loop_control.abort_completed = True
+            loop_control.finished = True
         if graph and close_after:
             t = t.destroy()
             del t
@@ -1118,7 +1145,7 @@ class _Sweep(instruments.BaseInstrument):
     def sweep_multi(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
                   close_after=False, graph=None, title=None, out=None, extra_conf=None,
                   async=False, reset=False, logspace=False, updown=False, first_wait=None, beforewait=None,
-                  progress=True, exec_before=None, exec_after=None, parallel=False):
+                  progress=True, exec_before=None, exec_after=None, loop_control=None, parallel=False):
         """
         The settings for sweep_multi have the same meaning as for the sweep command (see its documention).
         However, many of the settings now require lists (dev, start, stop, npts, logspace, reset, close_after
@@ -1328,7 +1355,9 @@ class _Sweep(instruments.BaseInstrument):
 
             if progress:
                 progress = instruments_base.mainStatusLine.new(timed=True)
-            other_options = dict(before=exec_before, after=exec_after)
+            if loop_control:
+                loop_control.reset()
+            other_options = dict(before=exec_before, after=exec_after, loop_control=loop_control)
             for iter_info, cf, cformats, sets, clf in iterator():
                 dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negativel[-1], gsel, clf, progress, other_options)
                 if dobreak == 'break':
@@ -1358,6 +1387,10 @@ class _Sweep(instruments.BaseInstrument):
         for dev, dev_opt, r in zip(devl, dev_optl, reset):
             if r is not None:
                 dev.set(r, **dev_opt)
+        if loop_control:
+            if loop_control.abort_enabled:
+                loop_control.abort_completed = True
+            loop_control.finished = True
         if graph and close_after[0]:
             t = t.destroy()
             del t
