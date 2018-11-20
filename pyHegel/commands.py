@@ -622,6 +622,7 @@ class _Sweep(instruments.BaseInstrument):
              ask_vals: vv from above. It is a list of all requested sets.
              v: is vv[-1], the last set value requested (same as above)
              fwd: see above
+             fwd_all: a list of all the fwd state
              set_vals: is the values of all cached values after set (like iv above)
                        Some instruments round requested values. When the device
                        is setup properly this should be the value the instrument
@@ -648,14 +649,15 @@ class _Sweep(instruments.BaseInstrument):
       all resulting cached values for set.
       The variable fwd is forward(True)/reverse(False) state of v.
       The variables iter_part and iter_total are also available (see description below).
-      The variable vals contain all the values read in out. It is a flat list
-      that contains all the data to be saved on a row of the main file.
+      The variable vals is a flat list that contains all the data to be saved on a
+      row of the main file.
+      Note that vals = iv+vals_only+[time].
       Note that v and vals[0] can be different for devices that use setget
       (those that perform a get after a set, because the instrument could be
       changing/rounding the value). v is the asked for value. vals starts with iv.
       Also have variables vals_only, vals_full which are a list of all the get values.
       vals_full still has vector data (saved in extra files) and is unflattened,
-      while they are replaced by index in vals_only. Note that vals = iv+vals_only+[time]
+      while they are replaced by index in vals_only.
       It should also have access to the globals present in the interactive environment.
 
       It can also be a function. The function signature is:
@@ -666,6 +668,7 @@ class _Sweep(instruments.BaseInstrument):
              ask_vals: vv from above. It is a list of all requested sets.
              v: is vv[-1], the last set value requested (same as above)
              fwd: see above
+             fwd_all: a list of all the fwd state
              set_vals: is the values of all cached values after set (like iv above)
                        Some instruments round requested values. When the device
                        is setup properly this should be the value the instrument
@@ -722,7 +725,7 @@ class _Sweep(instruments.BaseInstrument):
     def execbefore(self, i, fwd, v, vv, iv, other_options):
         # i, fwd are the same as iter_n and cfwd
         iter_info = other_options.get('iter_info', (i, 1, 2, fwd))
-        iter_n, iter_part, iter_total, cfwd = iter_info
+        iter_n, iter_part, iter_total, cfwd, fwd_all = iter_info
         b = other_options.get('before', None)
         if b is None:
             b = self.before.get()
@@ -730,12 +733,12 @@ class _Sweep(instruments.BaseInstrument):
             if isinstance(b, basestring):
                 exec (b, _globaldict, locals())
             else:
-                info = dict(i=i, fwd=fwd, v=v, ask_vals=vv, set_vals=iv, iter_part=iter_part, iter_total=iter_total)
+                info = dict(i=i, fwd=fwd, fwd_all=fwd_all, v=v, ask_vals=vv, set_vals=iv, iter_part=iter_part, iter_total=iter_total)
                 b(info)
     def execafter(self, i, fwd, v, vv, iv, vals, vals_only, vals_full, other_options):
         # i, fwd are the same as iter_n and cfwd
         iter_info = other_options.get('iter_info', (None, None, None, True))
-        iter_n, iter_part, iter_total, cfwd = iter_info
+        iter_n, iter_part, iter_total, cfwd, fwd_all = iter_info
         b = other_options.get('after', None)
         if b is None:
             b = self.after.get()
@@ -743,7 +746,7 @@ class _Sweep(instruments.BaseInstrument):
             if isinstance(b, basestring):
                 exec (b, _globaldict, locals())
             else:
-                info = dict(i=i, fwd=fwd, v=v, ask_vals=vv, set_vals=iv, iter_part=iter_part, iter_total=iter_total,
+                info = dict(i=i, fwd=fwd, fwd_all=fwd_all, v=v, ask_vals=vv, set_vals=iv, iter_part=iter_part, iter_total=iter_total,
                             saved_vals=vals, read_vals=vals_only, read_vals_full=vals_full)
                 b(info)
     def _fn_insert_updown(self, filename):
@@ -887,7 +890,8 @@ class _Sweep(instruments.BaseInstrument):
         # iter_partial between 1 and iter_total: they are both used for progress update.
         #   iter_partial can sometimes be iter_n+1
         # cfwd is True when we are currently doing a forward sweep (uses for exec before/after)
-        iter_n, iter_part, iter_total, cfwd = iter_info
+        # fwd_all is cfwd for all set variables in multi_sweep (cfwd is only last one)
+        iter_n, iter_part, iter_total, cfwd, fwd_all = iter_info
         other_options = other_options.copy()
         other_options.update(iter_info=iter_info)
         loop_control = other_options.get('loop_control', None)
@@ -1094,7 +1098,7 @@ class _Sweep(instruments.BaseInstrument):
                         else:
                             sets[3] = bwait
                         iter_partial += 1
-                        iter_info = i+ioffset, iter_partial, npts_total, cfwd
+                        iter_info = i+ioffset, iter_partial, npts_total, cfwd, [cfwd]
                         yield iter_info, cf, cformats, sets, clf
                     if updown_same:
                         ioffset = i + 1
@@ -1160,6 +1164,10 @@ class _Sweep(instruments.BaseInstrument):
         every time a sweep without updown jumps from last to first point.
         The graph uses the fastest changing value for the x axis.
         Only a single main file is ever created even when using updown (it does not use the sweep.updown device)
+        updown: It can also have the value 'alternate' instead of just True/False/-1. With alternate, it will
+                swap the sweep direction after every iteration. So for a 2d sweep with updown [False,'alternate']
+                it will do the sequence (x0,y0) .. (x0,yn) (x1, yn) .. (x1,y0) (x2,y0) ...
+                It only applies if parralel is False
 
         parallel: when True, all the devs are called for each cycle. All the pts are changed in parallel
             so they need to have the same number of elements.
@@ -1220,6 +1228,10 @@ class _Sweep(instruments.BaseInstrument):
         both_updown = []
         data_row_shape = []
         for ud, span in zip(updown, spanl):
+            if isinstance(ud, basestring) and ud != 'alternate':
+                raise ValueError("Invalid updown option: needs to be one of True, False, -1, 'alternate'")
+            if ud == 'alternate' and parallel:
+                raise ValueError("updown 'alternate' option is not available with parallel.")
             b = False
             L = len(span)
             if ud == True:
@@ -1230,7 +1242,7 @@ class _Sweep(instruments.BaseInstrument):
             elif ud == -1:
                 span = span[::-1]
                 f = [False]*L
-            else:
+            else: # Both updown  False and 'alternate'
                 f = [True]*L
             both_updown.append(b)
             fwdrev.append(f)
@@ -1287,16 +1299,18 @@ class _Sweep(instruments.BaseInstrument):
                     sets = [devl, dev_optl, [], [], [True]*multiN, set_counts]
                     for i in range(npts_total):
                         vs = []
+                        fwd_all = []
                         for cfwd, span in zip(fwdrev, spans):
                             vs.append(span[i])
                             fwd = cfwd[i]
+                            fwd_all.append(fwd)
                         # fwd is last cfwd
                         sets[2] = vs
                         if i == 0:
                             sets[3] = first_wait
                         else:
                             sets[3] = beforewait
-                        iter_info = i, i+1, npts_total, fwd
+                        iter_info = i, i+1, npts_total, fwd, fwd_all
                         yield iter_info, f, formats, sets, False
             else:
                 def js_iterator():
@@ -1328,18 +1342,34 @@ class _Sweep(instruments.BaseInstrument):
                         doset = []
                         vs = []
                         bwait = []
+                        fwd_all = []
                         clf = False
                         for k, tmp in enumerate(zip(js, fwdrev, spans)):
                             j, cfwd, span = tmp
+                            if updown[k] == 'alternate' and k>0:
+                                if js[k-1]%2: # odd k-1 cycles
+                                    span = span[::-1]
+                                    fwd = False
+                                else:
+                                    fwd = True
+                            else:
+                                fwd = cfwd[j]
+                            fwd_all.append(fwd)
                             vs.append(span[j])
-                            fwd = cfwd[j]
                             changing =  j != prev_js[k]
                             doset.append(changing)
                             if changing and i != 0 and k+1 < multiN:
                                 if close_after[k+1]:
                                     clf = True
                             if changing and j == 0 and not both_updown[k]:
-                                bwait.append(first_wait[k])
+                                next_wait = first_wait[k]
+                                if updown[k] == 'alternate' and k>0:
+                                    next_wait = beforewait[k]
+                                    if js[k-1] == 0 and prev_js[k-1]%2 == 0:
+                                        # preceding set restarted and was on even cycle
+                                        # therefore there is a jump
+                                        next_wait = first_wait[k]
+                                bwait.append(next_wait)
                             else:
                                 bwait.append(beforewait[k])
                         sets[2] = vs
@@ -1348,7 +1378,7 @@ class _Sweep(instruments.BaseInstrument):
                             sets[3] = first_wait
                         else:
                             sets[3] = bwait
-                        iter_info = i, i+1, npts_total, fwd
+                        iter_info = i, i+1, npts_total, fwd, fwd_all
                         yield iter_info, f, formats, sets, clf
                         i += 1
                         prev_js = js[:] # need to make a copy
