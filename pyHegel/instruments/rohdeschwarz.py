@@ -32,13 +32,15 @@ import scipy
 import os.path
 import time
 import string
+import functools
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             scpiDevice, MemoryDevice, ReadvalDev, BaseDevice,\
                             ChoiceMultiple, Choice_bool_OnOff, _repr_or_string,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDev, ChoiceDevSwitch, ChoiceIndex,\
                             ChoiceSimpleMap, decode_float32, decode_int8, decode_int16, _decode_block_base,\
-                            decode_float64, quoted_string, _fromstr_helper, ProxyMethod
+                            decode_float64, quoted_string, _fromstr_helper, ProxyMethod, _encode_block,\
+                            locked_calling, quoted_list, quoted_dict, decode_complex128
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 
@@ -1095,3 +1097,975 @@ class rs_rto_scope(visaInstrumentAsync):
 #   v=get(rs.waveform_data, ch=1)
 #   res=histogram(v, bins=arange(-2**15, 2**15))
 #   plot(res[0][2**15:40000:1], '.-')
+
+
+#######################################################
+##    R&S ZNB 40 Vector Network Analyzer
+#######################################################
+
+quoted_string_znb = functools.partial(quoted_string, fromstr="'")
+quoted_list_znb = functools.partial(quoted_list, fromstr="'")
+quoted_dict_znb = functools.partial(quoted_dict, quote_char="'", empty='', element_type=[int, None])
+
+
+#@register_instrument('Rohde-Schwarz', 'ZNB40-2Port', '2.92')
+@register_instrument('Rohde-Schwarz', 'ZNB40-2Port', usb_vendor_product=[0x0AAD, 0x01A2])
+class rs_znb_network_analyzer(visaInstrumentAsync):
+    """
+    This is the driver for the Rohde & Schwarz ZNB40 2 port network analyzer
+    Useful devices:
+        fetch, readval
+        snap_png
+    Some methods available:
+        abort
+        create_measurement
+        delete_measurement
+        restart_averaging
+        phase_unwrap, phase_wrap, phase_flatten
+        get_file, send_file
+    Other useful devices:
+        trace_meas_list_in_ch
+        select_trace
+        current_channel
+        freq_start, freq_stop, freq_cw
+        port_power_en
+        marker_x, marker_y
+        trigger_continuous_all_ch
+
+    Note that almost all devices/commands require a channel.
+    It can be specified with the ch option or will use the last specified
+    one if left to the default.
+    A lot of other commands require a selected trace (per channel)
+    The active one can be selected with the trace option or select_trace
+    If unspecified, the last one is used.
+
+    If a trace is REMOVED from the instrument, you should perform a get of
+    the trace_meas_list_in_ch device to update pyHegel knowledge of the available
+    traces (needed when trying to fetch all traces).
+    """
+    def init(self, full=False):
+        self.write('FORMat REAL,64') # Other available: ascii and real,32
+        self.write('FORMat:BORDer  SWAPped') # LSB first
+        # If sending binary data to instrument over GPIB, it requires setting
+        # SYSTem:COMMunicate:GPIB:RTERminator
+        # to EOI instead of default LFEoi (Line feed OR EOI)
+        # However the instrument I have does not habe gpib install so
+        # so the command fails. It requires option ZNB-B10
+        super(rs_znb_network_analyzer, self).init(full)
+
+    def abort(self):
+        self.write('ABORt')
+
+    def trigger_start(self, ch=None, add_opc=True):
+        """ ch when None, it triggers all channels """
+        if ch is None:
+            base = 'INITiate:ALL'
+        else:
+            self.current_channel.check(ch)
+            base = 'INITiate{ch}'.format(ch=ch)
+        if add_opc:
+            base += ';*OPC'
+        self.write(base)
+    def _async_trigger_helper(self):
+        self.trigger_start()
+
+    def _match_sweep_count_navg(self):
+        orig_ch = self.current_channel.get()
+        chs = self.active_channels_list.get().keys()
+        for ch in chs:
+            avg_en = self.sweep_average_en.get(ch=ch)
+            if avg_en:
+                n_avg = self.sweep_average_count.get()
+            else:
+                n_avg = 1
+            self.sweep_count.set(n_avg)
+        self.current_channel.set(orig_ch)
+    @locked_calling
+    def _async_trig(self):
+        self.trigger_continuous_all_ch.set(False)
+        self._match_sweep_count_navg()
+        self.restart_averaging('all')
+        # sweep counts needs>=avg count
+        # need to restart all averaging
+        super(rs_znb_network_analyzer, self)._async_trig()
+
+    @locked_calling
+    def restart_averaging(self, ch='all'):
+        """
+        Restart averaging. Also restarts a sweep.
+        ch can be 'all' (default) to restart all of device active_channels_list
+        if averaging is enabled.
+        ch can be None to use the current_channel
+        """
+        if ch == 'all':
+            orig_ch = self.current_channel.get()
+            chs = self.active_channels_list.get().keys()
+        elif ch is None:
+            #sets ch if necessary
+            chs = [self.current_channel.get()]
+        else:
+            chs = [ch]
+        for c in chs:
+            avg_en = self.sweep_average_en.get(ch=c)
+            if avg_en:
+                command = 'SENSe{ch}:AVERage:CLEar'.format(ch=c)
+                self.write(command)
+        if ch == 'all':
+            self.current_channel.set(orig_ch)
+
+    @locked_calling
+    def delete_channel(self, ch=None):
+        if ch is None:
+            ch = self.current_channel.get()
+        self.write('CONFigure:CHANnel{ch} OFF'.format(ch=ch))
+
+    @locked_calling
+    def create_measurement(self, trace, param, ch=None):
+        """
+        name: any unique, non-empty string. If it already exists, we change its param
+              It can be a number, like 1, in which case it is transformed to 'Trc1'
+        param: Any S parameter as S11 or any other format allowed (see Analyzer documentation)
+        """
+        trace_all = self.trace_list_all.get().values()
+        exist = False
+        if not isinstance(trace, basestring):
+            trace = 'Trc%i'%trace
+        if trace in trace_all:
+            exist = True
+        if ch is None:
+            ch = self.current_channel.get()
+        else:
+            self.current_channel.set(ch)
+        if ch in self.active_channels_list.get().keys():
+            trc_list = self.trace_meas_list_in_ch.get().keys()
+        else:
+            trc_list = []
+        if exist and trace not in trc_list:
+            raise ValueError('Selected trace is not in the correct channel')
+        if trace in trc_list:
+            self.select_trace.set(trace)
+            self.meas_function.set(param, trace=trace)
+        else:
+            self.write('CALCulate{ch}:PARameter:SDEFine "{trace}","{param}"'.format(ch=ch, trace=trace, param=param))
+        # Update list
+        self.trace_meas_list_in_ch.get()
+
+    @locked_calling
+    def delete_measurement(self, trace=None, ch=None):
+        """ delete a trace
+            if trace=None: delete all measurements for ch
+            see trace_meas_list_in_ch for the available traces
+        """
+        if ch is None:
+            ch = self.current_channel.get()
+        else:
+            self.current_channel.set(ch)
+        if trace is None:
+            self.write('CALCulate{ch}:PARameter:DELete:CALL'.format(ch=ch))
+        else:
+            self.select_trace.set(trace)
+            trace = self.select_trace.get()
+            self.write('CALCulate{ch}:PARameter:DELete "{trace}"'.format(ch=ch, trace=trace))
+        # Update list
+        self.trace_meas_list_in_ch.get()
+
+    def _current_config(self, dev_obj=None, options={}):
+        opts = ['opt=%s'%self.available_options]
+        return opts
+        opts += self._conf_helper('timebase_ful_range', 'timebase_pos_offset', 'timebase_reference_pos_percent')
+
+        def reorg(opts):
+            first = True
+            date_all = []
+            for ch_line in opts:
+                ch_line_split = [ c.split('=', 1) for c in ch_line]
+                names = [n for n, d in ch_line_split]
+                data = [d for n, d in ch_line_split]
+                if first:
+                    data_all = [ [d] for d in data]
+                    first = False
+                else:
+                    for db, d in zip(data_all, data):
+                        db.append(d)
+            return [n+'=['+','.join(d)+']' for n, d in zip(names, data_all)]
+
+        # Do Channels, Waveforms, Input, Probe
+        ch_orig = self.current_channel.get()
+        wf_orig = self.current_channel_waveform.get()
+        ch_opts = []
+        ch_wf_opts = []
+        for c in range(1, 5):
+            self.current_channel.set(c)
+            wf_range =  range(1, 4) if self.channel_multiple_waveforms_en.get() else [1]
+            for wf in wf_range:
+                self.current_channel_waveform.set(wf)
+                ch_wf_opt = ['channel_waveform=C%iW%i'%(c, wf)]
+                ch_wf_opt += self._conf_helper('channel_en', 'channel_decimation_type', 'channel_arithmetic_method')
+                ch_wf_opts.append(ch_wf_opt)
+            ch_opt = self._conf_helper('input_en', 'input_coupling', 'input_ground_en', 'input_invert_en', 'input_bandwidth',
+                                       'input_full_range', 'input_position_div', 'input_offset', 'input_power_calc_impedance',
+                                       'input_overloaded', 'input_filter_en', 'input_skew_manual_en', 'input_skew_time',
+                                       'input_filter_cutoff_freq', 'probe_state', 'probe_type', 'probe_name', 'probe_attenuation')
+            ch_opts.append(ch_opt)
+        opts += reorg(ch_wf_opts)
+        opts += reorg(ch_opts)
+        self.current_channel.set(ch_orig)
+        self.current_channel_waveform.set(wf_orig)
+
+        if 'B4' in self.available_options:
+            opts += self._conf_helper('reference_clock_src', 'reference_clock_ext_freq')
+        return opts + self._conf_helper(options)
+
+    @locked_calling
+    def set_time(self, set_time=False):
+        """ Reads the UTC time from the instrument or set it from the computer value
+            setting requires admin right which are not available by default. So it will fail."""
+        if set_time:
+            now = time.gmtime()
+            self.write('SYSTem:DATE %i,%i,%i'%(now.tm_year, now.tm_mon, now.tm_mday))
+            self.write('SYSTem:TIME %i,%i,%i'%(now.tm_hour, now.tm_min, now.tm_sec))
+        else:
+            date_str = self.ask('SYSTem:DATE?')
+            time_str = self.ask('SYSTem:TIME?')
+            return '%s %s UTC'%(date_str.replace(',', '-'), time_str.replace(',', ':'))
+
+    @locked_calling
+    def user_key(self, key_no=None, name=None, all_query=False, reset=False):
+        """ Query or set user keys.
+            without key_no, returns the key that was last pressed, name (or 0, '')
+            With key_no, and no name returns the name of key_no
+            with key_no and name, sets the key to name
+            with all_query True: returns all key names. (needs to be used on its own)
+            with reset: clears all entries and return to default remote tab (go to local, update display)
+                        (needs to be used on its own)
+        """
+        base = 'SYSTem:USER:KEY'
+        qs = quoted_string(quote_char="'")
+        def parse_response(ans):
+            if ans == "0''":
+                # No button pressed.
+                # Manual says it should be "0,''"
+                return 0, ''
+            n, t = ans.split(',')
+            n = int(n)
+            t = qs(t)
+            return n, t
+        if key_no is not None:
+            if key_no not in range(1,9):
+                raise ValueError('Invalid key_no. Should be 1-8')
+            if name is None:
+                return parse_response(self.ask(base+'? %i'%key_no))[1]
+            else:
+                self.write(base+' %i,"%s"'%(key_no, name))
+        else:
+            if all_query:
+                res = {}
+                for i in range(1, 9):
+                    n, t = parse_response(self.ask(base+'? %i'%i))
+                    res[n] = t
+                return res
+            elif reset:
+                self.write(base+' 0')
+            else:
+                return parse_response(self.ask(base+'?'))
+
+    @locked_calling
+    def get_status(self):
+        """ Reading the status also clears it. This is the event(latch) status."""
+        # STATus:OPERation is unused
+        res = {}
+        chk_bit = lambda val, bitn: bool((val>>bitn)&1)
+        quest_limit2 = int(self.ask('STATus:QUEStionable:LIMit2?'))
+        quest_limit1 = int(self.ask('STATus:QUEStionable:LIMit1?'))
+        quest_integrity_hw = int(self.ask('STATus:QUEStionable:INTegrity:HARDware?'))
+        quest_integrity = int(self.ask('STATus:QUEStionable:INTegrity?'))
+        quest = int(self.ask('STATus:QUEStionable?'))
+        res.update(limit1=quest_limit1, limit2=quest_limit2, quest_all=quest)
+        res.update(integrity_all=quest_integrity, integrity_hw_all=quest_integrity_hw)
+        res.update(ref_clock_fail=chk_bit(quest_integrity_hw, 1))
+        res.update(output_power_unlevel=chk_bit(quest_integrity_hw, 2))
+        res.update(receiver_overload=chk_bit(quest_integrity_hw, 3))
+        res.update(external_switch_problem=chk_bit(quest_integrity_hw, 4))
+        res.update(internal_comm_problem=chk_bit(quest_integrity_hw, 6))
+        res.update(temperature_too_high=chk_bit(quest_integrity_hw, 7))
+        res.update(oven_cold=chk_bit(quest_integrity_hw, 8))
+        res.update(unstable_level_control=chk_bit(quest_integrity_hw, 9))
+        res.update(external_generator_problem=chk_bit(quest_integrity_hw, 10))
+        res.update(external_powermeter_problem=chk_bit(quest_integrity_hw, 11))
+        res.update(time_grid_too_close=chk_bit(quest_integrity_hw, 12))
+        res.update(dc_meas_overload=chk_bit(quest_integrity_hw, 13))
+        res.update(port_power_exceed_limits=chk_bit(quest_integrity_hw, 14))
+        res.update(detector_meas_time_too_long=chk_bit(quest_integrity_hw, 15))
+        return res
+
+    @locked_calling
+    def get_status_now(self):
+        """ Reading the status. This is the condition(instantenous) status."""
+        quest_integrity_hw = int(self.ask('STATus:QUEStionable:INTegrity:HARDware:CONDition?'))
+        res = {}
+        res.update(integrity_hw_all=quest_integrity_hw)
+        return res
+
+    @locked_calling
+    def remote_ls(self, remote_path=None, extra=False, only_files=False):
+        """
+            if remote_path is None, get catalog of device remote_cwd.
+            It list both files and directories unless only_files is True
+            returns None for empty and invalid directories.
+            It will probably fail if filename have ", " in their name
+            If extra is False, only returns file/dir names
+            if extra is True: returns tuple of 3 elements
+               used_space, free_space, data
+               and data is list of tuples (name, file_size)
+               where file_size is -1 for directories
+        """
+        extra_cmd = ""
+        if remote_path:
+            extra_cmd = ' "%s"'%remote_path
+        res = self.ask('MMEMory:CATalog?'+extra_cmd)
+        if res == '':
+            # Invalid directory name
+            return None
+        res_s = res.split(', ')[:-1] # remove last element which is extra
+        used_space = int(res_s[0]) # by the files
+        free_space = int(res_s[1])
+        names = res_s[2::3]
+        is_dir = res_s[3::3]
+        file_size = res_s[4::3]
+        if not (len(names) == len(is_dir) == len(file_size)):
+            raise RuntimeError(self.perror('remote_ls check error. One of the files probably contains ", "'))
+        if (not extra) and (not only_files):
+            return names
+        is_dir = map(lambda x: x=='<DIR>', is_dir)
+        file_size = map(lambda x: -1 if x=='' else int(x), file_size)
+        # cross check
+        for d,s in zip(is_dir, file_size):
+            s = s == -1
+            if d != s:
+                raise RuntimeError(self.perror('remote_ls cross check failed'))
+        if only_files:
+            names = [n for n,d in zip(names, is_dir) if not d]
+            file_size = [s for s,d in zip(file_size, is_dir) if not d]
+        if not extra:
+            return names
+        return used_space, free_space, zip(names, file_size)
+
+    @locked_calling
+    def send_file(self, dest_file, local_src_file=None, src_data=None, overwrite=False):
+        """
+            dest_file: is the file name (absolute or relative to device remote_cwd)
+                       you have to use \\ to separate directories
+            overwrite: when True will skip testing for the presence of the file on the
+                       instrument and proceed to overwrite it without asking confirmation.
+            Use one of local_src_file (local filename) or src_data (data string)
+        """
+        if not overwrite:
+            # split seeks both / and \
+            directory, filename = os.path.split(dest_file)
+            ls = self.remote_ls(directory, only_files=True)
+            if ls:
+                ls = map(lambda s: s.lower(), ls)
+                if filename.lower() in ls:
+                    raise RuntimeError('Destination file already exists. Will not overwrite.')
+        if src_data is local_src_file is None:
+            raise ValueError('You need to specify one of local_src_file or src_data')
+        if src_data and local_src_file:
+            raise ValueError('You need to specify only one of local_src_file or src_data')
+        if local_src_file:
+            with open(local_src_file, 'rb') as f:
+                src_data = f.read()
+        data_str = _encode_block(src_data)
+        # manually add terminiation to prevent warning if data already ends with termination
+        self.write('MMEMory:DATA "%s",%s\n'%(dest_file, data_str), termination=None)
+
+    def get_file(self, remote_file, local_file=None):
+        """ read a remote_file from the instrument.
+            If not a full path, uses directory from remote_cwd device.
+            It requires the use of \\ not / for directory separator.
+            return the data unless local_file is given, then it saves data in that.
+            Files can be empty or not existing but return empty data.
+            Missing files also raise an error (see get_error method).
+        """
+        s = self.ask('MMEMory:DATA? "%s"'%remote_file, raw=True)
+        if len(s) == 0 or s[0] != '#':
+            # file is empty or does not exist
+            return ''
+        s = _decode_block_base(s)
+        if local_file:
+            with open(local_file, 'wb') as f:
+                f.write(s)
+        else:
+            return s
+
+    def _snap_png_getformat(self, **kwarg):
+        pdf = kwarg.get('pdf', False)
+        bin = '.pdf' if pdf else '.png'
+        fmt = self.snap_png._format
+        fmt.update(bin=bin)
+        return BaseDevice.getformat(self.snap_png, **kwarg)
+
+    def _snap_png_getdev(self, logo=True, time=True, color=True, portrait=False, pdf=False, window='all'):
+        """ logo, time: set to True (default) to show in file
+            color: set True (default) to enable color, False for gray
+            portrait: set True for portrait orientation, False (default) for Landscape
+            pdf: set to True to create pdf file, False (default) for png
+            window: can be 'all' (default), 'active', 'hardcopy'
+                    for generating output formated:
+                        all: all diagrams on one page
+                        active: only active diagram
+                        hardcopy: screen capture of diagrams. Display needs to be active,
+                                  and not in background (windows desktop)
+                    all can produce vector graph (in pdf) except for hardcopy
+        """
+        def handle_option(val, setup_str, on='1', off='0'):
+            if val:
+                self.write(setup_str+' '+on)
+            else:
+                self.write(setup_str+' '+off)
+        if window not in ['all', 'active', 'hardcopy']:
+            # there is also 'single' and NONE but it just disables hardcopy
+            # single produces multiple pages except when saving to file
+            #  where only the first page is output.
+            raise ValueError(self.snap_png.perror('Invalid window.'))
+        handle_option(logo, 'HCOPy:ITEM:LOGO')
+        # marker info is a separate window where the markers information can be moved to
+        # when enabling its output, it is added to another page.
+        # However, when printing to file directly, only the first page is output.
+        # This is the same problem for HCOPy:PAGE:WINDow single
+        #handle_option(marker_info, 'HCOPy:ITEM:MLISt')
+        handle_option(time, 'HCOPy:ITEM:TIME')
+        handle_option(color, 'HCOPy:PAGE:COLor')
+        handle_option(portrait, 'HCOPy:PAGE:ORIentation', on='PORTrait', off='LANDscape')
+        self.write('HCOPy:DESTination "MMEM"') # other options: DEFPRT
+        self.write('HCOPy:PAGE:WINDow %s'%window)
+
+        tmpfile_d = r'C:\TEMP'
+        if pdf:
+            # I think the proper filename is the necessary. Language might not do anything.
+            self.write('HCOPy:DEVice:LANGuage PDF')
+            tmpfile_f = 'TempScreenGrab.pdf'
+        else:
+            self.write('HCOPy:DEVice:LANGuage PNG')
+            tmpfile_f = 'TempScreenGrab.png'
+        tmpfile_p = tmpfile_d + '\\' + tmpfile_f
+        self.write('MMEMory:NAME "%s"'%tmpfile_p)
+        self.write('HCOPy:IMMediate')
+        ret = self.get_file(tmpfile_p)
+        self.write('MMEMory:DELete "%s"'%tmpfile_p)
+        return ret
+
+    def _fetch_getformat(self, **kwarg):
+        unit = kwarg.get('unit', 'default')
+        xaxis = kwarg.get('xaxis', True)
+        ch = kwarg.get('ch', None)
+        traces = kwarg.get('traces', None)
+        cook = kwarg.get('cook', False)
+        cal = kwarg.get('cal', False)
+        location = kwarg.get('location', 'sdata')
+        if location == 'fdata':
+            cook = True
+        if cal:
+            cook = False
+        if ch is not None:
+            self.current_channel.set(ch)
+        traces, traces_list = self._fetch_traces_helper(traces, cal)
+        if xaxis:
+            sweeptype = self.sweep_type.getcache()
+            choice = self.sweep_type.choices
+            if sweeptype in choice[['linear', 'log', 'segment']]:
+                multi = 'freq(Hz)'
+            elif sweeptype in choice[['power']]:
+                multi = 'power(dBm)'
+            elif sweeptype in choice[['CW', 'point']]:
+                multi = 'time(s)'
+            else: # PULSE
+                multi = 'pulse' # TODO check this
+            multi = [multi]
+        else:
+            multi = []
+        # we don't handle cmplx because it cannot be saved anyway so no header or graph
+        for t in traces_list:
+            names = None
+            if cook:
+                f = self.trace_format.get(trace=t)
+                if f not in self.trace_format.choices[['POLar', 'SMITh', 'ISMith']]:
+                    names = ['cook_val']
+            if names is None:
+                if unit == 'db_deg':
+                    names = ['dB', 'deg']
+                else:
+                    names = ['real', 'imag']
+            if cal:
+                basename = '%s_%i_%i_'%t
+            elif traces is None:
+                basename = "%s_"%t
+            else:
+                name, param = self.select_trace.choices[t]
+                basename = "%s=%s_"%(name, param)
+            multi.extend( [basename+n for n in names])
+        fmt = self.fetch._format
+        multi = tuple(multi)
+        fmt.update(multi=multi, graph=[], xaxis=xaxis)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+
+    def _fetch_traces_helper(self, traces, cal=False):
+        # assume ch is selected
+        if traces is None:
+            traces_list = self.calc_data_all_list.get()
+        else:
+            if isinstance(traces, list) or ((not cal) and isinstance(traces, tuple)):
+                traces = traces[:] # make a copy so it can be modified without affecting caller. I don't think this is necessary anymore but keep it anyway.
+            else:
+                traces = [traces]
+            traces_list = traces
+        return traces, traces_list
+
+    def _fetch_getdev(self, ch=None, traces=None, unit='default', xaxis=True, cook=False, cal=False, location='sdata'):
+        """
+           options available: traces, unit, mem and xaxis
+            -traces: can be a single value or a list of values.
+                     The values are strings representing the trace or the trace number.
+                     Memory traces also have a name (often like 'Mem1[Trc1]')
+                     or when cal is True, tuples like ('DIRECTIVITY', 1, 1)
+                     When None (default) selects all data traces (not memory) of the channel.
+                     To obtain memory traces, then need to be specified
+            -unit:   can be 'default' (real, imag)
+                       'db_deg' (db, deg) , where phase is unwrapped
+                       'cmplx'  (complex number), Note that this cannot be written to file
+            -xaxis:  when True(default), the first column of data is the xaxis
+            -cal:    when True, traces refers to the calibration curves, cook is
+                     unused.
+            -cook:   when True (default is False) returns the values from the display format
+                     They include the possible effects from trace math(edelay, transforms, gating...)
+                     as well as smoothing. When this is selected, unit has no effect unless the format is
+                     Smith, Polar or Inverted Smith (in which case both real and imaginary are read and
+                     converted appropriately)
+            -location: Can be one of 'sdata' (default), 'mdata', 'fdata', 'ncdata', 'ucdata', 'fsidata'
+                       note that not all combinations are possible. For example, with traces=None
+                       only sdata or fsidata are possible.
+                       fdata is the same as cook=True (it is display data and can be 1 or 2 values per stimulus).
+                       All others a complex number converted according to unit.
+                       mdata includes all calculations (edelay, trace math, ...) (position 3 in Figure 4.1, page 89,
+                          of ZNB_ZNBT_UserManual_en_42)
+                       sdata includes most calculation (edelay) except trace math (position 2)
+                       fsidata includes only calibration (position 1)
+                       ncdata only uses factory calibration.
+                       ucdata is raw data
+        """
+        if ch is not None:
+            self.current_channel.set(ch)
+        else:
+            ch = self.current_channel.get()
+        if location ==  'fdata':
+            cook = True
+        if cal:
+            cook = False
+        if cook:
+            location = 'fdata'
+        traces, traces_list = self._fetch_traces_helper(traces, cal)
+        if xaxis:
+            if cal:
+                ret = [self.calib_data_xaxis.get()]
+            else:
+                if traces is None:
+                    tr = self.trace_meas_list_in_ch.get().keys()[0]
+                else:
+                    tr = traces[0]
+                # get the x axis of the first trace selected
+                ret = [self.get_xscale(trace=tr)]
+        else:
+            ret = []
+        data = None
+        if traces is None:
+            data = self.calc_data_all.get(format=location)
+            #data.shape = (len(traces_list), self.npoints.get(), 2)
+            data.shape = (len(traces_list), self.npoints.get()*2)
+        for i, t in enumerate(traces_list):
+            if cal:
+                v = self.calib_data.get(eterm=t[0], p1=t[1], p2=t[2])
+            elif traces is None:
+                v = data[i]
+            else:
+                v = self.calc_data.get(trace=t, format=location)
+            if cook:
+                f = self.trace_format.get(trace=t)
+                if f not in self.trace_format.choices[['POLar', 'SMITh', 'ISMith']]:
+                    ret.append(v)
+                    continue
+                v = v[0::2] + 1j*v[1::2]
+            elif not cal:
+                v = v[0::2] + 1j*v[1::2]
+            if unit == 'db_deg':
+                r = 20.*np.log10(np.abs(v))
+                theta = np.angle(v, deg=True)
+                theta = self.phase_unwrap(theta)
+                ret.append(r)
+                ret.append(theta)
+            elif unit == 'cmplx':
+                ret.append(v)
+            else:
+                ret.append(v.real)
+                ret.append(v.imag)
+        ret = np.asarray(ret)
+        if ret.shape[0]==1:
+            ret=ret[0]
+        return ret
+
+    @staticmethod
+    def phase_unwrap(phase_deg):
+        return scipy.rad2deg( scipy.unwrap( scipy.deg2rad(phase_deg) ) )
+
+    @staticmethod
+    def phase_wrap(phase_deg):
+        return (phase_deg +180.) % 360 - 180.
+
+    @staticmethod
+    def phase_flatten(phase_deg, freq, delay=0., ratio=[0,-1]):
+        """
+           Using an unwrapped phase, this removes a slope.
+           if delay is specified, it adds delay*f*360
+           If delay is 0. (default) then it uses 2 points
+           specified by ratio (defaults to first and last)
+           to use to extract slope (delay)
+        """
+        dp = phase_deg[ratio[1]] - phase_deg[ratio[0]]
+        df = freq[ratio[1]] - freq[ratio[0]]
+        if delay == 0.:
+            delay = -dp/df/360.
+            print 'Using delay=', delay
+        return phase_deg + delay*freq*360.
+
+    def get_xscale(self, ch=None, trace=None):
+        return self.x_axis.get(ch=ch, trace=trace)
+
+    def conf_options(self):
+        ret = {}
+        qs = quoted_string_znb()
+        for o in self.available_options:
+            desc = qs(self.ask('DIAGnostic:PRODuct:OPTion:INFO? "%s", DESCription'%o))
+            type = qs(self.ask('DIAGnostic:PRODuct:OPTion:INFO? "%s", TYPE'%o))
+            activation = qs(self.ask('DIAGnostic:PRODuct:OPTion:INFO? "%s", ACTivation'%o))
+            expiration = qs(self.ask('DIAGnostic:PRODuct:OPTion:INFO? "%s", EXPiration'%o))
+            key = qs(self.ask('DIAGnostic:PRODuct:OPTion:INFO? "%s", KEY'%o))
+            data = dict(desc=desc, type=type, activation=activation, expiration=expiration, key=key)
+            ret[o] = data
+        return ret
+
+    def _help_ch_trace(self, ch=None, trace=None):
+        if ch is not None:
+            self.current_channel.set(ch)
+        else:
+            ch = self.current_channel.get()
+        if trace is not None:
+            self.select_trace.set(trace)
+        else:
+            trace = self.select_trace.get()
+        return ch, trace
+
+    def calc_math_data_to_mem(self, ch=None, trace=None):
+        ch, trace = self._help_ch_trace(ch, trace)
+        self.write('CALCulate{ch}:MATH:MEMorize'.format(ch=ch))
+
+    def _help_ch_trace_mkr(self, ch=None, trace=None, mkr=None):
+        ch, trace = self._help_ch_trace(ch, trace)
+        if mkr is None:
+            mkr = self.current_marker.get()
+        else:
+            self.current_marker.set(mkr)
+        return ch, trace, mkr
+
+    def marker_send_to(self, dest='center', ch=None, trace=None, mkr=None):
+        """ dest can be: 'center', 'start', 'stop', 'span' """
+        choices = ChoiceStrings('CENTer', 'SPAN', 'STARt', 'STOP')
+        if dest not in choices:
+            raise ValueError(self.perror('Invalid dest parameter'))
+        ch, trace, mkr = self._help_ch_trace_mkr(ch, trace, mkr)
+        self.write('CALCulate{ch}:MARKer{mkr}:FUNCtion:{dest}'.format(ch=ch, mkr=mkr, dest=dest))
+
+    def marker_search_exec(self, func, ch=None, trace=None, mkr=None):
+        """ func can be: 'MAXimum', 'MINimum', 'RPEak', 'LPEak', 'NPEak', 'TARGet', 'RTARget', 'LTARget', 'BFILter', 'MMAXimum', 'MMINimum', 'SPRogress'"""
+        choices = ChoiceStrings('MAXimum', 'MINimum', 'RPEak', 'LPEak', 'NPEak', 'TARGet', 'RTARget', 'LTARget', 'BFILter', 'MMAXimum', 'MMINimum', 'SPRogress')
+        if func not in choices:
+            raise ValueError(self.perror('Invalid func parameter'))
+        ch, trace, mkr = self._help_ch_trace_mkr(ch, trace, mkr)
+        self.write('CALCulate{ch}:MARKer{mkr}:FUNCtion:EXECute {func}'.format(ch=ch, mkr=mkr, func=func))
+
+    def _create_devs(self):
+        opt = self.ask('*OPT?')
+        self.available_options = opt.split(',')
+        nports = int(self.ask('INSTrument:PORT:COUNt?'))
+        # There is a bug. Asking for once twice behaves like True.
+        self.display_remote_update_en = scpiDevice('SYSTem:DISPlay:UPDate', choices=ChoiceSimpleMap({'1':True, '0':False, 'ONCE':'once'}))
+        self.display_message_text = scpiDevice('SYSTem:USER:DISPlay:TITLe', str_type=quoted_string_znb(), doc='The message is in the black remote window')
+        self.remote_cwd = scpiDevice('MMEMory:CDIRectory', str_type=quoted_string_znb(),
+                                     doc=r"""
+                                          instrument default is C:\\Users\\Public\\Documents\\Rohde-Schwarz\\VNA
+                                          You have to use \ (make sure to use raw strings r"" or double them \\)
+                                          """)
+
+        self.current_channel = MemoryDevice(1, min=1, max=200)
+        self.current_phys_port = MemoryDevice(1, min=1, max=nports)
+        self.current_marker = MemoryDevice(1, min=1, max=10)
+        self.active_channels_list = scpiDevice(getstr='CONFigure:CHANnel:CATalog?', str_type=quoted_dict_znb())
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_channel)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.channel_en = devChOption('CONFigure:CHANnel{ch}:MEASure', str_type=bool)
+        self.trace_list_in_ch = devChOption(getstr='CONFigure:CHANnel{ch}:TRACe:CATalog?', str_type=quoted_dict_znb())
+        self.trace_list_all = scpiDevice(getstr='CONFigure:TRACe:CATalog?', str_type=quoted_dict_znb())
+        self.trace_meas_list_in_ch = devChOption(getstr='CALCulate{ch}:PARameter:CATalog?', str_type=quoted_dict(quote_char="'", empty=''))
+        # CONFigure:TRACe:WINDow:TRACe? <TraceName>  converts from TraceName to trace number
+        # CONFigure:TRACe:WINDow? <TraceName>  finds the trace window (diagram), returns 0 if not displayed
+        # windowTrace restarts at 1 for each window
+        select_trace_choices = ChoiceDevSwitch(self.trace_meas_list_in_ch,
+                                               lambda t: 'Trc%i'%t,
+                                               sub_type=quoted_string_znb())
+        self.select_trace = devChOption('CALCulate{ch}:PARameter:SELect', autoinit=8,
+                                        choices=select_trace_choices, doc="""
+                Select the trace using either the trace name (standard ones are 'Trc1')
+                which are unique, the trace param like 'S11' which might not be unique
+                (in which case the first one is used). A number (like 1) is converted to the format 'Trc1'.
+                The actual Trace number are not used.
+                You need to select traces that are members of the channel.
+                """)
+
+        def devCalcOption(*arg, **kwarg):
+            # Use this one everywhere the manual uses <Chn> instead of <Ch>
+            options = kwarg.pop('options', {}).copy()
+            options.update(trace=self.select_trace)
+            app = kwarg.pop('options_apply', ['ch', 'trace'])
+            kwarg.update(options=options, options_apply=app)
+            return devChOption(*arg, **kwarg)
+        # There is a set SENSe{ch}:FUNCtion but the parameters are different than on read.
+        # So just to read now.
+        # TODO: implement set
+        self.meas_function_sweep_type = devCalcOption(getstr='SENSe{ch}:FUNCtion?', str_type=quoted_string_znb())
+        self.meas_function = devCalcOption('CALCulate{ch}:PARameter:MEASure {trace},{val}', 'CALCulate{ch}:PARameter:MEASure? {trace}', str_type=quoted_string_znb())
+
+        self.freq_start = devChOption('SENSe{ch}:FREQuency:STARt', str_type=float, setget=True, auto_min_max=True)
+        self.freq_stop = devChOption('SENSe{ch}:FREQuency:STOP', str_type=float, setget=True, auto_min_max=True)
+        self.freq_center = devChOption('SENSe{ch}:FREQuency:CENTer', str_type=float, setget=True, auto_min_max=True)
+        self.freq_span = devChOption('SENSe{ch}:FREQuency:SPAN', str_type=float, setget=True, auto_min_max=True)
+        self.freq_cw = devChOption('SENSe{ch}:FREQuency:CW', str_type=float, setget=True, auto_min_max=True)
+        self.freq_meas_sideband = devChOption('SENSe{ch}:FREQuency:SBANd', choices=ChoiceStrings('POSitive', 'NEGative', 'AUTO'))
+        # This requires option K14 K4
+        #self.freq_conversion_mode = devChOption('SENSe{ch}:FREQuency:CONVersion', choices=ChoiceStrings('FUNDamental', 'ARBitrary', 'MIXer'))
+        # Phase:mode does not seem to work.
+        #self.phase_mode = devChOption('SENSe{ch}:PHASe:MODE', choices=ChoiceStrings('NCOHerent', 'COHerent', 'LNNCoherent', 'LNCoherent'))
+
+        self.bandwidth = devChOption('SENSe{ch}:BANDwidth', str_type=float, setget=True, auto_min_max=True)
+        self.bandwidth_selectivity = devChOption('SENSe{ch}:BANDwidth:SELect', choices=ChoiceStrings('NORMal', 'MEDium', 'HIGH'))
+        self.sweep_average_en = devChOption('SENSe{ch}:AVERage', str_type=bool)
+        self.sweep_average_count = devChOption('SENSe{ch}:AVERage:COUNt', str_type=int, auto_min_max=True)
+        self.sweep_average_mode = devChOption('SENSe{ch}:AVERage:MODE', choices=ChoiceStrings('AUTO', 'FLATten', 'REDuce', 'MOVing'),
+                                              doc="""
+                                                  AUTO: the manual says it selects between FLATten (Linear/db/Phase) and Reduce (others)
+                                                        but tests seem to indicate it is always Reduce
+                                                  Reduce: Averages real/imaginary
+                                                  Flatten: Averages linear amplitude/phase
+                                                  Moving: Same as Reduce but only keeps last count in average
+                                                  Flatten and Reduce are exponential averages. Starting from a reset they reach
+                                                  a stable value after count. But they have exponential memory after that.
+                                                  """)
+        self.sweep_mode = devChOption('SENSe{ch}:COUPle', choices=ChoiceStrings('ALL', 'AUTO', 'NONE'), doc='ALL is chopped sweep mode, NONE is alternate sweep mode, auto depends on sweep time (chopped for long)')
+        self.sweep_type = devChOption('SENSe{ch}:SWEep:TYPE', choices=ChoiceStrings('LINear', 'LOGarithmic', 'POWer', 'CW', 'POINt', 'SEGMent', 'PULSe'))
+        self.sweep_linear_mode = devChOption('SENSe{ch}:SWEep:GENeration', choices=ChoiceStrings('STEPped', 'ANALog'))
+        self.sweep_time_auto_en = devChOption('SENSe{ch}:SWEep:TIME:AUTO', str_type=bool)
+        self.sweep_time = devChOption('SENSe{ch}:SWEep:TIME', str_type=float, setget=True, auto_min_max='max', min=0)
+        self.sweep_detector_time = devChOption('SENSe{ch}:SWEep:DETector:TIME', str_type=float, setget=True, auto_min_max=True)
+        self.sweep_meas_delay = devChOption('SENSe{ch}:SWEep:DWELl', str_type=float, setget=True, auto_min_max=True)
+        self.sweep_meas_delay_insertion_point = devChOption('SENSe{ch}:SWEep:DWELl:IPOint', choices=ChoiceStrings('ALL', 'FIRSt'))
+        self.npoints = devChOption('SENSe{ch}:SWEep:POINts', str_type=int, auto_min_max=True)
+        self.sweep_count = devChOption('SENSe{ch}:SWEep:COUNt', str_type=int, auto_min_max=True)
+        self.sweep_count_current = devCalcOption(getstr='CALCulate{ch}:DATA:NSWeep:COUNt?', str_type=int, autoinit=False)
+
+        def devChPhysOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(port=self.current_phys_port)
+            app = kwarg.pop('options_apply', ['ch', 'port'])
+            kwarg.update(options=options, options_apply=app)
+            return devChOption(*arg, **kwarg)
+
+        self.port_impedance = devChPhysOption('SENSe{ch}:PORT{port}:ZREFerence', str_type=complex, multi=['real', 'imag'])
+        self.port_attenuation = devChPhysOption('SENSe{ch}:POWer:ATTenuation {port},{val}', 'SENSe{ch}:POWer:ATTenuation? {port}', str_type=float, min=0, setget=True)
+        self.port_gain_control = devChPhysOption('SENSe{ch}:POWer:GAINcontrol:GLOBal', choices=ChoiceStrings('LNOise', 'LTRacenoise', 'LDIStortion', 'AUTO', 'MSNR', 'MANual'))
+        self.port_power_level_dBm = devChPhysOption('SOURce{ch}:POWer{port}', str_type=float, setget=True, auto_min_max=True)
+        self.port_power_en = devChPhysOption('SOURce{ch}:POWer{port}:STATe', str_type=bool)
+        self.port_power_permant_on_en = devChPhysOption('SOURce{ch}:POWer{port}:PERManent', str_type=bool)
+        self.port_power_sweep_end = scpiDevice('SOURce:POWer:SWEepend:MODE', choices=ChoiceStrings('AUTO', 'REDuce', 'KEEP'))
+        self.port_power_sweep_end_delay = scpiDevice('SOURce:POWer:SWEepend:SDELay', str_type=float, setget=True, auto_min_max=True)
+
+        self.trigger_src = devChOption('TRIGger{ch}:SOURce', choices=ChoiceStrings('IMMediate', 'EXTernal', 'MANual', 'MULTiple'))
+        self.trigger_continuous_all_ch = scpiDevice('INITiate:CONTinuous:ALL', str_type=bool)
+        self.trigger_continuous = devChOption('INITiate{ch}:CONTinuous', str_type=bool)
+
+        # format could also be SCORr1 - SCORr27 but prefer calib_data for that.
+        self.calc_data = devCalcOption(getstr='CALCulate{ch}:DATA? {format}', str_type=decode_float64, options=dict(format='sdata'),
+                                       options_lim=dict(format=ChoiceStrings('FDATa', 'SDATa', 'MDATa', 'NCData', 'UCData')),
+                                       autoinit=False, trig=True)
+        self.x_axis = devCalcOption(getstr='CALCulate{ch}:DATA:STIMulus?', str_type=decode_float64, autoinit=False)
+        self.calc_data_all = devChOption(getstr='CALCulate{ch}:DATA:CALL? {format}', str_type=decode_float64, options=dict(format='sdata'),
+                                       options_lim=dict(format=ChoiceStrings('SDATa', 'FSIData')),
+                                       autoinit=False, trig=True)
+        self.calc_data_all_list = devChOption(getstr='CALCulate{ch}:DATA:CALL:CATalog?', str_type=quoted_list_znb(), autoinit=False)
+
+        self.calc_gate_en = devCalcOption('CALCulate{ch}:FILTer:TIME:STATe', str_type=bool)
+        if 'ZNB-K20' in self.available_options:
+            self.calc_skew_meas_en = devCalcOption('CALCulate{ch}:DTIMe:STATe', str_type=bool)
+            self.calc_risetime_meas_en = devCalcOption('CALCulate{ch}:TTIMe:STATe', str_type=bool)
+        if 'ZNB-K2' in self.available_options:
+            self.calc_gate_en = devCalcOption('CALCulate{ch}:TRANsform:TIME:STATe', str_type=bool)
+        self.calc_deembed_ground_loop_en = devChOption('CALCulate{ch}:TRANsform:VNETworks:GLOop:DEEMbedding', str_type=bool)
+        self.calc_fixture_simulator_en = devChOption('CALCulate{ch}:TRANsform:VNETworks:FSIMulator', str_type=bool)
+        self.calc_deembed_single_end_en = devChPhysOption('CALCulate{ch}:TRANsform:VNETworks:SENDed:DEEMbedding{port}', str_type=bool)
+        self.calc_embed_single_end_en = devChPhysOption('CALCulate{ch}:TRANsform:VNETworks:SENDed:EMBedding{port}', str_type=bool)
+        self.calc_peak_hold_mode = devCalcOption('CALCulate{ch}:PHOLd', choices=ChoiceStrings('MIN', 'MAX', 'OFF'))
+        self.calc_math_function = devCalcOption('CALCulate{ch}:MATH:FUNCtion', choices=ChoiceStrings('NORMal', 'ADD', 'SUBTract', 'MULTiply', 'DIVide'))
+        self.calc_math_expression = devCalcOption('CALCulate{ch}:MATH:SDEFine', str_type=quoted_string_znb())
+        self.calc_math_expression_en = devCalcOption('CALCulate{ch}:MATH:STATe', str_type=bool)
+        self.calc_math_expression_wave_unit_en = devCalcOption('CALCulate{ch}:MATH:WUNit', str_type=bool)
+        self.calc_smoothing_en = devCalcOption('CALCulate{ch}:SMOothing', str_type=bool)
+        self.calc_smoothing_aperture_percent = devCalcOption('CALCulate{ch}:SMOothing:APERture', str_type=float, setget=True, auto_min_max=True)
+        # TODO: CALCulate<Chn>:STATistics
+
+        def devChMarkOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mkr=self.current_marker)
+            app = kwarg.pop('options_apply', ['ch', 'track', 'mkr'])
+            kwarg.update(options=options, options_apply=app)
+            return devCalcOption(*arg, **kwarg)
+        mkr_format_options = ChoiceStrings('DEFault', 'MLINear', 'MLOGarithmic', 'PHASe', 'POLar', 'GDELay', 'REAL', 'IMAGinary',
+                'SWR', 'LINPhase', 'LOGPhase', 'IMPedance', 'ADMittance', 'MIMPedance')
+        self.marker_default_format = devCalcOption('CALCulate{ch}:MARKer:DEFault:FORMat', choices=mkr_format_options,
+                doc='Note that instrument can have this settings at index. In which case it returns an error.')
+        self.marker_coupling_en = devCalcOption('CALCulate{ch}:MARKer:COUPled', str_type=bool)
+        self.marker_en = devChMarkOption('CALCulate{ch}:MARKer{mkr}', str_type=bool)
+        self.marker_x = devChMarkOption('CALCulate{ch}:MARKer{mkr}:X', str_type=float, setget=True)
+        # TODO: Need to handle file header. Can be reading 1 value, 2 values (complex) or 3 (complex + capacitance or inductance)
+        self.marker_y = devChMarkOption('CALCulate{ch}:MARKer{mkr}:Y', str_type=decode_float64, setget=True, autoinit=False)
+        self.marker_format = devChMarkOption('CALCulate{ch}:MARKer{mkr}:FORMat', choices=mkr_format_options,
+                doc='Note that instrument can have this settings at index. In which case it returns an error.')
+        self.marker_name = devChMarkOption('CALCulate{ch}:MARKer{mkr}:NAME', str_type=quoted_string_znb())
+        self.marker_type = devChMarkOption('CALCulate{ch}:MARKer{mkr}:TYPE', choices=ChoiceStrings('NORMal', 'FIXed', 'ARBitrary'))
+        self.marker_mode = devChMarkOption('CALCulate{ch}:MARKer{mkr}:MODE', choices=ChoiceStrings('CONTinuous', 'DISCrete'))
+        self.marker_delta_en = devChMarkOption('CALCulate{ch}:MARKer{mkr}:DELTa', str_type=bool)
+        # This is undocumented. Also device set to SPRogress returns an empty string.
+        #   Both function and tracking_en modify GUI menus: "Marker Search", "Multiple Peak", "Target Search", "Band-filter"
+        # They can be changed in a way in the GUI that returns errors or empty strings in remote control
+        self.marker_search_function = devChMarkOption('CALCulate{ch}:MARKer{mkr}:FUNCtion', choices=ChoiceStrings('MAXimum', 'MINimum', 'RPEak', 'LPEak', 'NPEak', 'TARGet',
+                                                      'RTARget', 'LTARget', 'BFILter', 'MMAXimum', 'MMINimum', 'SPRogress', 'INVALID_ENTRY', redirects={'':'INVALID_ENTRY'}), autoinit=False)
+        #self.marker_search_tracking_en = devChMarkOption('CALCulate{ch}:MARKer{mkr}:SEARch:TRACking', str_type=bool)
+        self.marker_search_tracking_en = devChMarkOption('CALCulate{ch}:MARKer{mkr}:SEARch:TRACking', choices=ChoiceSimpleMap({'1':True, '0':False, '':'INVALID_ENTRY'}), autoinit=False)
+        self.marker_search_format = devChMarkOption('CALCulate{ch}:MARKer{mkr}:SEARch:FORMat', choices=ChoiceStrings('MLINear', 'MLOGarithmic', 'PHASe', 'UPHase',
+                                                    'REAL', 'IMAGinary', 'SWR', 'DEFault'))
+        self.marker_search_target = devChMarkOption('CALCulate{ch}:MARKer{mkr}:TARGet', str_type=float, setget=True)
+        self.marker_search_range_index = devChMarkOption('CALCulate{ch}:MARKer{mkr}:FUNCtion:DOMain:USER', str_type=int, min=0, max=10, doc='0 is the full span')
+        self.marker_search_range_start = devChMarkOption('CALCulate{ch}:MARKer{mkr}:FUNCtion:DOMain:USER:STARt', str_type=float, setget=True)
+        self.marker_search_range_stop = devChMarkOption('CALCulate{ch}:MARKer{mkr}:FUNCtion:DOMain:USER:STOP', str_type=float, setget=True)
+        self.marker_search_result = devCalcOption(getstr='CALCulate{ch}:MARKer:FUNCtion:RESult?', choices=ChoiceMultiple(['x', 'y'], float), autoinit=False, trig=True)
+        self.marker_ref_en = devCalcOption('CALCulate{ch}:MARKer:REFerence', str_type=bool)
+        self.marker_ref_x = devCalcOption('CALCulate{ch}:MARKer:REFerence:X', str_type=float, setget=True)
+        # TODO: Need to handle file header. Can be reading 1 value, 2 values (complex) or 3 (complex + capacitance or inductance)
+        self.marker_ref_y = devCalcOption('CALCulate{ch}:MARKer:REFerence:Y', str_type=decode_float64, setget=True, autoinit=False)
+        self.marker_ref_name = devCalcOption('CALCulate{ch}:MARKer:REFerence:NAME', str_type=quoted_string_znb())
+        self.marker_ref_type = devCalcOption('CALCulate{ch}:MARKer:REFerence:TYPE', choices=ChoiceStrings('NORMal', 'FIXed', 'ARBitrary'))
+        self.marker_ref_mode = devCalcOption('CALCulate{ch}:MARKer:REFerence:MODE', choices=ChoiceStrings('CONTinuous', 'DISCrete'))
+        self.marker_search_bandwidth_center_geometric_mean_en = scpiDevice('CALCulate:MARKer:FUNCtion:BWIDth:GMCenter', str_type=bool)
+        self.marker_search_bandwidth_mode = devChMarkOption('CALCulate{ch}:MARKer{mkr}:FUNCtion:BWIDth:MODE',
+                                                 choices=ChoiceStrings('BPASs', 'BSTop', 'BPRMarker', 'BSRMarker', 'BPABsolute', 'BSABsolute', 'NONE'))
+        # on writing can only set one parameter which is bandwidth finding parameter in dB
+        self.marker_search_bandwidth_result = devChMarkOption(getstr='CALCulate{ch}:MARKer{mkr}:BWIDth', autoinit=False, trig=True,
+                                                       choices=ChoiceMultiple(['bandwidth', 'center', 'quality_3db', 'loss', 'lower', 'upper'], float))
+
+        # MAGNitude is the same as MLOGarithmic, COMPlex the same as POLar
+        # LOGarithmic does not seem to exist
+        self.trace_format = devCalcOption('CALCulate{ch}:FORMat', choices=ChoiceStrings('MLINear', 'MLOGarithmic',
+                                        'PHASe', 'UPHase', 'POLar', 'SMITh', 'ISMith', 'GDELay',
+                                        'REAL', 'IMAGinary', 'SWR'))
+        self.trace_unit = devCalcOption('CALCulate{ch}:FORMat:WQUType', choices=ChoiceStrings('POWer', 'VOLTage'))
+        self.trace_delay_aperture = devCalcOption('CALCulate{ch}:GDAPerture:SCOunt', str_type=int, setget=True, auto_min_max=True)
+
+        self.elec_delay_loss_fixture_after_deembed_en = scpiDevice('SENSe:CORRection:EDELay:VNETwork', str_type=bool)
+        self.elec_delay_loss_fixture_compensation_en = devChPhysOption('SENSe{ch}:CORRection:OFFSet{port}:COMPensation', str_type=bool)
+        self.elec_delay_time = devChPhysOption('SENSe{ch}:CORRection:EDELay{port}', str_type=float)
+        self.elec_delay_dielectric_constant = devChPhysOption('SENSe{ch}:CORRection:EDELay{port}:DIELectric', str_type=float, setget=True, auto_min_max=True)
+        self.elec_delay_length = devChPhysOption('SENSe{ch}:CORRection:EDELay{port}:DISTance', str_type=float)
+
+        calib_data_options = dict(eterm='DIRECTIVITY', p1=1, p2=1)
+        eterm_options = ChoiceStrings('DIRECTIVITY', 'SRCMATCH', 'REFLTRACK', 'LOADMATCH', 'TRANSTRACK',
+                                      'G11', 'G12', 'G21', 'G22',
+                                      'H11', 'H12', 'H21', 'H22',
+                                      'Q11', 'Q12', 'Q21', 'Q22', 'PREL',
+                                      'L1', 'L2', 'LA')
+        calib_data_options_lim = dict(eterm=eterm_options, p1=(1,2), p2=(1,2))
+        calib_data_options_conv = dict(eterm=lambda val, quoted_val: "'%s'"%val)
+        self.calib_data = devChOption(getstr='SENSe{ch}:CORRection:CDATa? {eterm},{p1},{p2}', str_type=lambda x: decode_complex128(x, skip='\n'), autoinit=False, raw=True,
+                                      options_conv=calib_data_options_conv, options=calib_data_options, options_lim=calib_data_options_lim,
+                                      doc="""
+                                         You should specify eterm, p1(source port) and p2(load_port). They default to DIRECTIVITY, 1, 1
+                                         The various values for eterm are:
+                                           DIRECTIVITY, SRCMATCH, REFLTRACK: require p1
+                                           LOADMATCH: requires p2
+                                           TRANSTRACK: requires p1, p2
+                                           G11, G12, G21, G22: requires p1
+                                           H11, H12, H21, H22: requires p2
+                                           Q11, Q12, Q21, Q22, PREL: requires p1
+                                           L1, L2, LA: requires p1
+                                      """)
+        self.calib_data_xaxis = devChOption(getstr='SENSe{ch}:CORRection:STIMulus?', str_type=decode_float64, autoinit=False)
+        self.calib_en = devChOption('SENSe{ch}:CORRection', str_type=bool)
+        self.calib_label = devCalcOption(getstr='SENSe{ch}:CORRection:SSTate?', str_type=quoted_string_znb())
+        self.calib_power_label = devCalcOption(getstr='SENSe{ch}:CORRection:PSTate?', str_type=quoted_string_znb())
+        # IMEthod does not seem to work.
+        #self.calib_interpol_method = devChOption('SENSe{ch}:CORRection:IMEThod', choices=ChoiceStrings('LINear', 'HORDer'))
+
+        self.ext_ref = scpiDevice('ROSCillator:SOURce', choices=ChoiceStrings('INTernal', 'EXTernal'))
+        # ext_ref_freq does not work (documentation says so 2018-11)
+        #self.ext_ref_freq = scpiDevice('ROSCillator:EXTernal:FREQuency', str_type=float)
+
+        self._devwrap('fetch', autoinit=False)
+        self._devwrap('snap_png', autoinit=False, trig=True)
+        self.readval = ReadvalDev(self.fetch)
+        self.alias = self.fetch
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+
+# Data transfer:
+#   CALCulate:DATA:ALL?
+#     gets all traces (irrespective of channel) form recall set (top tab grouping)
+#     Includes both date and memory traces (at least some memory traces).
+#     They are in trace number order. Complex numbers present as 2 consecutive numbers.
+#     Combining 2 channels with different number of points is ok but cannot be reshaped
+#     into a multi-dimensional array.
+#   CALCulate:DATA:DALL?
+#     same as above except only includes data (not memory)
+#   CALCulate<Ch>:DATA:CALL
+#     get all traces from channel, even if not being displayed (but included in calibrated measurement)
+#     Does not include memory traces. Only options sdate and fisdata are available
+#   CALCulate<Ch>:DATA:CALL:CATalog?
+#     List traces included in previous
+#   CALCulate<Ch>:DATA:CHANnel:ALL?
+#     gets all traces of channel.
+#     Includes both date and memory traces (at least some memory traces).
+#        some memory trace are not included. Probably when more than one memory
+#        from a trace was created, only one is downloaded. Which one?
+#   CALCulate<Ch>:DATA:CHANnel:DALL?
+#     same as above except only includes data (not memory)
+#   CALCulate<Chn>:DATA?
+#     download active trace of Chn
+# Trace types (references to ZNB_ZNBT_UserManual_en_42.pdf):
+#   FDATa:  formated trace data (can be 1 value or 2 value per stimulus). Cooked data
+#            location 3 in Figure 4.1 of manual (Data Flow), page 90
+#   SDATa:  unformated trace data (always complex value), Includes edelay but not trace math
+#            location 2 in Figure 4.1 of manual (Data Flow), page 90
+#   MDATa:  unformated trace data (always complex value), Includes edelay but and trace math
+#            location 3 in Figure 4.1 of manual (Data Flow), page 90
+#      These are available ont for CALCulate<Chn>:DATA?
+#   NCData: unformated trace data (always complex value), Only includes factory calibration
+#   UCData: unformated trace data (always complex value), Uncalibrated data. Only for wave quantity or ratio.
+#      This is only for CALCulate<Ch>:DATA:CALL
+#   FSIData: unformated trace data (always complex value), Only calibrated, does not include edelay
+#            location 1 in Figure 4.1 of manual (Data Flow), page 90
