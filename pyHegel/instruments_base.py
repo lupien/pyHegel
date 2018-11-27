@@ -2122,6 +2122,10 @@ class scaled_float(object):
 
 class quoted_string(object):
     def __init__(self, quote_char='"', quiet=False, tostr=True, fromstr=True):
+        """
+        tostr, fromstr: are True to enable the quote adding/removal.
+                        They can also be a string to use a different quote_char
+        """
         self._quote_char = quote_char
         self._quiet = quiet
         self._fromstr = fromstr
@@ -2129,7 +2133,10 @@ class quoted_string(object):
     def __call__(self, quoted_str):
         if not self._fromstr:
             return quoted_str
-        quote_char = self._quote_char
+        if isinstance(self._fromstr, basestring):
+            quote_char = self._fromstr
+        else:
+            quote_char = self._quote_char
         if len(quoted_str) and quote_char == quoted_str[0] and quote_char == quoted_str[-1]:
             return quoted_str[1:-1]
         else:
@@ -2139,7 +2146,10 @@ class quoted_string(object):
     def tostr(self, unquoted_str):
         if not self._tostr:
             return unquoted_str
-        quote_char = self._quote_char
+        if isinstance(self._tostr, basestring):
+            quote_char = self._tostr
+        else:
+            quote_char = self._quote_char
         if quote_char in unquoted_str:
             raise ValueError, 'The given string already contains a quote :%s:'%quote_char
         return quote_char+unquoted_str+quote_char
@@ -2148,9 +2158,23 @@ class quoted_list(quoted_string):
     def __init__(self, sep=',', element_type=None, protect_sep=None, **kwarg):
         super(quoted_list,self).__init__(**kwarg)
         self._sep = sep
+        # element_type can be a list of types. If it is not long enough for the input
+        # it is repeated.
         self._element_type = element_type
         self._protect_sep = protect_sep
-    def __call__(self, quoted_l):
+    def calc_element_type(self, input_list_len):
+        elem_type = self._element_type
+        if elem_type is not None:
+            N = input_list_len
+            if isinstance(elem_type, list):
+                Nt = len(elem_type)
+                if N%Nt != 0:
+                    raise RuntimeError('Unexpected number of elements')
+                elem_type = elem_type*(N//Nt)
+            else:
+                elem_type = [elem_type]*N
+        return elem_type
+    def __call__(self, quoted_l, skip_type=False):
         unquoted = super(quoted_list,self).__call__(quoted_l)
         if self._protect_sep is not None:
             start_sym, end_sym = self._protect_sep
@@ -2175,12 +2199,14 @@ class quoted_list(quoted_string):
             lst.append(unquoted[s:])
         else:
             lst = unquoted.split(self._sep)
-        if self._element_type is not None:
-            lst = [_fromstr_helper(elem, self._element_type) for elem in lst]
+        if self._element_type is not None and not skip_type:
+            elem_type = self.calc_element_type(len(lst))
+            lst = [_fromstr_helper(elem, et) for elem, et in zip(lst, elem_type)]
         return lst
-    def tostr(self, unquoted_l):
-        if self._element_type is not None:
-           unquoted_l = [_tostr_helper(elem, self._element_type) for elem in unquoted_l]
+    def tostr(self, unquoted_l, skip_type=False):
+        if self._element_type is not None and not skip_type:
+            elem_type = self.calc_element_type(len(unquoted_l))
+            unquoted_l = [_tostr_helper(elem, et) for elem,et in zip(unquoted_l, elem_type)]
         unquoted = self._sep.join(unquoted_l)
         return super(quoted_list,self).tostr(unquoted)
 
@@ -2189,18 +2215,21 @@ class quoted_dict(quoted_list):
         super(quoted_dict,self).__init__(**kwarg)
         self._empty = empty
     def __call__(self, quoted_l):
-        l = super(quoted_dict,self).__call__(quoted_l)
+        l = super(quoted_dict,self).__call__(quoted_l, skip_type=True)
         if l == [self._empty]:
             return OrderedDict()
+        l = super(quoted_dict,self).__call__(quoted_l)
         return OrderedDict(zip(l[0::2], l[1::2]))
     def tostr(self, d):
+        skip_type = False
         if d == {}:
             l = [self._empty]
+            skip_type = True
         else:
             l = []
             for k,v in d.iteritems():
                 l.extend([k ,v])
-        return super(quoted_dict,self).tostr(l)
+        return super(quoted_dict,self).tostr(l, skip_type=skip_type)
 
 # NOTE: a choice function tostr and __call__ (fromstr)
 #       is used when not specifying the str_type to scpi_device
