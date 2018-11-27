@@ -1361,6 +1361,8 @@ class BaseInstrument(object):
             obj.name = devname
             if conf and not obj._format['header']:
                 obj._format['header'] = conf
+        for devname, obj in self.devs_iter():
+            # some device depend on others. So finish all initialization before delayed_init
             obj._delayed_init()
     def _create_devs(self):
         # devices need to be created here (not at class level)
@@ -1752,7 +1754,10 @@ class scpiDevice(BaseDevice):
             If the value was not obtained it will be None.
             See also instr._get_dev_min_max
         """
-        return _get_dev_min_max(self.instr, self._getdev_p, self.type, ask)
+        options = self._combine_options()
+        command = self._getdev_p
+        command = command.format(**options)
+        return _get_dev_min_max(self.instr, command, self.type, ask)
     def _set_dev_min_max(self, min=None, max=None):
         if min is not None:
             self.min = min
