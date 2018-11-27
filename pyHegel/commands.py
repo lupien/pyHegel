@@ -458,6 +458,8 @@ def _readall(devs, formats, i, async=None, noflat=False, extra_kw={}):
         if not noflat:
             if val is None:
                 val = i
+            if isinstance(val, complex):
+                val = [val.real, val.imag]
             if isinstance(val, (list, tuple, np.ndarray, dict)):
                 if isinstance(val, dict):
                     val = val.values()
