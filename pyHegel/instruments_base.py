@@ -1581,6 +1581,8 @@ def _tostr_helper(val, t):
     if t == float or t == int:
         # use repr instead of str to keep full precision
         return repr(val)
+    if t == complex:
+        return '%r,%r'%(val.real, val.imag)
     if t is None or (type(t) == type and issubclass(t, basestring)):
         return val
     return t.tostr(val)
@@ -1601,6 +1603,10 @@ def _fromstr_helper(valstr, t):
         #        raise
     if t == float or t == int:
         return t(valstr)
+    if t == complex:
+        vals = valstr.split(',')
+        vals = map(float, vals)
+        return complex(*vals)
     if t is None or (type(t) == type and issubclass(t, basestring)):
         return valstr
     return t(valstr)
