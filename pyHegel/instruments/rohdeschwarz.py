@@ -382,7 +382,6 @@ class rs_rto_scope(visaInstrumentAsync):
 
         def reorg(opts):
             first = True
-            date_all = []
             for ch_line in opts:
                 ch_line_split = [ c.split('=', 1) for c in ch_line]
                 names = [n for n, d in ch_line_split]
