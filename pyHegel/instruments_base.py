@@ -2029,11 +2029,11 @@ def _decode_block(s, t='<f8', sep=None, skip=None):
         type can be np.float64 float32 int8 int16 int32 uint8 uint16 ...
               or it can be entered as a string like 'float64'
         skip can be used when the data length is unknown (#0....)
-             than you can enter the termination string you want removed from
+             then you can enter the termination string you want removed from
              the end, or an integer of the number of character to remove from the end.
     """
     block = _decode_block_base(s, skip=skip)
-    if sep is None:
+    if sep is None or len(block) == 0:
         return np.fromstring(block, t)
     return np.fromstring(block, t, sep=sep)
 
