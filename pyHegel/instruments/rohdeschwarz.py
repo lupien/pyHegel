@@ -202,14 +202,17 @@ class rs_sgma(visaInstrument):
         lan_addr = self.ask('EXTension:INSTruments:REMote:LAN:NAME?')
         serial_no = self.ask('EXTension:INSTruments:REMote:SERial?')
         state_busy = _fromstr_helper(self.ask('EXTension:BUSY?'), bool)
-        return dict(connected=connected, interface=interface, lan_addr=lan_addr, serial_no=serial_no, state_busy=state_busy)
+        return dict(connected=connected, name=name, interface=interface, lan_addr=lan_addr, serial_no=serial_no, state_busy=state_busy)
 
+    @locked_calling
     def extension_write(self, command, ch=1):
         if not self._is_SGS:
             print 'Only useful for SGS devices.'
             return
         self.write('EXTension:SELect %i'%ch)
         self.write('EXTension:SEND "%s"'%command)
+
+    @locked_calling
     def extension_ask(self, query='', ch=1):
         """ Only useful for SGS device.
             The query is transmitted to the extension.
