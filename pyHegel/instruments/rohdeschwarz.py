@@ -342,6 +342,7 @@ class rs_rto_scope(visaInstrumentAsync):
         self.single_trig()
         self.write('*OPC')
 
+    @locked_calling
     def set_format(self, data=None, bitp=None):
         """ If neither data or bit is given, it returns the current setup (data, bitp).
             data can be: ascii, real, int8 or int16
@@ -469,6 +470,7 @@ class rs_rto_scope(visaInstrumentAsync):
             opts += self._conf_helper('reference_clock_src', 'reference_clock_ext_freq')
         return opts + self._conf_helper(options)
 
+    @locked_calling
     def display_message(self, message=''):
         """ The message is displayed on the black remote window.
         """
@@ -479,6 +481,7 @@ class rs_rto_scope(visaInstrumentAsync):
         else:
             self.display_message_en.set(False)
 
+    @locked_calling
     def set_time(self, set_time=False):
         """ Reads the UTC time from the instrument or set it from the computer value """
         if set_time:
@@ -511,6 +514,7 @@ class rs_rto_scope(visaInstrumentAsync):
         self.write('ACQuire:ARESet:IMMediate')
     acquire_restart_now = clear_sweeps
 
+    @locked_calling
     def clear_measurement(self, ch=None):
         if ch is None:
             ch = self.current_measurement.get()
@@ -592,6 +596,7 @@ class rs_rto_scope(visaInstrumentAsync):
     def trigger_force(self):
         self.write('TRIGger:FORCe')
 
+    @locked_calling
     def get_status(self):
         """ Reading the status also clears it. This is the event(latch) status."""
         res = {}
@@ -620,6 +625,7 @@ class rs_rto_scope(visaInstrumentAsync):
         res.update(limits=quest_lim, margin=quest_marg, low_ampl=quest_lamp, mask=quest_mask)
         return res
 
+    @locked_calling
     def get_status_now(self):
         """ Reading the status. This is the condition(instantenous) status."""
         quest_cov = int(self.ask('STATus:QUEStionable:COV:CONDition?'))
@@ -628,6 +634,7 @@ class rs_rto_scope(visaInstrumentAsync):
         res.update(ch_overload=quest_cov, adcs_clipping=quest_adcs)
         return res
 
+    @locked_calling
     def list_channels(self):
         cur_ch = self.current_channel.get()
         cur_wf = self.current_channel_waveform.get()
@@ -716,6 +723,7 @@ class rs_rto_scope(visaInstrumentAsync):
            ret=ret[0]
         return ret
 
+    @locked_calling
     def list_meas_channels(self):
         cur_ch = self.current_measurement.get()
         chl = []
