@@ -1141,6 +1141,12 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
     If a trace is REMOVED from the instrument, you should perform a get of
     the trace_meas_list_in_ch device to update pyHegel knowledge of the available
     traces (needed when trying to fetch all traces).
+
+    The error message:
+        Remote Error -200: Execution error; CALculate1:MARKer1:FUNCtion?
+    can be shown when reading markers (if searching is disabled in sowe way).
+    It is unavoidable in that condition (to not have the error, just set searching
+    to anything other than None)
     """
     def init(self, full=False):
         self.write('FORMat REAL,64') # Other available: ascii and real,32
@@ -1267,15 +1273,34 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
             self.write('CALCulate{ch}:PARameter:DELete "{trace}"'.format(ch=ch, trace=trace))
         # Update list
         self.trace_meas_list_in_ch.get()
+        self.select_trace.get()
 
     def _current_config(self, dev_obj=None, options={}):
         opts = ['opt=%s'%self.available_options]
-        return opts
-        opts += self._conf_helper('timebase_ful_range', 'timebase_pos_offset', 'timebase_reference_pos_percent')
+        ch = options.get('ch', None)
+        trace = options.get('trace', None)
+        mkr = options.get('mkr', None)
+        if ch is not None:
+            ch_orig = self.current_channel.get()
+            self.current_channel.set(ch)
+        trace_orig = self.select_trace.get()
+        if trace is None:
+            # trace might have changed because of channel change
+            trace = self.select_trace.get()
+        port_orig = self.current_phys_port.get()
+
+        opts += self._conf_helper('active_channels_list', 'current_channel', 'trace_meas_list_in_ch', 'select_trace')
+        opts += self._conf_helper('calib_en', 'ext_ref')
+        opts += self._conf_helper('freq_start', 'freq_stop', 'freq_center', 'freq_span', 'freq_cw', 'freq_meas_sideband')
+        opts += self._conf_helper('bandwidth', 'bandwidth_selectivity', 'sweep_average_en', 'sweep_average_count', 'sweep_average_mode')
+        opts += self._conf_helper('sweep_mode', 'sweep_type', 'sweep_linear_mode', 'sweep_time_auto_en', 'sweep_time', 'sweep_detector_time')
+        opts += self._conf_helper('sweep_meas_delay', 'sweep_meas_delay_insertion_point', 'npoints', 'sweep_count')
+        opts += self._conf_helper('trigger_src', 'trigger_continuous_all_ch', 'trigger_continuous')
+        opts += self._conf_helper('calc_deembed_ground_loop_en', 'calc_fixture_simulator_en', 'elec_delay_loss_fixture_after_deembed_en')
+        opts += self._conf_helper('marker_search_bandwidth_center_geometric_mean_en')
 
         def reorg(opts):
             first = True
-            date_all = []
             for ch_line in opts:
                 ch_line_split = [ c.split('=', 1) for c in ch_line]
                 names = [n for n, d in ch_line_split]
@@ -1288,31 +1313,63 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
                         db.append(d)
             return [n+'=['+','.join(d)+']' for n, d in zip(names, data_all)]
 
-        # Do Channels, Waveforms, Input, Probe
-        ch_orig = self.current_channel.get()
-        wf_orig = self.current_channel_waveform.get()
-        ch_opts = []
-        ch_wf_opts = []
-        for c in range(1, 5):
-            self.current_channel.set(c)
-            wf_range =  range(1, 4) if self.channel_multiple_waveforms_en.get() else [1]
-            for wf in wf_range:
-                self.current_channel_waveform.set(wf)
-                ch_wf_opt = ['channel_waveform=C%iW%i'%(c, wf)]
-                ch_wf_opt += self._conf_helper('channel_en', 'channel_decimation_type', 'channel_arithmetic_method')
-                ch_wf_opts.append(ch_wf_opt)
-            ch_opt = self._conf_helper('input_en', 'input_coupling', 'input_ground_en', 'input_invert_en', 'input_bandwidth',
-                                       'input_full_range', 'input_position_div', 'input_offset', 'input_power_calc_impedance',
-                                       'input_overloaded', 'input_filter_en', 'input_skew_manual_en', 'input_skew_time',
-                                       'input_filter_cutoff_freq', 'probe_state', 'probe_type', 'probe_name', 'probe_attenuation')
-            ch_opts.append(ch_opt)
-        opts += reorg(ch_wf_opts)
-        opts += reorg(ch_opts)
-        self.current_channel.set(ch_orig)
-        self.current_channel_waveform.set(wf_orig)
+        ports = range(1, self.current_phys_port.max+1)
+        o_s = []
+        for p in ports:
+            self.current_phys_port.set(p)
+            o = ['phys_port=%i'%p]
+            o += self._conf_helper('port_power_en', 'port_gain_control', 'port_impedance', 'port_attenuation', 'port_gain_control')
+            o += self._conf_helper('port_power_permant_on_en')
+            o += self._conf_helper('calc_deembed_single_end_en', 'calc_embed_single_end_en')
+            o += self._conf_helper('elec_delay_loss_fixture_compensation_en', 'elec_delay_time', 'elec_delay_length', 'elec_delay_dielectric_constant')
+            o_s.append(o)
+        opts += reorg(o_s)
+        opts += self._conf_helper('port_power_sweep_end', 'port_power_sweep_end_delay')
 
-        if 'B4' in self.available_options:
-            opts += self._conf_helper('reference_clock_src', 'reference_clock_ext_freq')
+        traces = self.trace_meas_list_in_ch.get().keys()
+        o_s = []
+        for t in traces:
+            self.select_trace.set(t)
+            o = ['trace="%s"'%t]
+            o += self._conf_helper('meas_function', 'trace_format', 'trace_unit', 'trace_delay_aperture')
+            o += self._conf_helper('meas_function_sweep_type', 'calc_peak_hold_mode')
+            o += self._conf_helper('calc_gate_en')
+            if 'ZNB-K20' in self.available_options:
+                o += self._conf_helper('calc_skew_meas_en', 'calc_risetime_meas_en')
+            if 'ZNB-K2' in self.available_options:
+                o += self._conf_helper('calc_time_transform_en')
+            o += self._conf_helper('calc_math_function', 'calc_math_expression_en', 'calc_math_expression', 'calc_math_expression_wave_unit_en')
+            o += self._conf_helper('calc_smoothing_en', 'calc_smoothing_aperture_percent')
+            o += self._conf_helper('calib_label', 'calib_power_label', 'marker_default_format', 'marker_coupling_en')
+            o_s.append(o)
+        opts += reorg(o_s)
+
+        self.select_trace.set(trace)
+        if dev_obj in [self.marker_x, self.marker_y]:
+            if mkr is not None:
+                mkr_orig = self.current_marker.get()
+                self.current_marker.set(mkr)
+            opts += self._conf_helper('current_marker')
+            opts += self._conf_helper('marker_en', 'marker_x', 'marker_y', 'marker_format', 'marker_name', 'marker_type', 'marker_mode')
+            opts += self._conf_helper('marker_delta_en')
+            search_func = self.marker_search_function.get()
+            opts += ['marker_search_function=%s'%search_func]
+            if search_func != 'invalid_entry':
+                tracking = self.marker_search_tracking_en.get()
+                opts += ['marker_search_tracking_en=%s'%tracking]
+                opts += self._conf_helper('marker_search_bandwidth_mode', 'marker_search_target', 'marker_search_target_format')
+                opts += self._conf_helper('marker_search_range_index', 'marker_search_range_start', 'marker_search_range_stop')
+
+        if dev_obj in [self.marker_ref_x, self.marker_ref_y]:
+            opts += self._conf_helper('marker_ref_en', 'marker_ref_x', 'marker_ref_name', 'marker_ref_type', 'marker_ref_mode')
+
+        self.select_trace.set(trace_orig)
+        if ch is not None:
+            self.current_channel.set(ch_orig)
+            self.select_trace.get() # update the current trace
+        self.current_phys_port.set(port_orig)
+        if mkr is not None:
+            self.current_marker.set(mkr_orig)
         return opts + self._conf_helper(options)
 
     @locked_calling
@@ -1916,7 +1973,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
             self.calc_skew_meas_en = devCalcOption('CALCulate{ch}:DTIMe:STATe', str_type=bool)
             self.calc_risetime_meas_en = devCalcOption('CALCulate{ch}:TTIMe:STATe', str_type=bool)
         if 'ZNB-K2' in self.available_options:
-            self.calc_gate_en = devCalcOption('CALCulate{ch}:TRANsform:TIME:STATe', str_type=bool)
+            self.calc_time_transform_en = devCalcOption('CALCulate{ch}:TRANsform:TIME:STATe', str_type=bool)
         self.calc_deembed_ground_loop_en = devChOption('CALCulate{ch}:TRANsform:VNETworks:GLOop:DEEMbedding', str_type=bool)
         self.calc_fixture_simulator_en = devChOption('CALCulate{ch}:TRANsform:VNETworks:FSIMulator', str_type=bool)
         self.calc_deembed_single_end_en = devChPhysOption('CALCulate{ch}:TRANsform:VNETworks:SENDed:DEEMbedding{port}', str_type=bool)
@@ -1958,9 +2015,9 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
                                                       'RTARget', 'LTARget', 'BFILter', 'MMAXimum', 'MMINimum', 'SPRogress', 'INVALID_ENTRY', redirects={'':'INVALID_ENTRY'}), autoinit=False)
         #self.marker_search_tracking_en = devChMarkOption('CALCulate{ch}:MARKer{mkr}:SEARch:TRACking', str_type=bool)
         self.marker_search_tracking_en = devChMarkOption('CALCulate{ch}:MARKer{mkr}:SEARch:TRACking', choices=ChoiceSimpleMap({'1':True, '0':False, '':'INVALID_ENTRY'}), autoinit=False)
-        self.marker_search_format = devChMarkOption('CALCulate{ch}:MARKer{mkr}:SEARch:FORMat', choices=ChoiceStrings('MLINear', 'MLOGarithmic', 'PHASe', 'UPHase',
-                                                    'REAL', 'IMAGinary', 'SWR', 'DEFault'))
         self.marker_search_target = devChMarkOption('CALCulate{ch}:MARKer{mkr}:TARGet', str_type=float, setget=True)
+        self.marker_search_target_format = devChMarkOption('CALCulate{ch}:MARKer{mkr}:SEARch:FORMat', choices=ChoiceStrings('MLINear', 'MLOGarithmic', 'PHASe', 'UPHase',
+                                                    'REAL', 'IMAGinary', 'SWR', 'DEFault'))
         self.marker_search_range_index = devChMarkOption('CALCulate{ch}:MARKer{mkr}:FUNCtion:DOMain:USER', str_type=int, min=0, max=10, doc='0 is the full span')
         self.marker_search_range_start = devChMarkOption('CALCulate{ch}:MARKer{mkr}:FUNCtion:DOMain:USER:STARt', str_type=float, setget=True)
         self.marker_search_range_stop = devChMarkOption('CALCulate{ch}:MARKer{mkr}:FUNCtion:DOMain:USER:STOP', str_type=float, setget=True)
@@ -1969,6 +2026,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         self.marker_ref_x = devCalcOption('CALCulate{ch}:MARKer:REFerence:X', str_type=float, setget=True)
         # TODO: Need to handle file header. Can be reading 1 value, 2 values (complex) or 3 (complex + capacitance or inductance)
         self.marker_ref_y = devCalcOption('CALCulate{ch}:MARKer:REFerence:Y', str_type=decode_float64, setget=True, autoinit=False)
+        # marker_ref_format seems to be missing
         self.marker_ref_name = devCalcOption('CALCulate{ch}:MARKer:REFerence:NAME', str_type=quoted_string_znb())
         self.marker_ref_type = devCalcOption('CALCulate{ch}:MARKer:REFerence:TYPE', choices=ChoiceStrings('NORMal', 'FIXed', 'ARBitrary'))
         self.marker_ref_mode = devCalcOption('CALCulate{ch}:MARKer:REFerence:MODE', choices=ChoiceStrings('CONTinuous', 'DISCrete'))
