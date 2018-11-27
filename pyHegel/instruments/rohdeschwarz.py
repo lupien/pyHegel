@@ -42,6 +42,8 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 
+# The usb name can be (rs.idn_usb()):
+#    'Rohde & Schwarz GmbH & Co. KG'
 register_usb_name('Rohde & Schwarz', 0x0aad)
 
 #######################################################
