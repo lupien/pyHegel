@@ -40,7 +40,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDev, ChoiceDevSwitch, ChoiceIndex,\
                             ChoiceSimpleMap, decode_float32, decode_int8, decode_int16, _decode_block_base,\
                             decode_float64, quoted_string, _fromstr_helper, ProxyMethod, _encode_block,\
-                            locked_calling, quoted_list, quoted_dict, decode_complex128
+                            locked_calling, quoted_list, quoted_dict, decode_complex128, Block_Codec
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 
@@ -1350,7 +1350,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
                 mkr_orig = self.current_marker.get()
                 self.current_marker.set(mkr)
             opts += self._conf_helper('current_marker')
-            opts += self._conf_helper('marker_en', 'marker_x', 'marker_y', 'marker_format', 'marker_name', 'marker_type', 'marker_mode')
+            opts += self._conf_helper('marker_en', 'marker_x', 'marker_format', 'marker_name', 'marker_type', 'marker_mode')
             opts += self._conf_helper('marker_delta_en')
             search_func = self.marker_search_function.get()
             opts += ['marker_search_function=%s'%search_func]
@@ -1990,9 +1990,61 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         def devChMarkOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(mkr=self.current_marker)
-            app = kwarg.pop('options_apply', ['ch', 'track', 'mkr'])
+            app = kwarg.pop('options_apply', ['ch', 'trace', 'mkr'])
             kwarg.update(options=options, options_apply=app)
             return devCalcOption(*arg, **kwarg)
+
+        def adjust_getformat(dev, with_mkr):
+            """ the marker_*_y can return 1, 2 or 3 values.
+                Could figure out by reading its type, but if default needs to
+                find default type from curve, which can be default and depend
+                on curve type.
+                So short circuit all that craziness by just reading the data.
+                The caveat is that we waste a read just for getformat.
+                However, if many getformat are requested of a single conf, it will bypass
+                that read.
+            """
+            dev.getformat_orig = dev.getformat
+            dev._getformat_last_get = 0, (None, None, None)
+            def getformat_new(**kwarg):
+                last, last_conf = dev._getformat_last_get
+                now = time.time()
+                ch = kwarg.get('ch', None)
+                trace = kwarg.get('trace', None)
+                mkr = kwarg.get('mkr', None)
+                same_conf = True
+                if ch is not None and last_conf[0] != ch:
+                    same_conf = False
+                if trace is not None and last_conf[1] != trace:
+                    same_conf = False
+                if mkr is not None and last_conf[2] != mkr:
+                    same_conf = False
+                # we keep previous conf unless it is too old or different
+                if now-1 > last or not same_conf:
+                    get_kwd = dict(ch=ch, trace=trace)
+                    if with_mkr:
+                        get_kwd['mkr'] = mkr
+                    data = dev._getdev(**get_kwd)
+                    if isinstance(data, float):
+                        N = 1
+                    else:
+                        N = len(data)
+                    if N == 1:
+                        multi = False
+                    elif N >= 2:
+                        multi = ['real', 'imag']
+                        if N == 3:
+                            multi += ['C_L']
+                        elif N > 3:
+                            # This should not happen
+                            multi += ['extra%i'%i for i in range(1, N-2 +1)]
+                    fmt = dev._format
+                    fmt.update(multi=multi)
+                    dev._getformat_last_get = now, (ch, trace, mkr)
+                return dev.getformat_orig(**kwarg)
+            dev.getformat = getformat_new
+            return dev
+
         mkr_format_options = ChoiceStrings('DEFault', 'MLINear', 'MLOGarithmic', 'PHASe', 'POLar', 'GDELay', 'REAL', 'IMAGinary',
                 'SWR', 'LINPhase', 'LOGPhase', 'IMPedance', 'ADMittance', 'MIMPedance')
         self.marker_default_format = devCalcOption('CALCulate{ch}:MARKer:DEFault:FORMat', choices=mkr_format_options,
@@ -2000,8 +2052,10 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         self.marker_coupling_en = devCalcOption('CALCulate{ch}:MARKer:COUPled', str_type=bool)
         self.marker_en = devChMarkOption('CALCulate{ch}:MARKer{mkr}', str_type=bool)
         self.marker_x = devChMarkOption('CALCulate{ch}:MARKer{mkr}:X', str_type=float, setget=True)
-        # TODO: Need to handle file header. Can be reading 1 value, 2 values (complex) or 3 (complex + capacitance or inductance)
-        self.marker_y = devChMarkOption('CALCulate{ch}:MARKer{mkr}:Y', str_type=decode_float64, setget=True, autoinit=False)
+        # empty data is replaced by nan. The instrument also shows an error that seem unavoidable.
+        self.marker_y = adjust_getformat(devChMarkOption('CALCulate{ch}:MARKer{mkr}:Y',
+                                                         str_type=Block_Codec(sep=',', single_not_array=True, empty=np.nan),
+                                                         setget=True, autoinit=False), True)
         self.marker_format = devChMarkOption('CALCulate{ch}:MARKer{mkr}:FORMat', choices=mkr_format_options,
                 doc='Note that instrument can have this settings at index. In which case it returns an error.')
         self.marker_name = devChMarkOption('CALCulate{ch}:MARKer{mkr}:NAME', str_type=quoted_string_znb())
@@ -2024,8 +2078,9 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         self.marker_search_result = devCalcOption(getstr='CALCulate{ch}:MARKer:FUNCtion:RESult?', choices=ChoiceMultiple(['x', 'y'], float), autoinit=False, trig=True)
         self.marker_ref_en = devCalcOption('CALCulate{ch}:MARKer:REFerence', str_type=bool)
         self.marker_ref_x = devCalcOption('CALCulate{ch}:MARKer:REFerence:X', str_type=float, setget=True)
-        # TODO: Need to handle file header. Can be reading 1 value, 2 values (complex) or 3 (complex + capacitance or inductance)
-        self.marker_ref_y = devCalcOption('CALCulate{ch}:MARKer:REFerence:Y', str_type=decode_float64, setget=True, autoinit=False)
+        self.marker_ref_y = adjust_getformat(devCalcOption('CALCulate{ch}:MARKer:REFerence:Y',
+                                                           str_type=Block_Codec(sep=',', single_not_array=True, empty=np.nan),
+                                                           setget=True, autoinit=False), False)
         # marker_ref_format seems to be missing
         self.marker_ref_name = devCalcOption('CALCulate{ch}:MARKer:REFerence:NAME', str_type=quoted_string_znb())
         self.marker_ref_type = devCalcOption('CALCulate{ch}:MARKer:REFerence:TYPE', choices=ChoiceStrings('NORMal', 'FIXed', 'ARBitrary'))
