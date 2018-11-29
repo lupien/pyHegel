@@ -1982,7 +1982,7 @@ def _decode_block_header(s):
        If the strings does not start with a block format
        returns a full slice (:), nbytes=-1, 0
     """
-    if s[0] != '#':
+    if len(s)==0 or s[0] != '#':
         return slice(None), -1, 0
     nh = int(s[1])
     if nh: # a value of 0 is possible
@@ -2057,20 +2057,33 @@ def _encode_block(v, sep=None):
     return _encode_block_base(s)
 
 def _decode_block_auto(s, t='<f8', skip=None):
-    if s[0] == '#':
+    if len(s) and s[0] == '#':
         sep = None
     else:
         sep = ','
     return _decode_block(s, t, sep=sep, skip=skip)
 
 class Block_Codec(object):
-    def __init__(self, dtype='<f8', sep=None, skip=None):
+    def __init__(self, dtype='<f8', sep=None, skip=None, single_not_array=False, empty=None):
         self._dtype = dtype
         self._sep = sep
         self._skip = skip
+        self._single_not_array = single_not_array
+        self._empty = empty
     def __call__(self, input_str):
-        return _decode_block(input_str, self._dtype, self._sep, self._skip)
+        ret = _decode_block(input_str, self._dtype, self._sep, self._skip)
+        empty = self._empty
+        if empty is not None and len(ret) == 0:
+            ret = np.append(ret, empty)
+        if len(ret) == 1:
+            ret = ret[0]
+        return ret
     def tostr(self, array):
+        dtype = self._dtype
+        if isinstance(array, (int, long, float)):
+            array = np.array([array], dtype=dtype)
+        elif isinstance(array, (list, tuple)):
+            array = np.array(array, dtype=dtype)
         if array.dtype != self._dtype:
             array = array.astype(self._dtype)
         return _encode_block(array, self._sep)
