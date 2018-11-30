@@ -829,6 +829,13 @@ class lakeshore_325(visaInstrument):
         fmt.update(multi=multi, graph=graph)
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_getdev(self, ch=None):
+        """
+        reads thermometers temperature and their sensor values.
+        option ch: can be a single channel or a list of channels.
+                   by default (None), all active channels are used
+                   possible channels names are:
+                       A, B
+        """
         ch = self._fetch_helper(ch)
         ret = []
         for c in ch:
@@ -933,6 +940,14 @@ class lakeshore_340(visaInstrument):
         fmt.update(multi=multi, graph=graph)
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_getdev(self, ch=None):
+        """
+        reads thermometers temperature and their sensor values.
+        option ch: can be a single channel or a list of channels.
+                   by default (None), all active channels are used
+                   possible channels names are:
+                       A, B, C, D, C1, C2, C3, C4, D1, D2, D3, D4
+                   (depending on installed options)
+        """
         old_ch = self.current_ch.getcache()
         ch = self._fetch_helper(ch)
         ret = []
