@@ -40,7 +40,7 @@ from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsy
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
-from .logical import FunctionDevice
+from .logical import FunctionDevice, ScalingDevice
 
 # for pfeiffer
 import threading
@@ -48,6 +48,9 @@ import weakref
 
 # for BIAS-DAC
 import struct
+
+# for micro_lambda_wireless
+import socket
 
 #######################################################
 ##    Yokogawa source
@@ -2300,6 +2303,223 @@ class delft_BIAS_DAC(visaInstrument):
         self.alias = self.level
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+
+#######################################################
+##    Micro Lambda Wireless MLBF filter
+#######################################################
+
+#@register_instrument('micro_lambda_wireless', 'MLBFP-78020', '1.2  Aug 29 2016')
+@register_instrument('micro_lambda_wireless', 'MLBFP-78020')
+class micro_lambda_mlbf(BaseInstrument):
+    """
+    This is the driver for the Micro Lambda Wireless MLBF YIG filter.
+    It currently works using the UDP (network) protocol or the USB protocol
+    if cython-hipapi isinstalled. To install cython-hipapi on windows can be
+    done with: pip install hidapi
+    You need to specify either the udp_address (like '192.168.137.10') or the usb value (True
+    or a serial number string like '0093')
+    NOTE: the usb driver does hang when communicating a lot. When that happens the whole
+    instrument is completely frozen and requires disconnecting the power cable.
+    """
+    def __init__(self, udp_address=None, udp_port=30303, usb=None, **kwargs):
+        if usb is not None and usb is not False:
+            import hid
+            usbdev = hid.device()
+            usb_kwargs = {}
+            if usb is not True:
+                usb_kwargs['serial_number'] = unicode(usb)
+            usbdev.open(0x04d8, 0x003f, **usb_kwargs)
+            usbdev.set_nonblocking(True) # just to be safe. Probably unecessary since I used read timeouts.
+            self._usbdev = usbdev
+            self._usb_timeout = None
+            self._socket = None
+        else:
+            self._socket = socket.socket(type=socket.SOCK_DGRAM)
+            self._socket.connect((udp_address, udp_port))
+            self._usbdev = None
+        self.set_timeout = 3
+        self._last_write = 0
+        # from testing 0.001 seems good enough. So to be safe, make it 0.01
+        self._write_delay = 0.01
+        super(micro_lambda_mlbf, self).__init__(**kwargs)
+
+    def idn(self):
+        conf = self.conf_general()
+        return 'micro_lambda_wireless,%s,%s,%s'%(conf['model'], conf['serial'], conf['firmware_date'])
+
+    def _current_config(self, dev_obj=None, options={}):
+        opts = self._conf_helper('freq', 'temperature', 'temperature_highest')
+        opts += ['conf_general=%s'%self.conf_general()]
+        opts += ['protocol=%s'%('udp' if self._socket is not None else 'usb')]
+        opts += self._conf_helper(options)
+        return opts
+
+    @locked_calling
+    def write(self, val):
+        # writing to fast after a write prevents the first one from working
+        # (for example a query of the freq immediately after setting it, prevents
+        #  the frequency from changing)
+        now = time.time()
+        delta = now-self._last_write
+        delay = self._write_delay
+        if delta < delay:
+            time.sleep(delay-delta)
+        if self._socket is not None:
+            self._socket.send(val)
+        else:
+            data = [0]*65
+            for i, s in enumerate(val):
+                data[i+1] = ord(s)
+            self._usbdev.write(data)
+        self._last_write = time.time()
+
+    @locked_calling
+    def read(self, raw=None, chunk_size=None):
+        if self._socket is not None:
+            ret = self._socket.recv(256)
+        else:
+            ret = self._usbdev.read(65, timeout_ms=int(self._usb_timeout*1e3))
+            if len(ret) == 0:
+                raise RuntimeError(self.perror('Timeout when reading.'))
+            ret = ''.join(map(chr, ret))
+        self._last_write = 0
+        # all the reads I have seen have been 18 byte long.
+        # Theres is padding with \0 and for socket only (not usb) terminates with \r\n
+        zero_ind = ret.find('\0')
+        if zero_ind >= 0:
+            ret = ret[:zero_ind]
+        return ret
+
+    @property
+    def set_timeout(self):
+        """ The timeout in seconds """
+        if self._socket is not None:
+            return self._socket.gettimeout()
+        else:
+            return self._usb_timeout
+    @set_timeout.setter
+    def set_timeout(self, val):
+        if self._socket is not None:
+            self._socket.settimeout(val)
+        else:
+            self._usb_timeout = val
+    @locked_calling
+
+    def ask(self, val, raw=None, chunk_size=None):
+        self.write(val)
+        return self.read()
+
+    @locked_calling
+    def close(self):
+        if self._socket is not None:
+            self._socket.shutdown()
+            self._socket.close()
+        else:
+            self._usbdev.close()
+
+    def _freq_setdev(self, val):
+        """ Set/get frequency in Hz """
+        if self._socket is not None:
+            self.write('F%.4f'%(val*1e-6))
+        else: # usb returns an empty string, udp returns nothing
+            self.ask('F%.4f'%(val*1e-6))
+    def _freq_getdev(self):
+        s = self.ask('R16')
+        return float(s)*1e6
+
+    def set_display(self, display_string=None):
+        """ Sets the instrument 2 line display to the given string.
+            if None, set the first line to freq, the second to temperature.
+        """
+        if display_string is None:
+            return self.ask('DT')
+        if len(display_string) > 32:
+            raise ValueError(self.perror('The requested display string is too long. Need length <= 32.'))
+        self.write('"%s"'%display_string)
+
+    def conf_general(self):
+        clean = lambda x: x.rstrip('\n\r ')
+        model = self.ask('R0')
+        serial = self.ask('R1')
+        product = self.ask('R2')
+        freq_min_MHz = float(self.ask('R3'))
+        freq_max_MHz = float(self.ask('R4'))
+        v3_0 = float(self.ask('V1')[:-1]) # Need to remove terminating V
+        v3_3 = float(self.ask('V2')[:-1]) # Need to remove terminating V
+        v5_0 = float(self.ask('V3')[:-1]) # Need to remove terminating V
+        vp15 = float(self.ask('V4')[:-1]) # Need to remove terminating V
+        vn15 = float(self.ask('V5')[:-1]) # Need to remove terminating V
+        filter_bandwidth_MHz = float(self.ask('R5'))
+        filter_insertion_loss_dB = float(self.ask('R6'))
+        filter_limit_power_dBm = float(self.ask('R7'))
+        temperature_min = float(self.ask('R8'))
+        temperature_max = float(self.ask('R9'))
+        non_volatile_state = clean(self.ask('R11'))
+        firmware_date = clean(self.ask('R12'))
+        unit_health = self.ask('R13')
+        unit_calibration_status = self.ask('R14')
+        unit_self_test_result = self.ask('R15')
+        filter_passband_spurs_ripples_max_dB = float(self.ask('R17'))
+        filter_off_resonance_isolation_min_dB = float(self.ask('R18'))
+        filter_bandwidth_meas_spec_db = float(self.ask('R23'))
+        unit_coarse_calibration_status = self.ask('R26')
+        unit_fine_calibration_status = self.ask('R27')
+        firmware_tcpip_stack_version = self.ask('R29')
+        firmware_build_time = self.ask('R30')
+        ret = locals()
+        del ret['self']
+        del ret['clean']
+        return ret
+
+    def conf_network(self):
+        clean = lambda x: x.rstrip('\n\r ')
+        dhcp_status = clean(self.ask('R100'))
+        ip_addr = clean(self.ask('R101'))
+        ip_mask = clean(self.ask('R102'))
+        ip_gateway = clean(self.ask('R103'))
+        ip_dns1 = clean(self.ask('R104'))
+        ip_dns2 = clean(self.ask('R105'))
+        mac_address = clean(self.ask('R106'))
+        hostname = clean(self.ask('R107'))
+        udp_port = int(self.ask('R108'))
+        ret = locals()
+        del ret['self']
+        del ret['clean']
+        return ret
+
+    def get_status(self):
+        status = self.ask('?')
+        val = int(status, 2)
+        return dict(self_test_pass=bool(val&0x40), novo_locked=bool(val&0x80))
+
+    def _create_devs(self):
+        self.temperature = scpiDevice(getstr='T', str_type=lambda x: float(x[:-1])) # Need to remove terminating C
+        self.temperature_highest = scpiDevice(getstr='R10', str_type=float)
+        fmin = float(self.ask('R3'))-100
+        fmax = float(self.ask('R4'))+100
+        self._devwrap('freq', min=fmin*1e6, max=fmax*1e6, setget=True)
+        self.alias = self.freq
+        self.freq_MHz = ScalingDevice(self.freq, 1e-6, quiet_del=True)
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+
+# Above we use the UDP or USB connection protocol.
+# You can also connect using telnet.
+#  - The windows telnet works ok
+#  - The cygwin works if you specify the port (23) because that prevents
+#        automatic initiation of TELNET options.
+#  - The protocol seem fragile (hence preventing option negotiation)
+#      bad entries can easily block it
+#  - It allows only one connection at a time.
+# You can also use the web server:
+#  - connect to http://192.168.137.10 or something to that effect (standard port 80)
+#  - in python
+#     import httplib
+#     ht = httplib.HTTPConnection('192.168.137.10')
+#     ht.request('POST', '/diag.htm', 'cmd=r1'); resp = ht.getresponse()
+#     resp.status, resp.reason, resp.read()
+#   - can replace /diag.htm  by /commands.htm
+#   - should also be able to use /index.htm but that does not seem to work
 
 
 #######################################################
