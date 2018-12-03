@@ -1421,6 +1421,7 @@ class BaseInstrument(object):
                     val = _repr_or_string(getattr(self, devname)())
             ret.append('%s=%s'%(devname, val))
         if not no_default:
+            add_to(ret, 'class_name="%s"'%self.__class__.__name__)
             add_to(ret, 'idn="%s"'%self.idn())
         return ret
     def read(self):
