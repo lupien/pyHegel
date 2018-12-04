@@ -696,7 +696,7 @@ class BaseDevice(object):
         They can have multiple keyword parameters
     """
     def __init__(self, autoinit=True, doc='', setget=False, allow_kw_as_dict=False,
-                  allow_missing_dict=False, get_has_check=False,
+                  allow_missing_dict=False, allow_val_as_first_dict=False, get_has_check=False,
                   min=None, max=None, choices=None, multi=False, graph=True,
                   trig=False, redir_async=None):
         # instr and name updated by instrument's _create_devs
@@ -711,6 +711,8 @@ class BaseDevice(object):
         # a choices.field_names list of values (like with ChoiceMultiple)
         # allow_missing_dict, will fill the missing elements of dict with values
         #  from a get
+        # allow_val_as_first_dict when True, takes val as first element of dictionary.
+        #    probably only useful if allow_missing_dict is also True
         # get_has_check, make it true if the _getdev produces the Runtime_Get_Para_Checked
         #  exception (calls _get_para_checked). This is needed for proper CHECKING mode
         #  or if executing the get has not side effect.
@@ -733,6 +735,7 @@ class BaseDevice(object):
         self.choices = choices
         self._allow_kw_as_dict = allow_kw_as_dict
         self._allow_missing_dict = allow_missing_dict
+        self._allow_val_as_first_dict = allow_val_as_first_dict
         self._get_has_check = get_has_check
         self._doc = doc
         # obj is used by _get_conf_header and _write_dev
@@ -956,6 +959,8 @@ class BaseDevice(object):
             val = None
         else:
             raise RuntimeError(self.perror('%s can only have one positional parameter'%fnct_str))
+        if nval and self._allow_val_as_first_dict and not isinstance(val, dict):
+            val = {self.choices.field_names[0]:val}
         if self._allow_kw_as_dict:
             if val is None:
                 val = dict()
