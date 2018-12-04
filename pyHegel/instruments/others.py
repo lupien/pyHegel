@@ -2316,8 +2316,8 @@ class micro_lambda_mlbf(BaseInstrument):
     It currently works using the UDP (network) protocol or the USB protocol
     if cython-hipapi isinstalled. To install cython-hipapi on windows can be
     done with: pip install hidapi
-    You need to specify either the udp_address (like '192.168.137.10') or the usb value (True
-    or a serial number string like '0093')
+    You need to specify either the udp_address (like '192.168.137.10' or 'mlbf0093')
+    or the usb value (True or a serial number string like '0093')
     NOTE: the usb driver does hang when communicating a lot. When that happens the whole
     instrument is completely frozen and requires disconnecting the power cable.
     """
