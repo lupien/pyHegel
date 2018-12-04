@@ -1684,7 +1684,9 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
                      Memory traces also have a name (often like 'Mem1[Trc1]')
                      or when cal is True, tuples like ('DIRECTIVITY', 1, 1)
                      When None (default) selects all data traces (not memory) of the channel.
-                     To obtain memory traces, then need to be specified
+                     To obtain memory traces, they need to be specified
+                     WARNING: when traces is None and averaging is enabled it will always be reduce averaging,
+                              instead of the selected one. At least for firmware V2.92
             -unit:   can be 'default' (real, imag)
                        'db_deg' (db, deg) , where phase is unwrapped
                        'cmplx'  (complex number), Note that this cannot be written to file
@@ -1925,6 +1927,20 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
                                                   Moving: Same as Reduce but only keeps last count in average
                                                   Flatten and Reduce are exponential averages. Starting from a reset they reach
                                                   a stable value after count. But they have exponential memory after that.
+                                                  Equivalent python code:
+                                                      #let data be in vector v of infinite length that starts with zeroes.
+                                                      #new values are given to v[i] for iteration i (starting at 0).
+                                                      #The request is for N averages.
+                                                      # for reduce/Flatten
+                                                      if i<N:
+                                                          avg = v[:i+1].mean()
+                                                      else:
+                                                          avg = (1-1./N)*avg + (1./N)*v[i]
+                                                      # for moving:
+                                                      if i<N:
+                                                          avg = v[:i+1].mean()
+                                                      else:
+                                                          avg = v[-N:].mean()
                                                   """)
         self.sweep_mode = devChOption('SENSe{ch}:COUPle', choices=ChoiceStrings('ALL', 'AUTO', 'NONE'), doc='ALL is chopped sweep mode, NONE is alternate sweep mode, auto depends on sweep time (chopped for long)')
         self.sweep_type = devChOption('SENSe{ch}:SWEep:TYPE', choices=ChoiceStrings('LINear', 'LOGarithmic', 'POWer', 'CW', 'POINt', 'SEGMent', 'PULSe'))
