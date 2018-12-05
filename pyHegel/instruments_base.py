@@ -959,11 +959,14 @@ class BaseDevice(object):
             val = None
         else:
             raise RuntimeError(self.perror('%s can only have one positional parameter'%fnct_str))
+        allow_var_kw = False
         if nval and self._allow_val_as_first_dict and not isinstance(val, dict):
             val = {self.choices.field_names[0]:val}
+            allow_var_kw = True
         if self._allow_kw_as_dict:
-            if val is None:
-                val = dict()
+            if val is None or allow_var_kw:
+                if val is None:
+                    val = dict()
                 for k in kwarg.keys():
                     if k in self.choices.field_names:
                         val[k] = kwarg.pop(k)
