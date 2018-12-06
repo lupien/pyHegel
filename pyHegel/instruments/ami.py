@@ -89,6 +89,9 @@ class AmericanMagnetics_model430(visaInstrument):
         self._orig_target_cache = None
         super(AmericanMagnetics_model430, self).__init__(visa_addr, **kwargs)
         self._extra_create_dev()
+        # Because labber locks it, but we don't need it, unlock it so the user can
+        # change units from the instrument front panel.
+        self.write('CONFigure:LOCK:FIELD:UNITS 0')
 
     @locked_calling
     def _extra_create_dev(self):
