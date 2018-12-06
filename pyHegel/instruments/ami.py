@@ -28,7 +28,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseInstrume
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep, ChoiceSimpleMap,\
                             ChoiceStrings, ChoiceIndex, ChoiceLimits, ChoiceDevDep,\
                             make_choice_list, _fromstr_helper,\
-                            decode_float64, visa_wrap, locked_calling
+                            decode_float64, visa_wrap, locked_calling, sleep, BaseDevice
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 from .logical import ScalingDevice
 from ..types import dict_improved
@@ -48,6 +48,9 @@ class AmericanMagnetics_model430(visaInstrument):
     """
     This is the driver of American Magnetics model 430 magnet controller.
     Useful devices:
+        ramp_current
+        ramp_field_T
+        ramp_field_kG
         current
         current_magnet
         field_T
@@ -83,6 +86,7 @@ class AmericanMagnetics_model430(visaInstrument):
         self._coil_constant = 0. # always in T/A
         self._max_ramp_rate = max_ramp_rate
         self._min_ramp_rate = min_ramp_rate
+        self._orig_target_cache = None
         super(AmericanMagnetics_model430, self).__init__(visa_addr, **kwargs)
         self._extra_create_dev()
 
@@ -116,6 +120,10 @@ class AmericanMagnetics_model430(visaInstrument):
         self.ramp_rate_field_kG.choices.fmts_lims[0].choices['sec'].min = rmin*scalekG
         self.ramp_rate_field_kG.choices.fmts_lims[0].choices['sec'].max = rmax*scalekG
         self.ramp_rate_field_kG.choices.fmts_lims[1] = (1e-4*scalekG*10, max_current*scalekG)
+        self.ramp_current.max = max_current
+        self.ramp_current.min = min_current
+        self.ramp_field_T = ScalingDevice(self.ramp_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT)
+        self.ramp_field_kG = ScalingDevice(self.ramp_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG)
 
     def init(self, full=False):
         if full:
@@ -131,7 +139,7 @@ class AmericanMagnetics_model430(visaInstrument):
         opts += self._conf_helper('ramp_rate_unit', 'ramp_rate_segment_count')
         ramps = self.conf_ramp_rates()
         opts += ['ramp_rate_currents=%s'%ramps]
-        opts += self._conf_helper('persistent_switch_en', 'persistent_mode_active')
+        opts += self._conf_helper('ramp_wait_after', 'persistent_switch_en', 'persistent_mode_active')
         opts += self._conf_helper('quench_detected', 'quench_count', 'rampdown_count', 'field_unit')
         opts += ['conf_manget=%s'%self.conf_magnet()]
         opts += ['conf_supply=%s'%self.conf_supply()]
@@ -236,11 +244,22 @@ class AmericanMagnetics_model430(visaInstrument):
         self._conf_magnet_cache = ret
         return ret
 
-#TODO  implement go_to_field and wait (or go_to_current) and handle persistence
+    def _ramp_rate_field_checkdev_helper(self, unit=None, index=None):
+        if unit not in ['sec', 'min', None]:
+            raise ValueError(self.perror("Invalid unit, should be 'sec' or 'min' or None"))
+        if unit is not None:
+            # use setcache here, during set it will actually be changed.
+            # This is enough to update the device limits.
+            self.ramp_rate_unit.setcache(unit)
+        if not (index is None or index >= 1):
+            raise ValueError(self.perror("Invalid index, should be >=1 or None"))
 
     def _ramp_current_field_conv(self, dict_in, scale):
         return dict_improved([('rate', dict_in['rate']*scale), ('max_field', dict_in['max_current']*scale)])
 
+    def  _ramp_rate_field_T_checkdev(self, val, unit=None, index=None):
+        self._ramp_rate_field_checkdev_helper(unit, index)
+        BaseDevice._checkdev(self.ramp_rate_field_T, val)
     def _ramp_rate_field_T_setdev(self, val, unit=None, index=None):
         """ Same options as ramp_rate_current but requires a dictionnary with rate and max_field (instead of max_current)
         """
@@ -254,6 +273,9 @@ class AmericanMagnetics_model430(visaInstrument):
         scale = self._coil_constant
         return self._ramp_current_field_conv(val, scale)
 
+    def  _ramp_rate_field_kG_checkdev(self, val, unit=None, index=None):
+        self._ramp_rate_field_checkdev_helper(unit, index)
+        BaseDevice._checkdev(self.ramp_rate_field_kG, val)
     def _ramp_rate_field_kG_setdev(self, val, unit=None, index=None):
         """ Same options as ramp_rate_current but requires a dictionnary with rate and max_field (instead of max_current)
         """
@@ -267,7 +289,118 @@ class AmericanMagnetics_model430(visaInstrument):
         scale = self._coil_constant*10
         return self._ramp_current_field_conv(val, scale)
 
+    def _ramping_helper(self, stay_states, end_states=None, extra_wait=None):
+        if isinstance(stay_states, basestring):
+            stay_states = [stay_states]
+        while self.state.get() in stay_states:
+            #print self.state.getcache(), self.current.get(), self.current_magnet.get(), self.current_target.getcache(), self.persistent_switch_en.get()
+            sleep(.1)
+        if self.state.get() == 'quench':
+            raise RuntimeError(self.perror('The magnet QUENCHED!!!'))
+        if extra_wait:
+            sleep(extra_wait)
+        if end_states is not None:
+            if isinstance(end_states, basestring):
+                end_states = [end_states]
+            if self.state.get() not in end_states:
+                raise RuntimeError(self.perror('The magnet state did not change to %s as expected'%end_states))
+
+    @locked_calling
+    def do_persistent(self, to_pers, quiet=True):
+        """
+        This function goes in/out of persistent mode.
+        to_pers to True to go into peristent mode (turn persistent switch off, ramp to zero and leave magnet energized)
+                   False to go out of persistent mode (reenergize leads and turn persistent switch on)
+        It returns the previous state of the persistent switch.
+        """
+        # The instruments hardware user interface for the switch does exactly this algorithm:
+        #   going off persistent: ramps to recorded current (changes target temporarily to recorded one)
+        #                         then turns heat switch on
+        #   going persistent:   turn heat swithc off, ramps to zero
+        def print_if(s):
+            if not quiet:
+                print s
+        if not self.persistent_switch_installed.getcache():
+            return True
+        state = self.state.get()
+        if state in ['cooling_persistent_switch', 'heating_persistent_switch']:
+            raise RuntimeError(self.perror('persistent switch is currently changing state. Wait.'))
+        if state in  ['ramping', 'zeroing', 'ramping_manual_up', 'ramping_manual_down']:
+            raise RuntimeError(self.perror('Magnet is ramping. Stop that before changing the persistent state.'))
+        orig_switch_en = self.persistent_switch_en.get()
+        self.set_state('pause')
+        if to_pers:
+            if orig_switch_en:
+                # switch is active
+                print_if('Turning persistent switch off and waiting for cooling...')
+                self.persistent_switch_en.set(False)
+                self._ramping_helper('cooling_persistent_switch', 'paused')
+            print_if('Ramping to zero ...')
+            self.set_state('zero')
+            # This ramp is fast, no extra wait.
+            self._ramping_helper('zeroing', 'at_zero')
+        else: # go out of persistence
+            if not orig_switch_en:
+                orig_target = self.current_target.get()
+                self._orig_target_cache = orig_target
+                tmp_target = self.current_magnet.get()
+                print_if('Ramping to previous target ...')
+                self.current_target.set(tmp_target)
+                self.set_state('ramp')
+                # The ramp is fast but still wait and extra 5 s for stability before pausing.
+                self._ramping_helper('ramping', 'holding', 5.)
+                self.set_state('pause')
+                self.current_target.set(orig_target)
+                self._orig_target_cache = None
+                print_if('Turning persistent switch on and waiting for heating...')
+                self.persistent_switch_en.set(True)
+                self._ramping_helper('heating_persistent_switch', 'paused')
+        return orig_switch_en
+
+    def _do_ramp(self, current_target):
+        if current_target == 0:
+            self.set_state('zero')
+        else:
+            self.set_state('pause')
+            self.current_target.set(current_target)
+            self.set_state('ramp')
+        self._ramping_helper(['zeroing', 'ramping'], ['at_zero', 'holding'], self.ramp_wait_after.getcache())
+
+    def _ramp_current_checkdev(self, val, return_persistent='auto', quiet=True):
+        if return_persistent not in [True, False, 'auto']:
+            raise ValueError(self.perror("Invalid return_persistent option. Should be True, False or 'auto'"))
+        BaseDevice._checkdev(self.ramp_current, val)
+
+    def _ramp_current_setdev(self, val, return_persistent='auto', quiet=True):
+        """ Goes to the requested setpoint and then waits until it is reached.
+            After the instrument says we have reached the setpoint, we wait for the
+            duration set by ramp_wait_after (in s).
+            return_persistent can be True (always), False (never) or 'auto' (the default)
+                              which returns to state from start of ramp.
+
+            When using get, returns the magnet current.
+        """
+        def print_if(s):
+            if not quiet:
+                print s
+        ps_installed = self.persistent_switch_installed.getcache()
+        if ps_installed:
+            # Go out of persistent (turn persistent switch on)
+            prev_switch_en = self.do_persistent(to_pers=False, quiet=quiet)
+            # Now change the field
+            print_if('Ramping...')
+            self._do_ramp(val)
+            if return_persistent == True or (return_persistent == 'auto' and not prev_switch_en):
+                self.do_persistent(to_pers=True, quiet=quiet)
+        else: # not persistent switch installed
+            print_if('Ramping...')
+            self._do_ramp(val)
+
+    def _ramp_current_getdev(self):
+        return self.current_magnet.get()
+
     def _create_devs(self):
+        self.ramp_wait_after = MemoryDevice(10., min=0.)
         self.setpoint = scpiDevice('conf:current:target', 'current:target?', str_type=float)
         self.volt = scpiDevice(getstr='voltage:supply?', str_type=float)
         self.volt_magnet = scpiDevice(getstr='voltage:magnet?', str_type=float, doc='This is the voltage on the magnet if the proper connection are present.')
@@ -302,7 +435,8 @@ class AmericanMagnetics_model430(visaInstrument):
         self.persistent_switch_installed = scpiDevice('PSwitch:INSTalled?', str_type=bool)
         self.persistent_switch_ramp_rate = scpiDevice('CONFigure:PSwitch:PowerSupplyRampRate', 'PSwitch:PowerSupplyRampRate?', str_type=float, doc='Units are always A/s')
         self.persistent_switch_en = scpiDevice('PSwitch', str_type=bool)
-        self.persistent_mode_active = scpiDevice(getstr='PERSistent?', str_type=bool)
+        self.persistent_mode_active = scpiDevice(getstr='PERSistent?', str_type=bool,
+                                                 doc='This is the same as the front panel persistent LED. Shows if magnet is energized and persistent.')
         self.quench_detected = scpiDevice(getstr='QUench?', str_type=bool)
         self.quench_count = scpiDevice(getstr='QUench:COUNT?', str_type=int)
         self.rampdown_count = scpiDevice(getstr='RAMPDown:COUNT?', str_type=int)
@@ -316,6 +450,7 @@ class AmericanMagnetics_model430(visaInstrument):
         self._devwrap('ramp_rate_field_kG',
                       choices=ChoiceMultiple(['rate', 'max_field'], [(float, rate_kG_lim), (float, (0, None))]),
                       allow_kw_as_dict=True, allow_missing_dict=True, allow_val_as_first_dict=True)
+        self._devwrap('ramp_current', autoinit=False)
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
