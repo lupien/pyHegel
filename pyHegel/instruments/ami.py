@@ -111,22 +111,23 @@ class AmericanMagnetics_model430(visaInstrument):
         self.field_target_kG = ScalingDevice(self.current_target, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG)
         self.field_T = ScalingDevice(self.current_magnet, scaleT, quiet_del=True, doc='Field in magnet (even in persistent mode)')
         self.field_kG = ScalingDevice(self.current_magnet, scalekG, quiet_del=True, doc='Field in magnet (even in persistent mode)')
-        self.ramp_rate_current.choices.fmts_lims[1] = (1e-4, max_current)
         rmin, rmax = self._min_ramp_rate, self._max_ramp_rate
         self.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].min = rmin*scaleT*60
         self.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].max = rmax*scaleT*60
         self.ramp_rate_field_T.choices.fmts_lims[0].choices['sec'].min = rmin*scaleT
         self.ramp_rate_field_T.choices.fmts_lims[0].choices['sec'].max = rmax*scaleT
-        self.ramp_rate_field_T.choices.fmts_lims[1] = (1e-4*scaleT, max_current*scaleT)
         self.ramp_rate_field_kG.choices.fmts_lims[0].choices['min'].min = rmin*scalekG*60
         self.ramp_rate_field_kG.choices.fmts_lims[0].choices['min'].max = rmax*scalekG*60
         self.ramp_rate_field_kG.choices.fmts_lims[0].choices['sec'].min = rmin*scalekG
         self.ramp_rate_field_kG.choices.fmts_lims[0].choices['sec'].max = rmax*scalekG
-        self.ramp_rate_field_kG.choices.fmts_lims[1] = (1e-4*scalekG*10, max_current*scalekG)
         self.ramp_current.max = max_current
         self.ramp_current.min = min_current
         self.ramp_field_T = ScalingDevice(self.ramp_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT)
         self.ramp_field_kG = ScalingDevice(self.ramp_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG)
+        max_current = round(max_current+0.01, 1) # instruments returns a rounded value to one decimal. +0.01 is to deal for unknown of instrument rounding algorithm
+        self.ramp_rate_current.choices.fmts_lims[1] = (1e-4, max_current)
+        self.ramp_rate_field_T.choices.fmts_lims[1] = (1e-4*scaleT, max_current*scaleT)
+        self.ramp_rate_field_kG.choices.fmts_lims[1] = (1e-4*scalekG*10, max_current*scalekG)
 
     def init(self, full=False):
         if full:
