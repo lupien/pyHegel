@@ -299,7 +299,7 @@ class iTest_be2102(visaInstrument):
         extra_check_level = ProxyMethod(self._extra_check_level)
         self.level = scpiDevice(pre+'VOLTage', str_type=float, extra_check_func=extra_check_level)
 
-        range_list = map(float, self.ask('VOLTage:RANGe:LIST?').split(','))
+        range_list = map(float, self.ask(pre+'VOLTage:RANGe:LIST?').split(','))
         extra_check_output_en = ProxyMethod(self._extra_check_output_en)
         range_doc = """
         The range can only be changed when the output is disabled.
