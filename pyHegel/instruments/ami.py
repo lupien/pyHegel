@@ -252,9 +252,9 @@ class AmericanMagnetics_model430(visaInstrument):
         if unit not in ['sec', 'min', None]:
             raise ValueError(self.perror("Invalid unit, should be 'sec' or 'min' or None"))
         if unit is not None:
-            # use setcache here, during set it will actually be changed.
-            # This is enough to update the device limits.
-            self.ramp_rate_unit.setcache(unit)
+            # set unit here (don't use setcache otherwise ramp_rate_current.set will not do the unit set internally)
+            # It will not be repeated in ramp_rate_current.set because the value is only set if different than the cache
+            self.ramp_rate_unit.set(unit)
         if not (index is None or index >= 1):
             raise ValueError(self.perror("Invalid index, should be >=1 or None"))
 
