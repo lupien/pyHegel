@@ -128,12 +128,8 @@ class guzik_adp7104(BaseInstrument):
             return
         Nch = self._gsa_Nch
         res_arr = self._gsa_data_res_arr
-        if Nch == 1:
-            if SDK.GSA_Data_Info(arg, res_arr[0]) == SDK.GSA_FALSE:
-                raise RuntimeError(self.perror('Unable to destroy op.'))
-        else:
-            if SDK.GSA_Data_Multi_Info(arg, Nch, res_arr, None) == SDK.GSA_FALSE:
-                raise RuntimeError(self.perror('Unable to destroy op.'))
+        if SDK.GSA_Data_Multi_Info(arg, Nch, res_arr, None) == SDK.GSA_FALSE:
+            raise RuntimeError(self.perror('Unable to destroy op.'))
         self._gsa_data = None
         self._gsa_data_arg = None
 
@@ -171,16 +167,12 @@ class guzik_adp7104(BaseInstrument):
         hdr_default = SDK.GSA_ARG_HDR(version=SDK.GSA_SDK_VERSION)
         arg = SDK.GSA_Data_ARG(hdr=hdr_default)
         res_arr = (SDK.GSA_Data_RES*4)() # array of 4 RES
-        if Nch == 1:
-            if SDK.GSA_Data_Info(arg, res_arr[0]) == SDK.GSA_FALSE:
-                raise RuntimeError(self.perror('Unable to initialize acq structures.'))
-        else:
-            if SDK.GSA_Data_Multi_Info(arg, Nch, res_arr, None) == SDK.GSA_FALSE:
-                raise RuntimeError(self.perror('Unable to initialize acq structures.'))
+        if SDK.GSA_Data_Multi_Info(arg, Nch, res_arr, None) == SDK.GSA_FALSE:
+            raise RuntimeError(self.perror('Unable to initialize acq structures.'))
         arg.common.rc_idx = 0
         arg.common.rc_conf = conf
         arg.common.input_labels_list = channels_list
-        arg.common.acq_len = n_S_ch
+        arg.common.acq_len = int(n_S_ch)
         #arg.common.acq_time_ns = 1000
         arg.common.sectors_num = 1
         #arg.common.sector_time_ns = 1000
@@ -202,12 +194,8 @@ class guzik_adp7104(BaseInstrument):
         else:
             arg.common.data_type = SDK.GSA_DATA_TYPE_SHIFTED8BIT
         arg.hdr.op_command = SDK.GSA_OP_CONFIGURE
-        if Nch == 1:
-            if SDK.GSA_Data(arg, res_arr[0]) == SDK.GSA_FALSE:
-                raise RuntimeError(self.perror('Unable to finish initializing acq structure.'))
-        else:
-            if SDK.GSA_Data_Multi(arg, Nch, res_arr) == SDK.GSA_FALSE:
-                raise RuntimeError(self.perror('Unable to finish initializing acq structure.'))
+        if SDK.GSA_Data_Multi(arg, Nch, res_arr) == SDK.GSA_FALSE:
+            raise RuntimeError(self.perror('Unable to finish initializing acq structure.'))
         self._gsa_data_arg = arg
         self._gsa_data_res_arr = res_arr
         self._gsa_data = None # free previous data memory
@@ -240,12 +228,8 @@ class guzik_adp7104(BaseInstrument):
         res_arr = self._gsa_data_res_arr
         Nch = self._gsa_Nch
         arg.hdr.op_command = SDK.GSA_OP_FINISH
-        if Nch == 1:
-            if SDK.GSA_Data(arg, res_arr[0]) == SDK.GSA_FALSE:
-                raise RuntimeError(self.perror('Had a problem reading data.'))
-        else:
-            if SDK.GSA_Data_Multi(arg, Nch, res_arr) == SDK.GSA_FALSE:
-                raise RuntimeError(self.perror('Had a problem reading data.'))
+        if SDK.GSA_Data_Multi(arg, Nch, res_arr) == SDK.GSA_FALSE:
+            raise RuntimeError(self.perror('Had a problem reading data.'))
         data = self._gsa_data
         if not raw:
             if Nch == 1:
@@ -289,3 +273,18 @@ class guzik_adp7104(BaseInstrument):
         self.alias = self.fetch
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+
+# Tests results:
+#gz = instruments.guzik_adp7104()
+#gz.config(1,1e9, bits_16=True)
+#%timeit v=get(gz.fetch)
+## 1 loop, best of 3: 1.47 s per loop
+#gz.config(1,1e9, bits_16=False)
+#%timeit v=get(gz.fetch)
+## 1 loop, best of 3: 1.26 s per loop
+#gz.config([1,3],1e9, bits_16=False)
+#%timeit v=get(gz.fetch)
+## 1 loop, best of 3: 1.29 s per loop
+#gz.config([1,3],1e9, bits_16=True)
+#%timeit v=get(gz.fetch)
+## 1 loop, best of 3: 2.35 s per loop
