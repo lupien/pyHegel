@@ -83,7 +83,7 @@ class guzik_adp7104(BaseInstrument):
     """
     This is the driver for the Guzik acquisition system (ADP7104, 4 channels, 32 GS/s (2ch), 10 GHz (2ch))
     """
-    def __init__(self, sdk_path=r'C:\Codes\Guzik', lib_path=r'C:\Program Files\Keysight\GSA1 Toolkit 460A7KREL127\x64'):
+    def __init__(self, sdk_path=r'C:\Codes\Guzik', lib_path=r'C:\Program Files\Keysight\GSA1 Toolkit Latest\x64'):
         if sdk_path not in sys.path:
             sys.path.append(sdk_path)
         add_environ_path(lib_path)
