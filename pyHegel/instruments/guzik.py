@@ -133,6 +133,14 @@ class guzik_adp7104(BaseInstrument):
         self._gsa_data = None
         self._gsa_data_arg = None
 
+    def _current_config(self, dev_obj=None, options={}):
+        SDK = self._gsasdk
+        opts = ['channels=%s'%self._gsa_data_arg.common.input_labels_list]
+        opts += ['gain_db=%s'%self._gsa_data_arg.common.gain_dB]
+        opts += ['bits_16=%s'%(True if self._gsa_data_arg.common.data_type == SDK.GSA_DATA_TYPE_INT15BIT else False)]
+        opts += ['n_S_ch=%s'%self._gsa_data_res_arr[0].common.data_len]
+        opts += self._conf_helper(options)
+        return opts
 
     def config(self, channels, n_S_ch=1024, bits_16=True, gain=0.):
         """
@@ -246,9 +254,6 @@ class guzik_adp7104(BaseInstrument):
     def idn(self):
         return 'Guzik,ADP7104,00000,1.0'
 
-    def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('loop1', options)
-
     def get_error(self, basic=False, printit=True):
         SDK = self._gsasdk
         s = ctypes.create_string_buffer(SDK.GSA_ERROR_MAX_BUFFER_LENGTH)
@@ -268,7 +273,6 @@ class guzik_adp7104(BaseInstrument):
                 return None
 
     def _create_devs(self):
-        self.loop1 = MemoryDevice(0.)
         self._devwrap('fetch')
         self.alias = self.fetch
         # This needs to be last to complete creation
