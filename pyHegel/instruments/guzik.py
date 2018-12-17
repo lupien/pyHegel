@@ -92,8 +92,10 @@ class guzik_adp7104(BaseInstrument):
         super(guzik_adp7104, self).__init__()
         SDK = self._gsasdk
         self._gsa_sys_cfg = SDK.GSA_SYS_CFG(version=SDK.GSA_SDK_VERSION)
+        print 'Starting instrument initialization. This could take some time (20s)...'
         if SDK.GSA_SysInit(self._gsa_sys_cfg) != SDK.GSA_TRUE:
             raise RuntimeError(self.perror('Initialization problem!'))
+        print 'Finished instrument initialization.'
         ci = ctypes.c_int()
         if SDK.GSA_ReadChNumberGet(ctypes.byref(ci)) == SDK.GSA_FALSE:
             raise RuntimeError(self.perror('Initialization problem. Unable to get number of available channels'))
