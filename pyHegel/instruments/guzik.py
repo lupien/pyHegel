@@ -136,21 +136,44 @@ class guzik_adp7104(BaseInstrument):
         self._gsa_data_arg = None
 
     def _current_config(self, dev_obj=None, options={}):
-        SDK = self._gsasdk
-        opts = ['channels=%s'%self._gsa_data_arg.common.input_labels_list]
-        opts += ['gain_db=%s'%self._gsa_data_arg.common.gain_dB]
-        opts += ['bits_16=%s'%(True if self._gsa_data_arg.common.data_type == SDK.GSA_DATA_TYPE_INT15BIT else False)]
-        opts += ['n_S_ch=%s'%self._gsa_data_res_arr[0].common.data_len]
+        opts = ['config=%s'%self.config()]
         opts += self._conf_helper(options)
         return opts
 
-    def config(self, channels, n_S_ch=1024, bits_16=True, gain=0.):
+    def _read_config(self):
+        SDK = self._gsasdk
+        channels = self._gsa_data_arg.common.input_labels_list
+        gain_db = self._gsa_data_arg.common.gain_dB
+        bits_16 =(True if self._gsa_data_arg.common.data_type == SDK.GSA_DATA_TYPE_INT15BIT else False)
+        n_S_ch = self._gsa_data_res_arr[0].common.data_len
+        Nch = self._gsa_Nch
+        conv_offset = []
+        conv_resolution=[]
+        res_arr = self._gsa_data_res_arr
+        low_pass_filter_MHz = []
+        high_pass_filter_MHz = []
+        for i in range(Nch):
+            conv_offset.append(res_arr[i].common.data_offset)
+            conv_resolution.append(res_arr[i].common.ampl_resolution*1e3)
+            low_pass_filter_MHz.append(res_arr[i].common.used_lpf_cutoff_frq_MHz)
+            high_pass_filter_MHz.append(res_arr[i].common.used_hpf_cutoff_frq_MHz)
+        sampling_period_ns = self._gsa_conf_ch.sampling_period_ns
+        sampling_rate_GSs = 1./sampling_period_ns
+        analog_bandwidth_MHz = self._gsa_conf_ch.analog_bandwidth_MHz
+        ret = locals()
+        del ret['i'], ret['res_arr'], ret['self'], ret['SDK']
+        return ret
+
+    def config(self, channels=None, n_S_ch=1024, bits_16=True, gain_dB=0.):
         """
+        if channels is None, it returns information about the current config.
         channels needs be a list of integer that represent the channels (1-4).
         It can also be a single integer
         bits_16 when False, returns 8 bit data.
         n_S_ch is the number of Sample per ch to read.
         """
+        if channels is None:
+            return self._read_config()
         self._destroy_op()
         if not isinstance(channels, (np.ndarray, list, tuple)):
             channels = [channels]
@@ -189,7 +212,7 @@ class guzik_adp7104(BaseInstrument):
         #arg.common.acq_timeout = 0 # in us. -1 for infinite
         arg.common.acq_adjust_up = SDK.GSA_TRUE
         arg.common.trigger_mode = SDK.GSA_DP_TRIGGER_MODE_IMMEDIATE
-        arg.common.gain_dB = gain
+        arg.common.gain_dB = gain_dB
         ts = [np.zeros(10, np.uint) for i in range(4)]
         tf = [np.zeros(10, np.uint64) for i in range(4)]
         self._gsa_data_res_ts = ts # timestamp in seconds
