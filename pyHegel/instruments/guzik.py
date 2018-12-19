@@ -82,6 +82,15 @@ def pp(o, align=20, base=''):
 class guzik_adp7104(BaseInstrument):
     """
     This is the driver for the Guzik acquisition system (ADP7104, 4 channels, 32 GS/s (2ch), 10 GHz (2ch))
+    To use this instrument, the most useful device is probably:
+        fetch
+    Some methods are available:
+        config
+        conv_scale
+        close
+        get_error
+        print_timestamps
+        print_structure
     """
     def __init__(self, sdk_path=r'C:\Codes\Guzik', lib_path=r'C:\Program Files\Keysight\GSA1 Toolkit Latest\x64'):
         if sdk_path not in sys.path:
@@ -171,6 +180,8 @@ class guzik_adp7104(BaseInstrument):
         It can also be a single integer
         bits_16 when False, returns 8 bit data.
         n_S_ch is the number of Sample per ch to read.
+        To free the memory, delete any user variable that remembers a previous result,
+        than call config with a new size.
         """
         if channels is None:
             return self._read_config()
@@ -231,7 +242,9 @@ class guzik_adp7104(BaseInstrument):
             raise RuntimeError(self.perror('Unable to finish initializing acq structure.'))
         self._gsa_data_arg = arg
         self._gsa_data_res_arr = res_arr
-        self._gsa_data = None # free previous data memory
+        # free previous data memory
+        self.fetch.setcache(None)
+        self._gsa_data = None
         N = res_arr[0].common.data_len
         for i in range(Nch):
             if res_arr[i].common.data_len != N:
@@ -298,7 +311,7 @@ class guzik_adp7104(BaseInstrument):
                 return None
 
     def _create_devs(self):
-        self._devwrap('fetch')
+        self._devwrap('fetch', autoinit=False)
         self.alias = self.fetch
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
