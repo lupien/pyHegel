@@ -327,7 +327,14 @@ def _get_extra_confs(extra_conf):
     formats = []
     for x in extra_conf:
         if isinstance(x, basestring):
-            f = dict(base_hdr_name='comment', base_conf=x)
+            lines = x.split('\n')
+            f = dict(base_hdr_name='comment', base_conf=lines[0])
+            formats.append(f)
+            if lines[-1] == '':
+                lines = lines[:-1] #remove one empty last line
+            for l in lines[1:]:
+                f = dict(base_hdr_name='com ...', base_conf=l)
+                formats.append(f)
         else:
             dev, kwarg = _get_dev_kw(x)
             dev.force_get()
@@ -335,7 +342,7 @@ def _get_extra_confs(extra_conf):
             f = dev.getformat(**kwarg)
             f['base_conf'] = instruments_base._get_conf_header(f)
             f['base_hdr_name'] = hdr
-        formats.append(f)
+            formats.append(f)
     return formats
 
 def _getheaders_multi_helper(fmt, hdr):
@@ -558,6 +565,7 @@ def _write_conf(f, formats, extra_base=None, **kwarg):
         extra = dict(base_hdr_name=extra_base, base_conf=[repr(kwarg)])
         formats = formats[:] # make a copy
         formats.append(extra)
+    rm_nl = lambda x: x.replace('\n', '\\n')
     for fmt in formats:
         conf = fmt['base_conf']
         hdr = fmt['base_hdr_name']
@@ -565,9 +573,9 @@ def _write_conf(f, formats, extra_base=None, **kwarg):
             f.write('#'+hdr+':=')
             if isinstance(conf, list):
                 for c in conf:
-                    f.write(' '+c+';')
+                    f.write(' '+rm_nl(c)+';')
             else:
-                f.write(' '+conf)
+                f.write(' '+rm_nl(conf))
             f.write('\n')
 
 def dump_conf(f, setdevs=None, getdevs=[], extra_conf=None):
