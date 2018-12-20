@@ -176,12 +176,17 @@ class sr830_lia(visaInstrument):
         return self._conf_helper('async_delay','async_wait', 'freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
                                  'sync_filter', 'reserve_mode',
                                  'offset_expand_x', 'offset_expand_y', 'offset_expand_r',
-                                 'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf', options)
+                                 'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf',
+                                 'auxout1', 'auxout2', 'auxout3', 'auxout4', options)
     def _create_devs(self):
         self.freq = scpiDevice('freq', str_type=float, setget=True, min=0.001, max=102e3)
         sens = ChoiceIndex(make_choice_list([2,5,10], -9, -1), normalize=True)
         self.sens = scpiDevice('sens', choices=sens, doc='Set the sensitivity in V (for currents it is in uA)')
-        self.oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float, setget=True)
+        self.oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float)
+        self.auxout1 = scpiDevice('AUXV 1,{val}', 'AUXV? 1', str_type=float, setget=True, min=-10.5, max=10.5)
+        self.auxout2 = scpiDevice('AUXV 2,{val}', 'AUXV? 2', str_type=float, setget=True, min=-10.5, max=10.5)
+        self.auxout3 = scpiDevice('AUXV 3,{val}', 'AUXV? 3', str_type=float, setget=True, min=-10.5, max=10.5)
+        self.auxout4 = scpiDevice('AUXV 4,{val}', 'AUXV? 4', str_type=float, setget=True, min=-10.5, max=10.5)
         self.srclvl = scpiDevice('slvl', str_type=float, min=0.004, max=5., setget=True)
         self.harm = scpiDevice('harm', str_type=int, min=1, max=19999)
         self.phase = scpiDevice('phas', str_type=float, min=-360., max=729.90, setget=True)
