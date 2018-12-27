@@ -2368,7 +2368,7 @@ class micro_lambda_mlbf(BaseInstrument):
         delta = now-self._last_write
         delay = self._write_delay
         if delta < delay:
-            time.sleep(delay-delta)
+            traces.wait(delay-delta)
         if self._socket is not None:
             self._socket.send(val)
         else:
