@@ -1131,6 +1131,7 @@ class _Sweep(instruments.BaseInstrument):
                 # This is important when using quiet_KeyboardInterrupt(True)
                 # becasuse then the traceback cleanup is delayed until garbage collection
                 # but it contains progress. So for while, old status report will be kept around.
+                progress.remove()
                 del progress
             if graph:
                 t.set_comment_func(None)
@@ -1411,6 +1412,7 @@ class _Sweep(instruments.BaseInstrument):
                 # This is important when using quiet_KeyboardInterrupt(True)
                 # becasuse then the traceback cleanup is delayed until garbage collection
                 # but it contains progress. So for while, old status report will be kept around.
+                progress.remove()
                 del progress
             if graph:
                 t.set_comment_func(None)
