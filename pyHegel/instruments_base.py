@@ -175,8 +175,10 @@ class UserStatusLine(object):
         if self._time_check is not None:
             return self._time_check()
         return True
-    def __del__(self):
+    def remove(self):
         self.main.delete(self.handle)
+    def __del__(self):
+        self.remove()
     def __call__(self, new_status=''):
         self.main.change(self.handle, new_status)
         do_update = self.check_time()
@@ -184,6 +186,10 @@ class UserStatusLine(object):
             self.main.output()
     def output(self):
         self.main.output()
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        self.remove()
 
 class MainStatusLine(object):
     """
@@ -195,10 +201,14 @@ class MainStatusLine(object):
     Larger priority will show before lower ones. You can also put a limit to the
     update rate with timed (which is passed to UserStatusLine).
     For information on using the user object see UserStatusLine
+    Can use attribute enable to turn off the status line display
+    Can also use the return object (from new) as a context manager to make sure it is properly cleaned.
     """
     def __init__(self):
         self.last_handle = 0
         self.users = {}
+        self.enable = True
+        self._lock = threading.Lock()
     def new(self, priority=1, timed=False):
         handle = self.last_handle + 1
         self.last_handle = handle
@@ -206,10 +216,14 @@ class MainStatusLine(object):
         return UserStatusLine(self, handle, timed)
         # higher priority shows before lower ones
     def delete(self, handle):
-        del self.users[handle]
+        with self._lock:
+            if handle in self.users:
+                del self.users[handle]
     def change(self, handle, new_status):
         self.users[handle][1] = new_status
     def output(self):
+        if not self.enable:
+            return
         entries = self.users.values()
         entries = sorted(entries, key=lambda x: x[0], reverse=True) # sort on decreasing priority only
         outstr = ' '.join([e[1] for e in entries if e[1] != '']) # join the non-empty status
