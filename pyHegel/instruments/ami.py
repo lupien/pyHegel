@@ -23,12 +23,14 @@
 
 from __future__ import absolute_import
 
+from .. import traces
+
 from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseInstrument,\
                             scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep, ChoiceSimpleMap,\
                             ChoiceStrings, ChoiceIndex, ChoiceLimits, ChoiceDevDep,\
                             make_choice_list, _fromstr_helper,\
-                            decode_float64, visa_wrap, locked_calling, sleep, BaseDevice
+                            decode_float64, visa_wrap, locked_calling, BaseDevice, mainStatusLine
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 from .logical import ScalingDevice
 from ..types import dict_improved
@@ -87,6 +89,7 @@ class AmericanMagnetics_model430(visaInstrument):
         self._max_ramp_rate = max_ramp_rate
         self._min_ramp_rate = min_ramp_rate
         self._orig_target_cache = None
+        self._last_state = None
         super(AmericanMagnetics_model430, self).__init__(visa_addr, **kwargs)
         self._extra_create_dev()
         # Because labber locks it, but we don't need it, unlock it so the user can
@@ -154,6 +157,7 @@ class AmericanMagnetics_model430(visaInstrument):
         if state not in ['ramp', 'pause', 'incr', 'decr', 'zero']:
             raise RuntimeError('invalid state')
         self.write(state)
+        self._last_state = state
 
     def conf_ramp_rates(self, ramp_unit=None, field=None):
         """ By default returns ramps in default ramp_unit (sec or min)
@@ -294,15 +298,27 @@ class AmericanMagnetics_model430(visaInstrument):
         return self._ramp_current_field_conv(val, scale)
 
     def _ramping_helper(self, stay_states, end_states=None, extra_wait=None):
+        conf = self.conf_magnet()
+        to = time.time()
+        if stay_states == 'cooling_persistent_switch':
+            prog_base = 'Magnet Cooling switch: {time}/%.1f'%conf['persistent_switch_cool_time']
+        elif stay_states == 'heating_persistent_switch':
+            prog_base = 'Magnet Heating switch: {time}/%.1f'%conf['persistent_switch_heat_time']
+        elif self._last_state == 'ramp':
+            prog_base = 'Magnet Ramping {current:.3f}/%.3f A'%self.current_target.getcache()
+        else: # zeroing field
+            prog_base = 'Magnet Ramping {current:.3f}/0 A'
         if isinstance(stay_states, basestring):
             stay_states = [stay_states]
         while self.state.get() in stay_states:
-            #print self.state.getcache(), self.current.get(), self.current_magnet.get(), self.current_target.getcache(), self.persistent_switch_en.get()
-            sleep(.1)
+            with mainStatusLine(priority=10, timed=True) as progress:
+                #print self.state.getcache(), self.current.get(), self.current_magnet.get(), self.current_target.getcache(), self.persistent_switch_en.get()
+                traces.wait(.1)
+                progress(prog_base.format(current=self.current.get(), time=time.time()-to))
         if self.state.get() == 'quench':
             raise RuntimeError(self.perror('The magnet QUENCHED!!!'))
         if extra_wait:
-            sleep(extra_wait)
+            traces.wait(extra_wait)
         if end_states is not None:
             if isinstance(end_states, basestring):
                 end_states = [end_states]
@@ -505,4 +521,5 @@ class MagnetSimul(BaseInstrument):
         self._devwrap('field')
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
-        
+
+
