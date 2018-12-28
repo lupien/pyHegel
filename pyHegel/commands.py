@@ -1129,7 +1129,7 @@ class _Sweep(instruments.BaseInstrument):
                 t.set_status(False, 'ctrl-c')
             raise KeyboardInterrupt('Interrupted sweep'), None, sys.exc_info()[2]
         finally:
-            if progress:
+            if progress and isinstance(progress, instruments_base.UserStatusLine):
                 # This is important when using quiet_KeyboardInterrupt(True)
                 # becasuse then the traceback cleanup is delayed until garbage collection
                 # but it contains progress. So for while, old status report will be kept around.
@@ -1410,7 +1410,7 @@ class _Sweep(instruments.BaseInstrument):
                 t.set_status(False, 'ctrl-c')
             raise KeyboardInterrupt('Interrupted sweep_multi'), None, sys.exc_info()[2]
         finally:
-            if progress:
+            if progress and isinstance(progress, instruments_base.UserStatusLine):
                 # This is important when using quiet_KeyboardInterrupt(True)
                 # becasuse then the traceback cleanup is delayed until garbage collection
                 # but it contains progress. So for while, old status report will be kept around.
