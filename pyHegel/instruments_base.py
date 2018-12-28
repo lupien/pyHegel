@@ -37,8 +37,8 @@ import thread
 import threading
 import weakref
 from collections import OrderedDict  # this is a subclass of dict
-from .qt_wrap import processEvents
-from .kbint_util import sleep, _sleep_signal_context_manager, _delayed_signal_context_manager
+from .qt_wrap import processEvents_managed, sleep
+from .kbint_util import _sleep_signal_context_manager, _delayed_signal_context_manager
 
 from . import visa_wrap
 from . import instruments_registry
@@ -232,6 +232,27 @@ class MainStatusLine(object):
         sys.stdout.flush()
 
 mainStatusLine = MainStatusLine()
+
+
+def wait(sec, progress_base='Wait', progress_timed=True):
+    """
+    Time to wait in seconds.
+    It can be stopped with CTRL-C, and it should update the GUI while waiting.
+    if progress_base is None, status line update will be disabled.
+    """
+    if progress_base is None or sec < 1:
+        sleep(sec)
+        return
+    progress_base += ' {:.1f}/%.1f'%sec
+    to = time.time()
+    with mainStatusLine.new(priority=100, timed=progress_timed) as progress:
+        while True:
+            dif = time.time() - to
+            delay = min(sec - dif, .1)
+            if delay <= 0:
+                break
+            sleep(delay)
+            progress(progress_base.format(dif))
 
 #######################################################
 ##    find_all_instruments function (for VISA)
@@ -656,10 +677,9 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
             return False
         if check_state is not None and check_state._error_state:
             break
-        with _delayed_signal_context_manager():
-            # processEvents is for the current Thread.
-            # if a thread does not have and event loop, this does nothing (not an error)
-            processEvents(max_time_ms = 20)
+        # processEvents is for the current Thread.
+        # if a thread does not have and event loop, this does nothing (not an error)
+        processEvents_managed(max_time_ms = 20)
 
 def _general_check(val, min=None, max=None, choices=None, lims=None, msg_src=None):
    # self is use for perror

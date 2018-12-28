@@ -28,15 +28,13 @@ import random
 import time
 from scipy.optimize import brentq as brentq_rootsolver
 
-from .. import traces
-
 from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep, ChoiceSimpleMap,\
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list, _fromstr_helper,\
                             decode_float64, visa_wrap, locked_calling,\
-                            Lock_Extra, Lock_Instruments, _sleep_signal_context_manager
+                            Lock_Extra, Lock_Instruments, _sleep_signal_context_manager, wait
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -1317,7 +1315,7 @@ class lakeshore_370(visaInstrument):
                 self._data_valid_last_t = to
                 return start_ch
         while not self.read_status_byte()&4:
-            traces.wait(.02)
+            wait(.02)
         after_ch, foo = self._data_valid_start()
         tf = time.time()
         if tf-to > 1.: # we waited after a channel change
@@ -1380,7 +1378,7 @@ class lakeshore_370(visaInstrument):
                 while True:
                     ch, foo = self._data_valid_start()
                     if ch == current_ch: # we wait until the channel changes
-                        traces.wait(.2)
+                        wait(.2)
                     else:
                         break
                 if current_ch not in ch2i:
@@ -1396,7 +1394,7 @@ class lakeshore_370(visaInstrument):
                 while True:
                     current_ch = self._data_valid()
                     if current_ch not in ch2i: # we want valid data for this channel
-                        traces.wait(.5)
+                        wait(.5)
                     else:
                         i, c = ch2i.pop(current_ch), current_ch
                         nmeas -= 1
@@ -1415,7 +1413,7 @@ class lakeshore_370(visaInstrument):
                 ch, foo = self._data_valid_start()
                 if ch != start_scan_ch:
                     break
-                traces.wait(.1)
+                wait(.1)
             i = ch2i[start_scan_ch]
             ret[i*2] = self.t.get(ch=start_scan_ch)
             ret[i*2+1] = self.s.get(ch=start_scan_ch)
@@ -2368,7 +2366,7 @@ class micro_lambda_mlbf(BaseInstrument):
         delta = now-self._last_write
         delay = self._write_delay
         if delta < delay:
-            traces.wait(delay-delta)
+            wait(delay-delta)
         if self._socket is not None:
             self._socket.send(val)
         else:
@@ -2550,14 +2548,14 @@ class dummy(BaseInstrument):
     def _incr_getdev(self):
         ret = self.incr_val
         self.incr_val += 1
-        traces.wait(self.wait)
+        wait(self.wait)
         return ret
     def _incr_setdev(self, val):
         self.incr_val = val
     #incr3 = wrapDevice(_incr_setdev, _incr_getdev)
     #incr2 = wrapDevice(getdev=_incr_getdev)
     def _rand_getdev(self):
-        traces.wait(self.wait)
+        wait(self.wait)
         return random.normalvariate(0,1.)
     def _create_devs(self):
         self.volt = MemoryDevice(0., doc='This is a memory voltage, a float')

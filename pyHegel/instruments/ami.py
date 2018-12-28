@@ -23,14 +23,12 @@
 
 from __future__ import absolute_import
 
-from .. import traces
-
 from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseInstrument,\
                             scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep, ChoiceSimpleMap,\
                             ChoiceStrings, ChoiceIndex, ChoiceLimits, ChoiceDevDep,\
                             make_choice_list, _fromstr_helper,\
-                            decode_float64, visa_wrap, locked_calling, BaseDevice, mainStatusLine
+                            decode_float64, visa_wrap, locked_calling, BaseDevice, mainStatusLine, wait
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 from .logical import ScalingDevice
 from ..types import dict_improved
@@ -313,12 +311,12 @@ class AmericanMagnetics_model430(visaInstrument):
         while self.state.get() in stay_states:
             with mainStatusLine(priority=10, timed=True) as progress:
                 #print self.state.getcache(), self.current.get(), self.current_magnet.get(), self.current_target.getcache(), self.persistent_switch_en.get()
-                traces.wait(.1)
+                wait(.1)
                 progress(prog_base.format(current=self.current.get(), time=time.time()-to))
         if self.state.get() == 'quench':
             raise RuntimeError(self.perror('The magnet QUENCHED!!!'))
         if extra_wait:
-            traces.wait(extra_wait)
+            wait(extra_wait, progress_base='Magnet wait')
         if end_states is not None:
             if isinstance(end_states, basestring):
                 end_states = [end_states]

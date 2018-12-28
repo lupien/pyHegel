@@ -32,8 +32,7 @@ import time
 
 from ..instruments_base import BaseDevice, BaseInstrument, ProxyMethod,\
                         _find_global_name, _get_conf_header, locked_calling_dev,\
-                        FastEvent, wait_on_event, CHECKING, sleep
-from ..traces import wait
+                        FastEvent, wait_on_event, CHECKING, wait
 from ..instruments_registry import add_to_instruments
 
 def _asDevice(dev):
@@ -937,7 +936,7 @@ class RampDevice(LogicalDevice):
             too = to = time.time()
             dt_next = dt
             while not done:
-                sleep(dt_next)
+                wait(dt_next)
                 tf = time.time()
                 # If the time difference is too great (computer was busy running something else)
                 # there could be a big jump. To prevent that, if the timedifference is greater than 3*dt
@@ -967,7 +966,7 @@ class RampDevice(LogicalDevice):
             dt_next = dt
             dval_total = val - start_val
             while now < tf:
-                sleep(dt_next)
+                wait(dt_next)
                 now = time.time()
                 if now >= tf:
                     break

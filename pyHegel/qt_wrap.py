@@ -122,7 +122,11 @@ from __future__ import absolute_import
 
 import sip
 import sys
+import time
 import types
+
+from . import kbint_util
+_sleep = kbint_util.sleep
 
 def fix_ipython_241():
     """
@@ -203,6 +207,13 @@ def processEvents(events_flags=None, max_time_ms=None):
         else:
             QtGui.QApplication.processEvents(events_flags, max_time_ms)
 
+# processEvents is for the current Thread.
+# if a thread does not have and event loop, this does nothing (not an error)
+def processEvents_managed(events_flags=None, max_time_ms=None):
+     with kbint_util._delayed_signal_context_manager():
+         processEvents(max_time_ms=max_time_ms)
+
+
 def check_qt(base):
     if base in sys.modules:
         return True
@@ -233,6 +244,25 @@ def load_qt():
                 ret = load_Qt5()
     return ret
 
+def sleep(sec):
+    """
+    Time to wait in seconds.
+    It can be stopped with CTRL-C, and it should update the GUI while waiting.
+    """
+    start = time.time()
+    end = start + sec
+    while time.time() < end:
+        dif = end - time.time()
+        if dif < .01:
+            if dif >0.:
+                _sleep(dif)
+            return
+        else:
+            processEvents_managed(max_time_ms = dif*1000)
+            dif = end - time.time()
+            if dif < 0:
+                return
+            _sleep(min(.1, dif))
 
 QtCore, QtGui, api = load_qt()
 

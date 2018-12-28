@@ -48,13 +48,14 @@ from . import instruments_base
 #from . import local_config
 from . import util
 from . import config
+from . import gui_tools
 
 local_config = config.load_local_config()
 
 from .instruments_base import _writevec as writevec, _normalize_usb, _normalize_gpib, _get_visa_idns, _writevec_flatten_list,\
-                             time_check as _time_check, CHECKING as checkmode
-from .traces import wait
+                             time_check as _time_check, CHECKING as checkmode, wait
 from .util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
+from .gui_tools import sleep
 
 __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'instruments_registry',
            'util', 'help_pyHegel', 'reset_pyHegel', 'clock', 'sweep', 'sweep_multi', 'wait',
@@ -225,8 +226,8 @@ def reset_pyHegel():
          /reset_pyNoise
     """
     reload(traces.config)
+    reload(traces.qt_wrap.kbint_util)
     reload(traces.qt_wrap)
-    reload(traces.kbint_util)
     reload(traces)
     reload(instruments_base.visa_wrap)
     instruments_registry.clean_instruments()
@@ -234,6 +235,7 @@ def reset_pyHegel():
     reload(instruments_base)
     reload(instruments.logical)
     reload(instruments)
+    reload(gui_tools)
     reload(util)
     import pyHegel
     reload(pyHegel)
@@ -1994,16 +1996,6 @@ def batch(batchfile):
         execfile(batchfile, _globaldict)
     except IOError:
         execfile(batchfile+'.py', _globaldict)
-
-def sleep(sec):
-    """
-       wait seconds... It has a GUI that allows the wait to be paused.
-       After resuming, the wait continues (i.e. total
-          wait will be pause+sec)
-       See also wait
-    """
-    traces.sleep(sec)
-
 
 def _load_helper(entry):
     # we will accept a single Instrument or any of the lists
