@@ -250,7 +250,7 @@ class _Trace_Cleanup(object):
 
 class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class so need object to make it new one (so super works properly for childs)
     # A useful subclass will need at least to include update
-    def __init__(self, width=9.00, height=7.00, dpi=72):
+    def __init__(self, width=9.00, height=7.00, dpi=72, do_show=True):
         self.fig = Figure(figsize=(width,height),dpi=dpi)
         self.canvas = TraceCanvas(self.fig)
         FigureManagerQT.__init__(self,self.canvas,-1)
@@ -272,6 +272,8 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
         except AttributeError:
             # Using that QtCore.Qt.WA_DeleteOnClose attribute is set
             self.window.destroyed.connect(self.close_slot)
+        if do_show:
+            self.show()
     def close_slot(self):
         """
         Remove the Trace from the list so that it can be deleted on the next
