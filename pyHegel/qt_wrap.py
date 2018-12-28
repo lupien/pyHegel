@@ -247,13 +247,13 @@ def load_qt():
 def sleep(sec):
     """
     Time to wait in seconds.
-    It can be stopped with CTRL-C, and it should update the GUI while waiting.
+    It can be stopped with CTRL-C, and it should update the GUI while waiting (if sec > 0.01)
     """
     start = time.time()
     end = start + sec
     while time.time() < end:
         dif = end - time.time()
-        if dif < .01:
+        if dif < .009:
             if dif >0.:
                 _sleep(dif)
             return
