@@ -129,6 +129,7 @@ class AmericanMagnetics_model430(visaInstrument):
         self.ramp_rate_current.choices.fmts_lims[1] = (1e-4, max_current)
         self.ramp_rate_field_T.choices.fmts_lims[1] = (1e-4*scaleT, max_current*scaleT)
         self.ramp_rate_field_kG.choices.fmts_lims[1] = (1e-4*scalekG*10, max_current*scalekG)
+        self._create_devs_helper() # to get logical devices return proper name (not name_not_found)
 
     def init(self, full=False):
         if full:
