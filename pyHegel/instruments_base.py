@@ -191,6 +191,27 @@ class UserStatusLine(object):
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self.remove()
 
+class UserStatusLine_dummy(object):
+    """
+    This is a dummy UserStatusLine so code can be more general.
+    """
+    def __init__(self, main, handle, timed=False):
+        self.delay = 0.
+    def restart_time(self):
+        pass
+    def check_time(self):
+        return True
+    def __call__(self, new_status=''):
+        pass
+    def remove(self):
+        pass
+    def output(self):
+        pass
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        pass
+
 class MainStatusLine(object):
     """
     This class provides a tools for combining multiple strings in a status line.
@@ -209,7 +230,10 @@ class MainStatusLine(object):
         self.users = {}
         self.enable = True
         self._lock = threading.Lock()
-    def new(self, priority=1, timed=False):
+        self._dummy = UserStatusLine_dummy(self, 0)
+    def new(self, priority=1, timed=False, dummy=False):
+        if dummy:
+            return self._dummy
         handle = self.last_handle + 1
         self.last_handle = handle
         self.users[handle] = [priority, '']
@@ -392,23 +416,40 @@ def _write_dev(val, filename, format=format, first=False):
     f.close()
 
 
-def _retry_wait(func, timeout, delay=0.01):
+def _retry_wait(func, timeout, delay=0.01, progress_base='Wait', progress_timed=True, keep_delay=False):
     """
     this calls func() and stops when the return value is True
     or timeout seconds have passed.
     delay is the sleep duration between attempts.
+    progress_base is prefix when using status line (for timeout >= 1s)
+                  when set to None, status line update is disabled.
+    progress_timed is mainStatusLine.new timed option.
+    keep_delay when False, will increase the delay to 20 ms (if smaller) after .5s of wait
+       to make sure to update the graphics.
     """
-    endtime = time.time() + timeout
     ret = False
-    while True:
-        ret = func()
-        if ret:
-            break
-        remaining = endtime - time.time()
-        if remaining <= 0:
-            break
-        delay = min(delay, remaining)
-        sleep(delay)
+    dummy = (timeout < 1.) or (progress_base is None)
+    with mainStatusLine.new(priority=100, timed=progress_timed, dummy=dummy) as progress:
+        to = time.time()
+        endtime = to + timeout
+        if progress_base is not None:
+            progress_base = progress_base + ' %.1f/{:.1f}'.format(timeout)
+        while True:
+            ret = func()
+            if ret:
+                break
+            now = time.time()
+            duration = now - to
+            remaining = endtime - now
+            if remaining <= 0:
+                break
+            if progress_base is not None:
+                progress(progress_base%duration)
+            if duration>.5 and not keep_delay:
+                delay = max(delay, 0.02)
+                keep_delay = True
+            delay = min(delay, remaining)
+            sleep(delay)
     return ret
 
 
@@ -646,11 +687,12 @@ class asyncThread(threading.Thread):
 # be internally protected with _sleep_signal_context_manager
 # This is the case for FastEvent and any function using sleep instead of time.sleep
 
-def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
+def wait_on_event(task_or_event_or_func, check_state = None, max_time=None, progress_base='Even wait', progress_timed=True):
     # task_or_event_or_func either needs to have a wait attribute with a parameter of
     # seconds. Or it should be a function accepting a parameter of time in s.
     # check_state allows to break the loop if check_state._error_state
     # becomes True
+    # It returns True/False unless it is stopped with check_state in which case it returns None
     # Note that Event.wait (actually threading.Condition.wait)
     # tries to wait for 1ms then for 2ms more then 4, 8, 16, 32 and then in blocks
     # of 50 ms. If the wait would be longer than what is left, the wait is just
@@ -659,27 +701,39 @@ def wait_on_event(task_or_event_or_func, check_state = None, max_time=None):
     # therefore, using Event.wait can produce times of 10, 20, 30, 40, 60, 100, 150
     # 200 ms ...
     # Can use FastEvent.wait instead of Event.wait to be faster
+    # progress_base is prefix when using status line (for timeout >= 1s)
+    #               when set to None, status line update is disabled.
+    # progress_timed is mainStatusLine.new timed option.
     start_time = time.time()
     try: # should work for task (threading.Thread) and event (threading.Event)
         docheck = task_or_event_or_func.wait
     except AttributeError: # just consider it a function
         docheck = task_or_event_or_func
-    while True:
-        if max_time is not None:
-            check_time = max_time - (time.time()-start_time)
-            check_time = max(0., check_time) # make sure it is positive
-            check_time = min(check_time, 0.2) # and smaller than 0.2 s
-        else:
-            check_time = 0.2
-        if docheck(check_time):
-            return True
-        if max_time is not None and time.time()-start_time > max_time:
-            return False
-        if check_state is not None and check_state._error_state:
-            break
-        # processEvents is for the current Thread.
-        # if a thread does not have and event loop, this does nothing (not an error)
-        processEvents_managed(max_time_ms = 20)
+    dummy = (max_time is not None and max_time < 1.) or (progress_base is None)
+    with mainStatusLine.new(priority=100, timed=progress_timed, dummy=dummy) as progress:
+        if progress_base is not None:
+            progress_base += ' %.1f'
+            if max_time is not None:
+                progress_base = progress_base + '/{:.1f}'.format(max_time)
+        while True:
+            if max_time is not None:
+                check_time = max_time - (time.time()-start_time)
+                check_time = max(0., check_time) # make sure it is positive
+                check_time = min(check_time, 0.2) # and smaller than 0.2 s
+            else:
+                check_time = 0.2
+            if docheck(check_time):
+                return True
+            duration = time.time()-start_time
+            if max_time is not None and duration > max_time:
+                return False
+            if progress_base is not None:
+                progress(progress_base%duration)
+            if check_state is not None and check_state._error_state:
+                break
+            # processEvents is for the current Thread.
+            # if a thread does not have and event loop, this does nothing (not an error)
+            processEvents_managed(max_time_ms = 20)
 
 def _general_check(val, min=None, max=None, choices=None, lims=None, msg_src=None):
    # self is use for perror
