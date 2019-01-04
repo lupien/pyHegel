@@ -1723,6 +1723,9 @@ class MagnetController_SMC(visaInstrument):
     This only handles serial address connections (like ASRL1)
     Important: To changes values like display Unit, the instrument needs to be
     in remote (press remote button).
+    To change the polarity(reverse option of operating_parameters),
+    the current needs to be near zero to work (<0.09 A). It fails silently
+    when above (reread operating_parameters to confirm the change).
     """
     def __init__(self, address):
         cnsts = visa_wrap.constants
