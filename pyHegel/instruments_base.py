@@ -687,7 +687,7 @@ class asyncThread(threading.Thread):
 # be internally protected with _sleep_signal_context_manager
 # This is the case for FastEvent and any function using sleep instead of time.sleep
 
-def wait_on_event(task_or_event_or_func, check_state = None, max_time=None, progress_base='Even wait', progress_timed=True):
+def wait_on_event(task_or_event_or_func, check_state = None, max_time=None, progress_base='Event wait', progress_timed=True):
     # task_or_event_or_func either needs to have a wait attribute with a parameter of
     # seconds. Or it should be a function accepting a parameter of time in s.
     # check_state allows to break the loop if check_state._error_state
