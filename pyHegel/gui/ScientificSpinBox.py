@@ -192,6 +192,7 @@ class PyScientificSpinBox(QDoubleSpinBox):
                  valueChange_gui_time, and also when pressing enter. It is not emitted when using
                  setValue_quiet
             option disable_context_menu can be used to disable the context menu. It is False by default.
+            enabled_controls property can be used to disable some entries in the context_menu
         """
         self._initializing = True
         self._in_setValue_quiet = False
@@ -218,6 +219,8 @@ class PyScientificSpinBox(QDoubleSpinBox):
         # We override decimals. This should set the parent value.
         kwargs['decimals'] = 1000 # this get adjusted to max double  precision (323)
         kwargs['accelerated'] = accelerated
+        kwargs['minimum'] = minimum
+        kwargs['maximum'] = maximum
         # Note that this will call all properties that are left in kwargs
         super(PyScientificSpinBox, self).__init__(*args, **kwargs)
         # decimals is used when changing min/max, on setValue and on converting value to Text (internally, it is overriden here)
@@ -225,20 +228,19 @@ class PyScientificSpinBox(QDoubleSpinBox):
         # make sure parent class decimals is set properly
         if super(PyScientificSpinBox, self).decimals() < 323:
             raise RuntimeError('Unexpected parent decimals value.')
-        self.setMinimum(minimum)
-        self.setMaximum(maximum)
+        # The suffix/prefix change in the above QDoubleSpinBox.__init__ did not call our override
+        # lets update them now
+        self.setSuffix(self.suffix())
+        self.setPrefix(self.prefix())
         # pyqt5 5.6 on windows (at least) QAction requires the parent value.
         self.copyAction = QAction('&Copy', None, shortcut=QKeySequence(QKeySequence.Copy), triggered=self.handle_copy)
         self.pasteAction = QAction('&Paste', None, shortcut=QKeySequence(QKeySequence.Paste), triggered=self.handle_paste)
         self.addActions(( self.copyAction, self.pasteAction))
         self._create_menu_init()
-        # This is to make sure display is properly updated.
-        self.setSuffix(self.suffix())
-        self.setPrefix(self.prefix())
         self.clipboard = QApplication.instance().clipboard()
-        self.valueChanged.connect(self._valueChanged_helper)
         self._last_valueChanged_gui = self.value()
         self._current_valueChanged_gui = self._last_valueChanged_gui
+        self.valueChanged.connect(self._valueChanged_helper)
         self._valueChange_timer.timeout.connect(self._do_valueChanged_gui_emit)
         self._last_focus_reason_mouse = False
         self.lineEdit().installEventFilter(self)
