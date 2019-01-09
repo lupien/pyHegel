@@ -115,10 +115,10 @@ def get_para_checked(*val):
 class ProxyMethod(object):
     def __init__(self, bound_method):
         #self.class_of_method = bound_method.im_class
-        self.instance = weakref.proxy(bound_method.im_self)
-        self.func_name = bound_method.func_name
+        self.instance = weakref.proxy(bound_method.__self__)
+        self.unbound_func = bound_method.__func__
     def __call__(self, *arg, **kwarg):
-        return getattr(self.instance, self.func_name)(*arg, **kwarg)
+        return self.unbound_func(self.instance, *arg, **kwarg)
 
 #######################################################
 ##    Have a status line active
