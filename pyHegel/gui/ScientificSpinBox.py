@@ -277,13 +277,13 @@ class PyScientificSpinBox(QDoubleSpinBox):
         self.fixed_exponent_actions = actions = {}
         for i in range(-15, 9+1, 3)[::-1]:
             if i == 0:
-                act = QAction('%i: %s'%(i, ''), checkable=True)
+                act = QAction('%i: %s'%(i, ''), None, checkable=True)
             else:
-                act = QAction('%i: %s'%(i, units_inverse[i]), checkable=True)
+                act = QAction('%i: %s'%(i, units_inverse[i]), None, checkable=True)
             submenu.addAction(act)
             subgroup.addAction(act)
             actions[i] = act
-        act = QAction('&Custom', checkable=True)
+        act = QAction('&Custom', None, checkable=True)
         submenu.addAction(act)
         subgroup.addAction(act)
         actions['custom'] = act
@@ -292,7 +292,7 @@ class PyScientificSpinBox(QDoubleSpinBox):
         self.fixed_exponent_custom_action.setDefaultWidget(self.fixed_exponent_custom_widget)
         submenu.addAction(self.fixed_exponent_custom_action)
         submenu.addSeparator()
-        act = QAction('&Disabled', checkable=True)
+        act = QAction('&Disabled', None, checkable=True)
         submenu.addAction(act)
         subgroup.addAction(act)
         actions['disabled'] = act
@@ -303,11 +303,11 @@ class PyScientificSpinBox(QDoubleSpinBox):
         self.precision_group = subgroup = QActionGroup(None)
         self.precision_actions = actions = {}
         for i in range(0,10):
-            act = QAction('&%i'%i, checkable=True)
+            act = QAction('&%i'%i, None, checkable=True)
             submenu.addAction(act)
             subgroup.addAction(act)
             actions[i] = act
-        act = QAction('&Custom', checkable=True)
+        act = QAction('&Custom', None, checkable=True)
         submenu.addAction(act)
         subgroup.addAction(act)
         actions['custom'] = act
