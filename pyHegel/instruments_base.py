@@ -3545,13 +3545,16 @@ class visaInstrumentAsync(visaInstrument):
             print 'Unread event byte!'
         # A while loop is needed when National Instrument (NI) gpib autopoll is active
         # This is the default when using the NI Visa.
+        n = 0
         while self.read_status_byte() & 0x40: # This is SRQ bit
             if self.visa.is_usb() and not self.visa.resource_manager.is_agilent():
                 # National instruments visa buffers usb status bytes
                 # so it is normal to have left overs
                 pass
             else:
-                print 'Unread status byte!'
+                n += 1
+        if n > 0:
+            print 'Unread(%i) status byte!'%n
         if self._async_polling:
             pass
         elif self._RQS_status != -1:
@@ -3560,7 +3563,7 @@ class visaInstrumentAsync(visaInstrument):
         else:
             # could use self.visa.discard_events(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
             #                                    visa_wrap.constans.VI_QUEUE)
-            #  but then would not how many events were discarded.
+            #  but then we would not know how many events were discarded.
             n = 0
             try:
                 while True:
