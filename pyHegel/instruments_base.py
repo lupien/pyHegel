@@ -3548,7 +3548,7 @@ class visaInstrumentAsync(visaInstrument):
         while self.read_status_byte() & 0x40: # This is SRQ bit
             if self.visa.is_usb() and not self.visa.resource_manager.is_agilent():
                 # National instruments visa buffers usb status bytes
-                # so it is normal to hab left overs
+                # so it is normal to have left overs
                 pass
             else:
                 print 'Unread status byte!'
@@ -3560,6 +3560,7 @@ class visaInstrumentAsync(visaInstrument):
         else:
             # could use self.visa.discard_events(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
             #                                    visa_wrap.constans.VI_QUEUE)
+            #  but then would not how many events were discarded.
             n = 0
             try:
                 while True:
