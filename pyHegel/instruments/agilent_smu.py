@@ -70,7 +70,7 @@ class MemoryDevice_update(MemoryDevice):
             nch, when set is the number of channels of data to save internally.
               With this, it enables the use of ch as an option for set/get
         """
-        self._update_func = update_func
+        self._update_func = func_or_proxy(update_func)
         nch = self._nch = kwargs.pop('nch', None)
         super(MemoryDevice_update, self).__init__(*args, **kwargs)
         if nch is not None:
@@ -173,27 +173,66 @@ class agilent_SMU(visaInstrumentAsync):
         super(agilent_SMU, self).__init__(*args, **kwargs)
 
     def init(self, full=False):
-        self.write('BC') # make sure to empty output buffer
         self.write('FMT21')
         self.calibration_auto_en.set(False)
-        #self.write('CM0') # Auto-calibration off.
         #self.sendValueToOther('Auto Calibration Enable', False)
           # Calibration is performed every 30 min after all outputs are off.
         self.remote_display_en.set(True)
-        #self.write('RED 1') # Enable remote-display (RED 0 disables it)
         #super(agilent_SMU, self).init(full=full) # don't use this, it sets *esr which does not exist for SMU
         # self.clear() # SMU does not have *cls
         self.write('*sre 0') # disable trigger (we enable it only when needed)
-        self._async_trigger_helper_string = '*OPC?'
+        self._async_trigger_helper_string = None
 
     def _async_trigger_helper(self):
-        self.write('*sre 1') # Trigger on data ready
-        self.write(self._async_trigger_helper_string)
+        async_string = self._async_trigger_helper_string
+        if async_string is None:
+            return
+        self._async_trig_current_data = None
+#        self._async_trigger_first_absorbed = False
+#        self.write('*sre 16') # Trigger on Set Ready. This generates an event which will need to be cleaned up.
+        self.write(async_string)
 
-    def _read_after_wait(self):
-        ret = self.read()
+    def _async_cleanup_after(self):
         self.write('*sre 0') # disable trigger on data ready to prevent unread status byte from showing up
+        super(agilent_SMU, self)._async_cleanup_after()
+
+    def _async_detect(self, max_time=.5): # 0.5 s max by default
+        async_string = self._async_trigger_helper_string
+        if async_string is None:
+            return True
+        ret = super(agilent_SMU, self)._async_detect(max_time)
+        if not ret:
+            # This cycle is not finished
+            return ret
+#        print 'last srq', self._async_last_status
+#        if not self._async_trigger_first_absorbed:
+#            print 'skipping..'
+#            self._async_trigger_first_absorbed = True
+#            return False
+        # we got a trigger telling data is available. so read it, before we turn off triggering in cleanup
+        data = self.read()
+        self._async_trig_current_data = data
         return ret
+
+    @locked_calling
+    def _async_trig(self):
+        async_string = self._async_trigger_helper_string
+        if async_string != '*cal?':
+            if self.measurement_spot_en.get():
+                async_string = None
+            else:
+                async_string = 'XE'
+                self.write('BC') # empty buffer
+                self.write('*sre 16') # Trigger on Set Ready. This generates an event which will need to be cleaned up.
+                #self.ask('*sre 16;*opc?') # just something that takes a little while and should allow us to always? see the srq
+                # absorb all status bytes created.
+                i=0
+                while self.read_status_byte()&0x40:
+#                    i += 1
+                    pass
+#                print 'skipped %i'%i
+            self._async_trigger_helper_string =  async_string
+        super(agilent_SMU, self)._async_trig()
 
     def _get_esr(self):
         # does not have esr register
@@ -206,7 +245,14 @@ class agilent_SMU(visaInstrumentAsync):
         return ', '.join(errm)
 
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper(options)
+        opts = []
+        conf_gen = self.conf_general()
+        opts += ['conf_general=%s'%conf_gen]
+        opts += ['conf_ch=%s'%self.conf_ch()]
+        opts += ['conf_integration=%s'%self.conf_integration()]
+        if not conf_gen['measurement_spot_en']:
+            opts += ['set_mode=%s'%self.set_mode()]
+        return opts+self._conf_helper(options)
 
     def _reset_wrapped_cache(self, func):
         self._wrapped_cached_results[func._internal_func] = (None, None, None, None)
@@ -218,32 +264,135 @@ class agilent_SMU(visaInstrumentAsync):
 
     @locked_calling
     def perform_calibration(self):
-        self._async_trigger_helper_string = '*cal?'
-        self.run_and_wait()
-        res = int(self._read_after_wait())
-        self._async_trigger_helper_string = '*OPC?'
+        prev_str = self._async_trigger_helper_string
+        try:
+            self._async_trigger_helper_string = '*cal?'
+            self.run_and_wait()
+            res = int(self._async_trig_current_data)
+        finally:
+            self._async_trigger_helper_string = prev_str
+            del self._async_trig_current_data
         if res != 0:
             raise RuntimeError(self.perror('Calibration failed (at least one module failed). Returned value is %i'%res))
 
-    def _fetch_getdev(self, chs=None, auto='all'):
+    def _fetch_opt_helper(self, chs=None, auto='all'):
+        mode = 'spot'
+        if not self.measurement_spot_en.get():
+            mode = self.set_mode().mode
+            full_chs = [[c, 'ch'] for c in self.set_mode()['channels']]
+            return full_chs, auto, mode
+        auto = auto.lower()
+        if auto not in ['all', 'i', 'v']:
+            raise ValueError(self.perror("Invalid auto setting"))
+        if chs is None:
+            chs = [i+1 for i,v in enumerate(self._get_enabled_state()) if v]
+            if len(chs) == 0:
+                raise RuntimeError(self.perror('All channels are off so cannot fetch.'))
+        if not isinstance(chs, (list, tuple, np.ndarray)):
+            chs = [chs]
+        full_chs = []
+        for ch in chs:
+            if isinstance(ch, basestring):
+                meas = ch[0].lower()
+                c = int(ch[1:])
+                if meas not in ['v', 'i']:
+                    raise ValueError(self.perror("Invalid measurement requested, should be 'i' or 'v'"))
+                if c not in self._valid_ch:
+                    raise ValueError(self.perror('Invalid channel requested'))
+                full_chs.append([c, meas])
+            else:
+                if ch not in self._valid_ch:
+                    raise ValueError(self.perror('Invalid channel requested'))
+                if auto in ['all', 'i']:
+                    full_chs.append([ch, 'i'])
+                if auto in ['all', 'v']:
+                    full_chs.append([ch, 'v'])
+        return full_chs, auto, mode
+
+    def _fetch_getformat(self,  **kwarg):
+        chs = kwarg.get('chs', None)
+        auto = kwarg.get('auto', 'all')
+        status = kwarg.get('status', False)
+        xaxis = kwarg.get('xaxis', True)
+        full_chs, auto, mode = self._fetch_opt_helper(chs, auto)
+        multi = []
+        graph = []
+        for i, (c, m) in enumerate(full_chs):
+            base = '%s%i'%(m, c)
+            if status:
+                multi.extend([base, base+'_stat'])
+                graph.append(2*i)
+            else:
+                multi.append(base)
+                graph.append(i)
+        if mode == 'stair':
+            graph = []
+            if xaxis:
+                multi = ['force']+multi
+            multi = tuple(multi)
+        fmt = self.fetch._format
+        fmt.update(multi=multi, graph=graph)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+
+    def _fetch_getdev(self, chs=None, auto='all', status=False, xaxis=True):
         """
-        auto can be: all (both V and I), I or V to get just one,
+        auto/chs can are only used when measurement_spot_en is True
+        auto can be: 'all' (both V and I), 'I' or 'V' to get just one,
                      force/compliance to get the force value (source) or
                        the complicance value
         auto is used when chs is None (all enabled channels)
            or chs is a list of channel numbers.
-        Otherwise, chs can also use strings like 'V1' to read the voltage of channel 1
-                     'I2' to read the current of channel 2.
+        Otherwise, chs can also use strings like 'v1' to read the voltage of channel 1
+                     'i2' to read the current of channel 2.
+        status when True, adds the status of every reading to the return value.
+        xaxis when True and when getting stair data, will add the xaxis as a first column
         """
-        # TODO handle fetch!
+        full_chs, auto, mode = self._fetch_opt_helper(chs, auto)
+        if mode != 'spot':
+            try:
+                data = self._async_trig_current_data
+                x_data = self._x_axis
+            except AttributeError:
+                raise RuntimeError(self.perror('No data is available. Probably prefer to use readval.'))
+            data = data.split(',')
+            # _parse_data returns: value, channel, status, type
+            ret = map(self._parse_data, data)
+            if status:
+                ret = map(lambda x: [x[0], x[2]], ret)
+            else:
+                ret = map(lambda x: x[0], ret)
+            ret = np.array(ret)
+            if status and mode == 'single':
+                ret.shape = (-1, 2)
+            elif mode == 'stair':
+                N = len(x_data)
+                ret.shape = (N, -1)
+                if xaxis:
+                    ret = np.concatenate([x_data[:, None], ret], axis=1)
+                ret = ret.T
+            return ret
+        # TODO, do run and wait for long TI/TV?
         # The longest measurement time for TI/TV seems to be for PLC mode (100/50 or 100/60) so a max of 2s.
         # so just use ask? for short times and run_and_wait (note that it needs to behave properly under async.)
-        self._async_trigger_helper_string = 'TI 1'
-        self.run_and_wait()
-        res = self._read_after_wait()
-        self._async_trigger_helper_string = 'XE'
-        self.run_and_wait()
-        res = self._read_after_wait()
+        ret = []
+        ch_orig = self.current_channel.get()
+        for ch, meas in full_chs:
+            if meas == 'v':
+                val = self.measV.get(ch=ch)
+            else:
+                val = self.measI.get(ch=ch)
+            ret.append(val)
+            if status:
+                ret.append(self.meas_last_status.get())
+        self.current_channel.set(ch_orig)
+        ret = np.array(ret)
+        if status:
+            ret.shape = (-1, 2)
+        return ret
+
+        #self._async_trigger_helper_string = 'XE'
+        #self.run_and_wait()
+        #res = self._read_after_wait()
 
     def _ch_helper(self, ch):
         curr_ch = self.current_channel
@@ -351,14 +500,14 @@ class agilent_SMU(visaInstrumentAsync):
             comp = fnc.compliance_val
         mode = fnc.mode
         comp_mode = 'current' if mode == 'voltage' else 'voltage'
-        sRange = self._conv_range(mode, 'out')
-        sCompRange = self._conv_range(comp_mode, 'in')
+        sRange = self._conv_range(mode)
+        sCompRange = self._conv_range(comp_mode)
         sCompPolarity = '0' if self.compliance_polarity_auto_en.get() else '1'
         root = dict(voltage='DV', current='DI')[mode]
         #  Use %.7e since instruments chop the resolution instead of rounding it (we get 99.99 instead of 100 sometimes)
         self.write(root+"%i,%s,%.7e,%.7e,%s,%s"%(ch, sRange, level, comp, sCompPolarity, sCompRange))
 
-    def _conv_range(self, signal='current', dir='out'):
+    def _conv_range(self, signal='current'):
         if signal == 'current':
             rg = self.range_current
         else:
@@ -393,6 +542,53 @@ class agilent_SMU(visaInstrumentAsync):
         fnc = self._get_function(ch)
         return fnc.active_Vrange
 
+    def _measIV_helper(self, voltage, ch, range, rgdev):
+        ch = self._ch_helper(ch) # this set ch for the next entries
+        if range is None:
+            if self.range_meas_use_compliance_en.get():
+                range = 'comp'
+            else:
+                range = rgdev.get()
+        else:
+            if not (range == 'comp' or range in rgdev.choices):
+                raise ValueError(self.perror('Invalid range selected'))
+        quest = 'TV' if voltage else 'TI'
+        quest += '%i'%ch
+        if range != 'comp':
+            quest += ',%s'%rgdev.choices.tostr(range)
+        result_str = self.ask(quest)
+        value, channel, status, type = self._parse_data(result_str)
+        if type is not None and type != {True:'V', False:'I'}[voltage]:
+            raise RuntimeError(self.perror('Read back the wrong signal type'))
+        if channel is not None and channel != ch:
+            raise RuntimeError(self.perror('Read back the wrong channel'))
+        self.meas_last_status.set(status)
+        return value
+
+    def _measV_getdev(self, ch=None, range=None):
+        """ This returns the spot measurement.
+            ch is the option to select the channel number.
+            specifying range does not change the other devices so the effect is temporary.
+            range will only be effective for the compliance measurement.
+                  For force side measurement it always use the force channel range.
+            range is range_voltage_meas/range_meas_use_compliance_en if None
+               to specify complicance range use: 'comp'
+                    otherwise use the same entries as range_voltage_meas
+        """
+        return self._measIV_helper(voltage=True, ch=ch, range=range, rgdev=self.range_voltage_meas)
+    def _measI_getdev(self, ch=None, range=None):
+        """ This returns the spot measurement.
+            ch is the option to select the channel number.
+            specifying range does not change the other devices so the effect is temporary.
+            range will only be effective for the compliance measurement.
+                  For force side measurement it always use the force channel range.
+            range is range_current_meas/range_meas_use_compliance_en if None
+               to specify complicance range use: 'comp'
+                    otherwise use the same entries as range_voltage_meas
+        """
+        return self._measIV_helper(voltage=False, ch=ch, range=range, rgdev=self.range_current_meas)
+
+
     def _integration_set_helper(self, speed=True, mode=None, time=None):
         prev_result = self._get_avg_time_and_autozero()
         if speed:
@@ -413,7 +609,8 @@ class agilent_SMU(visaInstrumentAsync):
     def conf_general(self, autozero=None, remote_display=None, auto_calib=None):
         para_dict = dict(autozero=self.auto_zero_en,
                          remote_display=self.remote_display_en,
-                         auto_calib=self.calibration_auto_en)
+                         auto_calib=self.calibration_auto_en,
+                         measurement_spot_en=self.measurement_spot_en )
         params = locals()
         if all(params.get(k) is None for k in para_dict):
             return {k:dev.get() for k, dev in para_dict.items()}
@@ -422,7 +619,9 @@ class agilent_SMU(visaInstrumentAsync):
             if val is not None:
                 dev.set(val)
 
-    def conf_ch(self, ch=None, function=None, level=None, range=None, compliance=None, comp_range=None, polarity=None, integrator=None, Vmeas_range=None, Imeas_range=None, meas_range_comp=None, filter=None, series_r=None):
+    def conf_ch(self, ch=None, function=None, level=None, range=None, compliance=None, comp_range=None,
+                polarity=None, integrator=None, Vmeas_range=None, Imeas_range=None, meas_range_comp=None,
+                filter=None, series_r=None, meas_auto_type=None):
         """ when call with no parameters, returns all channels settings,
         when called with only one ch selected, only returns its settings.
         Otherwise modifies the settings that are not None
@@ -438,7 +637,8 @@ class agilent_SMU(visaInstrumentAsync):
                                 Imeas_range=self.range_current_meas,
                                 meas_range_comp=self.range_meas_use_compliance_en,
                                 filter=self.output_filter_en,
-                                series_r=self.series_resistor_en)
+                                series_r=self.series_resistor_en,
+                                meas_auto_type=self.meas_auto_type)
         params = locals()
         def adjust_range(func):
             if func == 'current':
@@ -465,7 +665,7 @@ class agilent_SMU(visaInstrumentAsync):
             if val is not None:
                 dev.set(val)
 
-    def conf_integrator(self, speed_mode=None, speed_time=None, resol_mode=None, resol_time=None):
+    def conf_integration(self, speed_mode=None, speed_time=None, resol_mode=None, resol_time=None):
         para_dict = dict(speed_mode=self.integration_high_speed_mode,
                          speed_time=self.integration_high_speed_time,
                          resol_mode=self.integration_high_resolution_mode,
@@ -478,61 +678,142 @@ class agilent_SMU(visaInstrumentAsync):
             if val is not None:
                 dev.set(val)
 
-    def conf_staircase(self, func=None, ch=None, start=None, stop=None, nsteps=None, range=None, mode=None, end_to=None, hold=None, delay=None, compliance=None):
+    def set_mode(self, mode=None, channels=None, **kwargs):
+        """
+        To use one of these mode, set measurement_spot_en to False
+        if no options are given, it returns the current setting
+        mode can be 'single' or 'stair'
+        channels is a list of channels to read. When not specified it uses
+          the current instrument set, and if never set, all the active channels.
+        when using 'stair' extra keywords are passed to conf_staircase
+        """
+        res = self._get_tn_av_cm_fmt_mm()
+        res_mode = res['meas_mode']
+        res_channels = [i+1 for i,v in enumerate(res['enabled']) if v]
+        if mode == channels == None:
+            mode = res_mode
+            channels = res_channels
+            ret = dict_improved([('mode', mode), ('channels', channels)])
+            if mode == 'stair':
+                ret['stair'] = self.conf_staircase()
+            return ret
+        valid_modes = dict(single=1, stair=16)
+        if mode is None:
+            mode = res['meas_mode']
+        elif mode not in valid_modes:
+            raise ValueError(self.perror('Selected an invalide mode'))
+        if channels is None:
+             channels = res_channels
+        elif not isinstance(channels, (list, tuple, np.ndarray)):
+            channels = [channels]
+        if any(c not in self._valid_ch for c in channels):
+            raise ValueError(self.perror('Invalid channel selection'))
+        if len(channels) == 0:
+            en_ch = self._get_enabled_state()
+            channels = [i+1 for i,v in enumerate(en_ch) if v]
+            if len(channels) == 0:
+                raise RuntimeError(self.perror('All channels are disabled. You should enable at least one.'))
+        self.write('MM %i,%s'%(valid_modes[mode], ','.join(map(str, channels))))
+        N_kwargs = len(kwargs)
+        if mode == 'stair' and N_kwargs > 0:
+            self.conf_staircase(**kwargs)
+        elif N_kwargs > 0:
+            raise ValueError(self.perror('extra arguments are invalid'))
+
+    def _calc_x_axis(self, conf):
+        if conf.func is None:
+            return
+        sweep_mode_opt = {'linear':(False, False),
+                            'log':(True, False),
+                            'linear_updown':(False, True),
+                            'log_updown':(True, True)}
+        isLog, isUpDown = sweep_mode_opt[conf.mode]
+        if isLog:
+            x = np.logspace(np.log10(conf.start), np.log10(conf.stop), conf.nsteps)
+        else:
+            x = np.linspace(conf.start, conf.stop, conf.nsteps)
+        if isUpDown:
+            x = np.concatenate( (x, x[::-1]) )
+        self._x_axis = x
+
+    def conf_staircase(self, ch=None, start=None, stop=None, nsteps=None, mode=None, end_to=None, hold=None, delay=None):
         """
         call with no values to see current setup.
-        func is 'voltage' or 'current'
-        end_to can be 'start' or 'end'
-        model can be 'linear', 'log', 'linear_updown', 'log_updown'
+        When setting it uses the current settings of ch for func, range and compliance.
+        When reading there are the values that will be used.
+        WARNING: you probably don't want the settings of ch after calling this function.
+        end_to can be 'start' or 'stop'
+        mode can be 'linear', 'log', 'linear_updown', 'log_updown'
+          updown makes it go from start to stop then from stop to start.
         """
-        params = ['func', 'ch', 'start', 'stop', 'nsteps', 'range', 'mode', 'end_on', 'hold', 'delay', 'compliance']
-        params_prev = ['sweep_var', 'sweep_ch', 'start', 'stop', 'steps', '__NA__', 'mode', 'ending_value', 'hold_time', 'delay_time', 'compliance']
+        func = None
         para_val = locals()
-        conf = {p:para_val[p] for p in params}
+        params = ['func', 'ch', 'start', 'stop', 'nsteps', 'mode', 'end_to', 'hold', 'delay']
+        params_prev = ['sweep_var', 'sweep_ch', 'start', 'stop', 'steps', 'mode', 'ending_value', 'hold_time', 'delay_time']
+        conf = dict_improved([(p,para_val[p]) for p in params])
         allnone = False
         if all(v is None for v in conf.values()):
             allnone = True
         prev_stair =  self._get_staircase_settings()
         for k in prev_stair.keys():
-            if k =='active_range':
+            if k == 'abort':
+                continue
+            if k in ['active_range', 'power', 'compliance']:
                 conf[k] = prev_stair[k]
-            kp = params[params_prev.index(k)]
-            if conf[kp] is None:
-                conf[kp] = prev_stair[k]
+            else:
+                kp = params[params_prev.index(k)]
+                if conf[kp] is None:
+                    conf[kp] = prev_stair[k]
         if allnone:
+            self._calc_x_axis(conf)
             return conf
+        del conf['func']
         if any(v is None for v in conf.values()):
-            raise ValueError(self.perror('Some values (None) need to be specified: %r'%conf))
-        if conf.func not in ['voltage', 'current']:
-            raise ValueError(self.perror("func needs to be 'voltage' or 'current'"))
-        else:
-            base = 'WV ' if conf.func == 'voltage' else 'WI'
-            minmax = 100. if conf.func == 'voltage' else .1
-            comp_minmax = .1 if conf.func == 'voltage' else 100.
-        base += "%i,%i,%s,%.7e,%.7e,%i,%.7e"
+            raise ValueError(self.perror('Some values (None) need to be specified: {conf}', conf=conf))
         if conf.ch not in self._valid_ch:
             raise ValueError(self.perror("Invalid ch selection."))
+        func = self.function.get(ch=conf.ch)
+        if func not in ['voltage', 'current']:
+            raise ValueError(self.perror("Selected channel is disabled"))
+        else:
+            if func == 'voltage':
+                base = 'WV'
+                minmax = 100.
+                rgdev = self.range_voltage
+            else:
+                base = 'WI'
+                minmax = 0.1
+                rgdev = self.range_current
+        range = rgdev.get()
+        sRange = rgdev.choices.tostr(range)
+        compliance = self.compliance.get()
+        #base += "%i,%i,%s,%.7e,%.7e,%i,%.7e"
+        base += "%i,%i,%s,%.7e,%.7e,%i"
         if not (-minmax <= conf.start <= minmax):
             raise ValueError(self.perror("Invalid start."))
         if not (-minmax <= conf.stop <= minmax):
             raise ValueError(self.perror("Invalid stop."))
-        if not (-comp_minmax <= conf.compliance <= comp_minmax):
-            raise ValueError(self.perror("Invalid compliance."))
-        if not (1 <= conf.steps <= 1001):
+        if not (1 <= conf.nsteps <= 1001):
             raise ValueError(self.perror("Invalid steps (must be 1-1001)."))
         if not (0 <= conf.hold <= 655.35):
             raise ValueError(self.perror("Invalid hold (must be 0-655.35)."))
         if not (0 <= conf.hold <= 65.535):
             raise ValueError(self.perror("Invalid delay (must be 0-65.535)."))
-        mode_ch = {'linear':1, 'log':2, 'linear updown':3, 'log_updown':4}
+        mode_ch = {'linear':1, 'log':2, 'linear_updown':3, 'log_updown':4}
         if conf.mode not in mode_ch:
             raise ValueError(self.perror("Invalid mode (must be one of %r)."%mode_ch.keys()))
+        end_to_ch = dict(start=1, stop=2)
         mode = mode_ch[conf.mode]
-        # TODO handle sRange
-        self.write(base%(conf.ch, mode, sRange, conf.start, conf.stop, conf.step, conf.comp))
+        #self.write(base%(conf.ch, mode, sRange, conf.start, conf.stop, conf.nsteps, compliance))
+        self.write(base%(conf.ch, mode, sRange, conf.start, conf.stop, conf.nsteps))
         self.write('WT %.7e,%.7e'%(conf.hold, conf.delay))
+        self.write('WM 1,%i'%end_to_ch[conf.end_to])
+        conf.func = func
+        self._calc_x_axis(conf)
+
 
     def _create_devs(self):
+        self.write('BC') # make sure to empty output buffer
         valid_ch, options_dict, Nmax = self._get_unit_conf()
         self._valid_ch = valid_ch
         self._Nvalid_ch = len(valid_ch)
@@ -606,11 +887,15 @@ class agilent_SMU(visaInstrumentAsync):
                                              'FL{val},{ch}', type=bool, ch_mode=True)
         self.integration_type = CommonDevice(self._get_ad_converter_highres_en,
                                              lambda v, ch: v[ch-1],
-                                             'AAD {ch},{val}', type=bool, ch_mode='out',
+                                             'AAD {ch},{val}', ch_mode=True,
                                              choices=ChoiceIndex(['speed', 'resolution']))
         self.auto_zero_en = CommonDevice(self._get_avg_time_and_autozero,
                                          lambda v: v['autozero_en'],
                                          'AZ {val}', type=bool)
+        self.meas_auto_type = CommonDevice(self._get_meas_operation_mode,
+                                           lambda v, ch: v[ch-1],
+                                           'CMM {ch},{val}', ch_mode=True,
+                                           choices=ChoiceIndex(['compliance', 'current', 'voltage', 'force']))
 
         self._integ_choices = ChoiceIndex(['auto', 'manual', 'plc'])
         self.integration_high_speed_mode = CommonDevice(self._get_avg_time_and_autozero,
@@ -632,144 +917,25 @@ class agilent_SMU(visaInstrumentAsync):
                                                              type=int, min=1, max=127, setget=True,
                                                              doc=""" time is internally limited to 100 for plc mode """)
 
+        self.measurement_spot_en = MemoryDevice(True, choices=[True, False],
+                                                doc="""
+                                                With this False, you need to use set_mode
+                                                """)
 
         self._devwrap('function', choices=['voltage', 'current', 'disabled'])
         self._devwrap('level', setget=True)
         self._devwrap('compliance', setget=True)
         self._devwrap('active_range_current')
         self._devwrap('active_range_voltage')
+        self._devwrap('measV', autoinit=False, trig=True)
+        self.meas_last_status = MemoryDevice_update(None, None, nch=Nmax)
+        self._devwrap('measI', autoinit=False, trig=True)
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
+        self.alias = self.readval
 
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
-
-    def performSetValue(self, quant, value, sweepRate=0.0, options={}):
-        if False:
-            return quant.getValue()
-        elif quant.name in ('(Staircase Option) Sweep Variable', '(Staircase Option) Sweep Channel',
-                            '(Staircase Option) Mode', '(Staircase Option) Start', '(Staircase Option) Stop',
-                            '(Staircase Option) Steps'):
-            quant.setValue(value)
-            sType = self.getCmdStringFromValue('(Staircase Option) Sweep Variable')
-            sMode = self.getCmdStringFromValue('(Staircase Option) Mode')
-            sChan = self.getCmdStringFromValue('(Staircase Option) Sweep Channel')
-            ch = int(sChan)
-            if sType == 'V':
-                self.sendValueToOther(self._quant_ch('Function', ch), 'Voltage Source') # To have range available
-                sRange = self.getCmdStringFromValue(self._quant_ch('(Voltage Option) Voltage Range', ch))
-                comp = self.getValue(self._quant_ch('(Voltage Option) Compliance Current', ch))
-            if sType == 'I':
-                self.sendValueToOther(self._quant_ch('Function', ch), 'Current Source') # To have range available
-                sRange = self.getCmdStringFromValue(self._quant_ch('(Current Option) Current Range', ch))
-                comp = self.getValue(self._quant_ch('(Current Option) Compliance Voltage', ch))
-            start = self.getValue('(Staircase Option) Start')
-            stop = self.getValue('(Staircase Option) Stop')
-            step = self.getValue('(Staircase Option) Steps')
-            self.writeAndLog("W%s %s,%s,%s,%.7e,%.7e,%i,%.7e"%(sType, sChan, sMode, sRange, start, stop, step, comp))
-            #self.sendValueToOther('Measurement Mode', self.getValue('Measurement Mode'))
-            return quant.getValue()
-        elif quant.name == "Measurement Mode" or quant.name.startswith("(Staircase Option) Sweep Measurement Ch"):
-            quant.setValue(value)
-            mode = self.getValue("Measurement Mode")
-            sMode = self.getCmdStringFromValue("Measurement Mode")
-            meas_modes = [self.getCmdStringFromValue("(Staircase Option) Sweep Measurement Ch%i"%ch) for ch in range(1, self.N_channels+1)]
-            if all([m == 'NotUsed' for m in meas_modes]):
-                self.setValue("(Staircase Option) Sweep Measurement Ch1", 'Compliance Measurement') # Always need one
-                meas_modes[0] = self.getCmdStringFromValue("(Staircase Option) Sweep Measurement Ch1")
-            enabled = ''
-            for i,m in enumerate(meas_modes):
-                ch = i+1
-                if m != 'NotUsed':
-                    enabled += ',%i'%ch
-                    self.write('CMM %i,%s'%(ch, m))
-            self.write('MM %s%s'%(sMode, enabled))
-            if mode != 'Spot Measurements':
-                self.sendValueToOther('(Staircase Option) Sweep Variable', self.getValue('(Staircase Option) Sweep Variable'))
-            return quant.getValue()
-        elif quant.name in ["(Staircase Option) Hold Time", "(Staircase Option) Delay Time"]:
-            quant.setValue(value)
-            hold = self.getValue("(Staircase Option) Hold Time")
-            delay = self.getValue("(Staircase Option) Delay Time")
-            self.writeAndLog('WT %.7e,%.7e'%(hold, delay))
-            return quant.getValue()
-        else:
-            return VISA_Driver.performSetValue(self, quant, value, sweepRate, options=options)
-
-    def performGetValue(self, quant, options={}):
-        ch, ch_name = self._parse_ch(quant.name)
-        if quant.name == "(Staircase Option) Measurements":
-        # TODO Handle Multiples dimensions in a better way.
-        #      currently all the data is chained (all channel1, all channel2, ....)
-            sVec = self.writeAndLog('XE')
-            notDone = True
-            while notDone and not self.isStopped():
-                try:
-                    sVec = self.read()
-                    notDone = False
-                except VisaIOError as exc:
-                    if exc.error_code != VI_ERROR_TMO:
-                        raise
-            if self.isStopped():
-                return
-            sVec=sVec.split(",")
-            vData = np.zeros(len(sVec))
-            for i, v in enumerate(sVec):
-                vData[i] = self.parse_data(v)[0]
-            start = self.getValue('(Staircase Option) Start')
-            stop = self.getValue('(Staircase Option) Stop')
-            step = self.getValue('(Staircase Option) Steps')
-            sweep_mode = self.getValue('(Staircase Option) Mode')
-            sweep_mode_opt = {'Linear (start to stop)':(False, False),
-                                'Log (start to stop)':(True, False),
-                                'Linear (start to stop to start)':(False, True),
-                                'Log (start to stop to start)':(True, True)}
-            isLog, isUpDown = sweep_mode_opt[sweep_mode]
-            if isLog:
-                x = np.logspace(np.log10(start), np.log10(stop), step)
-            else:
-                x = np.linspace(start, stop, step)
-            if isUpDown:
-                x = np.concatenate( (x, x[::-1]) )
-            vData.shape = (len(x), -1)
-            x.shape = (-1, 1)
-            x = x*([1.]*vData.shape[1])
-            return quant.getTraceDict(vData.T.flatten(), x=x.T.flatten())
-        elif quant.name in ['Auto Calibration Enable', "Measurement Mode"] or quant.name.startswith('(Staircase Option) Sweep Measurement Ch'):
-            self.get_tn_av_cm_fmt_mm()
-            return self.getValue(quant.name)
-        elif ch_name in ['Spot Current Measurement', 'Spot Voltage Measurement']:
-            func = self.getValue(self._quant_ch('Function', ch))
-            if 'Current' in ch_name:
-                current = True
-                base_Msg = 'TI%i'%ch
-                if func != 'Current Source':
-                    Mrange = self.getCmdStringFromValue(self._quant_ch('Current Measurement Range', ch))
-                    if Mrange != 'compliance':
-                        base_Msg += ',%s'%Mrange
-            else: #Voltage Measurement
-                current = False
-                base_Msg = 'TV%i'%ch
-                if func != 'Voltage Source':
-                    Mrange = self.getCmdStringFromValue(self._quant_ch('Voltage Measurement Range', ch))
-                    if Mrange != 'compliance':
-                        base_Msg += ',%s'%Mrange
-            res = self.askAndLog(base_Msg)
-            value, channel, status, type = self.parse_data(res)
-            if channel is not None:
-                rch = ord(channel)-ord('A')+1
-                if rch != ch:
-                    raise RuntimeError('Read unexepected channel "%s" but expected "%s"'%(rch, ch))
-            if type is not None and type != base_Msg[1]:
-                    raise RuntimeError('Read unexepected type "%s" but expected "%s"'%(type, base_Msg[1]))
-            status &= 0x7f # remove 128 from flags. This is always the last value (for spot).
-            if current:
-                self.setValue(self._quant_ch('Spot Current Measurement Status', ch), status)
-            else:
-                self.setValue(self._quant_ch('Spot Voltage Measurement Status', ch), status)
-            return value
-        else:
-            return VISA_Driver.performGetValue(self, quant, options=options)
 
     @cache_result
     def _get_enabled_state(self):
@@ -946,8 +1112,8 @@ class agilent_SMU(visaInstrumentAsync):
 
     @cache_result
     def _get_meas_operation_mode(self):
-        options = ['Compliance Measurement', 'Measure Current', 'Measure Voltage', 'Force Side Measurement']
-        modes = self._get_values_helper(46, 'CMM', lambda s: options[int(s)])
+        choices =  self.meas_auto_type.choices
+        modes = self._get_values_helper(46, 'CMM', choices)
         return modes
 
     @cache_result
@@ -957,18 +1123,6 @@ class agilent_SMU(visaInstrumentAsync):
         vch = lambda v: self._v_range_meas_choices(v) if v is not None else None
         ranges = [[ich(i), vch(v)] for i,v in ranges]
         return ranges
-        for i, (ir, vr) in enumerate(ranges):
-            ch = i+1
-            Vquant_s = self._quant_ch('Voltage Measurement Range', ch)
-            Iquant_s = (self._quant_ch('Current Measurement Range', ch))
-            Vquant = self.getQuantity(Vquant_s)
-            Iquant = self.getQuantity(Iquant_s)
-            if not (Vquant.getCmdStringFromValue() == 'compliance' and vr == '0'):
-                #Vquant.setValue(Vquant.getValueFromCmdString(vr)) # This updates the value, but the display is not changed (Labber 1.5.1)
-                self.setValue(Vquant_s, Vquant.getValueFromCmdString(vr)) # so use this instead
-            if not (Iquant.getCmdStringFromValue() == 'compliance' and ir == '0'):
-                #Iquant.setValue(Iquant.getValueFromCmdString(ir))# This updates the value, but the display is not changed (Labber 1.5.1)
-                self.setValue(Iquant_s, Iquant.getValueFromCmdString(ir)) # so use this instead
 
     @cache_result
     def _get_avg_time_and_autozero(self):
@@ -997,8 +1151,8 @@ class agilent_SMU(visaInstrumentAsync):
         outfmt = self._parse_block_helper(rs[3], 'FMT', [int, int]) # format, mode
         enabled = [False]*self._N_channels
         if N == 5:
-            mm_modes = {1:'spot', 2:'staircase', 3:'pulsed spot', 4:'pulsed sweep', 5:'staircase pulsed bias',
-                        9:'quasi-pulsed spot', 14:'linear search', 15:'binary search', 16:'multi sweep'}
+            mm_modes = {1:'single', 2:'staircase', 3:'pulsed spot', 4:'pulsed sweep', 5:'staircase pulsed bias',
+                        9:'quasi-pulsed spot', 14:'linear search', 15:'binary search', 16:'stair'}
             mm = self._parse_block_helper(rs[4], 'MM', [int]*9, Nv_min=1) # mode, chnum, chnum ... (max of 8 chnum)
             meas_mode = mm_modes[mm[0]]
             for m in mm[1:]:
@@ -1046,35 +1200,39 @@ class agilent_SMU(visaInstrumentAsync):
             raise RuntimeError(self.perror('Invalid number of elements for lrn 33'))
         abort, end = self._parse_block_helper(rs[0], 'WM', [int, int])
         delays = self._parse_block_helper(rs[1], 'WT', [float]*5)
-        ret_dict = dict_improved(ending_value = {1:'start', 2:'stop'}[end],
+        ret_dict = dict_improved(ending_value = {1:'start', 2:'end'}[end],
                         hold_time = delays[0],
                         delay_time = delays[1],
                         abort=abort)
         if len(rs) == 3:
             if rs[2][1] == 'I':
-                stair = self._parse_block_helper(rs[2], 'WI', [int, int, int, float, float, int, float])
+                stair = self._parse_block_helper(rs[2], 'WI', [int, int, int, float, float, int, float, float], Nv_min=6)
                 ch = stair[0]
                 ret_dict['sweep_var'] = 'current'
-                ret_dict['compliance'] = stair[6]
                 ret_dict['active_range'] = 10**(stair[2]-11-9)
+                ret_dict['compliance'] = stair[6]
+                ret_dict['power'] = stair[7]
             else:
-                stair = self._parse_block_helper(rs[2], 'WV', [int, int, int, float, float, int, float])
+                stair = self._parse_block_helper(rs[2], 'WV', [int, int, int, float, float, int, float, float], Nv_min=6)
                 ch = stair[0]
                 ret_dict['sweep_var'] = 'voltage'
-                ret_dict['compliance'] = stair[6]
                 ret_dict['active_range'] = stair[2]/10.
+            comp = None if len(stair) < 7 else stair[6]
+            power = None if len(stair) < 8 else stair[7]
             mode_opt = {1:'linear', 2:'log', 3:'linear updown', 4:'log updown'}
             ret_dict.update(dict(sweep_ch = ch,
                                  mode = mode_opt[stair[1]],
                                  start = stair[3],
                                  stop = stair[4],
-                                 steps =  stair[5]))
+                                 steps =  stair[5],
+                                 power = power,
+                                 compliance = comp))
         else:
             ret_dict['sweep_var'] = None
         return ret_dict
 
     _status_letter_2_num = dict(N=0, T=4, C=8, V=1, X=2, G=16, S=32)
-    def parse_data(self, data_string):
+    def _parse_data(self, data_string):
         """ Automatically parses the data into value, channel, status, type """
         # FMT12 and FMT22 seem to be the same
         if data_string[2] in 'VIT': # FMT1 or FMT5 (12 digits data), or FMT11 or FMT15 (13 digits data)
@@ -1099,6 +1257,8 @@ class agilent_SMU(visaInstrumentAsync):
             channel = None
             type = None
             value = float(data_string)
+        if channel is not None and channel in 'ABCDEFGH':
+            channel = ord(channel) - ord('A') + 1
         return value, channel, status, type
 
     def _get_unit_conf(self):
