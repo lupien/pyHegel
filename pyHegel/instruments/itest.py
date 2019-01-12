@@ -108,7 +108,7 @@ class iTest_be2102(visaInstrument):
         config_calibration
         trig
     TCP address format:
-        TCPIP::192.168.137.112::5025::SOCKET
+        TCPIP::192.168.150.112::5025::SOCKET
     """
     def __init__(self, addr, slot, *args, **kwargs):
         self._slot = slot
