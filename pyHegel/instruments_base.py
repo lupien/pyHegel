@@ -3548,7 +3548,8 @@ class visaInstrumentAsync(visaInstrument):
         n = 0
         while self.read_status_byte() & 0x40: # This is SRQ bit
             if self.visa.is_usb() and not self.visa.resource_manager.is_agilent():
-                # National instruments visa buffers usb status bytes
+                # National instruments visa buffers a usb status byte (the SRQ bit only)
+                # Therefore a request will be seen in multiple threads/process.
                 # so it is normal to have left overs
                 pass
             else:
