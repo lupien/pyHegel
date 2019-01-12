@@ -107,12 +107,20 @@ class iTest_be2102(visaInstrument):
         config_addresses
         config_calibration
         trig
+    TCP address format:
+        TCPIP::192.168.137.112::5025::SOCKET
     """
     def __init__(self, addr, slot, *args, **kwargs):
         self._slot = slot
         if slot<1 or slot>13:
             raise ValueError('Slot needs to be a value within 1-13.')
         self._pre = 'i%i'%self._slot
+        kwargs['write_termination'] = '\n'
+        if isinstance(addr, basestring) and not addr.lower().startswith('gpib'):
+            # Needed for all but gpib.
+            # serial behaves likes this anyway (because VI_ATTR_ASRL_END_IN attribute is set
+            #   to use the END_TERMCHAR which is \n)
+            kwargs['read_termination'] = '\n'
         super(iTest_be2102, self).__init__(addr, *args, **kwargs)
 
     def idn_remote(self):
