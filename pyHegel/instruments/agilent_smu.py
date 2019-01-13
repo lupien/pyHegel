@@ -188,8 +188,6 @@ class agilent_SMU(visaInstrumentAsync):
         if async_string is None:
             return
         self._async_trig_current_data = None
-#        self._async_trigger_first_absorbed = False
-#        self.write('*sre 16') # Trigger on Set Ready. This generates an event which will need to be cleaned up.
         self.write(async_string)
 
     def _async_cleanup_after(self):
@@ -204,11 +202,6 @@ class agilent_SMU(visaInstrumentAsync):
         if not ret:
             # This cycle is not finished
             return ret
-#        print 'last srq', self._async_last_status
-#        if not self._async_trigger_first_absorbed:
-#            print 'skipping..'
-#            self._async_trigger_first_absorbed = True
-#            return False
         # we got a trigger telling data is available. so read it, before we turn off triggering in cleanup
         data = self.read()
         self._async_trig_current_data = data
@@ -223,10 +216,14 @@ class agilent_SMU(visaInstrumentAsync):
             else:
                 async_string = 'XE'
                 self.write('BC') # empty buffer
-                self.write('*sre 16') # Trigger on Set Ready. This generates an event which will need to be cleaned up.
-                #self.ask('*sre 16;*opc?') # just something that takes a little while and should allow us to always? see the srq
+                # Trigger on Set Ready. This generates an event which will need to be cleaned up.
+                # *opc? is used to make sure we waited long enough to see the event if it was to occur.
+                # Note that the event is not always detected by NI autopoll so this is why
+                # we wait and then empty the buffer of all/any status.
+                #   (see details in comment section below to class code.)
+                self.ask('*sre 16;*opc?')
                 # absorb all status bytes created.
-                i=0
+                #i=0
                 while self.read_status_byte()&0x40:
 #                    i += 1
                     pass
@@ -1359,5 +1356,23 @@ class agilent_SMU(visaInstrumentAsync):
 # For output range selection, only use auto or limited ones (not the fixed ranges).
 #  The fixed ones can be used, but if they are too small, we have a parameter error and nothing is changed.
 
-
-
+# Observations about RQS (some of it with NI trace, some with a scope on pin 10 of cable):
+#  When using *sre 16 (that bit is high except when executing a command)
+#  The SRQ line should and does get activated at the end of execution
+#  However, it does seem to also produce a glitch when writing a command.
+#   The SRQ line momentarally get activated, but only for about 20 us.
+#   This probably causes NI autopoll to sometimes misbehave (it can miss some events.)
+#   NI autopoll is disabled by board level calls (but I check and the iblck calls don't seem
+#   to be a problem.) and also by Stuck SRQ line (ESRQ error return from ibwait). But I
+#   was unable to observe the ESRQ error (and it was not stuck on, more more like it was
+#   already off when the autopoll tried to see the source.)
+#  Even when using going back to *sre 0, there is a glitch (the first time) on the SRQ line.
+#   Again it is short (20 us) and probably skipped by autopoll code
+#     (could depend on the number of device opened on the gpib (my test uses only one)
+#      and computer speed ...) It could cause some extraneous status cleanup (unread))
+# The solution:
+#   my event wait internnally (the NI visa library) uses ibwait which restarts autopoll.
+#   some I just need to make sure to properly clean the status_byte buffer before
+#   using it. The safest, after *sre 16 (which does create the event, sometimes),
+#   is to wait a little to make sure the instruments did trigger it (I use *OPC?)
+#   and then empty the buffer.
