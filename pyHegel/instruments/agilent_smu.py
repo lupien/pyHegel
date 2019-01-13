@@ -351,7 +351,8 @@ class agilent_SMU(visaInstrumentAsync):
         if mode != 'spot':
             try:
                 data = self._async_trig_current_data
-                x_data = self._x_axis
+                if mode == 'stair':
+                    x_data = self._x_axis
             except AttributeError:
                 raise RuntimeError(self.perror('No data is available. Probably prefer to use readval.'))
             data = data.split(',')
