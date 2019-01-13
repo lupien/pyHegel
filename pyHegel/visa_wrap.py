@@ -412,6 +412,15 @@ def flow_control_helper(self):
 def flow_control_helper(self, value):
     self.set_visa_attribute(constants.VI_ATTR_ASRL_FLOW_CNTRL, value)
 
+def _get_ressource_impl_manuf_name(self):
+    """
+    Returns the manufacturer that implemented the library being used to access
+    the ressource.
+    This is useful on 64bit architecture were the conflict manager can redirect
+    to different implementations
+    """
+    return self.get_visa_attribute(constants.VI_ATTR_RSRC_MANF_NAME)
+
 # Important: do not use wait_for_srq
 #            it enables constants.VI_EVENT_SERVICE_REQ, constants.VI_QUEUE
 
@@ -577,7 +586,7 @@ class old_Instrument(redirect_instr):
     query = _query_helper
     def flush(self, mask):
         vpp43.flush(self.vi, mask)
-
+    get_ressource_impl_manuf_name = _get_ressource_impl_manuf_name
 
 class new_Instrument(redirect_instr):
     #def __del__(self):
@@ -689,6 +698,7 @@ class new_Instrument(redirect_instr):
         with self.ignore_warning(constants.VI_SUCCESS_MAX_CNT):
             return self.visalib.read(self.session, size)[0]
     read_raw_n_all = _read_raw_n_all_helper
+    get_ressource_impl_manuf_name = _get_ressource_impl_manuf_name
 
 
 ####################################################################
@@ -883,6 +893,10 @@ def get_resource_manager(path=None):
     In case of problem it raises ImportError
     Note that for pyvisa<1.5 only one dll can be loaded at the same time. Loading
     a new one kills the previous one (resource_manager will no longer work.)
+    On windows 64 bit platform, loading visa32.dll or visa64.dll loads the conflict
+    resolution layer. Therefore the actual implementation used for a loaded device
+    can depend on the user selection (in the vias conflict manager).
+     see get_ressource_impl_manuf_name to identify which is being used on a ressource.
     """
     if pyvisa is None:
         return None
