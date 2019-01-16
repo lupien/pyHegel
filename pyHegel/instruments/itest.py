@@ -44,6 +44,7 @@ import math
 #  when turning the output on:
 #   device ramps voltage from 0V to target
 #  when turning output off, relays open and voltage drops to 0 immediately
+#    The relay actually shorts the ouput to ground.
 #  Need to have output off to change range/filter
 #  With output off there is not ramping.
 #  Ramping with fast, it changes the voltage every 1 ms, with slow it is every 2ms
@@ -58,6 +59,11 @@ import math
 
 #  The remote sma grounds are all the same. They float with respect to the mainframe.
 #  They seem to be the same as the remote box also.
+
+#  When on remote sense off, the remote connection (SMA) are open (no signal)
+#  Even with remote sense True, if output_en is False, meas_out does not see the signal
+#   on the connectors. It reads 0. (There are many cmos switches. Only one relay for the output.)
+#  The input impedance on the remote sense connectors seems to be >50 MOhm most of the time.
 
 class range_type(object):
     def __call__(self, input_str):
