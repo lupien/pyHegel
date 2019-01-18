@@ -554,6 +554,23 @@ def locked_calling_dev(func):
     """ Same as locked_calling, but for a BaseDevice subclass. """
     return locked_calling(func, extra='.instr')
 
+class release_lock_context(object):
+    def __init__(self, instr):
+        self.instr =  instr
+        self.n = 0
+    def __enter__(self):
+        self.n = 0
+        try:
+            while True:
+                self.instr._lock_release()
+                self.n += 1
+        except RuntimeError as exc:
+            if exc.message != "cannot release un-acquired lock":
+                raise
+        return self
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        for i in range(self.n):
+            self.instr._lock_acquire()
 
 # Taken from python threading 2.7.2
 class FastEvent(threading._Event):
