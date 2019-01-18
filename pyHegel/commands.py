@@ -2192,6 +2192,7 @@ def task(*arg, **kwarg):
        (which defaults to 0).
        The interval sleep can be stopped every 1s.
        extra are keyword arguments to pass to the threading.Thread init function.
+       see also top and kill.
     """
     _Hegel_Task(*arg, **kwarg)
 
@@ -2200,6 +2201,7 @@ def top(all=False):
         can use to kill the task.
         If all is True, then all python threading threads are listed
         (not only the pyHegel ones)
+       see also task and kill.
     """
     # All threads count: threading.active_count()
     for t in threading.enumerate():
@@ -2214,6 +2216,7 @@ def kill(n, force=False):
           the other thread which should stop most python code
           (but will not stop blocking system function like sleep or
           file system read)
+        see also task and top.
     """
     try:
         for t in threading.enumerate():
