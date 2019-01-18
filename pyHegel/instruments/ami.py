@@ -309,8 +309,8 @@ class AmericanMagnetics_model430(visaInstrument):
             prog_base = 'Magnet Ramping {current:.3f}/0 A'
         if isinstance(stay_states, basestring):
             stay_states = [stay_states]
-        while self.state.get() in stay_states:
-            with mainStatusLine(priority=10, timed=True) as progress:
+        with mainStatusLine.new(priority=10, timed=True) as progress:
+            while self.state.get() in stay_states:
                 #print self.state.getcache(), self.current.get(), self.current_magnet.get(), self.current_target.getcache(), self.persistent_switch_en.get()
                 wait(.1)
                 progress(prog_base.format(current=self.current.get(), time=time.time()-to))
