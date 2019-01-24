@@ -2701,7 +2701,7 @@ def make_choice_list(list_values, start_exponent, end_exponent):
 
 
 class ChoiceMultiple(ChoiceBase):
-    def __init__(self, field_names, fmts=int, sep=',', ending_sep=False, ending_sep_get=None):
+    def __init__(self, field_names, fmts=int, sep=',', ending_sep=False, ending_sep_get=None, allow_missing_keys=False):
         """
         This handles scpi commands that return a list of options like
          1,2,On,1.34
@@ -2719,6 +2719,7 @@ class ChoiceMultiple(ChoiceBase):
         ending_sep, when True it adds (on writing) or remove (on reading) an extra sep
         at the end of the string
         ending_sep_get, when not None it overrides ending_sep for reading.
+        allow_missing_keys when True, will not produce error for missing field_names when checking
         """
         self.field_names = field_names
         if not isinstance(fmts, (list, np.ndarray)):
@@ -2740,6 +2741,7 @@ class ChoiceMultiple(ChoiceBase):
         self.ending_sep_get = ending_sep
         if ending_sep_get is not None:
             self.ending_sep_get = ending_sep_get
+        self.allow_missing_keys = allow_missing_keys
     def __call__(self, fromstr):
         if self.ending_sep_get:
             if fromstr.endswith(self.sep):
@@ -2781,6 +2783,8 @@ class ChoiceMultiple(ChoiceBase):
             try:
                 val = x.pop(k) # generates KeyError if k not in x
             except KeyError:
+                if self.allow_missing_keys:
+                    continue
                 raise KeyError_Choices('key %s is missing'%k)
             _general_check(val, lims=lims, msg_src='key %s'%k)
         if x != {}:
