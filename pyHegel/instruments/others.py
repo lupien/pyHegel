@@ -34,7 +34,8 @@ from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsy
                             ChoiceStrings, ChoiceIndex,\
                             make_choice_list, _fromstr_helper,\
                             decode_float64, visa_wrap, locked_calling,\
-                            Lock_Extra, Lock_Instruments, _sleep_signal_context_manager, wait
+                            Lock_Extra, Lock_Instruments, _sleep_signal_context_manager, wait,\
+                            release_lock_context, mainStatusLine
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -1716,8 +1717,12 @@ class MagnetController_SMC(visaInstrument):
     """
     This controls a Scientific Magnetics Magnet Controller SMC120-10ECS
     Usefull device:
+        ramp_T
+        ramp_wait_after
         field
         rawIV
+    You only control the lower setpoint. The upper setpoint is to control
+    maximum value.
     Important, either leave the instrument in Tesla or at least
     do not change the calibration (it is read during init.)
     This only handles serial address connections (like ASRL1)
@@ -1734,10 +1739,14 @@ class MagnetController_SMC(visaInstrument):
     def init(self, full=False):
         super(MagnetController_SMC, self).init(full=full)
         self._magnet_cal_T_per_A = self.operating_parameters.get()['calibTpA']
+        maxT = self._magnet_max_T = self.setpoints.get(Tunit=True).upper
+        self._magnet_max_I = self.setpoints.get(Tunit=False).upper
+        self.ramp_T.min = -maxT
+        self.ramp_T.max = maxT
     def idn(self):
         return 'Scientific Magnetics,SMC120-10,000000,5.67'
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('field', 'current_status', 'setpoints', 'status', 'operating_parameters', options)
+        return self._conf_helper('field', 'current_status', 'setpoints', 'status', 'operating_parameters', 'ramp_wait_after', options)
     def _field_internal(self):
         s=self.ask('N')
         try:
@@ -1766,9 +1775,17 @@ class MagnetController_SMC(visaInstrument):
         d = self._current_status_getdev()
         return d.current, d.volt
     def _operating_parameters_setdev(self, value):
+        """
+        When setting, you need a dictionnary.
+        You can only set the following keys, to the corresponding values:
+            rate:  sign of value is lost. in A/s.
+            Tunit: True or False
+            reverse: True or False
+        But reverse will only work if field and voltage are 0.
+        """
         for k,v in value.iteritems():
             if k == 'rate':
-                self.write('A%.5f'%v)
+                self.write('A%.5f'%abs(v))
             elif k == 'Tunit':
                  self.write('T%i'%v)
             elif k == 'reverse':
@@ -1785,15 +1802,23 @@ class MagnetController_SMC(visaInstrument):
         if Tunit is not None:
             self.write('T%i'%Tunit)
         for k,v in values.iteritems():
-            if k == 'upper':
-                self.write('U%f'%v)
-            elif k == 'lower':
-                 self.write('L%f'%v)
+            v = abs(v)
+            if k == 'lower':
+                self.write('L%f'%v)
+            #elif k == 'upper':
+            #    self.write('U%f'%v)
             elif k == 'voltLim':
-                 self.write('Y%f'%v)
+                self.write('Y%f'%v)
             else:
                 raise NotImplementedError('Changing %s is not implememented'%k)
     def _setpoints_getdev(self, Tunit='default'):
+        """
+        When setting, use a dictionnary with keys of 'lower' and/or 'voltLim'
+        and with value the setpoint/limit you want (the sign of the value is lost).
+        Also use 'Tunit' key with value False/True.
+        For upper/lower you should also always set Tunit (if not it will use the current unit of the instrument.)
+        For set, any unspecified value is unchanged.
+        """
         s = self.ask('S')
         d = _parse_magnet_return(s, [ ('T', 'Tunit', bool), ('U', 'upper', float), ('L', 'lower', float),
                                      ('Y', 'voltLim', float)])
@@ -1831,6 +1856,13 @@ class MagnetController_SMC(visaInstrument):
             else:
                 raise NotImplementedError('Changing %s is not implememented'%k)
     def _status_getdev(self):
+        """
+        When setting, you need a dictionnary.
+        You can only set the following keys, to the corresponding values:
+            target: 'zero', 'lower' or 'upper'
+            pause: True or False
+            persistent: True or False
+        """
         s = self.ask('K')
         d= _parse_magnet_return(s, [('R', 'target', ChoiceIndex(['zero', 'lower','upper'])),
                                     ('M', 'rampstate', ChoiceIndex(['ramping', 'unknown', 'at_target'])),
@@ -1842,14 +1874,125 @@ class MagnetController_SMC(visaInstrument):
         # at target is shown when control has reached the value. The actual outputs gets there a little bit later
         d.pop('foo')
         return d
+
+    def get_error(self):
+        return 'This instrument does not return the communication error state. Use status error value instead.'
+
+    def _ramping_helper(self, stay_states, end_states=None, extra_wait=None):
+        to = time.time()
+        if self._last_state == 'ramp':
+            # Reaching here, the cache should be ok.
+            factor = -1. if self.operating_parameters.getcache().reverse else 1.
+            prog_base = 'Magnet Ramping {field:.3f}/%.3f T'%(self.setpoints.getcache().lower*factor)
+        else: # zeroing field
+            prog_base = 'Magnet Ramping {field:.3f}/0 T'
+        if isinstance(stay_states, basestring):
+            stay_states = [stay_states]
+        with release_lock_context(self):
+            with mainStatusLine.new(priority=10, timed=True) as progress:
+                check = lambda x: x.rampstate in stay_states and x.error == 0
+                while check(self.status.get()):
+                    # The instrument is slow. Trying to read too fast is counter productive
+                    wait(.5)
+                    progress(prog_base.format(field=self.field.get(), time=time.time()-to))
+            if self.status.getcache().error != 0:
+                error_code = self.status.getcache().error
+                errors = []
+                if error_code >= 10:
+                    errors.append({1:'Changing polarity with I/V != 0.',
+                                    2:'Polarity did not switch correctly',
+                                    3:'Polarity switch in invalid state'}[error_code//10])
+                if error_code%10 != 0:
+                    errors.append({1:'Quenched!!',
+                                    2:'External trip',
+                                    3:'Quenched!! and External trip',
+                                    4:'Brick trip',
+                                    5:'Heatsink overtemperature trip',
+                                    6:'Slave trip',
+                                    7:'Heatsink overvoltage trip'}[error_code%10])
+                # Polarity switch (I/V) != 0. error is only reset once a proper polarity change is performed
+                # i.e. when changing polarity (operating_parameters reverse option)  with I=V=0.
+                raise RuntimeError(self.perror('Magnet is in error: %s'%', '.join(errors)))
+            if extra_wait:
+                wait(extra_wait, progress_base='Magnet wait')
+        if end_states is not None:
+            if isinstance(end_states, basestring):
+                end_states = [end_states]
+            if self.status.get().rampstate not in end_states:
+                raise RuntimeError(self.perror('The magnet state did not change to %s as expected'%end_states))
+
+    def _do_ramp(self, field_target, wait):
+        status = self.status.get()
+        # chaning pause or target status takes 0.6 each and it is cumulative.
+        # Therefore check if the change is needed before doing it.
+        if field_target == 0:
+            if status.target != 'zero':
+                self.status.set(target='zero')
+            if status.pause:
+                self.status.set(pause=False)
+            self._last_state = 'zero'
+        else:
+            #self.status.set(pause=True)
+            self.setpoints.set(lower=field_target, Tunit=True)
+            if status.target != 'lower':
+                # This can take 0.6s so only do it when necessary.
+                self.status.set(target='lower')
+            if status.pause:
+                self.status.set(pause=False)
+            self._last_state = 'ramp'
+        # unknow state seems to be a possible transient between ramping and at_target.
+        # I only see it once (when continuously reading status) immediately followed by 'at_target'
+        # I don't always see it.
+        # Since the end_states check is done after a second reading of status (and a possible wait)
+        # we should never have to check for it but to be safe I add it anyway (my observations time was not infinite)
+        self._ramping_helper('ramping', ['at_target', 'unknown'], wait)
+        # With a ramping rate of 0.00585 A/s  = 0.031 T/min
+        # when going to zero, at_target shows up at about 3 mT and it takes about another 5 s to go to 0.
+        # going to non-zero field (+0.05), at_target shows up at about 20 mT from target, and it takes another 15-20 s to become stable (0.0505 T)
+
+    def _ramp_T_checkdev(self, val, wait=None, quiet=True):
+        BaseDevice._checkdev(self.ramp_T, val)
+
+    def _ramp_T_setdev(self, val, wait=None, quiet=True):
+        """ Goes to the requested setpoint and then waits until it is reached.
+            After the instrument says we have reached the setpoint, we wait for the
+            duration set by ramp_wait_after (in s).
+            wait can be used to set a wait time (in s) after the ramp. It overrides ramp_wait_after.
+            When using get, returns the magnet field in T.
+        """
+        def print_if(s):
+            if not quiet:
+                print s
+        if wait is None:
+            wait = self.ramp_wait_after.getcache()
+        reverse_en = self.operating_parameters.get().reverse
+        neg_val = True if val<0 else False
+        if val != 0 and reverse_en != neg_val:
+            # We need to switch polarity
+            print_if('Ramping to zero for polarity change ...')
+            # When switching polarity, need to wait. 5s is minium I observed as necessary.
+            #  To be safe make it 20.
+            self._do_ramp(0, 20.)
+            self.operating_parameters.set(reverse = not reverse_en)
+        print_if('Ramping...')
+        self._do_ramp(val, wait)
+
+    def _ramp_T_getdev(self):
+        return self.field.get()
+
     def _create_devs(self):
+        self.ramp_wait_after = MemoryDevice(20., min=0.)
         self._devwrap('field', doc='units are Tesla')
-        self._devwrap('operating_parameters', setget=True, doc="rate in A/s depending on units")
-        self._devwrap('setpoints', setget=True, doc="For set, any unspecified value is unchanged.")
-        self._devwrap('status', setget=True)
+        self._devwrap('operating_parameters', setget=True, allow_kw_as_dict=True,
+                      choices=ChoiceMultiple(['rate', 'reverse', 'Tunit'], [float, bool, bool], allow_missing_keys=True))
+        self._devwrap('setpoints', setget=True, allow_kw_as_dict=True,
+                      choices=ChoiceMultiple(['lower', 'voltLim', 'Tunit'], [float, float, bool], allow_missing_keys=True))
+        self._devwrap('status', setget=True, allow_kw_as_dict=True,
+                      choices=ChoiceMultiple(['pause', 'target', 'persistent'], [bool, float, bool], allow_missing_keys=True))
         self._devwrap('current_status')
         self._devwrap('rawIV')
         self.rawIV._format['multi'] = ['current', 'volt']
+        self._devwrap('ramp_T')
         self.alias = self.field
         # This needs to be last to complete creation
         super(MagnetController_SMC, self)._create_devs()
