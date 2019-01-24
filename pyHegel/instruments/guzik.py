@@ -55,6 +55,85 @@ def add_environ_path(path):
 ##    Guzik ADP7104
 #######################################################
 
+new_data_c_func = ctypes.CFUNCTYPE(None, c_int)
+class PostProcess(object):
+    """ Release is always called before init.
+        Normal sequence is
+         init -> reset ->
+            new_data_array
+              new_data
+              new_data
+                ...
+              new_data (all of array ready)
+            new_data_array ()
+              new_data
+              new_data
+                ...
+              new_data (all of array ready)
+             ...
+          complete
+         Then back to reset -> new_data_array
+         or release.
+         For chaining to work, This object needs to call the
+         chain periodically with new_data_array and new_data
+    """
+    def init(self, Nsamples, Nch=1, chain=None):
+        """ Init stage. Use it to reserve memory """
+        self.Nsamples = Nsamples
+        self.Nch = Nch
+        self.chain = chain
+        if self.chain:
+            self.chain.init(Nsamples, Nch)
+        self._new_data_func = new_data_c_func(self.get_counter_func_address)
+    def get_counter_func_address(self):
+        """ This is used when chaining. It is the address of a C function that
+            takes an int64 as a parameter to perform in pure C what
+            new_data does in python
+        """
+        return -1
+    def stop(self):
+        """ Call this to stop an calculation. Only returns once the calculation are
+        really stopped."""
+        if self.chain:
+            self.chain.stop()
+    def reset(self):
+        """ Reset stage. Use it to initialize memory for a new acq """
+        if self.chain:
+            self.chain.reset()
+    def new_data(self, sample_count_ready):
+        """ call this to update the sample count (per ch) of available data """
+        self._new_data_func(sample_count_ready)
+    def check_in_progress(self):
+        """ returns how many inputs samples have been completed """
+        pass
+    def check_out_progress(self):
+        """ returns how many output samples have been completed """
+        pass
+    def check_is_done(self):
+        """ returns when current calculation is done """
+        if self.chain:
+            return self.chain.check_is_done()
+        return self.check_in_progress() == self.Nsamples
+    def new_data_array(self, data, sample_count_ready=0):
+        """ This is called when a new array of data is available """
+        self.new_data(sample_count_ready)
+    def complete(self):
+        """ This is called at the end of the calulculation to
+            return the results
+        """
+        if self.chain:
+            return self.chain.complete()
+    def release(self):
+        """ This is called to relase the memory """
+        if self.chain:
+            self.chain.release()
+    def current_config(self):
+        """ Return a list of strings representing the configuration """
+        opts = []
+        if self.chain:
+            opts += self.chain.current_config()
+        return opts
+
 def pp(o, align=20, base=''):
     """ prints a ctypes structure recursivelly """
     if len(base):
