@@ -146,7 +146,7 @@ class AmericanMagnetics_model430(visaInstrument):
         opts += self._conf_helper('ramp_rate_unit', 'ramp_rate_segment_count')
         ramps = self.conf_ramp_rates()
         opts += ['ramp_rate_currents=%s'%ramps]
-        opts += self._conf_helper('ramp_wait_after', 'persistent_switch_en', 'persistent_mode_active')
+        opts += self._conf_helper('ramp_wait_after', 'persistent_switch_en', 'persistent_mode_active', 'persistent_wait_before')
         opts += self._conf_helper('quench_detected', 'quench_count', 'rampdown_count', 'field_unit')
         opts += ['conf_manget=%s'%self.conf_magnet()]
         opts += ['conf_supply=%s'%self.conf_supply()]
@@ -327,7 +327,7 @@ class AmericanMagnetics_model430(visaInstrument):
                 raise RuntimeError(self.perror('The magnet state did not change to %s as expected'%end_states))
 
     @locked_calling
-    def do_persistent(self, to_pers, quiet=True):
+    def do_persistent(self, to_pers, quiet=True, extra_wait=None):
         """
         This function goes in/out of persistent mode.
         to_pers to True to go into peristent mode (turn persistent switch off, ramp to zero and leave magnet energized)
@@ -358,8 +358,8 @@ class AmericanMagnetics_model430(visaInstrument):
                 self._ramping_helper('cooling_persistent_switch', 'paused')
             print_if('Ramping to zero ...')
             self.set_state('zero')
-            # This ramp is fast, no extra wait.
-            self._ramping_helper('zeroing', 'at_zero')
+            # This ramp is fast, no extra wait necessary, but user might want the delay.
+            self._ramping_helper('zeroing', 'at_zero', extra_wait)
         else: # go out of persistence
             if not orig_switch_en:
                 orig_target = self.current_target.get()
@@ -375,29 +375,31 @@ class AmericanMagnetics_model430(visaInstrument):
                 self._orig_target_cache = None
                 print_if('Turning persistent switch on and waiting for heating...')
                 self.persistent_switch_en.set(True)
-                self._ramping_helper('heating_persistent_switch', 'paused')
+                self._ramping_helper('heating_persistent_switch', 'paused', extra_wait)
         return orig_switch_en
 
-    def _do_ramp(self, current_target):
+    def _do_ramp(self, current_target, wait):
         if current_target == 0:
             self.set_state('zero')
         else:
             self.set_state('pause')
             self.current_target.set(current_target)
             self.set_state('ramp')
-        self._ramping_helper(['zeroing', 'ramping'], ['at_zero', 'holding'], self.ramp_wait_after.getcache())
+        self._ramping_helper(['zeroing', 'ramping'], ['at_zero', 'holding'], wait)
 
-    def _ramp_current_checkdev(self, val, return_persistent='auto', quiet=True):
+    def _ramp_current_checkdev(self, val, return_persistent='auto', wait=None, quiet=True):
         if return_persistent not in [True, False, 'auto']:
             raise ValueError(self.perror("Invalid return_persistent option. Should be True, False or 'auto'"))
         BaseDevice._checkdev(self.ramp_current, val)
 
-    def _ramp_current_setdev(self, val, return_persistent='auto', quiet=True):
+    def _ramp_current_setdev(self, val, return_persistent='auto', wait=None, quiet=True):
         """ Goes to the requested setpoint and then waits until it is reached.
             After the instrument says we have reached the setpoint, we wait for the
             duration set by ramp_wait_after (in s).
             return_persistent can be True (always), False (never) or 'auto' (the default)
                               which returns to state from start of ramp.
+            wait can be used to set a wait time (in s) after the ramp. It overrides ramp_wait_after.
+            When going to persistence it waits persistent_wait_before before cooling the switch.
 
             When using get, returns the magnet current.
         """
@@ -405,23 +407,28 @@ class AmericanMagnetics_model430(visaInstrument):
             if not quiet:
                 print s
         ps_installed = self.persistent_switch_installed.getcache()
+        if wait is None:
+            wait = self.ramp_wait_after.getcache()
         if ps_installed:
             # Go out of persistent (turn persistent switch on)
             prev_switch_en = self.do_persistent(to_pers=False, quiet=quiet)
             # Now change the field
             print_if('Ramping...')
-            self._do_ramp(val)
             if return_persistent == True or (return_persistent == 'auto' and not prev_switch_en):
-                self.do_persistent(to_pers=True, quiet=quiet)
-        else: # not persistent switch installed
+                self._do_ramp(val, self.persistent_wait_before.getcache())
+                self.do_persistent(to_pers=True, quiet=quiet, extra_wait=wait)
+            else:
+                self._do_ramp(val, wait)
+        else: # no persistent switch installed
             print_if('Ramping...')
-            self._do_ramp(val)
+            self._do_ramp(val, wait)
 
     def _ramp_current_getdev(self):
         return self.current_magnet.get()
 
     def _create_devs(self):
         self.ramp_wait_after = MemoryDevice(10., min=0.)
+        self.persistent_wait_before = MemoryDevice(30., min=30., doc='This time is used to wait after a ramp but before turning persistent off')
         self.setpoint = scpiDevice('conf:current:target', 'current:target?', str_type=float)
         self.volt = scpiDevice(getstr='voltage:supply?', str_type=float)
         self.volt_magnet = scpiDevice(getstr='voltage:magnet?', str_type=float, doc='This is the voltage on the magnet if the proper connection are present.')
