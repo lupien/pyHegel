@@ -2701,7 +2701,7 @@ def make_choice_list(list_values, start_exponent, end_exponent):
 
 
 class ChoiceMultiple(ChoiceBase):
-    def __init__(self, field_names, fmts=int, sep=',', ending_sep=False, ending_sep_get=None, allow_missing_keys=False):
+    def __init__(self, field_names, fmts=int, sep=',', ending_sep=False, ending_sep_get=None, allow_missing_keys=False, reading_sep=None):
         """
         This handles scpi commands that return a list of options like
          1,2,On,1.34
@@ -2720,6 +2720,7 @@ class ChoiceMultiple(ChoiceBase):
         at the end of the string
         ending_sep_get, when not None it overrides ending_sep for reading.
         allow_missing_keys when True, will not produce error for missing field_names when checking
+        readding_sep when not None is used instead of sep when obtaining data from instrument.
         """
         self.field_names = field_names
         if not isinstance(fmts, (list, np.ndarray)):
@@ -2741,14 +2742,16 @@ class ChoiceMultiple(ChoiceBase):
         self.ending_sep_get = ending_sep
         if ending_sep_get is not None:
             self.ending_sep_get = ending_sep_get
+        self.reading_sep = sep if reading_sep is None else reading_sep
         self.allow_missing_keys = allow_missing_keys
     def __call__(self, fromstr):
+        sep = self.reading_sep
         if self.ending_sep_get:
-            if fromstr.endswith(self.sep):
-                fromstr = fromstr[:-len(self.sep)]
+            if fromstr.endswith(sep):
+                fromstr = fromstr[:-len(sep)]
             else:
                 raise ValueError('Expected ending sep in class %s'%self.__class__.__name__)
-        v_base = fromstr.split(self.sep)
+        v_base = fromstr.split(sep)
         if len(v_base) != len(self.field_names):
             raise ValueError('Invalid number of parameters in class %s'%self.__class__.__name__)
         v_conv = []
