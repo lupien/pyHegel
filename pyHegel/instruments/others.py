@@ -2838,7 +2838,7 @@ class ah_2550a_capacitance_bridge(visaInstrumentAsync):
             return dict(zip(['interval', 'stop_count', 'count'], data))
 
     def _fetch_getdev(self):
-        """ error contains cap overrange if 1000 and loss overange if 2000.
+        """ error contains cap uncertainty flag (>) if 1000 and loss uncertainty flag (>) if 2000.
             errors codes <100 are listed in Appendix B of manual (careful some numbers are off by 1).
         """
         if self._async_trig_current_data is not None:
