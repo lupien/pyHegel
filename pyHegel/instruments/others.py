@@ -35,7 +35,7 @@ from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsy
                             make_choice_list, _fromstr_helper,\
                             decode_float64, visa_wrap, locked_calling,\
                             Lock_Extra, Lock_Instruments, _sleep_signal_context_manager, wait,\
-                            release_lock_context, mainStatusLine
+                            release_lock_context, mainStatusLine, quoted_string, Choice_bool_OnOff
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -2669,6 +2669,270 @@ class micro_lambda_mlbf(BaseInstrument):
 #     resp.status, resp.reason, resp.read()
 #   - can replace /diag.htm  by /commands.htm
 #   - should also be able to use /index.htm but that does not seem to work
+
+#######################################################
+##    Andeen Hagerling AH 2550A  Ultra-Precision 1 kHz capacitance bridge
+#######################################################
+
+#@register_instrument('ANDEEN-HAGERLING', 'AH2550A', 'AH2X0217')
+@register_instrument('ANDEEN-HAGERLING', 'AH2550A')
+class ah_2550a_capacitance_bridge(visaInstrumentAsync):
+    """
+    This is the driver for the Andeen Hagerling AH 2550A  Ultra-Precision 1 kHz capacitance bridge.
+    The protect the life of the instrument relays, do not measure continously (or for long periods
+    of time) with the averaging at 7 or above.
+       Useful device:
+           readval
+           fetch
+           average
+           bias
+    """
+    def __init__(self, *args, **kwargs):
+        self._async_trig_current_data = None
+        super(ah_2550a_capacitance_bridge, self).__init__(*args, **kwargs)
+
+    def idn_split(self):
+        idn = self.idn()
+        no_labels = False
+        if idn.startswith('\n'):
+            no_labels = True
+        #'MANUFACTURER    ANDEEN-HAGERLING\nMODEL/OPTIONS   AH2550A  --------\nSERIAL NUMBER   00100319\nACTIVE FIRMWARE AH2X0217'
+        pp = idn.split('\n')
+        def check_skip(s, start_str):
+            if not no_labels:
+                if not s.startswith(start_str):
+                    raise RuntimeError('Unexepected idn string format')
+                s = s[len(start_str):].lstrip()
+            return s
+        vm = check_skip(pp[0], 'MANUFACTURER')
+        if vm == '':
+            # without labels the current firmware (AH2X0217) returns an empty manufacturer
+            vm = 'ANDEEN-HAGERLING'
+        model_option = check_skip(pp[1], 'MODEL/OPTIONS')
+        if ',' in model_option:
+            # using ieee:
+            mo = model_option.split(',')
+        else:
+            mo = model_option.split(' ')
+        model = mo[0].rstrip()
+        option = mo[-1]
+        sn = check_skip(pp[2], 'SERIAL NUMBER')
+        fm = check_skip(pp[3], 'ACTIVE FIRMWARE')
+        return dict(vendor=vm, model=model, option=option, serial=sn, firmware=fm)
+
+    def _get_esr(self):
+        # does not have esr register
+        return 0
+
+    def _async_trigger_helper(self):
+        self._async_trig_current_data = None
+        self.write('*sre 16;SIngle')
+
+    def _async_detect(self, max_time=.5): # 0.5 s max by default
+        ret = super(ah_2550a_capacitance_bridge, self)._async_detect(max_time)
+        if not ret:
+            # This cycle is not finished
+            return ret
+        # we got a trigger telling data is available. so read it, before we turn off triggering in cleanup
+        data = self.read()
+        self._async_trig_current_data = data
+        return ret
+
+    def _async_cleanup_after(self):
+        self._async_trig_current_data = None
+        self.write('*sre 0') # disable trigger on data ready to prevent unread status byte from showing up
+        super(ah_2550a_capacitance_bridge, self)._async_cleanup_after()
+
+
+    def get_error(self, no_reset=False):
+        """ when no_reset is True, the error state is read but not reset """
+        if no_reset:
+            flags = self.read_status_byte()
+        else:
+            # This will also reset the flags
+            flags = int(self.ask('*STB?'))
+        errors = []
+        if flags & 0x01:
+            errors.append('Oven temperature invalid')
+        if flags & 0x02:
+            errors.append('Command error')
+        if flags & 0x04:
+            errors.append('User request')
+        if flags & 0x08:
+            errors.append('Powered on')
+        # flags & 0x10 is ready for command
+        if flags & 0x20:
+            errors.append('Execution Erro')
+        # flags & 0x40 is Master summary
+        # flags & 0x80 is message available
+        if len(errors):
+            return ', '.join(errors)
+        else:
+            return 'No errors.'
+
+    def clear(self):
+        #some device buffer status byte so clear them
+        while self.read_status_byte()&0x40:
+            pass
+
+    def init(self, full=False):
+        self.write('*sre 0') # disable trigger (we enable it only when needed)
+        self.clear()
+        if full:
+            # These are normally reset during power on.
+            #  float (could be sci or eng), labels off, ieee on (commas), variable spacing (as opposed to fix)
+            self.write('FORMAT float,OFF,ON,VARIABLE')
+            # fields: sample off, frequency off, Cap 9 digits, loss 9 digits, voltage on, message(error) off means a number
+            #  The error shows first
+            self.write('FIELD OFF,OFF,9,9,ON,OFF')
+            # With this configuration, an invalid question returns '32' or '36'
+            #  when error are off the corresponding messages are: ILLEGAL WORD, and SYNTAX ERROR
+            #  Table B3 says ILLEGAL WORD is 31, SYNTAX ERROR is 35
+
+    def conf_datetime(self, set_to_now=False, passcode='INVALID'):
+        """ The correct passcode(owner or calibrator) is necessary to change the date/time """
+        if set_to_now:
+            tm = time.localtime()
+            cmd = 'STOre DAte %i,%i,%i;%s; STOre TIme %i,%i,%i;%s'%(tm.tm_year, tm.tm_mon, tm.tm_mday, passcode,
+                                                                    tm.tm_hour, tm.tm_min, tm.tm_sec, passcode)
+            print cmd
+            self.write(cmd)
+        d = self.ask('SHow DAte')
+        t = self.ask('SHow TIme')
+        d = map(int, d.split(','))
+        t = map(int, t.split(','))
+        runtime_hours = int(self.ask('SHow STAtus'))
+        return dict(date='%04i-%02i-%02i %02i:%02i:%02i'%tuple(d+t), runtime_hours=runtime_hours)
+
+    def conf_firmwares(self):
+        firmwares = self.ask('SHow FIRMware')
+        return dict(zip(['bank_rom', 'bank_flash1', 'bank_flash2'], firmwares.split('\n')))
+
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('average', 'units', 'voltage_max', 'frequency', 'commutate', 'bias', 'cable', options)
+
+    _data_format = ChoiceMultiple(['error', 'cap_lbl', 'cap', 'loss_lbl', 'loss', 'volt'], [int, quoted_string(), float, quoted_string(), float, float])
+    @locked_calling
+    def _read_data(self, force_req=True):
+        """ using force_req will send a fetch request (it will show BUSY on the display)
+            When in continuous you can use force_req=False to read the latest value (then wait for the next one.)
+            It can also be 'async' to read available async data.
+        """
+        data = None
+        if force_req == 'async':
+            data = self._async_trig_current_data
+            self._async_trig_current_data = None
+        elif force_req:
+            self.write('fetch')
+        if data is None:
+            data = self.read()
+        return self._data_format(data)
+
+    def continous(self, state=None):
+        """ state can be True/False. If none it returns the current state """
+        if state is not None:
+            self.write('COntinuous %s'%Choice_bool_OnOff.tostr(state))
+        else:
+            data = self.ask('SHow COntinuous').split('\n')
+            data = map(lambda x: x[0](x[1]), zip([float, int, int], data))
+            return dict(zip(['interval', 'stop_count', 'count'], data))
+
+    def _fetch_getdev(self):
+        """ error contains cap overrange if 1000 and loss overange if 2000.
+            errors codes <100 are listed in Appendix B of manual (careful some numbers are off by 1).
+        """
+        if self._async_trig_current_data is not None:
+            data  = self._read_data('async')
+        else:
+            data  = self._read_data(True)
+        error = data.error
+        if data.cap_lbl != ' ':
+            if data.cap_lbl != '>':
+                raise RuntimeError(self.perror('Unexpected cap label received'))
+            error += 1000
+        if data.loss_lbl != ' ':
+            if data.loss_lbl != '>':
+                raise RuntimeError(self.perror('Unexpected loss label received'))
+            error += 2000
+        return data.cap, data.loss, data.volt, error
+
+    def _create_devs(self):
+        # TODO: commands to program:
+        #   calibrate? / store calibarate
+        #   continuous interval, reset, total
+        #   dev mode
+        #   dev auto
+        #   dev average
+        #   dev bound
+        #   dev fetch
+        #   dev format
+        #   dev margin
+        #   dev point
+        #   dev position
+        #   dev rolloff
+        #   dev span
+        #   dev stream
+        #   gpib  (to read this use: show gpib list)
+        #     logger (to turn it off)
+        #   reference
+        #   reference percent
+        #   reference point
+        #     scan to disable it.
+        #   serial (to read this use: show serial list)
+        #   test?
+        #   zero
+        #   zero point
+        #
+        cold_k = np.array([.28,.29,.30,.33,.37,.44,.58,.82,1.2,1.8,3,5,9,17,34,68])
+        cold_f = np.array([80,110,150,200,260,350,520,820,1300,2200,3900,7000,14000,27000,57000,120000])
+        warm_k = np.array([.027, .033,.042,.058,.085,.12,.18])
+        warm_f = np.array([11,23,42,75,130,230,400])
+        cold_time = cold_k+cold_f/1e3 # at 1 kHz
+        warm_time = warm_k+warm_f/1e3 # at 1 kHz
+        time_doc = '%6s  %10s %10s\n'%('','cold', 'warm')
+        for i in range(len(cold_time)):
+            if i < len(warm_time):
+                time_doc += '%6i: %10.3f %10.3f\n'%(i, cold_time[i], warm_time[i])
+            else:
+                time_doc += '%6i: %10.3f %10s\n'%(i, cold_time[i], 'n/a')
+        # Note that for loss range the table is not clear if that f is in Hz or kHz but
+        # comparing with table 4-3 it seems to be kHz for loss formula hence 12 uS.
+        self.average = scpiDevice('AVerage', 'SHow AVerage', str_type=int, min=0, max=15,
+                                  doc=u"""
+The averaging time is seen in table 4-1 and A-1 of the manual.
+Note cold start measurement are longer because they readjust all the relays.
+Warm start only adjust the stages that don't use relays.
+For cold start by using average >= 7 (but don't use continous because relays will age too quickly.)
+There is a frequency dependence but for 1 kHz it is and C<0.165 µF (G<12 µS):
+%s
+                                  """%time_doc)
+        self.bias = scpiDevice('BIas', 'SHow BIas', choices=ChoiceStrings('OFF', 'ILow', 'IHigh'),
+                               doc=u'ihigh is 1 MΩ, ilow is 100 MΩ')
+        self.units = scpiDevice('UNits', 'SHow UNits',
+                                    choices=ChoiceStrings('NS', 'DS', 'KO', 'GO', 'JP'),
+                                    doc=u"""
+                                    Choices mean:
+                                        NS: Nanosiemens (nS)
+                                        DS: Dissipation factor or tanδ (dimensionless)
+                                        KO: Series resistance in kilohms (kΩ)
+                                        GO: Parallel resistance in gigohms (GΩ)
+                                        JP: G/ω  (jpF)
+                                    Note that series option (KO) means series capacitance is measured.
+                                    Otherwise it is the parallel capacitance that is measured.
+                                        """)
+        self.voltage_max = scpiDevice('Voltage', 'SH Voltage', str_type=float, min=0.3e-3, max=15, setget=True,
+                                      doc="""For optimal use select one of the following voltages: 15, 7.5, 3, 1.5, 0.75, 0.25, 0.1, 0.03, 0.01, 0.003, 0.001""")
+        #self.frequency =  scpiDevice('FRequency', 'SHow FRequency', str_type=float, setget=True)
+        self.frequency =  scpiDevice(getstr='SHow FRequency', str_type=float)
+        self.commutate = scpiDevice('COMmutate', 'SHow COMmutate', choices=ChoiceStrings('OFF', 'LINERej', 'ASync'))
+        self.cable = scpiDevice('CABle', 'SHow CABle',
+                                choices=ChoiceMultiple(['length', 'R', 'L', 'C'], [(float, (0, 999.99)), (float, (0, 9999)), (float, (0, 99.99)), (float, (0, 999.9))], reading_sep='\n'),
+                                doc=u"""Units are: length (m), R(mΩ/m), L(µH/m), C(pF/m)""")
+        self._devwrap('fetch', autoinit=False, trig=True, multi=['cap', 'loss', 'volt', 'error'], graph=[0,1])
+        self.readval = ReadvalDev(self.fetch)
+        self.alias = self.readval
+        # This needs to be last to complete creation
+        super(ah_2550a_capacitance_bridge, self)._create_devs()
 
 
 #######################################################
