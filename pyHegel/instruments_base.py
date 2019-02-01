@@ -1270,6 +1270,7 @@ class BaseInstrument(object):
         # on the progress.
         self._async_statusLine = mainStatusLine.new(timed=True)
         self._last_force = time.time()
+        self._conf_helper_cache = None # this is filled by conf_helper (should be under a locked state to prevent troubles)
         self.init(full=True)
     def __del__(self):
         if not self._quiet_delete:
@@ -1536,6 +1537,7 @@ class BaseInstrument(object):
         if not no_default:
             add_to(ret, 'class_name="%s"'%self.__class__.__name__)
             add_to(ret, 'idn="%s"'%self.idn())
+        self._conf_helper_cache = no_default, add_to
         return ret
     def read(self):
         raise NotImplementedError, self.perror('This instrument class does not implement read')
@@ -3369,6 +3371,14 @@ class visaInstrument(BaseInstrument):
             See also dev._get_dev_min_max
         """
         return _get_dev_min_max(self, ask_str, str_type, ask)
+
+    # To properly use self._conf_helper_cache, the caller (probably _current_config) should be locked.
+    def _conf_helper(self, *devnames, **kwarg):
+        ret = super(visaInstrument, self)._conf_helper(*devnames, **kwarg)
+        no_default, add_to = self._conf_helper_cache
+        if not no_default:
+            add_to(ret, 'visa_addr="%s"'%self.visa_addr)
+        return ret
 
 
 #######################################################
