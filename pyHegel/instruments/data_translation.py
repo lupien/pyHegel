@@ -332,6 +332,7 @@ class DataTranslation(BaseInstrument):
         self._analog_in.BufferQueue.QueueBuffer(self._inbuffer)
         self._analog_in.Start()
 
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         self._update_all_channels_info()
         extra = ['AssemblyVersion=%r'%_assembly_Version, 'boxname=%r'%self._name,

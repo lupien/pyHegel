@@ -94,6 +94,7 @@ class yokogawa_gs200(visaInstrument):
     def init(self, full=False):
         # clear event register, extended event register and error queue
         self.clear()
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('function', 'range', 'level', 'output_en', options)
     def _create_devs(self):
@@ -170,6 +171,7 @@ class sr830_lia(visaInstrument):
         choices=ChoiceIndex(['x', 'y', 'r'], offset=1)
         ch_i = choices.tostr(ch)
         self.write('aoff '+ch_i)
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         #base = ['async_delay=%r'%self.async_delay]
         return self._conf_helper('async_delay','async_wait', 'freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
@@ -306,6 +308,7 @@ class sr384_rf(visaInstrument):
     def init(self, full=False):
         # This clears the error state
         self.clear()
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('freq', 'en_lf', 'amp_lf_dbm', 'offset_low',
                                  'en_rf', 'amp_rf_dbm', 'en_hf', 'amp_hf_dbm',
@@ -538,6 +541,7 @@ class sr780_analyzer(visaInstrumentAsync):
         if xaxis:
             ret = ret = np.asarray([self.get_xscale(), ret])
         return ret
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         if options.has_key('disp'):
             self.current_display.set(options['disp'])
@@ -855,6 +859,7 @@ class lakeshore_325(visaInstrument):
             else:
                 raise ValueError("Invalid selection for ch. If it is None, check that enabled_list is a list with 'A' and/or 'B'")
         return ret
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('sp', options)
     def _create_devs(self):
@@ -899,6 +904,7 @@ class lakeshore_340(visaInstrument):
        status_ch returns the status of ch
        fetch allows to read all channels
     """
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         if dev_obj == self.fetch:
             old_ch = self.current_ch.getcache()
@@ -1051,6 +1057,7 @@ class lakeshore_224(lakeshore_340):
                 self._write_write_wait = 0.100
             else: # GPIB, LAN: This is unchecked but should be ok. Shorter time might be better...
                 self._write_write_wait = 0.050
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         if dev_obj == self.fetch:
             old_ch = self.current_ch.getcache()
@@ -1242,6 +1249,7 @@ class lakeshore_370(visaInstrument):
         if ret == '':
             ret = 'No Error.'
         return ret
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         if dev_obj == self.fetch:
             old_ch = self.current_ch.getcache()
@@ -1546,6 +1554,7 @@ class colby_pdl_100a(visaInstrument):
         if full:
             self.set_timeout = 3
             #self.visa.term_chars='\n'
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         #return self._conf_helper('delay_ps', 'mode', 'rate', 'accel', options)
         return self._conf_helper('delay_ps', 'mode', options)
@@ -1612,6 +1621,7 @@ class BNC_rf_845(visaInstrument):
     According to specs, it takes less than 0.1 ms for settling after
     a frequency change.
     """
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         # TODO Get the proper config
         return self._conf_helper('oscillator_source', 'oscillator_ext_freq_MHz', 'oscillator_locked',
@@ -1745,6 +1755,7 @@ class MagnetController_SMC(visaInstrument):
         self.ramp_T.max = maxT
     def idn(self):
         return 'Scientific Magnetics,SMC120-10,000000,5.67'
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('field', 'current_status', 'setpoints', 'status', 'operating_parameters', 'ramp_wait_after', options)
     def _field_internal(self):
@@ -2435,6 +2446,7 @@ class delft_BIAS_DAC(visaInstrument):
             self._set_ch_command(val, i+1)
     def _level_all_getdev(self):
         return np.array([self._get_ch_command(ch) for ch in range(1,17)])
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         modes = self.get_config(do_return=True)
         values = [self._get_ch_command(ch, do_exc=False) for ch in range(1,17)]
@@ -2496,6 +2508,7 @@ class micro_lambda_mlbf(BaseInstrument):
         conf = self.conf_general()
         return 'micro_lambda_wireless,%s,%s,%s'%(conf['model'], conf['serial'], conf['firmware_date'])
 
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = self._conf_helper('freq', 'temperature', 'temperature_highest')
         opts += ['conf_general=%s'%self.conf_general()]
@@ -2808,6 +2821,7 @@ class ah_2550a_capacitance_bridge(visaInstrumentAsync):
         firmwares = self.ask('SHow FIRMware')
         return dict(zip(['bank_rom', 'bank_flash1', 'bank_flash2'], firmwares.split('\n')))
 
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('average', 'units', 'voltage_max', 'frequency', 'commutate', 'bias', 'cable', options)
 
@@ -2953,6 +2967,7 @@ class dummy(BaseInstrument):
         self.wait = .1
     def idn(self):
         return 'pyHegel_Instrument,dummy,00000,1.0'
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('volt', 'current', 'other', options)
     def _incr_getdev(self):
@@ -2992,6 +3007,7 @@ class loop(BaseInstrument):
     """
     def idn(self):
         return 'pyHegel_Instrument,dummy,00000,1.0'
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('loop1', 'loop2',  'loop3', 'loop4', 'loop5', options)
     def _create_devs(self):

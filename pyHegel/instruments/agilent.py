@@ -53,6 +53,7 @@ class agilent_rf_33522A(visaInstrument):
     New code should use the unumbered devices (numbered device are there for compatibility.)
     The devices
     """
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = ['opt=%s'%self.available_options]
         opts += self._conf_helper('ref_oscillator_current_state', 'coupled_ampl_en', 'coupled_freq_en')
@@ -207,6 +208,7 @@ class agilent_PowerMeter(visaInstrumentAsync):
             return int(self.ask('*STB?'))
         else:
             return super(agilent_PowerMeter, self).read_status_byte()
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('range', 'range_auto_en', 'unit',
                                  'gain_en', 'hold_mode', 'relative_en', 'average_en',
@@ -290,6 +292,7 @@ class agilent_rf_PSG(visaInstrument):
     Available methods:
         phase_sync
     """
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         # TODO Get the proper config
         return self._conf_helper('oscillator_source', 'rf_en', 'ampl', 'ampl_unit', 'amp_flatness_corr_en',
@@ -387,6 +390,7 @@ class agilent_rf_MXG(agilent_rf_PSG):
     Available methods:
         phase_sync
     """
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         # TODO Get the proper config
         return self._conf_helper('oscillator_source', 'rf_en', 'ampl', 'ampl_unit', 'amp_flatness_corr_en',
@@ -448,6 +452,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
     """
     def math_clear(self):
         self.write('CALCulate:AVERage:CLEar')
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         mode = self.mode.getcache()
         choices = self.mode.choices
@@ -694,6 +699,7 @@ class agilent_rf_Attenuator(visaInstrument):
     Note that the attenuation for 0dB is not included for the
     other calibration levels.
     """
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('att_level_dB', 'cal_att_level_dB', 'current_freq_Hz',
                                  'relative_en', 'relative_ref_dB', options)
@@ -750,6 +756,7 @@ class infiniiVision_3000(visaInstrumentAsync):
         self.digitize()
         self.write('*OPC')
         #self.write(':DIGitize;*OPC')
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         # TODO:  improve this
         return self._conf_helper('source', 'points_mode', 'preamble', options)
@@ -963,6 +970,7 @@ class agilent_EXA(visaInstrumentAsync):
         else:
             ret = [n+'=['+v+']' for n, v in zip(trace_conf, ret)]
         return ret
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         # Assume SA instrument mode, SAN measurement (config)
         if options.has_key('trace'):
@@ -1716,6 +1724,7 @@ class agilent_PNAL(visaInstrumentAsync):
     def get_xscale(self):
         return self.x_axis.get()
 
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         # These all refer to the current channel
         # calib_en depends on trace
@@ -2062,6 +2071,7 @@ class agilent_ENA(agilent_PNAL):
         self.initiate()
         self.write(':TRIGger:SINGle;*OPC')
         #self.trig_source.set('INTernal')
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         # These all refer to the current channel
         # calib_en depends on trace
@@ -2312,6 +2322,7 @@ class agilent_FieldFox(agilent_PNAL):
         super(agilent_PNAL, self)._async_trig()
     #def _async_detect(self, max_time=.5): # 0.5 s max by default
     #    return super(agilent_PNAL, self)._async_detect(max_time)
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         # These all refer to the current channel
         # calib_en depends on trace
@@ -2583,6 +2594,7 @@ class agilent_AWG(visaInstrumentAsync):
     def _async_trigger_helper(self):
         self.write(self._async_trigger_helper_string)
         #self._async_trigger_helper_string = '*OPC'
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         orig_ch = self.current_channel.getcache()
         ch_list = ['current_channel', 'freq_source', 'cont_trigger', 'gate_mode_en', 'output_en',
@@ -2764,6 +2776,7 @@ class agilent_power_supply_E363x(visaInstrument):
     Changing the output level can take a while depending on connected load impedance.
     Output off means the volt level becomes 0, the current level is 0.05. It is not a relay.
     """
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         orig_ch = self.current_ch.getcache()
         ch_list = ['current_ch', 'volt_level', 'current_level', 'volt_measured', 'current_measured', 'status']

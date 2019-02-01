@@ -35,7 +35,8 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             scpiDevice, MemoryDevice, ReadvalDev, BaseDevice,\
                             ChoiceMultiple, Choice_bool_OnOff, Choice_bool_YesNo, _repr_or_string,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDev, ChoiceDevSwitch, ChoiceIndex,\
-                            ChoiceLimits, quoted_string, _fromstr_helper, ProxyMethod, decode_float64
+                            ChoiceLimits, quoted_string, _fromstr_helper, ProxyMethod, decode_float64,\
+                            locked_calling
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 register_usb_name('Rigol Technologies', 0x1AB1)
@@ -53,6 +54,7 @@ class rigol_power_dp831a(visaInstrument):
     Useful devices:
       voltage, current, output_en
     """
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         chs = self.channel_en_list()
         opts = ['enabled_channels=%r'%chs ]

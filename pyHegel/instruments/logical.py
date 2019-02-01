@@ -361,6 +361,7 @@ class ScalingDevice(LogicalDevice):
             self._format['graph'] = [0]
         self._setdev_p = True
         self._getdev_p = True
+    @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
         head = ['Scaling:: fact=%r offset=%r basedev=%s'%(self._scale, self._offset, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
@@ -427,6 +428,7 @@ class FunctionDevice(LogicalDevice):
             self._format['graph'] = [0]
         self._setdev_p = True
         self._getdev_p = True
+    @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
         head = ['Func Convert:: basedev=%s'%(self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
@@ -523,6 +525,7 @@ class LimitDevice(LogicalDevice):
             self.min = min
         if max is not None:
             self.max = max
+    @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
         head = ['Limiting:: min=%r max=%r basedev=%s'%(self.min, self.max, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
@@ -569,6 +572,7 @@ class CopyDevice(LogicalDevice):
         super(CopyDevice, self).__init__(basedevs=basedevs, autoget=autoget, doc=doc, **extrak)
         self._setdev_p = True
         self._getdev_p = True
+    @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
         head = ['Copy:: %r'%(self._basedevs)]
         return self._current_config_addbase(head, options=options)
@@ -642,6 +646,7 @@ class ExecuteDevice(LogicalDevice):
         self._format['file'] = True
         self._format['bin'] = basefmt['bin']
         return super(type(self), self).getformat(**kwarg)
+    @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
         head = ['Execute:: command="%s" basedev=%s'%(self._command, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
@@ -695,6 +700,7 @@ class RThetaDevice(LogicalDevice):
         self._format['multi'] = ['R', 'ThetaDeg', 'raw_x', 'raw_y']
         self._format['graph'] = [0,1]
         self._getdev_p = True
+    @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
         head = ['R_Theta_Device:: %r, xoffset=%g, yoffset=%g'%(self._basedevs, self._xoffset, self._yoffset)]
         return self._current_config_addbase(head, options=options)
@@ -744,6 +750,7 @@ class PickSome(LogicalDevice):
         self._pick_cache_on_set = pick_cache_on_set
         self._getdev_p = True
         self._setdev_p = self._basedev._setdev_p
+    @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
         head = ['PickSome:: %r, selector=%r'%(self._basedev, self._selector)]
         return self._current_config_addbase(head, options=options)
@@ -813,6 +820,7 @@ class Average(LogicalDevice):
         multi += ['N']
         fmt.update(multi=multi, graph=base_graph)
         return super(Average, self).getformat(**kwarg)
+    @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
         head = ['Average:: %r, filter_time=%r, repeat_time=%r'%(self._basedev, self._filter_time, self._repeat_time)]
         return self._current_config_addbase(head, options=options)
@@ -911,6 +919,7 @@ class RampDevice(LogicalDevice):
     def interval(self, interval):
         self._interval = np.abs(interval)
         self._mode_is_rate = False
+    @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
         if self._mode_is_rate:
             head1 = 'rate=%r'%self._rate
@@ -1025,6 +1034,7 @@ class FunctionWrap(LogicalDevice):
         self._use_ret = use_ret_as_cache
         self._getformatfunc = getformatfunc
         self._basedev_as_param = basedev_as_param
+    @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
         head = ['FunctionWrap:: set=%r, get=%r, check=%r, getformat=%r, user_ret_as_cache=%r'%(
                 self._setdev_p, self._getdev_p, self._checkfunc, self._getformatfunc, self._use_ret)]

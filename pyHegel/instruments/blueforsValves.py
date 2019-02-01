@@ -135,6 +135,7 @@ class bf_valves(BaseInstrument):
         self._keep_alive = keep_alive(keep_interval, s, self._lock_instrument)
         self._keep_alive.start()
 
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('idn', 'all_gages', 'all_status', options)
     @locked_calling

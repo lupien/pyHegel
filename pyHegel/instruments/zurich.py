@@ -394,6 +394,8 @@ class zurich_UHF(BaseInstrument):
             return (1./(2*np.pi*tc)) * np.sqrt(np.pi)*gamma(order-0.5)/(2*gamma(order))
         else:
             return np.sqrt(2.**(1./order) -1) / (2*np.pi*tc)
+
+    @locked_calling
     def _current_config_demod_helper(self, chs):
         # chs needs to be a list
         just_one = False

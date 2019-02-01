@@ -162,6 +162,8 @@ class keithley_2450_smu(visaInstrumentAsync):
         t = time.gmtime()
         opts = dict(year=t.tm_year, month=t.tm_mon, day=t.tm_mday, hour=t.tm_hour, min=t.tm_min, sec=t.tm_sec)
         self.write('SYSTEM:TIME {year}, {month}, {day}, {hour}, {min}, {sec}'.format(**opts))
+
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         src_conf = self._conf_helper('src_mode', 'src_level', 'src_range', 'src_range_auto_en', 'src_protection_level', 'src_protection_tripped',
                                       'src_limit', 'src_limit_tripped',

@@ -557,6 +557,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self.write('Comm_ForMaT DEF9,WORD,BIN') #DEF9=IEEE 488.2 block data, WORD (default is BYTE)
         self.write('Comm_HeaDeR OFF') #can be OFF, SHORT, LONG. OFF removes command echo and units
         super(lecroy_wavemaster, self).init(full=full)
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         ch_info = []
         orig_ch = self.current_channel.getcache()

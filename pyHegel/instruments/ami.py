@@ -139,6 +139,7 @@ class AmericanMagnetics_model430(visaInstrument):
             if self.read() != 'Hello.':
                 raise RuntimeError('Did not receive second expected message from instrument')
 
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = self._conf_helper('state', 'current', 'current_magnet')
         opts += self._conf_helper('field_T', 'field_kG')

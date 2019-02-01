@@ -89,6 +89,7 @@ class rs_sgma(visaInstrument):
     def _internal_othergen(self, freq, power):
         print "Other gen should be at %r Hz, %r dBm"%(freq, power)
 
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = ['opt=%s'%self.available_options]
         if self._is_SGS:
@@ -372,6 +373,7 @@ class rs_rto_scope(visaInstrumentAsync):
             bitp = bitp_usr[bitp_instr.index(bitp)]
             return form, bitp
 
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = ['opt=%s'%self.available_options]
         opts += self._conf_helper('timebase_ful_range', 'timebase_pos_offset', 'timebase_reference_pos_percent')
@@ -1275,6 +1277,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         self.trace_meas_list_in_ch.get()
         self.select_trace.get()
 
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = ['opt=%s'%self.available_options]
         ch = options.get('ch', None)

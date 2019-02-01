@@ -241,6 +241,7 @@ class agilent_SMU(visaInstrumentAsync):
         errm = ['%i: %s'%(e, self.ask('EMG? %i'%e)) for e in errn]
         return ', '.join(errm)
 
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = []
         conf_gen = self.conf_general()

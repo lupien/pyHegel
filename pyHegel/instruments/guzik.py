@@ -223,6 +223,7 @@ class guzik_adp7104(BaseInstrument):
         self._gsa_data = None
         self._gsa_data_arg = None
 
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = ['config=%s'%self.config()]
         opts += self._conf_helper(options)
