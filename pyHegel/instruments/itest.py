@@ -29,7 +29,8 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseInstrume
                             ChoiceStrings, ChoiceIndex, ChoiceLimits, _general_check,\
                             make_choice_list, _tostr_helper, _fromstr_helper, ProxyMethod,\
                             decode_float64, quoted_string, scaled_float, visa_wrap, locked_calling,\
-                            sleep
+                            wait, release_lock_context, mainStatusLine
+
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 import time
@@ -242,6 +243,14 @@ class iTest_be2102(visaInstrument):
             rg_min, rg_max = -max_volt, max_volt
         dev_obj._general_check(val, min=rg_min, max=rg_max)
 
+    def _conf_helper(self, *devnames, **kwarg):
+        ret = super(iTest_be2102, self)._conf_helper(*devnames, **kwarg)
+        no_default, add_to = self._conf_helper_cache
+        if not no_default:
+            add_to(ret, 'slot="%s"'%self._slot)
+        return ret
+
+    @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         base = self._conf_helper('output_en', 'level', 'range', 'range_auto_en', 'slope', 'filter_fast_en',
                                  'remote_sense_en', 'saturation_pos', 'saturation_neg', 'temp_ready_status',
@@ -283,17 +292,20 @@ class iTest_be2102(visaInstrument):
             # ramping_fraction only works with output enabled
             return
         prev_f = -1
-        while True:
-            f = self.ramping_fraction.get()
-            if f == 1 or math.isnan(f):
-                # f is nan when asking for a ramp to the same value as before (i.e.
-                #  being at -1 and going to -1), except for 0.
-                break
-            if f == 0 == prev_f:
-                # f stays at 0 when output is off or asking to go to 0 when already at 0
-                break
-            prev_f = f
-            sleep(.05)
+        with release_lock_context(self):
+            with mainStatusLine.new(priority=10, timed=True) as progress:
+                while True:
+                    f = self.ramping_fraction.get()
+                    if f == 1 or math.isnan(f):
+                        # f is nan when asking for a ramp to the same value as before (i.e.
+                        #  being at -1 and going to -1), except for 0.
+                        break
+                    if f == 0 == prev_f:
+                        # f stays at 0 when output is off or asking to go to 0 when already at 0
+                        break
+                    prev_f = f
+                    wait(.05)
+                    progress('ramp progress: %f.3'%f)
 
     def _ramp_setdev(self, val):
         prev_val = self.level.get()
