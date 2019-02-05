@@ -2805,10 +2805,11 @@ class ah_2550a_capacitance_bridge(visaInstrumentAsync):
     def conf_datetime(self, set_to_now=False, passcode='INVALID'):
         """ The correct passcode(owner or calibrator) is necessary to change the date/time """
         if set_to_now:
+            if passcode == 'INVALID':
+                raise ValueError(self.perror('You need to specify a valid passcode'))
             tm = time.localtime()
-            cmd = 'STOre DAte %i,%i,%i;%s; STOre TIme %i,%i,%i;%s'%(tm.tm_year, tm.tm_mon, tm.tm_mday, passcode,
+            cmd = 'STOre DAte %i,%i,%i\n%s\nSTOre TIme %i,%i,%i\n%s'%(tm.tm_year, tm.tm_mon, tm.tm_mday, passcode,
                                                                     tm.tm_hour, tm.tm_min, tm.tm_sec, passcode)
-            print cmd
             self.write(cmd)
         d = self.ask('SHow DAte')
         t = self.ask('SHow TIme')
@@ -2821,9 +2822,112 @@ class ah_2550a_capacitance_bridge(visaInstrumentAsync):
         firmwares = self.ask('SHow FIRMware')
         return dict(zip(['bank_rom', 'bank_flash1', 'bank_flash2'], firmwares.split('\n')))
 
+    def conf_zero(self, enable=None, cap=None, loss=None, use_last=False):
+        """ This is used to configure zero mode.
+            If none of the entries are specified, it returns the current setting.
+            If you use use_last (uses last reading as 0 value) you cannont use cap or loss.
+            If either cap or loss is specified, the other value is unchanged.
+        """
+        if use_last and (cap is not None or loss is not None):
+            raise ValueError(self.perror('You can only specify cap/loss or use_last'))
+        if enable is not None and not enable:
+            self.write('Zero '+Choice_bool_OnOff.tostr(enable))
+        if use_last:
+            self.write('Zero FEtch')
+        if cap is not None or loss is not None:
+            prev = self.conf_zero()
+            if cap is None:
+                cap = prev.cap
+            if loss is None:
+                loss = prev.loss
+            # Need to always specify both, otherwise it is an error
+            self.write('Zero POINT %r,%r'%(cap, loss))
+        if enable is not None and enable:
+            self.write('Zero '+Choice_bool_OnOff.tostr(enable))
+        res = self.ask('SHow Zero')
+        # returns: 'OFF\n" ",0.00000000," ",0.00000000'
+        en, points_raw = res.split('\n')
+        ret = dict_improved(enabled = Choice_bool_OnOff(en))
+        zero_fmt = ChoiceMultiple(['cap_lbl', 'cap', 'loss_lbl', 'loss'], [quoted_string(), float, quoted_string(), float])
+        ret.update(zero_fmt(points_raw).items())
+        return ret
+
+    def conf_reference(self, enable=None, cap=None, loss=None, percent=None, use_last=False):
+        """ This is used to configure reference mode.
+            If none of the entries are specified, it returns the current setting.
+            enable/use_last/percent can be None, 'cap', 'loss', 'all' (or True), 'none' (or False)
+            If you use use_last (uses last reading as 0 value) you cannont use cap or loss.
+            If either cap or loss is specified, the other value is unchanged.
+        """
+        def cleanup(x):
+            if x is None:
+                return x
+            if x not in [True, False, 'all', 'none', 'cap', 'loss']:
+                raise ValueError(self.perror('Invalid option'))
+            if x is True:
+                x = 'all'
+            elif x is False:
+                x = 'none'
+            return x
+        enable = cleanup(enable)
+        percent = cleanup(percent)
+        use_last = cleanup(use_last)
+        if use_last in ['cap', 'all'] and cap is not None:
+            raise ValueError(self.perror('You can only specify cap or use_last'))
+        if use_last in ['loss', 'all'] and loss is not None:
+            raise ValueError(self.perror('You can only specify cap or use_last'))
+        if enable is not None and enable != 'all':
+            # These all return the measurement in the new configuration
+            # Not reading it sometimes prevents the change to actually happen
+            #  so use ask instead of write
+            if enable == 'none':
+                self.ask('REFerence ALL OFF')
+            elif enable == 'cap':
+                self.ask('REFerence LOSs OFF')
+            elif enable == 'loss':
+                self.ask('REFerence Cap OFF')
+        if use_last != 'none':
+            self.write('REFerence FEtch %s'%use_last)
+        if cap is not None:
+            self.write('REFerence POINT Cap %r'%cap)
+        if loss is not None:
+            self.write('REFerence POINT LOSs %r'%loss)
+        if percent is not None:
+            if percent in ['all', 'cap']:
+                self.write('REFerence PERcent Cap ON')
+            if percent in ['all', 'loss']:
+                self.write('REFerence PERcent LOSs ON')
+            if percent in ['none', 'cap']:
+                self.write('REFerence PERcent LOSs OFF')
+            if percent in ['none', 'loss']:
+                self.write('REFerence PERcent Cap OFF')
+        if enable is not None and enable != 'none':
+            # These all return the measurement in the new configuration
+            # Not reading it sometimes prevents the change to actually happen
+            #  so use ask instead of write
+            if enable == 'all':
+                self.ask('REFerence ALL ON')
+            elif enable == 'cap':
+                self.ask('REFerence Cap ON')
+            elif enable == 'loss':
+                self.ask('REFerence LOSs ON')
+        res = self.ask('SHow REFerence')
+        # returns: 'OFF,OFF\n" ",0.00000000," ",0.00000000\nOFF,OFF'
+        en, points_raw, percent = res.split('\n')
+        ret = dict_improved()
+        ret.update(zip(['cap_en', 'loss_en'], map(Choice_bool_OnOff, en.split(','))))
+        zero_fmt = ChoiceMultiple(['cap_lbl', 'cap', 'loss_lbl', 'loss'], [quoted_string(), float, quoted_string(), float])
+        ret.update(zero_fmt(points_raw).items())
+        ret.update(zip(['cap_percent_en', 'loss_percent_en'], map(Choice_bool_OnOff, percent.split(','))))
+        return ret
+
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('average', 'units', 'voltage_max', 'frequency', 'commutate', 'bias', 'cable', options)
+        opts = self._conf_helper('average', 'units', 'voltage_max', 'frequency', 'commutate', 'bias', 'cable')
+        opts += ['zero=%r'%self.conf_zero()]
+        opts += ['reference=%r'%self.conf_reference()]
+        opts += self._conf_helper(options)
+        return opts
 
     _data_format = ChoiceMultiple(['error', 'cap_lbl', 'cap', 'loss_lbl', 'loss', 'volt'], [int, quoted_string(), float, quoted_string(), float, float])
     @locked_calling
@@ -2888,15 +2992,10 @@ class ah_2550a_capacitance_bridge(visaInstrumentAsync):
         #   dev stream
         #   gpib  (to read this use: show gpib list)
         #     logger (to turn it off)
-        #   reference
-        #   reference percent
-        #   reference point
         #     scan to disable it.
         #   serial (to read this use: show serial list)
         #   test?
-        #   zero
-        #   zero point
-        #
+        # Note that deviation mode does not seem to work with AH2550A (probably only for AH2700)
         cold_k = np.array([.28,.29,.30,.33,.37,.44,.58,.82,1.2,1.8,3,5,9,17,34,68])
         cold_f = np.array([80,110,150,200,260,350,520,820,1300,2200,3900,7000,14000,27000,57000,120000])
         warm_k = np.array([.027, .033,.042,.058,.085,.12,.18])
