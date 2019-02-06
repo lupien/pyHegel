@@ -234,9 +234,10 @@ class MainStatusLine(object):
     def new(self, priority=1, timed=False, dummy=False):
         if dummy:
             return self._dummy
-        handle = self.last_handle + 1
-        self.last_handle = handle
-        self.users[handle] = [priority, '']
+        with self._lock:
+            handle = self.last_handle + 1
+            self.last_handle = handle
+            self.users[handle] = [priority, '']
         return UserStatusLine(self, handle, timed)
         # higher priority shows before lower ones
     def delete(self, handle):
@@ -244,11 +245,15 @@ class MainStatusLine(object):
             if handle in self.users:
                 del self.users[handle]
     def change(self, handle, new_status):
-        self.users[handle][1] = new_status
+        # This locking might not be necessary but lets do it to be sure.
+        with self._lock:
+            self.users[handle][1] = new_status
     def output(self):
         if not self.enable:
             return
-        entries = self.users.values()
+        # This locking might not be necessary but lets do it to be sure.
+        with self._lock:
+            entries = self.users.values()
         entries = sorted(entries, key=lambda x: x[0], reverse=True) # sort on decreasing priority only
         outstr = ' '.join([e[1] for e in entries if e[1] != '']) # join the non-empty status
         outstr = outstr if len(outstr)<=72 else outstr[:69]+'...'
