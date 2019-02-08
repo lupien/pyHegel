@@ -212,6 +212,14 @@ def strResult(func, p, pe, extra={}, signif=2):
 def printResult(func, p, pe, extra={}, signif=2):
     print '\n'.join(strResult(func, p, pe, extra, signif))
 
+def _get_axis_bgcolor(axis):
+    # get_axis_bgcolor cot depracated in matplotlib 2.0 and removed in 2.2
+    # It is replaced by get_facecolor
+    try:
+        return axis.get_axis_bgcolor()
+    except AttributeError:
+        return axis.get_facecolor()
+
 # TODO: handler positioning better (the bbox is not where I ask for)
 def plotResult(func, p, pe, extra={}, signif=2, loc='upper right', ax=None, formats={}):
     """
@@ -226,7 +234,7 @@ def plotResult(func, p, pe, extra={}, signif=2, loc='upper right', ax=None, form
     if ax is None:
         ax = plt.gca()
         update = True
-    bg = ax.get_axis_bgcolor()
+    bg = _get_axis_bgcolor(ax)
     kwarg['bbox'] = dict(boxstyle='round', fill=True, facecolor=bg, alpha=.6)
     codes = {'upper right':  1,
              'upper left':   2,
@@ -607,7 +615,7 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, sel=None, fig=None, skip=False,
             col_fit = ax1._get_lines.color_cycle.next()
     if col_unsel_data is None:
         col = matplotlib.colors.colorConverter.to_rgb(col_data)
-        bgcol = matplotlib.colors.colorConverter.to_rgb(ax1.get_axis_bgcolor())
+        bgcol = matplotlib.colors.colorConverter.to_rgb(_get_axis_bgcolor(ax1))
         # move halfway between col abd bgcol
         col = np.array(col)
         bgcol = np.array(bgcol)
