@@ -41,7 +41,8 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseInstrume
                             ChoiceStrings, ChoiceDevDep, ChoiceDev, ChoiceDevSwitch, ChoiceIndex,\
                             ChoiceSimpleMap, decode_float32, decode_int8, decode_int16, _decode_block_base,\
                             decode_float64, quoted_string, _fromstr_helper, ProxyMethod, _encode_block,\
-                            locked_calling, quoted_list, quoted_dict, decode_complex128, Block_Codec
+                            locked_calling, quoted_list, quoted_dict, decode_complex128, Block_Codec,\
+                            dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 def add_environ_path(path):
@@ -50,6 +51,8 @@ def add_environ_path(path):
         if not current_paths.endswith(os.pathsep):
             current_paths += os.pathsep
         os.environ['PATH'] = current_paths + path
+
+_SDK = None
 
 #######################################################
 ##    Guzik ADP7104
@@ -134,17 +137,33 @@ class PostProcess(object):
             opts += self.chain.current_config()
         return opts
 
-def pp(o, align=20, base=''):
-    """ prints a ctypes structure recursivelly """
+def pp(o, align=20, base='', nmax=None):
+    """ prints a ctypes structure (or a dictionnary from ppdict) recursivelly """
+    fmt = '%%-%is %%s'%align
+    dicts = (dict, dict_improved)
+    if isinstance(o, list) and (len(o) == 0 or (len(o)>0 and not isinstance(o[0], (Structure, list)+dicts))):
+        print fmt%(base, o)
+        return
+    elif isinstance(o, (Array, list)):
+        if nmax is None:
+            nmax = len(o)
+        for i in range(nmax):
+            pp(o[i], align, base+'[%i]'%i)
+        return
     if len(base):
         base += '.'
-    for s in o.__slots__:
-        v = getattr(o, s)
+    if isinstance(o, dicts):
+        elements = o.keys()
+        get_val = lambda o, k: o[k]
+    else:
+        elements = o.__slots__
+        get_val = lambda o,s: getattr(o, s)
+    for s in elements:
+        v = get_val(o, s)
         n = base+s
-        if isinstance(v, Structure):
+        if isinstance(v, (Structure, list)+dicts):
             pp(v, align, n)
         else:
-            fmt = '%%-%is %%s'%align
             if isinstance(v, Array) and len(v) < 100:
                 if isinstance(v[0], Array):
                     try:
@@ -156,8 +175,42 @@ def pp(o, align=20, base=''):
                     v = v[:]
             print fmt%(n, v)
 
+def ppdict(o, nmax=None):
+    """ Takes the returned Structure or Array and turn it into dicts and lists """
+    if isinstance(o, Array):
+        if nmax is None:
+            nmax = len(o)
+        return [ppdict(o[i]) for i in range(nmax)]
+    ret = dict_improved()
+    for s in o.__slots__:
+        v = getattr(o, s)
+        if isinstance(v, Structure):
+            ret[s] = ppdict(v)
+        else:
+            if isinstance(v, Array) and len(v) < 100:
+                if isinstance(v[0], Array):
+                    try:
+                        # This works for array of strings
+                        v = [ e.value for e in v ]
+                    except AttributeError:
+                        v = [ e[:] for e in v ]
+                else:
+                    v = v[:]
+            ret[s] = v
+    return ret
 
-@register_instrument('Guzik', 'ADP7104', '1.0')
+GiS = 2.**30
+
+def get_memory():
+    try:
+        import psutil
+    except ImportError:
+        print 'Unable to find the computer memory size. Requires the psutil module. using 128 GiB'
+        return 128*GiS
+    return psutil.virtual_memory().total
+
+#@register_instrument('Guzik', 'ADP7104 ADC 64GS', '446034')
+@register_instrument('Guzik', 'ADP7104 ADC 64GS')
 class guzik_adp7104(BaseInstrument):
     """
     This is the driver for the Guzik acquisition system (ADP7104, 4 channels, 32 GS/s (2ch), 10 GHz (2ch))
@@ -172,6 +225,7 @@ class guzik_adp7104(BaseInstrument):
         print_structure
     """
     def __init__(self, sdk_path=r'C:\Codes\Guzik', lib_path=r'C:\Program Files\Keysight\GSA1 Toolkit Latest\x64'):
+        global _SDK
         if sdk_path not in sys.path:
             sys.path.append(sdk_path)
         add_environ_path(lib_path)
@@ -179,17 +233,54 @@ class guzik_adp7104(BaseInstrument):
         self._gsasdk = gsa_sdk_h
         super(guzik_adp7104, self).__init__()
         SDK = self._gsasdk
+        _SDK = SDK
+        self._computer_memsize = get_memory()
         self._gsa_sys_cfg = SDK.GSA_SYS_CFG(version=SDK.GSA_SDK_VERSION)
         print 'Starting instrument initialization. This could take some time (20s)...'
         if SDK.GSA_SysInit(self._gsa_sys_cfg) != SDK.GSA_TRUE:
             raise RuntimeError(self.perror('Initialization problem!'))
         print 'Finished instrument initialization.'
-        ci = ctypes.c_int()
-        if SDK.GSA_ReadChNumberGet(ctypes.byref(ci)) == SDK.GSA_FALSE:
-            raise RuntimeError(self.perror('Initialization problem. Unable to get number of available channels'))
-        if ci.value != 1:
+        c_n_avail_analyzer = ctypes.c_int()
+        def check_error(func_call_result, error_message='Error!'):
+            if func_call_result == SDK.GSA_FALSE:
+                raise RuntimeError(self.perror(error_message))
+        check_error(SDK.GSA_ReadChNumberGet(ctypes.byref(c_n_avail_analyzer)),
+            'Initialization problem. Unable to get number of available channels')
+        if c_n_avail_analyzer.value != 1:
             raise RuntimeError(self.perror('Current code only handles one Guzik card on the system.'))
+        board_index = 0 # needs to be <c_n_avail_analyzer
+        self._board_index = board_index
         self._gsa_data_arg = None
+        serial_no = create_string_buffer(SDK.GSA_READ_CH_ID_LENGTH)
+        pxi_addr = create_string_buffer(SDK.GSA_READ_CH_ID_LENGTH)
+        brd_arg = SDK.GSA_BRD_LIST_ARG(version=SDK.GSA_SDK_VERSION)
+        brd_arg_rc = SDK.GSA_BRD_LIST_ARG(version=SDK.GSA_SDK_VERSION)
+        check_error(SDK.GSA_BoardsListGetInfo(brd_arg), 'Board list info error')
+        check_error(SDK.GSA_RCBoardsListGetInfo(board_index, brd_arg_rc), 'RC board list info error')
+        brd_arg.brd_max = brd_arg.brd_num
+        brd_arg.gpu_max = brd_arg.gpu_num
+        brd_arg_rc.brd_max = brd_arg_rc.brd_num
+        brd_info = (SDK.GSA_BRD_INFO*brd_arg.brd_num)()
+        brd_gpu = (SDK.GSA_GPU_INFO*brd_arg.gpu_num)()
+        brd_info_rc = (SDK.GSA_BRD_INFO*brd_arg_rc.brd_num)()
+        check_error(SDK.GSA_BoardsListGet(brd_arg, brd_info, brd_gpu), 'Board list error')
+        check_error(SDK.GSA_RCBoardsListGet(board_index, brd_arg_rc, brd_info_rc), 'RC board list error')
+        check_error(SDK.GSA_ReadChStringIdGet(SDK.String(serial_no), board_index, SDK.GSA_READ_CH_ID_SERIAL_NO),
+                    'Error getting serial number')
+        serial_no = serial_no.value
+        check_error(SDK.GSA_ReadChStringIdGet(SDK.String(pxi_addr), board_index, SDK.GSA_READ_CH_ID_PXI_LEGACY),
+                    'Error getting pxi_addr')
+        pxi_addr = pxi_addr.value
+        frame_slot = c_int()
+        check_error(SDK.GSA_ReadChSlotGet(board_index, byref(frame_slot)), 'Error getting frame_slot number')
+        frame_slot = frame_slot.value
+        chs_info = SDK.GSA_READ_CH_INFO_RES(version=SDK.GSA_SDK_VERSION)
+        check_error(SDK.GSA_ReadChInfoGet(board_index, chs_info), 'Error getting channel info')
+        self._conf_general = dict_improved(board_index=board_index, serial_no=serial_no, pxi_addr=pxi_addr, frame_slot=frame_slot,
+                                  brd_info=ppdict(brd_info),
+                                  brd_info_rc=ppdict(brd_info_rc),
+                                  brd_gpu= ppdict(brd_gpu),
+                                  chs_info=ppdict(chs_info))
         self.config(1)
 
     @staticmethod
@@ -216,10 +307,12 @@ class guzik_adp7104(BaseInstrument):
         arg = self._gsa_data_arg
         if arg is None:
             return
-        Nch = self._gsa_Nch
-        res_arr = self._gsa_data_res_arr
-        if SDK.GSA_Data_Multi_Info(arg, Nch, res_arr, None) == SDK.GSA_FALSE:
-            raise RuntimeError(self.perror('Unable to destroy op.'))
+        if arg.hdr.op_handle != 0:
+            arg.hdr.op_command = SDK.GSA_OP_DESTROY
+            Nch = self._gsa_Nch
+            res_arr = self._gsa_data_res_arr
+            if SDK.GSA_Data_Multi(arg, Nch, res_arr, None) == SDK.GSA_FALSE:
+                raise RuntimeError(self.perror('Unable to destroy op.'))
         self._gsa_data = None
         self._gsa_data_arg = None
 
@@ -265,7 +358,6 @@ class guzik_adp7104(BaseInstrument):
         """
         if channels is None:
             return self._read_config()
-        self._destroy_op()
         if not isinstance(channels, (np.ndarray, list, tuple)):
             channels = [channels]
         channels = sorted(set(channels)) # Make list of unique values and sorted.
@@ -274,11 +366,23 @@ class guzik_adp7104(BaseInstrument):
         Nch = len(channels)
         if Nch == 0:
             raise RuntimeError(self.perror('Invalid number of channels'))
+        if n_S_ch > 52.5*GiS:
+            # This is only for 1 channels or 2 interleaved (1,3 or 2,3, or 2,4 or 1,4)
+            # There is 64 GiB of ECC memory with 15/16 used. The 10 bit of a sample
+            # is packed as 7 words of 10 bits into 72 bits of ECC (8 words of 9 bits)
+            # So the packing is 7 samples (70 bits) into 8 words (72 bits)
+            # 64/16.*15*7/8 = 52.5
+            raise RuntimeError(self.perror('Maximum hardware request is 52.5 GiS'))
+        S2B = 2 if bits_16 else 1
+        if n_S_ch*Nch*S2B > (self._computer_memsize -  5*GiS):
+            raise RuntimeError(self.perror('You are requesting more memory than is available (with a reserve of 5 GiB)'))
+        self._destroy_op()
         self._gsa_Nch = Nch
         channels_list = ','.join(['CH%i'%i for i in channels])
         conf = c_long()
         SDK = self._gsasdk
-        if SDK.GSA_ReadChBestConfigGet(0, SDK.GSA_READ_CH_INP1, channels_list, byref(conf)) == SDK.GSA_FALSE:
+        board_index = self._board_index
+        if SDK.GSA_ReadChBestConfigGet(board_index, SDK.GSA_READ_CH_INP1, channels_list, byref(conf)) == SDK.GSA_FALSE:
             raise RuntimeError(self.perror('Unable to obtain best config.'))
         self._gsa_conf = conf.value
         # now obtain the conf
@@ -364,13 +468,19 @@ class guzik_adp7104(BaseInstrument):
                 data = np.array([self.conv_scale(data[i], res_arr[i]) for i in range(Nch)])
         return data
 
+    def __del__(self):
+        self.close()
+        super(guzik_adp7104, self).__del__()
+
     def close(self):
         self._destroy_op()
         SDK = self._gsasdk
         SDK.GSA_SysDone(self._gsa_sys_cfg)
 
     def idn(self):
-        return 'Guzik,ADP7104,00000,1.0'
+        return 'Guzik,%s,%s,%i'%(self._conf_general.brd_info_rc[0].name,
+                                       self._conf_general.serial_no,
+                                       self._conf_general.chs_info.version)
 
     def get_error(self, basic=False, printit=True):
         SDK = self._gsasdk
