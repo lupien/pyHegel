@@ -1701,11 +1701,14 @@ class BNC_rf_845(visaInstrument):
 ##    Scientific Magnetics Magnet Controller SMC120-10ECS
 #######################################################
 
+_parse_magnet_glitches = 0
+
 def _parse_magnet_return(s, conv):
     """
     s is the input string
     conv is a list of tuples (start symbol, name, type)
     """
+    global _parse_magnet_glitches
     names = []
     vals = []
     for symb, name, t in conv[::-1]:
@@ -1714,8 +1717,16 @@ def _parse_magnet_return(s, conv):
             s = s[:-1]
         else:
             sp = s.rsplit(symb, 1)
-            vals.append(_fromstr_helper(sp[1], t))
-            s = sp[0]
+            # I have notice that sometimes the instrument does not send the first
+            # letter of the reply (at least for status update K, it sometimes (1 out of 20000),
+            #  skips sending R). So capture that and handle it.
+            if len(sp) == 1:
+                vals.append(_fromstr_helper(sp[0], t))
+                s = ""
+                _parse_magnet_glitches += 1
+            else:
+                vals.append(_fromstr_helper(sp[1], t))
+                s = sp[0]
         names.append(name)
     if s != "":
         raise RuntimeError('There is some leftovers (%s) in the string'%s)
@@ -1760,12 +1771,12 @@ class MagnetController_SMC(visaInstrument):
         return self._conf_helper('field', 'current_status', 'setpoints', 'status', 'operating_parameters', 'ramp_wait_after', options)
     def _field_internal(self):
         s=self.ask('N')
-        try:
+        if s[0] == 'F':
             d = _parse_magnet_return(s, [('F', 'field', float), ('V', 'volt', float),
                                          ('R', 'target', ChoiceIndex(['zero', 'lower','upper'])),
                                           ('last', 'ramptype', ChoiceSimpleMap(dict(A='current_limit', V='volt_limit')))])
             field = d.field
-        except IndexError:
+        else:
             d = _parse_magnet_return(s, [('I', 'current', float), ('V', 'volt', float),
                                      ('R', 'target', ChoiceIndex(['zero', 'lower','upper'])),
                                      ('last', 'ramptype', ChoiceSimpleMap(dict(A='current_limit', V='volt_limit')))])
