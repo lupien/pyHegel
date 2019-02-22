@@ -1732,6 +1732,22 @@ def _parse_magnet_return(s, conv):
         raise RuntimeError('There is some leftovers (%s) in the string'%s)
     return dict_improved(zip(names[::-1], vals[::-1]))
 
+def _repeat_getdev_dec(func):
+    def _repeat_getdev_wrap(self, *arg, **kwarg):
+        i = 0
+        while True:
+            try:
+                ret = func(self, *arg, **kwarg)
+                break
+            except:
+                if i == 2:
+                    raise
+            i += 1
+        _repeat_getdev_wrap._bad_count += i
+        return ret
+    _repeat_getdev_wrap._bad_count = 0
+    return _repeat_getdev_wrap
+
 
 @register_instrument('Scientific Magnetics', 'SMC120-10', '5.67')
 class MagnetController_SMC(visaInstrument):
@@ -1877,6 +1893,8 @@ class MagnetController_SMC(visaInstrument):
                 self.write('H%i'%v)
             else:
                 raise NotImplementedError('Changing %s is not implememented'%k)
+
+    @_repeat_getdev_dec                
     def _status_getdev(self):
         """
         When setting, you need a dictionnary.
