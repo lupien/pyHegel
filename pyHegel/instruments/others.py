@@ -1739,7 +1739,9 @@ def _repeat_getdev_dec(func):
             try:
                 ret = func(self, *arg, **kwarg)
                 break
-            except:
+            except Exception as e:
+                if isinstance(e, KeyboardInterrupt):
+                    raise
                 if i == 2:
                     raise
             i += 1
@@ -1785,6 +1787,7 @@ class MagnetController_SMC(visaInstrument):
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         return self._conf_helper('field', 'current_status', 'setpoints', 'status', 'operating_parameters', 'ramp_wait_after', options)
+    @_repeat_getdev_dec
     def _field_internal(self):
         s=self.ask('N')
         if s[0] == 'F':
@@ -1801,6 +1804,7 @@ class MagnetController_SMC(visaInstrument):
     def _field_getdev(self):
         field, d = self._field_internal()
         return field
+    @_repeat_getdev_dec
     def _current_status_getdev(self):
         # Note that G,N returns the live output, while only J returns the persistent current (this is different than
         #  what the manual says.)
@@ -1830,6 +1834,7 @@ class MagnetController_SMC(visaInstrument):
                  self.write('D%i'%v)
             else:
                 raise NotImplementedError('Changing %s is not implememented'%k)
+    @_repeat_getdev_dec
     def _operating_parameters_getdev(self):
         s = self.ask('O')
         return _parse_magnet_return(s, [('A', 'rate', float), ('D', 'reverse', bool),
@@ -1849,6 +1854,7 @@ class MagnetController_SMC(visaInstrument):
                 self.write('Y%f'%v)
             else:
                 raise NotImplementedError('Changing %s is not implememented'%k)
+    @_repeat_getdev_dec
     def _setpoints_getdev(self, Tunit='default'):
         """
         When setting, use a dictionnary with keys of 'lower' and/or 'voltLim'
@@ -1894,7 +1900,7 @@ class MagnetController_SMC(visaInstrument):
             else:
                 raise NotImplementedError('Changing %s is not implememented'%k)
 
-    @_repeat_getdev_dec                
+    @_repeat_getdev_dec
     def _status_getdev(self):
         """
         When setting, you need a dictionnary.
