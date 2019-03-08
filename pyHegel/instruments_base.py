@@ -510,6 +510,36 @@ class Lock_Instruments(threading._RLock):
             print 'Inner lock was still locked, now released.'
 
 
+# This functions was moved out of _locked_calling_helper
+# because it was causing different errors in python < 2.7.9
+#     SyntaxError: unqualified exec is not allowed in function 'locked_calling' it contains a nested function with free variables
+#      see  https://bugs.python.org/issue21591
+#           https://stackoverflow.com/questions/4484872/why-doesnt-exec-work-in-a-function-with-a-subfunction
+#       However fixing that (by using the "exec something in lcl" syntax) leads to another error:
+#     SyntaxError: function 'locked_calling' uses import * and bare exec, which are illegal because it contains a nested function with free variables
+#      which is because I kept the exec in an if else statement. (I need to keep the exec in function form for
+#       future upgrade to python 3)
+def _locked_calling_helper(argspec, extra):
+    (args, varargs, varkw, defaults) = argspec
+    # find and replace class (like float), functions in defaults
+    # will use obj.__name__ but could also try to find the object name in the
+    # calling locals, globals, __builtin__
+    if defaults is not None:
+        defaults_repl = [(d, d.__name__) for d in defaults if getattr(d, '__name__', None)]
+    else:
+        defaults_repl = []
+    defaults_repl_obj = [d[0] for d in defaults_repl]
+    def def_repl_func(obj):
+        try:
+            ind = defaults_repl_obj.index(obj)
+        except ValueError:
+            return '='+repr(obj)
+        return '='+defaults_repl[ind][1]
+    def_arg = inspect.formatargspec(*argspec, formatvalue=def_repl_func) # this is: (self, arg1, arg2, kw1=1, kw2=5, *arg, *kwarg)
+    use_arg = inspect.formatargspec(*argspec, formatvalue=lambda name: '') # this is: (self, arg1, arg2, kw1, kw2, *arg, *kwarg)
+    selfname = args[0]+extra
+    return dict(def_arg=def_arg, use_arg=use_arg, self=selfname)
+
 # Use this as a decorator
 def locked_calling(func, extra=''):
     """ This function is to be used as a decorator on a class method.
@@ -518,37 +548,20 @@ def locked_calling(func, extra=''):
         Only use on method in classes derived from BaseInstrument
     """
     argspec = inspect.getargspec(func)
-    (args, varargs, varkw, defaults) = argspec
-    # find and replace class (like float), functions in defaults
-    # will use obj.__name__ but could also try to find the object name in the
-    # calling locals, globals, __builtin__
-    if defaults is not None:
-        defaults_repl = [(d.__name__, d) for d in defaults if getattr(d, '__name__', None)]
-    else:
-        defaults_repl = []
-    defaults_repl_obj = [d[1] for d in defaults_repl]
-    def def_repl_func(obj):
-        try:
-            ind = defaults_repl_obj.index(obj)
-        except ValueError:
-            return '='+repr(obj)
-        return '='+defaults_repl[ind][0]
-    def_arg = inspect.formatargspec(*argspec, formatvalue=def_repl_func) # this is: (self, arg1, arg2, kw1=1, kw2=5, *arg, *kwarg)
-    use_arg = inspect.formatargspec(*argspec, formatvalue=lambda name: '') # this is: (self, arg1, arg2, kw1, kw2, *arg, *kwarg)
-    selfname = args[0]+extra
+    frmt_para = _locked_calling_helper(argspec, extra)
     def_str = """
 @functools.wraps(func)
 def locked_call_wrapper{def_arg}:
         " locked_call_wrapper is a wrapper that executes func with the instrument locked."
         with {self}._lock_instrument, {self}._lock_extra:
             return func{use_arg}
-    """.format(def_arg=def_arg, use_arg=use_arg, self=selfname)
-    lcl = locals()
+    """.format(**frmt_para)
+    lcl = {}
+    lcl.update(func=func)
     lcl.update(functools=functools)
-    lcl.update(defaults_repl)
-    #code = compile(def_str, inspect.getsourcefile(func), 'exec')
-    #exec(code, lcl)
+    # lcl is uses as both globals and locals
     exec(def_str, lcl)
+    locked_call_wrapper = lcl['locked_call_wrapper']
     ### only for ipython 0.12
     ### This makes newfunc?? show the correct function def (including decorator)
     ### note that for doc, ipython tests for getdoc method
