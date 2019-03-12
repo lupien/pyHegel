@@ -1205,15 +1205,18 @@ class lakeshore_370(visaInstrument):
                These are fixed (see  Manual 4.11.8.1 Reading Sequence p 4-23)
                There does not seem to be a way to change these dwell times.
     """
-    def __init__(self, visa_addr, still_res=120., still_full_res=136.4, **kwarg):
+    def __init__(self, visa_addr, still_res=120., still_full_res=136.4, scanner='auto', **kwarg):
         """
         still_res is the still heater resistance
         still_full_res is the still heater resistance with the wire resistance
                        included (the 2 wire resistance seen from outside the fridge)
         They are both used fot the still device
+        scanner set it to True to force scanner use, False to disable it and 'auto' to
+                automatically check for it.
         """
         self._still_res = still_res
         self._still_full_res = still_full_res
+        self._scanner_present = scanner
         super(lakeshore_370, self).__init__(visa_addr, **kwarg)
         self._data_valid_last_ch = 0
         self._data_valid_last_t = 0.
@@ -1441,7 +1444,23 @@ class lakeshore_370(visaInstrument):
             rng = self.heater_range.get()
             return (htr/100.*rng)**2 * csetup.heater_Ohms
     def _create_devs(self):
-        ch_opt_sel = range(1, 17)
+        if self._scanner_present == 'auto':
+            # DOUT always returns 00 when a scanner is present.
+            scanner = False
+            prev_dout = int(self.ask('DOUT?'))
+            if prev_dout == 0:
+                self.write('DOUT 01')
+                dout = int(self.ask('DOUT?'))
+                if dout != 0:
+                    # bring it back
+                    self.write('DOUT 00')
+                else:
+                    scanner = True
+            self._scanner_present = scanner
+        if self._scanner_present:
+            ch_opt_sel = range(1, 17)
+        else:
+            ch_opt_sel = range(1, 2)
         self.current_ch = MemoryDevice(1, choices=ch_opt_sel)
         def devChOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
