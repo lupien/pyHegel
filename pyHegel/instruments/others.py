@@ -1523,7 +1523,21 @@ class lakeshore_370(visaInstrument):
         self.still = FunctionDevice(self.still_raw, htr_from_raw, htr_to_raw, quiet_del=True, doc='still power in mW')
 
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(lakeshore_370, self)._create_devs()
+
+#######################################################
+##    Lakeshore 372 Temperature controller
+#######################################################
+
+#@register_instrument('LSCI', 'MODEL372', '1.3')
+@register_instrument('LSCI', 'MODEL372')
+class lakeshore_372(lakeshore_370):
+    def __init__(self, visa_addr, *args, **kwargs):
+        baud_rate = kwargs.pop('baud_rate', 57600)
+        addr = visa_addr.lower()
+        if addr.startswith('com') or addr.startswith('asrl'):
+            kwargs['baud_rate'] = baud_rate
+        super(lakeshore_372, self).__init__(visa_addr, *args, **kwargs)
 
 
 #######################################################
