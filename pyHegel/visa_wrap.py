@@ -81,6 +81,12 @@ def _add_enum_equivalent_old():
         termination_char = constants.VI_ASRL_END_TERMCHAR
         termination_break = constants.VI_ASRL_END_BREAK
     constants.SerialTermination = SerialTermination
+    class InterfaceType(object):
+        gpib = constants.VI_INTF_GPIB
+        asrl = constants.VI_INTF_ASRL
+        pxi = constants.VI_INTF_PXI
+        usb = constants.VI_INTF_USB
+    constants.InterfaceType = InterfaceType
 
 def _add_missing_attributes_new():
     # needed for tests
