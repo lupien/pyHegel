@@ -3137,6 +3137,11 @@ class _LastTime(ctypes.Structure):
     _fields_ = [('write_time', ctypes.c_double),
                 ('read_time', ctypes.c_double)]
 
+def resource_info(visa_addr):
+    if isinstance(visa_addr, int):
+        visa_addr = _normalize_gpib(visa_addr)
+    return rsrc_mngr.resource_info(visa_addr)
+
 class visaInstrument(BaseInstrument):
     """
         Open visa instrument with a visa address.
