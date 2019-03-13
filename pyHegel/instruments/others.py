@@ -35,7 +35,8 @@ from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsy
                             make_choice_list, _fromstr_helper,\
                             decode_float64, visa_wrap, locked_calling,\
                             Lock_Extra, Lock_Instruments, _sleep_signal_context_manager, wait,\
-                            release_lock_context, mainStatusLine, quoted_string, Choice_bool_OnOff
+                            release_lock_context, mainStatusLine, quoted_string, Choice_bool_OnOff,\
+                            resource_info
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -1217,23 +1218,14 @@ class lakeshore_370(visaInstrument):
         self._still_res = still_res
         self._still_full_res = still_full_res
         self._scanner_present = scanner
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.asrl:
+            kwarg['parity'] = visa_wrap.constants.Parity.odd
+            kwarg['data_bits'] = 7
         super(lakeshore_370, self).__init__(visa_addr, **kwarg)
         self._data_valid_last_ch = 0
         self._data_valid_last_t = 0.
         self._data_valid_last_start = 0., [0, False]
-    def init(self, full=False):
-        if full:
-            if self.visa.is_serial():
-                # we need to set this before any writes.
-                self._write_write_wait = 0.100
-                self.visa.parity = visa_wrap.constants.Parity.odd
-                self.visa.data_bits = 7
-                #self.visa.term_chars = '\r\n'
-                self.write('*ESE 255') # needed for get_error
-                self.write('*sre 4') # neede for _data_valid
-            else: # GPIB
-                self._write_write_wait = 0.050
-        super(lakeshore_370, self).init(full=full)
     def _get_esr(self):
         return int(self.ask('*esr?'))
     def get_error(self):
@@ -1444,6 +1436,14 @@ class lakeshore_370(visaInstrument):
             rng = self.heater_range.get()
             return (htr/100.*rng)**2 * csetup.heater_Ohms
     def _create_devs(self):
+        if self.visa.is_serial():
+            # we need to set this before any writes.
+            self._write_write_wait = 0.100
+            #self.visa.term_chars = '\r\n'
+            self.write('*ESE 255') # needed for get_error
+            self.write('*sre 4') # neede for _data_valid
+        else: # GPIB
+            self._write_write_wait = 0.050
         if self._scanner_present == 'auto':
             # DOUT always returns 00 when a scanner is present.
             scanner = False
@@ -1552,9 +1552,9 @@ class lakeshore_370(visaInstrument):
 @register_instrument('LSCI', 'MODEL372')
 class lakeshore_372(lakeshore_370):
     def __init__(self, visa_addr, *args, **kwargs):
-        baud_rate = kwargs.pop('baud_rate', 57600)
-        addr = visa_addr.lower()
-        if addr.startswith('com') or addr.startswith('asrl'):
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.asrl:
+            baud_rate = kwargs.pop('baud_rate', 57600)
             kwargs['baud_rate'] = baud_rate
         super(lakeshore_372, self).__init__(visa_addr, *args, **kwargs)
 
