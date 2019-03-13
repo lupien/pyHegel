@@ -1206,14 +1206,14 @@ class lakeshore_370(visaInstrument):
                These are fixed (see  Manual 4.11.8.1 Reading Sequence p 4-23)
                There does not seem to be a way to change these dwell times.
     """
-    def __init__(self, visa_addr, still_res=120., still_full_res=136.4, scanner='auto', **kwarg):
+    def __init__(self, visa_addr, still_res=120., still_full_res=136.4, scanner=True, **kwarg):
         """
         still_res is the still heater resistance
         still_full_res is the still heater resistance with the wire resistance
                        included (the 2 wire resistance seen from outside the fridge)
         They are both used fot the still device
         scanner set it to True to force scanner use, False to disable it and 'auto' to
-                automatically check for it.
+                automatically check for it. 'auto' only works for newer model 372 not 370.
         """
         self._still_res = still_res
         self._still_full_res = still_full_res
@@ -1556,7 +1556,8 @@ class lakeshore_372(lakeshore_370):
         if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.asrl:
             baud_rate = kwargs.pop('baud_rate', 57600)
             kwargs['baud_rate'] = baud_rate
-        super(lakeshore_372, self).__init__(visa_addr, *args, **kwargs)
+        scanner = kwargs.pop('scanner', 'auto')
+        super(lakeshore_372, self).__init__(visa_addr, *args, scanner=scanner, **kwargs)
 
 
 #######################################################
