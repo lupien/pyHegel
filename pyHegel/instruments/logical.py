@@ -348,13 +348,15 @@ class ScalingDevice(LogicalDevice):
        This class provides a wrapper around a device.
        On reading, it returns basedev.get()*scale_factor + offset
        On writing it will write basedev.set((val - offset)/scale_factor)
+       Unless invert_trans is True than the definition above are switched (reading <-> writing)
        When only_val is False, get returns a tuple of (converted val, base_device raw)
     """
-    def __init__(self, basedev, scale_factor, offset=0., setget=False, only_val=False, doc='', **extrak):
+    def __init__(self, basedev, scale_factor, offset=0., setget=False, only_val=False, invert_trans=False, doc='', **extrak):
         self._scale = float(scale_factor)
         self._offset = offset
         self._only_val = only_val
-        doc+= 'scale_factor=%g (initial)\noffset=%g'%(scale_factor, offset)
+        self._invert_trans = invert_trans
+        doc+= 'scale_factor=%g (initial)\noffset=%g\ninvert_trans=%s'%(scale_factor, offset, invert_trans)
         super(type(self), self).__init__(basedev=basedev, doc=doc, setget=setget, **extrak)
         if not only_val:
             self._format['multi'] = ['scale', 'raw']
@@ -363,12 +365,20 @@ class ScalingDevice(LogicalDevice):
         self._getdev_p = True
     @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
-        head = ['Scaling:: fact=%r offset=%r basedev=%s'%(self._scale, self._offset, self._basedev.getfullname())]
+        head = ['Scaling:: fact=%r offset=%r invert_trans=%s basedev=%s'%(self._scale, self._offset, self._invert_trans, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
     def conv_fromdev(self, raw):
-        return raw * self._scale + self._offset
+        if self._invert_trans:
+            val = (raw - self._offset) / self._scale
+        else:
+            val = raw * self._scale + self._offset
+        return val
     def conv_todev(self, val):
-        return (val - self._offset) / self._scale
+        if self._invert_trans:
+            raw = val * self._scale + self._offset
+        else:
+            raw = (val - self._offset) / self._scale
+        return raw
     def _prep_output(self, raw):
         val = self.conv_fromdev(raw)
         if self._only_val:
