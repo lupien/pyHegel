@@ -153,14 +153,21 @@ class sr830_lia(visaInstrument):
     def _check_snapsel(self,sel):
         if not (2 <= len(sel) <= 6):
             raise ValueError, 'snap sel needs at least 2 and no more thant 6 elements'
-    def _snap_getdev(self, sel=[1,2]):
+    def _snap_getdev(self, sel=[1,2], norm=False):
         # sel must be a list
         self._check_snapsel(sel)
         sel = map(str, sel)
-        return decode_float64(self.ask('snap? '+','.join(sel)))
-    def _snap_getformat(self, sel=[1,2], **kwarg):
+        data = decode_float64(self.ask('snap? '+','.join(sel)))
+        if norm:
+            amp = self.srclvl.get()
+            data_norm = data/amp
+            data = np.concatenate( (data_norm, data) )
+        return data
+    def _snap_getformat(self, sel=[1,2], norm=False, **kwarg):
         self._check_snapsel(sel)
         headers = [ self._snap_type[i] for i in sel]
+        if norm:
+            headers = map(lambda x: x+'_norm', headers) + headers
         d = self.snap._format
         d.update(multi=headers, graph=range(len(sel)))
         return BaseDevice.getformat(self.snap, sel=sel, **kwarg)
@@ -225,6 +232,7 @@ class sr830_lia(visaInstrument):
             which is [1,2] by default.
             The numbers are taken from the following dictionnary:
                 %r
+            The option norm when True return the data divided by the srclvl (and followed by raw data)
                 """%self._snap_type)
         self.fetch = self.snap
         self.readval = ReadvalDev(self.fetch)
