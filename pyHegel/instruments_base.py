@@ -3145,7 +3145,7 @@ def resource_info(visa_addr):
 class Keep_Alive(threading.Thread):
     def __init__(self, interval, keep_alive_func):
         # the function keep_alive_func should call update_time somewhere.
-        super(keep_alive, self).__init__()
+        super(Keep_Alive, self).__init__()
         self.keep_alive_func = ProxyMethod(keep_alive_func)
         self.interval = interval
         self.lck = threading.RLock()
@@ -3207,8 +3207,7 @@ class visaInstrument(BaseInstrument):
         self._last_rw_time = _LastTime(to, to) # When wait time are not 0, it will be replaced
         self._write_write_wait = 0.
         self._read_write_wait = 0.
-        BaseInstrument.__init__(self, quiet_delete=quiet_delete)
-        if (self.keep_alive == 'auto' and self.visa.is_tcpip) or self.keep_alive is True:
+        if (keep_alive == 'auto' and self.visa.is_tcpip) or keep_alive is True:
             # TODO handle keep_alive (get inspired by bluefors)
             #  Could use the keep_alive setting for visa (at least socket/hislip)
             #  However it is 2 hours by default on windows. Which is often too long.
@@ -3216,9 +3215,9 @@ class visaInstrument(BaseInstrument):
             # Also note that writing an empty string (not even the newline) will not produce any tcpip
             # communication. So keepalive should send at least '\n' if that is valid.
             self._keep_alive_thread = Keep_Alive(keep_alive_time, self._keep_alive_func)
-            self._keep_alive_thread.start()
         else:
             self._keep_alive_thread = None
+        BaseInstrument.__init__(self, quiet_delete=quiet_delete)
 
         if not CHECKING():
             if not skip_id_test:
@@ -3226,6 +3225,8 @@ class visaInstrument(BaseInstrument):
                 if not instruments_registry.check_instr_id(self.__class__, idns['vendor'], idns['model'], idns['firmware']):
                     print 'WARNING: this particular instrument idn is not attached to this class: operations might misbehave.'
                     #print self.__class__, idns
+        if self._keep_alive_thread:
+            self._keep_alive_thread.start()
     def __del__(self):
         #print 'Destroying '+repr(self)
         # no need to call self.visa.close()
