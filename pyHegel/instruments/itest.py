@@ -29,7 +29,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseInstrume
                             ChoiceStrings, ChoiceIndex, ChoiceLimits, _general_check,\
                             make_choice_list, _tostr_helper, _fromstr_helper, ProxyMethod,\
                             decode_float64, quoted_string, scaled_float, visa_wrap, locked_calling,\
-                            wait, release_lock_context, mainStatusLine
+                            wait, release_lock_context, mainStatusLine, resource_info
 
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -117,18 +117,21 @@ class iTest_be2102(visaInstrument):
     TCP address format:
         TCPIP::192.168.150.112::5025::SOCKET
     """
-    def __init__(self, addr, slot, *args, **kwargs):
+    def __init__(self, visa_addr, slot, *args, **kwargs):
         self._slot = slot
         if slot<1 or slot>13:
             raise ValueError('Slot needs to be a value within 1-13.')
         self._pre = 'i%i'%self._slot
         kwargs['write_termination'] = '\n'
-        if isinstance(addr, basestring) and not addr.lower().startswith('gpib'):
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type != visa_wrap.constants.InterfaceType.gpib:
             # Needed for all but gpib.
             # serial behaves likes this anyway (because VI_ATTR_ASRL_END_IN attribute is set
             #   to use the END_TERMCHAR which is \n)
             kwargs['read_termination'] = '\n'
-        super(iTest_be2102, self).__init__(addr, *args, **kwargs)
+        kwargs['keep_alive'] = 'auto'
+        kwargs['keep_alive_time'] = 15*60 # 15 min. The instrument seems to timeout after 25 min when using a socket
+        super(iTest_be2102, self).__init__(visa_addr, *args, **kwargs)
 
     def idn_remote(self):
         # here it is something like:
