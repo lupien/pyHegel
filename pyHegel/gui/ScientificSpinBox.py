@@ -244,6 +244,8 @@ class PyScientificSpinBox(QDoubleSpinBox):
         self._valueChange_timer.timeout.connect(self._do_valueChanged_gui_emit)
         self._last_focus_reason_mouse = False
         self.lineEdit().installEventFilter(self)
+        self.text_is_being_changed_state = False
+        self.lineEdit().textEdited.connect(self.text_is_being_changed)
         self._last_key_pressed_is_enter = False
         self.editingFinished.connect(self.editFinished_slot)
         self._in_config_menu = False
@@ -332,6 +334,9 @@ class PyScientificSpinBox(QDoubleSpinBox):
         self.min_incr_custom_widget.valueChanged.connect(self.handle_min_incr_custom_widget)
         self.display_mode_sep = QAction('Display mode', None)
         self.display_mode_sep.setSeparator(True)
+
+    def text_is_being_changed(self):
+        self.text_is_being_changed_state = True
 
     def _create_menu(self):
         ec = self.enabled_controls
@@ -499,8 +504,12 @@ class PyScientificSpinBox(QDoubleSpinBox):
             #print('doing paste')
             self.pasteAction.trigger()
         elif key == QtCore.Qt.Key_Escape:
-            #print('doing escape')
-            self.setValue(self.value())
+            if self.text_is_being_changed_state:
+                #print('doing escape')
+                self.setValue(self.value())
+            else:
+                #print('letting escape propagate')
+                event.ignore()
         else:
             if key in [QtCore.Qt.Key_Enter, QtCore.Qt.Key_Return]:
                 self._last_key_pressed_is_enter = True
@@ -534,6 +543,7 @@ class PyScientificSpinBox(QDoubleSpinBox):
         self.selectAll()
 
     def editFinished_slot(self):
+        self.text_is_being_changed_state = False
         if self._last_key_pressed_is_enter:
             self._last_key_pressed_is_enter = False
             self._do_valueChanged_gui_emit(force=True)
@@ -553,6 +563,7 @@ class PyScientificSpinBox(QDoubleSpinBox):
         text = self.clipboard.text()
         # let user decide if it is ok by pressing ok (not esc)
         self.lineEdit().setText(text)
+        self.text_is_being_changed_state = True
         # update value immediately
         #try:
         #    self.setValue(float(text))
