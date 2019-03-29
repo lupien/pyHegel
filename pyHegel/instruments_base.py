@@ -3142,6 +3142,36 @@ def resource_info(visa_addr):
         visa_addr = _normalize_gpib(visa_addr)
     return rsrc_mngr.resource_info(visa_addr)
 
+class Keep_Alive(threading.Thread):
+    def __init__(self, interval, keep_alive_func):
+        # the function keep_alive_func should call update_time somewhere.
+        super(keep_alive, self).__init__()
+        self.keep_alive_func = ProxyMethod(keep_alive_func)
+        self.interval = interval
+        self.lck = threading.RLock()
+        self.update_time()
+        self.stop = False
+    def run(self):
+        while True:
+            with self.lck:
+                if self.stop:
+                    break
+                delta = time.time() - self.last
+                if delta >= self.interval:
+                    self.keep_alive_func()
+                    continue  # skipt wait (we just changed self.last)
+            wait = min(self.interval - delta, 5) # wait at most 5s
+            time.sleep(wait)
+    def cancel(self):
+        with self.lck:
+            self.stop = True
+    def update_time(self, no_lock=False):
+        with self.lck:
+            self.last = time.time()
+    #def __del__(self):
+    #    print 'cleaning up keep_alive thread.'
+
+
 class visaInstrument(BaseInstrument):
     """
         Open visa instrument with a visa address.
@@ -3153,7 +3183,14 @@ class visaInstrument(BaseInstrument):
           'USB0::0x0957::0x0118::MY49012345::0::INSTR'
           'USB::0x0957::0x0118::MY49012345'
     """
-    def __init__(self, visa_addr, skip_id_test=False, quiet_delete=False, **kwarg):
+    def __init__(self, visa_addr, skip_id_test=False, quiet_delete=False, keep_alive=False, keep_alive_time=15*60, **kwarg):
+        """
+        skip_id_test when True will skip doing the idn test.
+        quiet_delete when True will prevent the print following an instrument delete
+        keep_alive can True/False/'auto'. If auto, it is activated only when on a tcpip connection (hislip, socket, instr)
+        keep_alive_time is the time in seconds between keep alive requests.
+
+        """
         # need to initialize visa before calling BaseInstrument init
         # which might require access to device
         if isinstance(visa_addr, int):
@@ -3171,6 +3208,18 @@ class visaInstrument(BaseInstrument):
         self._write_write_wait = 0.
         self._read_write_wait = 0.
         BaseInstrument.__init__(self, quiet_delete=quiet_delete)
+        if (self.keep_alive == 'auto' and self.visa.is_tcpip) or self.keep_alive is True:
+            # TODO handle keep_alive (get inspired by bluefors)
+            #  Could use the keep_alive setting for visa (at least socket/hislip)
+            #  However it is 2 hours by default on windows. Which is often too long.
+            #     self.visa.set_visa_attribute(visa_wrap.constants.VI_ATTR_TCPIP_KEEPALIVE, True)
+            # Also note that writing an empty string (not even the newline) will not produce any tcpip
+            # communication. So keepalive should send at least '\n' if that is valid.
+            self._keep_alive_thread = Keep_Alive(keep_alive_time, self._keep_alive_func)
+            self._keep_alive_thread.start()
+        else:
+            self._keep_alive_thread = None
+
         if not CHECKING():
             if not skip_id_test:
                 idns = self.idn_split()
@@ -3181,6 +3230,8 @@ class visaInstrument(BaseInstrument):
         #print 'Destroying '+repr(self)
         # no need to call self.visa.close()
         # because self.visa does that when it is deleted
+        if self._keep_alive_thread:
+            self._keep_alive_thread.cancel()
         super(visaInstrument, self).__del__()
     # Do NOT enable locked_calling for read_status_byte, otherwise we get a hang
     # when instrument is on gpib using agilent visa. But do use lock visa
@@ -3199,6 +3250,7 @@ class visaInstrument(BaseInstrument):
         else:
             with self._lock_extra:
                 return self.visa.read_stb()
+            self._keep_alive_update()
     @locked_calling
     def control_remotelocal(self, remote=False, local_lockout=False, all=False):
         """
@@ -3252,6 +3304,14 @@ class visaInstrument(BaseInstrument):
             else:
                 val = cnsts.VI_GPIB_REN_ADDRESS_GTL
         self.visa.control_ren(val)
+        self._keep_alive_update()
+
+    def _keep_alive_func(self):
+        self.write('') # should send just a newline.
+    def _keep_alive_update(self):
+        if self._keep_alive_thread:
+            self._keep_alive_thread.update_time()
+
     def _do_wr_wait(self):
         if self._last_rw_time.read_time > self._last_rw_time.write_time:
             # last operation was a read
@@ -3292,6 +3352,7 @@ class visaInstrument(BaseInstrument):
         else:
             ret = self.visa.read(chunk_size=chunk_size)
         self._last_rw_time.read_time = time.time()
+        self._keep_alive_update()
         return ret
     @locked_calling
     def write(self, val, termination='default'):
@@ -3302,6 +3363,7 @@ class visaInstrument(BaseInstrument):
             if not isinstance(val, basestring):
                 raise ValueError(self.perror('The write val is not a string.'))
         self._last_rw_time.write_time = time.time()
+        self._keep_alive_update()
     @locked_calling
     def ask(self, question, raw=False, chunk_size=None):
         """
@@ -3356,6 +3418,7 @@ class visaInstrument(BaseInstrument):
         if CHECKING():
             return
         self.visa.clear()
+        self._keep_alive_update()
     @property
     def set_timeout(self):
         if CHECKING():
@@ -3386,6 +3449,7 @@ class visaInstrument(BaseInstrument):
         if CHECKING():
             return
         self.visa.trigger()
+        self._keep_alive_update()
     @locked_calling
     def _get_dev_min_max(self, ask_str, str_type=float, ask='both'):
         """ ask_str is the question string.
