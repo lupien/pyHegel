@@ -86,6 +86,7 @@ def _add_enum_equivalent_old():
         asrl = constants.VI_INTF_ASRL
         pxi = constants.VI_INTF_PXI
         usb = constants.VI_INTF_USB
+        tcpip = constants.VI_INTF_TCPIP
     constants.InterfaceType = InterfaceType
 
 def _add_missing_attributes_new():
@@ -509,6 +510,8 @@ class old_Instrument(redirect_instr):
         #return isinstance(self.instr, visa.GpibInstrument)
     def is_usb(self):
         return self.get_visa_attribute(constants.VI_ATTR_INTF_TYPE) == constants.VI_INTF_USB
+    def is_tcpip(self):
+        return self.get_visa_attribute(constants.VI_ATTR_INTF_TYPE) == constants.VI_INTF_TCPIP
     def get_visa_attribute(self, attr):
         return vpp43.get_attribute(self.vi, attr)
     def set_visa_attribute(self, attr, state):
@@ -610,6 +613,8 @@ class new_Instrument(redirect_instr):
     def is_gpib(self):
         return self.interface_type == constants.InterfaceType.gpib
         #return isinstance(self.instr, pyvisa.resources.GPIBInstrument)
+    def is_tcpip(self):
+        return self.interface_type == constants.InterfaceType.tcpip
     def trigger(self):
         # VI_TRIG_SW is the default
         #self.set_attribute(constants.VI_ATTR_TRIG_ID, constants.VI_TRIG_SW) # probably uncessary but the code was like that
