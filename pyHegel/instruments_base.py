@@ -3151,6 +3151,7 @@ class Keep_Alive(threading.Thread):
         self.lck = threading.RLock()
         self.update_time()
         self.stop = False
+        self.daemon = True # This will allow python to exit
     def run(self):
         while True:
             with self.lck:
