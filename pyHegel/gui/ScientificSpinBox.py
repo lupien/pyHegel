@@ -510,9 +510,15 @@ class PyScientificSpinBox(QDoubleSpinBox):
             else:
                 #print('letting escape propagate')
                 event.ignore()
+        elif key in [QtCore.Qt.Key_Enter, QtCore.Qt.Key_Return]:
+            self._last_key_pressed_is_enter = True
+            text_was_being_changed_state = self.text_is_being_changed_state
+            super(PyScientificSpinBox, self).keyPressEvent(event)
+            # default handling does event.ignore() so event, after doing something here
+            # propagate. only do that if test is not being changed.
+            if text_was_being_changed_state:
+                event.accept()
         else:
-            if key in [QtCore.Qt.Key_Enter, QtCore.Qt.Key_Return]:
-                self._last_key_pressed_is_enter = True
             super(PyScientificSpinBox, self).keyPressEvent(event)
 
     # Can't seem to do the same thing (stop short timer) for wheelEvent
