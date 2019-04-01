@@ -1273,6 +1273,8 @@ class MetaClassInit(type):
 class BaseInstrument(object):
     __metaclass__ = MetaClassInit
     alias = None
+    # add _quiet_delete here in case we call __del__ before __init__ because of problem in subclass
+    _quiet_delete = False
     def __init__(self, quiet_delete=False):
         self._quiet_delete = quiet_delete
         self.header_val = None
@@ -3197,6 +3199,7 @@ class visaInstrument(BaseInstrument):
         if isinstance(visa_addr, int):
             visa_addr = _normalize_gpib(visa_addr)
         self.visa_addr = visa_addr
+        self._keep_alive_thread = None
         if not CHECKING():
             self.visa = rsrc_mngr.open_resource(visa_addr, **kwarg)
             self._lock_extra = Lock_Visa(self.visa)
@@ -3216,8 +3219,6 @@ class visaInstrument(BaseInstrument):
             # Also note that writing an empty string (not even the newline) will not produce any tcpip
             # communication. So keepalive should send at least '\n' if that is valid.
             self._keep_alive_thread = Keep_Alive(keep_alive_time, self._keep_alive_func)
-        else:
-            self._keep_alive_thread = None
         BaseInstrument.__init__(self, quiet_delete=quiet_delete)
 
         if not CHECKING():
