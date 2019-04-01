@@ -3158,9 +3158,9 @@ class Keep_Alive(threading.Thread):
                 if self.stop:
                     break
                 delta = time.time() - self.last
-                if delta >= self.interval:
-                    self.keep_alive_func()
-                    continue  # skipt wait (we just changed self.last)
+            if delta >= self.interval:
+                self.keep_alive_func()
+                continue  # skipt wait (we just changed self.last)
             wait = min(self.interval - delta, 5) # wait at most 5s
             time.sleep(wait)
     def cancel(self):
