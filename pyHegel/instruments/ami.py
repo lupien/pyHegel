@@ -36,7 +36,9 @@ from ..types import dict_improved
 
 
 import time
-from numpy import sign, abs
+from numpy import sign, abs, sqrt, sin, cos, pi
+from scipy.optimize import root_scalar
+
 
 
 #######################################################
@@ -528,6 +530,302 @@ class MagnetSimul(BaseInstrument):
         self._devwrap('current')
         self._devwrap('rate_current')
         self._devwrap('field')
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+
+
+#######################################################
+##    American Magnetics, Inc. Vector magnet
+#######################################################
+
+def length(self, xyz):
+    return sqrt(xyz[0]**2 + xyz[1]**2 + xyz[2]**2)
+
+def to_cartesian(self, rtp, deg=True):
+    r, t, p = rtp
+    if deg:
+        t = t*pi/180
+        p = p*pi/180
+    x = r * sin(t) * cos(p)
+    y = r * sin(t) * sin(p)
+    z = r * np.cos(t)
+    return np.array([x, y, z])
+
+def to_spherical(self, xyz, deg=True, no_phi=False):
+    x, y, z = xyz
+    r = length(xyz)
+    if no_phi:
+        if no_phi == 'xz' and approx_equal(y, 0.):
+            xy = x
+            p = z*0.
+        if no_phi == 'yz' and approx_equal(x, 0.):
+            xy = y
+            p = z*0. + pi/2
+        else:
+            raise ValueError('Asking for no_phi, but data has x and y ! =0')
+    else:
+        xy = sqrt(x**2 + y**2)
+        p = arctan2(y, x)
+    t = arctan2(xy, z)
+    if deg:
+        t *= 180/pi
+        p *= 180/pi
+    return np.array([r, t, p])
+
+_Abs_Tol = 1e-6
+def approx_equal(v1, v2):
+    return np.allclose(v1, v2, atol=_Abs_Tol, rtol=1e-8)
+
+def normalize(v1):
+    # v1 is arrays of dimension (3, ...) where 3 is for x,y,z
+    v1_length = length(v1)
+    v1_length1 = where(v1_length < _Abs_Tol, 1., v1_length)
+    norm = where(v1_length < _Abs_Tol, v1*0., v1/v1_length1)
+    return norm
+
+
+#@register_instrument('AMERICAN MAGNETICS INC.', 'VECTOR')
+@register_instrument('AMERICAN MAGNETICS INC.', 'VECTOR', '1.0')
+class AmericanMagnetics_vector(BaseInstrument):
+    def __init__(self, magnet_x=None, magnet_y=None, magnet_z=None, max_vector_field=1, **kwargs):
+        """
+        magnet_x, y and z are AmericanMagnetics_model430 instruments (or for testing only MagnetSimul)
+                 They can be left as None if only some magnets are being used (the others are assumed to be
+                 at 0 Tesla. You should always load all powered on power supply otherwise you could
+                 produce an unacceptable condition.
+        max_vector_field is the maximum field when more than one magnet is on.
+        With this instrument, fields are always Tesla. Rates are always T/min
+        """
+        if magnet_x == magnet_y == magnet_z == None:
+            raise ValueError('At least one of the magnet needs to be specified.')
+        # TODO could also check for same address. Not required because it is not possible to open the same magnet twice right now.
+        if magnet_x is not None and magnet_x in ( magnet_y, magnet_z):
+            raise ValueError('Two magnets are the same..')
+        if magnet_y is not None and magnet_y in ( magnet_x, magnet_z):
+            raise ValueError('Two magnets are the same..')
+        self._magnet_x = magnet_x
+        self._magnet_y = magnet_y
+        self._magnet_z = magnet_z
+        self._magnets = [magnet_x, magnet_y, magnet_z]
+        self._magnets_name = ['x', 'y', 'z']
+        self._max_vector_field = max_vector_field
+        self._magnets_enable = [False]*3
+        mnmx = {min_field=[None]*3, max_field=[None]*3,
+                min_field_global=np.nan, max_field_global=np.nan,
+                min_rate_global=np.nan, max_rate_global=np.nan}
+        current_rate = [np.nan]*3
+        def adjust_mnmx1(func, base, val, index=None):
+            if index is not None:
+                mnmx[base_str][i] = val
+            s = base_str+'_global'
+            mnmx[s] = func(mnmx[s], val)
+        for i, (magnet, name) in enumerate(zip(self._magnets, self._magnets_name)):
+            if magnet:
+                self._magnets_enable[i] = True
+                if not isinstance(magnet, (AmericanMagnetics_model430, MagnetSimul)):
+                    raise ValueError('magnet%s_ is of the wrong type (should be AmericanMagnetics_model430)'%name)
+                if mangnet.ramp_rate_segment_count.get() > 1:
+                    raise ValueError('magnet%s_ should only have one ramp_rate segment.'%name)
+                adjust_mnmx1(max, 'min_field', instr.field_target_T.min, i)
+                adjust_mnmx1(min, 'max_field', instr.field_target_T.max, i)
+                adjust_mnmx1(max, 'min_rate', instr.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].min)
+                adjust_mnmx1(min, 'max_rate', instr.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].max)
+                current_rate[i] = magnet.ramp_rate_field_T.get(unit='min')
+        self._magnets_lims = dict_improved(mnmx)
+        super(AmericanMagnetics_vector, self).__init__(**kwargs)
+        min_current_rate = min(current_rate)
+        if max(np.array(current_rate)/min_current_rate) > 1.001:
+            # only change ramp_rate if difference is larger than 1.001
+            self.ramp_rate.set(min_current_rate)
+
+    def _ramp_rate_check(self, val):
+        for magnet in self._magnets
+            if magnet:
+                magnet.ramp_rate_filed_T.check(val, unit='min')
+    def _ramp_rate_setdev(self, val):
+        for magnet in self._magnets
+            if magnet:
+                magnet.ramp_rate_filed_T.set(val, unit='min')
+    def _ramp_rate_getdev(self, val):
+        for magnet in self._magnets
+            if magnet:
+                # return first value
+                return magnet.ramp_rate_filed_T.get(val)[0]
+
+    def _field_getformat(self, unit='rect'):
+        pass
+    def _field_getdev(self, unit='rect'):
+        pass
+
+    # actually need to set different rates to go in a straight line.
+
+    def _clean_up(self, xyz):
+        xyz = np.where(np.abs(xyz) < _Abs_Tol, 0)
+        return xyz
+    def _check(self, xyz):
+        #xyz = self._clean_up(xyz)
+        all_zeros = [ np.all(f==0.) for f in xyz ]
+        for f, enable in zip(xyz, self._magnets_enable):
+            if not enable and np.any(f != 0.):
+                raise ValueError(self.perror('Request of an invalid field'))
+        mg_lims = self._magnets_lims
+        if np.sum(all_zeros) == 2:
+            i = all_zeroes.index(False)
+            mn, mx = mg_lims.min_field[i], mg_lims.max_field[i]
+            if np.any(xyz[i] > mx) or np.any(xyz[i] < mn):
+                raise ValueError(self.perrir('Requested field bigger than axis min/max')
+        else:
+            r = self._length(xyz)
+            if r > self._max_vector_field:
+                raise ValueError(self.perrir('Requested field bigger than max_vector_field')
+
+    def _calculate_sequence(self, start, stop, only_rotation=False):
+        # TODO use max_error to calculate a sequence between the 2 points.
+        # Find the points and the rates that will satisfy the requirement.
+        # Here find the theoretical path.
+        # Later we will have to check the real path using the real ramp_rate to check we stay within the error.
+        # Also decice if start is real field or starting target.
+        start = self._clean_up(start)
+        stop = self._clean_up(stop)
+        self._check(stop)
+        max_error = self.max_error.get()
+        if only_rotation:
+            start_rtp = to_spherical(start)
+            r = start_rtp[0]
+            stop_rtp = to_spherical(stop)
+            if approx_equal(r, stop_rtp[0]):
+                raise ValueError(self.perror('Requested a pure rotation, but start/stop change the magnitude.'))
+            th_phi = self._find_rotation_sequence(r, start_rtp[1:], stop_rtp[1:], max_error)
+            all_points_rtp = np.concatenate( (np.full((len(th_phi), 1), r), th_phi), axis=1)
+            all_points = np.concatenate( (start, to_cartesian(all_points_rtp.T), axis=1)
+        else:
+            all_points = np.array([start, stop]).T
+        dif = np.diff(all_points)
+        max_ramp_rate = self.ramp_rate.get()
+        ramp_time = np.max(dif, axis=0, keep_dims=True)/max_ramp_rate
+        ramp_rates = dif/ramp_time
+        return all_points, dif, ramp_rates, max_error
+
+
+    def _rotation_max_error_internal(xyz_start, xyz_end, r):
+        L = lenght(xyz_end - xyz_start)
+        return r - sqrt(r**2 - (L/2.)**2)
+
+    def _rotation_max_error_xyz(self, xyz_start, xyz_end):
+        r_start = lenght(xyz_start)
+        r_end = lenght(xyz_end)
+        if not approx_equal(r_start, r_end):
+            raise ValueError('_rotation_max_error_xyz needs both vector to be the same length')
+        return self._rotation_max_error_internal(xyz_start, xyz_end, r_start)
+
+    def _rotation_max_error(self, r, th_phi_start, th_phi_end):
+        # r is the same for start and end.
+        # The max distance is exactly between start and end
+        # It is between the circle radius (r) and the midpoint (of a triangle)
+        xyz_start = to_cartesian([r]+list(th_phi_start), deg=True)
+        xyz_end = to_cartesian([r]+list(th_phi_end), deg=True)
+        return self._rotation_max_error_internal(xyz_start, xyz_end, abs(r))
+
+    def _find_rotation_sequence(self, r, th_phi_start, th_phi_end, max_error, shortest=False):
+        if shortest:
+            # normalize the start/end
+            th_phi_start = to_spherical(to_cartesian([r]+list(th_phi_start))
+            th_phi_end = to_spherical(to_cartesian([r]+list(th_phi_end))
+        th_phi_diff = th_phi_end - th_phi_start
+        th_phi_diff = (th_phi_diff + 360) % 720 - 360 #  keep th_phi between -360 and +360 def
+        if shortest:
+            # we limit to +- 180 deg
+            th_phi_diff += np.where(th_phi_diff > 180, -360, 0)
+            th_phi_diff += np.where(th_phi_diff < 180, +360, 0)
+        half = False
+        if np.any(abs(th_phi_diff)>180):
+            th_phi_diff = th_phi_diff/2
+            half = True
+        th_phi_end = th_phi_start + th_phi_diff
+        error = self._rotation_max_error(r, th_phi_start, th_phi_end)
+        N = 1
+        if error > max_error:
+            # we minimize the rotation_max_error
+            xyz_start = to_cartesian([r]+list(th_phi_start))
+            xyz_end = to_cartesian([r]+list(th_phi_end))
+            unit1 = normalize(xyz_start)
+            unit2 = normalize(xyz_end)
+            unit12 = np.dot(unit1, unit2)
+            rot_angle = np.arccos(unit12)
+            unit_perp = normalize(unit2 - unit1*unit12)
+            froot = lambda x: self._rotation_max_error_xyz([r,0,0], [r*cos(rot_angle*x), r*sin(rot_angle*x),0]) - max_error
+            sol = root_scalar(froot, method='brentq', bracket=(0., 1.), xtol=1e-6, maxiter=1000)
+            if not sol.converged:
+                raise RuntimeError('Something went wrong finding the rotation sequence. (%r)'%sol)
+            x = sol.root
+            N = np.ceil(1./x)
+        if half:
+            N *= 2
+        steps = arange(1, N+1)/N
+        th_phi = th_phi_start + th_phi_diff * steps[:, None]
+        # rt = rot_angle * steps
+        # xyz_s = r*(unit1*cos(rt) + unit_perp*sin(rt))
+        return th_phi
+
+    def _ramp_it_helper(self, target, last=False):
+        if last:
+            print 'Last ramp'
+        print 'Going to:', target
+        
+        
+    def _ramp_it_rtp(self, start, stop, only_rotation=True):
+        """ only_rotation can be True, False or 'auto'
+              in which case it will be True if r is unchanged between start/stop.
+        """
+        if approx_equal(start[0], stop(0)):
+            if only_rotation == 'auto':
+                only_rotation = True
+        elif only_rotation = True:
+                raise ValueError('Request for rotation but r is changing.')
+        if only_rotation == 'auto':
+            only_rotation = False
+        start_xyz = to_cartesian(start)
+        stop_xyz = to_cartesian(stop)
+        self._ramp_it_xyz(start_xyz, stop, only_rotation)
+
+    def _line_max_error(self, dif, rate):
+        dif_pos = abs(dif)
+        t_first = min(dif_pos/rate)
+        delta = length(real_rate*t_first - dif_pos)
+        return delta
+
+
+    def _ramp_it_xyz(self, start, stop, only_rotation=False):
+        all_points, difs, ramp_rates, max_error = self._calculate_sequence(start, stop, only_rotation)
+        N = len(difs)
+        for i, (point, dif, rate) in enumerate(zip(all_points[1:], difs, ramp_rates)):
+            is_last = i == N-1
+            # set ramp rate (making sure it is accepted)
+            # get real ramp rate
+            real_rate = np.array([1.,1.,1.])
+            delta = self._line_max_error(dif, real_rate)
+            if delta > max_error:
+                start = all_points[i]
+                N2 = np.ceil(delta/max_error)
+                dif_n = dif/N2
+                targets = start + dif_n*np.arange(1, N2+1)[:, None]
+                prev = start
+                for j, target in enumerate(targets):
+                    is_last2 = is_last and j == N2 - 1
+                    self.ramp_it_helper(target, is_last2)
+                    print 'Iter i,j=%i,%i  error=%.8f'%(i,j, self._line_max_error(target-prev, real_rate))
+                    prev = target
+            else:
+                self.ramp_it_helper(point, is_last)
+                print 'Iter i=%i  error=%.8f'%(i, self._line_max_error(point-all_points[0], real_rate))
+            if only_rotation:
+                print 'rotation error=%.8f'%(self._rotation_max_error_xyz(all_points[0], point))
+
+        
+    def _create_devs(self):
+        self.max_error = MemoryDevice(1e-3, min=1e-6, max=1e3)
+        self.ramp_rate = MemoryDevice(1e-3, min=1e-6, max=1, doc='In unit of T/min')
+        self._devwrap('ramp_rate')
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
