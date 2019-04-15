@@ -111,10 +111,10 @@ in a readlike fashion. You can start your own ipython with those options like th
 
 To have an improved windows console, you can install ConsoleZ
 (https://github.com/cbucher/console). I provide a starting console.xml config file
-in extra/console.xml. It can be copied to %USERPROFILE%\AppData\Roaming\Console\console.xml
+in extra/console.xml. It can be copied to %USERPROFILE%\\AppData\\Roaming\\Console\\console.xml
 then the different tabs can be modified/removed depending on your personal setup.
-(It presumes anaconda is installed in C:\Anaconda2 or C:\Anaconda3 and that for 3 it the python2
-is in C:\Anaconda3\envs\py2)
+(It presumes anaconda is installed in C:\\Anaconda2 or C:\\Anaconda3 and that for 3 it the python2
+is in C:\\Anaconda3\\envs\\py2)
 
 Installation
 --------------
