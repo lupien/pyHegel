@@ -93,12 +93,28 @@ Requirements
 - pywin32 is needed on windows platforms
 - some other packages depending on the instruments.
 
-An easy way to obtain most of these on windows is to intall Python(x,y)
-(https://code.google.com/p/pythonxy/) and use the custom install to install
-everything. That is the distribution used by the maintainers on windows and
-pyHegel provides shortcuts to use the improved console packaged with it
-(ConsoleZ: https://github.com/cbucher/console).
+An easy way to obtain most of these on windows is to intall the Anaconda Distribution
+(https://www.anaconda.com/distribution/). That includes python, numpy, scipy and matplotlib.
+Others like PyVISA and PyPDF2 can be installed can be install from the command line using:
 
+    pip install pyVisa
+    pip install PyPDF2
+
+or using the conda package installer like:
+
+    conda install pyserial
+
+Note that pyHegel starts ipython in pylab mode with autocall enabled and with completions
+in a readlike fashion. You can start your own ipython with those options like this:
+
+    ipython --pylab --TerminalInteractiveShell.display_completions=readlinelike --autocall=1
+
+To have an improved windows console, you can install ConsoleZ
+(https://github.com/cbucher/console). I provide a starting console.xml config file
+in extra/console.xml. It can be copied to %USERPROFILE%\AppData\Roaming\Console\console.xml
+then the different tabs can be modified/removed depending on your personal setup.
+(It presumes anaconda is installed in C:\Anaconda2 or C:\Anaconda3 and that for 3 it the python2
+is in C:\Anaconda3\envs\py2)
 
 Installation
 --------------
