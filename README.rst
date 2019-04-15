@@ -95,17 +95,17 @@ Requirements
 
 An easy way to obtain most of these on windows is to intall the Anaconda Distribution
 (https://www.anaconda.com/distribution/). That includes python, numpy, scipy and matplotlib.
-Others like PyVISA and PyPDF2 can be installed can be install from the command line using:
+Others like PyVISA and PyPDF2 can be installed can be install from the command line using::
 
     pip install pyVisa
     pip install PyPDF2
 
-or using the conda package installer like:
+or using the conda package installer like::
 
     conda install pyserial
 
 Note that pyHegel starts ipython in pylab mode with autocall enabled and with completions
-in a readlike fashion. You can start your own ipython with those options like this:
+in a readlike fashion. You can start your own ipython with those options like this::
 
     ipython --pylab --TerminalInteractiveShell.display_completions=readlinelike --autocall=1
 
@@ -119,20 +119,20 @@ is in C:\Anaconda3\envs\py2)
 Installation
 --------------
 
-Download the distribution to some directory on your computer
+Download the distribution to some directory on your computer ::
 
     git clone https://github.com/lupien/pyHegel.git
 
 You can then use it from there directly by calling the pyHegel.py script at the
 base of the distributions.
 
-However you can install it either in develop mode
+However you can install it either in develop mode ::
 
     python setup.py develop
 
 which will keep the current directory the active one (so the code can be
 modified there) but updates python so it finds the module correctly and creates
-the pyHegel command so you can start a session. Or use a full install
+the pyHegel command so you can start a session. Or use a full install ::
 
     python setup.py install
 
