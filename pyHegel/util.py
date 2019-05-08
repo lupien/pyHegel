@@ -41,6 +41,7 @@ This module contains many utilities:
     read_blueforsGauges
     sort_file
     find_index_closest
+    function_cached
 Conversion functions and time constants calculation helpers:
     dB2A, dB2P, P2dB, A2dB
     dBm2o, o2dBm
@@ -787,6 +788,25 @@ def read_blueforsGauges(filename):
     # unit: 0:mbar, 1:Torr, 2:Pascal
     v = [[t]+[float(x) for x in vals[3::6]] for t, vals in v]
     return np.array(v).T
+
+
+def function_cached(filename, fct, *args, **kwargs):
+    """
+    Spits out the result of fct(*args, **kwargs) using "filename" cache file to
+    speed things up.
+    
+    It loads the results from *filename* if it exists, otherwise it computes 
+    fct(*args, **kwargs) and caches the resul to *filename*.
+
+    Especially useful for long calculations or loading tons of plaintext data. 
+    """
+    if os.path.isfile(filename):
+        tmp = np.load(filename)['arr_0']
+    else:
+        tmp = fct(*args, **kwargs)
+        np.savez_compressed(filename, tmp)
+    return tmp
+
 
 #########################################################
 # Conversion functions, time constants calcs
