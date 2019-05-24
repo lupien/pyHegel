@@ -139,7 +139,7 @@ class rs_sgma(visaInstrument):
                 d[name] = v
         return ret
 
-    def _apply_helper(self, val, dev_obj):
+    def _apply_helper(self, val, dev_obj, **kwargs):
         lo_f = self.LO_freq.get()
         lo_p = self.LO_power.get()
         self._othergenset(lo_f, lo_p)
