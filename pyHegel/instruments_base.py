@@ -2037,7 +2037,7 @@ class scpiDevice(BaseDevice):
         command = command.format(val=val, **options)
         self.instr.write(command, **self._ask_write_opt)
         if self._extra_set_after_func:
-            self._extra_set_after_func(val, self)
+            self._extra_set_after_func(val, self, **options)
     def _getdev(self, **kwarg):
         if self._getdev_cache:
             if kwarg == {}:
