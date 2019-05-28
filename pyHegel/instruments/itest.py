@@ -456,7 +456,7 @@ class iTest_be214x(visaInstrument):
         return dict(vendor=vm[0], model=parts_idn[0], serial=sf[0], firmware=sf[-1])
 
     def trig_all(self):
-        self.write('TRIGger:INput:INITiate:ALL')
+        self.write(self._pre+'TRIGger:INput:INITiate:ALL')
 
     def trig(self, ch=None):
         if ch is not None:
@@ -567,9 +567,9 @@ class iTest_be214x(visaInstrument):
             base1 = self._conf_helper('output_en', 'level', 'range', 'range_auto_en', 'slope',
                                  'saturation_pos', 'saturation_neg',
                                  'ready_treshold', 'alarm_status', 'delay_start', 'delay_stop', 'halt_en')
-            base1 += self._conf_helper('trigger_mode', 'trigger_source', 'trigger_edge_falling_en', 'trigger_delay', 'step_amplitude', 'step_width')
-            if hasattr(self, 'current_compliance'):
-                base1 += self._conf_helper('current_compliance', 'current_limit_en', 'current_limit_lower', 'current_limit_upper', 'current_limit_delay')
+            base1 += self._conf_helper('trigger_mode', 'trigger_edge_falling_en', 'trigger_delay', 'step_amplitude', 'step_width')
+            if hasattr(self, 'current_limit_en'):
+                base1 += self._conf_helper('current_limit_en', 'current_limit_lower', 'current_limit_upper', 'current_limit_delay')
             base.append(base1)
 
         self.current_channel.set(orig_ch)
@@ -676,6 +676,8 @@ class iTest_be214x(visaInstrument):
                 extra_set_after_func=extra_set_level,
                 options=dict(trig=True), options_conv=dict(trig=lambda v,s:v))
 
+        # Technically VOLTage:RANGe:LIST? is addressed to a specific channel, however they all return the same result (from email).
+        #  email refers to Mathieu PANEL <m.panel@itest.fr>, Re: Fwd: problèmes avec BE2142, 2019-05-28
         range_list = map(float, self.ask(pre+'VOLTage:RANGe:LIST?').split(','))
         extra_check_output_en = ProxyMethod(self._extra_check_output_en)
         range_doc = """
@@ -687,9 +689,6 @@ class iTest_be214x(visaInstrument):
         range_auto_en_extra_set = ProxyMethod(self._range_auto_en_extraset)
         self.range_auto_en = devChannelOption('VOLTage:RANGe:AUTO', str_type=bool, extra_set_func=range_auto_en_extra_set)
         self.slope =  devChannelOption('VOLTage:SLOPe', str_type=scaled_float(1e3), doc='in V/s', min=1.2e-3, max=1e2)
-        # STATE seems to do the same as output but has more options: ),0,OFF ;1 ON ; 2 WARNING ; 3,ALARm
-        #self.output_en =  scpiDevice(pre+'OUTPut', str_type=bool)
-        #self._devwrap('output_en')
         output_en_extra_set = ProxyMethod(self._output_en_extraset)
         self.output_en = devChannelOption('OUTPut', str_type=bool, extra_set_func=output_en_extra_set,
                 extra_set_after_func=extra_set_level,
@@ -697,8 +696,6 @@ class iTest_be214x(visaInstrument):
         self.meas_out_volt = devChannelOption(getstr='MEASure:VOLTage?', str_type=float)
         if enable_current:
             self.meas_out_current = devChannelOption(getstr='MEASure:CURRent?', str_type=float)
-            # compliance can't be changed right now 2019-05-23
-            self.current_compliance = devChannelOption('CURRent', str_type=float, min=-15e-3, max=15e-3)
         self.meas_out_minmax = devChannelOption(getstr='MMX:VOLTage?', str_type=decode_float64, doc='get the minimum/maximum measurements since the last call', multi=['min', 'max'])
         self.ramping_fraction = devChannelOption(getstr='VOLTage:STATus?', str_type=float)
         self.saturation_pos = devChannelOption('VOLTage:SAT:POS', choices=Choice_float_extra(dict(MAX=999), min=0, max=12), doc='999 is used to turn of checking')
@@ -706,8 +703,8 @@ class iTest_be214x(visaInstrument):
         self.delay_start = devChannelOption('STARt:DELay', str_type=scaled_float(1e-3), min=10e-3, max=60, setget=True)
         self.delay_stop = devChannelOption('STOP:DELay', str_type=scaled_float(1e-3), min=0, max=50e-3, setget=True)
         self.trigger_mode = devChannelOption('TRIGger:Input', choices=ChoiceIndex(['OFF', 'TRIG', 'STAIR', 'STEP', 'AUTO']), doc='OFF/TRIG are the same as EXP/RAMP in the manual')
-        # TODO check trigger_source working and if requires ch
-        self.trigger_source = devChannelOption('TRIGger:Input:SOURce', choices=ChoiceIndex(['chassis', 'module', 'both']))
+        # Trigger source cannot be changed according to manual rev 1.5 (and email)
+        #self.trigger_source = scpiDevice(pre+'TRIGger:Input:SOURce', choices=ChoiceIndex(['chassis', 'module', 'both']))
         self.trigger_delay = devChannelOption('TRIGger:INput:DELay', str_type=scaled_float(1e-3), min=0, max=60, setget=True)
         self.trigger_edge_falling_en = scpiDevice(pre+'TRIGger:INput:EDGE', str_type=bool)
         self.step_amplitude = devChannelOption('VOLTage:STep:AMPLitude', str_type=float, min=1.2e-6, max=12)
@@ -725,8 +722,7 @@ class iTest_be214x(visaInstrument):
             self.current_limit_upper = devChannelOption('LIMit:CURRent:UPPer', str_type=float)
             self.current_limit_lower = devChannelOption('LIMit:CURRent:LOWer', str_type=float)
             self.current_limit_delay = devChannelOption('LIMit:DELay', str_type=scaled_float(1e-3), min=0, max=60, setget=True)
-        # I don't think halt does anything here. 2019-05-23
-        self.halt_en = devChannelOption('HALT:STATe', str_type=bool)
+        self.halt_en = devChannelOption('HALT:STATe', str_type=bool, doc="To be effective requires the use of the safety stop interlock (remove internal jumper).")
         fkey_doc = """
         You can program the front panel F1/F2 keys (if present).
         A program example is (To ramp all voltages to 0V):
@@ -743,4 +739,5 @@ class iTest_be214x(visaInstrument):
 
 # observations:
 #   OFF trigger_mode is a jump, not a ramp like for BE2102
+# There is also an internal limit that turns off all 4 inputs if one goes above 20 mA (from email)
 
