@@ -286,7 +286,9 @@ class iTest_be2102(visaInstrument):
         if val and self.range_auto_en.getcache():
             # This is to update the cache so level check works correctly
             self.range.get()
-        if self.output_en.get() and not val:
+        output_en = self.output_en.get()
+        self._output_en_prev_val = output_en # used in extraset_after
+        if output_en and not val:
             # we go from on to off, ramp down
             self.level.set(0)
             self._ramp_wait()
@@ -314,6 +316,18 @@ class iTest_be2102(visaInstrument):
                     prev_f = f
                     wait(.05)
                     progress('ramp progress: %.3f'%f)
+
+    def _output_en_extraset_after(self, val, dev_obj, **kwargs):
+        if not val:
+            # do nothing when disabling.
+            # might wait delay_stop
+            return
+        # we are going to True
+        if self._output_en_prev_val:
+            # already True, no need to wait
+            return
+        delay = self.delay_start.get()
+        wait(delay)
 
     def _ramp_setdev(self, val):
         prev_val = self.level.get()
@@ -353,7 +367,9 @@ class iTest_be2102(visaInstrument):
         #self.output_en =  scpiDevice(pre+'OUTPut', str_type=bool)
         #self._devwrap('output_en')
         output_en_extra_set = ProxyMethod(self._output_en_extraset)
-        self.output_en = scpiDevice(pre+'OUTPut', str_type=bool, extra_set_func=output_en_extra_set)
+        output_en_extra_set_after = ProxyMethod(self._output_en_extraset_after)
+        self.output_en = scpiDevice(pre+'OUTPut', str_type=bool, extra_set_func=output_en_extra_set,
+                                     extra_set_after_func=output_en_extra_set_after)
         self.filter_fast_en = scpiDevice(pre+'VOLTage:FILter', str_type=bool, extra_check_func=extra_check_output_en, doc='slow is 100ms, fast is 10ms')
         self.temp_ready_status = scpiDevice(getstr=pre+'TEMPerature:STATus?', str_type=bool)
         self.meas_out = scpiDevice(getstr=pre+'MEASure:VOLTage?', str_type=float)
@@ -592,7 +608,9 @@ class iTest_be214x(visaInstrument):
         if val and self.range_auto_en.getcache():
             # This is to update the cache so level check works correctly
             self.range.get()
-        if self.output_en.get() and not val:
+        output_en = self.output_en.get()
+        self._output_en_prev_val = output_en # used in extraset_after
+        if output_en and not val:
             # we go from on to off, ramp down
             self.level.set(0)
             self._ramp_wait()
@@ -634,11 +652,15 @@ class iTest_be214x(visaInstrument):
             if not val:
                 # ramp down will trigger if necessary
                 return
-            delay = self.delay_start.get()
-            wait(delay + 0.05) # needs to wait before trig after output_en True
+            # we are going to True
+            if not self._output_en_prev_val:
+                # if we are off, we need to wait
+                delay = self.delay_start.get()
+                wait(delay + 0.05) # needs to wait before trig after output_en True
         if kwargs.pop('trig', False):
             self.trig()
         if dev_obj == self.output_en:
+            # get here if we were off, going to True. trig has been called (possibly).
             self._ramp_wait()
 
     def _create_devs(self):
