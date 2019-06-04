@@ -327,6 +327,10 @@ class iTest_be2102(visaInstrument):
 
     def _create_devs(self):
         pre = self._pre + ';'
+        model_name = self.idn_local().split(',')[0]
+        if len(model_name) != 4 or not model_name.startswith('210') or model_name[3] not in ['1', '2']:
+            raise RuntimeError(self.perror('Unable to detect a valid model_number (2101 or 2102).'))
+
         # No need for setget. The instruments returns the set value with 8 significant digits
         self.module_name = scpiDevice(pre+'NAMe', str_type=quoted_string())
         self.module_channels_indep = scpiDevice(getstr=pre+'IMC?', str_type=bool)
@@ -640,9 +644,9 @@ class iTest_be214x(visaInstrument):
     def _create_devs(self):
         pre = self._pre + ';'
         pre_ch = self._pre + ';C{ch};' # the actual command is Channel
-        model_name = self.ask(pre+'*idn?').split(',')[0]
+        model_name = self.idn_local().split(',')[0]
         if len(model_name) != 4 or not model_name.startswith('214') or model_name[3] not in ['1', '2']:
-            self.perror('Unable to detect a valid model_number (2141 or 2142). Will disable current reading.')
+            raise RuntimeError(self.perror('Unable to detect a valid model_number (2141 or 2142).'))
         enable_current = True if model_name[3] == '2' else False
         # Changing slot with i1 resets the selected channel to 1
         # so always set the channel after changing slot
