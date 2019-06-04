@@ -37,7 +37,7 @@ from ..types import dict_improved
 
 import time
 from numpy import sign, abs, sqrt, sin, cos, pi
-from scipy.optimize import root_scalar
+from scipy.optimize import brentq
 
 
 
@@ -610,9 +610,9 @@ class AmericanMagnetics_vector(BaseInstrument):
         self._magnets_name = ['x', 'y', 'z']
         self._max_vector_field = max_vector_field
         self._magnets_enable = [False]*3
-        mnmx = {min_field=[None]*3, max_field=[None]*3,
+        mnmx = dict(min_field=[None]*3, max_field=[None]*3,
                 min_field_global=np.nan, max_field_global=np.nan,
-                min_rate_global=np.nan, max_rate_global=np.nan}
+                min_rate_global=np.nan, max_rate_global=np.nan)
         current_rate = [np.nan]*3
         def adjust_mnmx1(func, base, val, index=None):
             if index is not None:
@@ -639,15 +639,15 @@ class AmericanMagnetics_vector(BaseInstrument):
             self.ramp_rate.set(min_current_rate)
 
     def _ramp_rate_check(self, val):
-        for magnet in self._magnets
+        for magnet in self._magnets:
             if magnet:
                 magnet.ramp_rate_filed_T.check(val, unit='min')
     def _ramp_rate_setdev(self, val):
-        for magnet in self._magnets
+        for magnet in self._magnets:
             if magnet:
                 magnet.ramp_rate_filed_T.set(val, unit='min')
     def _ramp_rate_getdev(self, val):
-        for magnet in self._magnets
+        for magnet in self._magnets:
             if magnet:
                 # return first value
                 return magnet.ramp_rate_filed_T.get(val)[0]
@@ -673,11 +673,11 @@ class AmericanMagnetics_vector(BaseInstrument):
             i = all_zeroes.index(False)
             mn, mx = mg_lims.min_field[i], mg_lims.max_field[i]
             if np.any(xyz[i] > mx) or np.any(xyz[i] < mn):
-                raise ValueError(self.perrir('Requested field bigger than axis min/max')
+                raise ValueError(self.perror('Requested field bigger than axis min/max'))
         else:
             r = self._length(xyz)
             if r > self._max_vector_field:
-                raise ValueError(self.perrir('Requested field bigger than max_vector_field')
+                raise ValueError(self.perror('Requested field bigger than max_vector_field'))
 
     def _calculate_sequence(self, start, stop, only_rotation=False):
         # TODO use max_error to calculate a sequence between the 2 points.
@@ -697,7 +697,7 @@ class AmericanMagnetics_vector(BaseInstrument):
                 raise ValueError(self.perror('Requested a pure rotation, but start/stop change the magnitude.'))
             th_phi = self._find_rotation_sequence(r, start_rtp[1:], stop_rtp[1:], max_error)
             all_points_rtp = np.concatenate( (np.full((len(th_phi), 1), r), th_phi), axis=1)
-            all_points = np.concatenate( (start, to_cartesian(all_points_rtp.T), axis=1)
+            all_points = np.concatenate( (start, to_cartesian(all_points_rtp.T)), axis=1)
         else:
             all_points = np.array([start, stop]).T
         dif = np.diff(all_points)
@@ -729,8 +729,8 @@ class AmericanMagnetics_vector(BaseInstrument):
     def _find_rotation_sequence(self, r, th_phi_start, th_phi_end, max_error, shortest=False):
         if shortest:
             # normalize the start/end
-            th_phi_start = to_spherical(to_cartesian([r]+list(th_phi_start))
-            th_phi_end = to_spherical(to_cartesian([r]+list(th_phi_end))
+            th_phi_start = to_spherical(to_cartesian([r]+list(th_phi_start)))
+            th_phi_end = to_spherical(to_cartesian([r]+list(th_phi_end)))
         th_phi_diff = th_phi_end - th_phi_start
         th_phi_diff = (th_phi_diff + 360) % 720 - 360 #  keep th_phi between -360 and +360 def
         if shortest:
@@ -754,7 +754,7 @@ class AmericanMagnetics_vector(BaseInstrument):
             rot_angle = np.arccos(unit12)
             unit_perp = normalize(unit2 - unit1*unit12)
             froot = lambda x: self._rotation_max_error_xyz([r,0,0], [r*cos(rot_angle*x), r*sin(rot_angle*x),0]) - max_error
-            sol = root_scalar(froot, method='brentq', bracket=(0., 1.), xtol=1e-6, maxiter=1000)
+            root, sol = brentq(froot, 0., 1., xtol=1e-6, maxiter=1000, full_output=True, disp=False)
             if not sol.converged:
                 raise RuntimeError('Something went wrong finding the rotation sequence. (%r)'%sol)
             x = sol.root
@@ -780,7 +780,7 @@ class AmericanMagnetics_vector(BaseInstrument):
         if approx_equal(start[0], stop(0)):
             if only_rotation == 'auto':
                 only_rotation = True
-        elif only_rotation = True:
+        elif only_rotation == True:
                 raise ValueError('Request for rotation but r is changing.')
         if only_rotation == 'auto':
             only_rotation = False
