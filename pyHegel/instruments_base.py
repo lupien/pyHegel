@@ -2031,13 +2031,14 @@ class scpiDevice(BaseDevice):
         if self._extra_set_func:
             if self._extra_set_func(val, self) == "__SKIP__NEXT__":
                 return
+        val_orig = val
         val = self._tostr(val)
         options = self._check_cache['options']
         command = self._setdev_p
         command = command.format(val=val, **options)
         self.instr.write(command, **self._ask_write_opt)
         if self._extra_set_after_func:
-            self._extra_set_after_func(val, self, **options)
+            self._extra_set_after_func(val_orig, self, **options)
     def _getdev(self, **kwarg):
         if self._getdev_cache:
             if kwarg == {}:
