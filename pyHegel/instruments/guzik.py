@@ -336,7 +336,7 @@ class guzik_adp7104(BaseInstrument):
         high_pass_filter_MHz = []
         for i in range(Nch):
             conv_offset.append(res_arr[i].common.data_offset)
-            conv_resolution.append(res_arr[i].common.ampl_resolution*1e3)
+            conv_resolution.append(res_arr[i].common.ampl_resolution*1e-3)
             low_pass_filter_MHz.append(res_arr[i].common.used_lpf_cutoff_frq_MHz)
             high_pass_filter_MHz.append(res_arr[i].common.used_hpf_cutoff_frq_MHz)
         sampling_period_ns = self._gsa_conf_ch.sampling_period_ns
