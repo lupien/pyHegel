@@ -84,7 +84,10 @@ def _add_enum_equivalent_old():
     class InterfaceType(object):
         gpib = constants.VI_INTF_GPIB
         asrl = constants.VI_INTF_ASRL
-        pxi = constants.VI_INTF_PXI
+        try:
+            pxi = constants.VI_INTF_PXI
+        except:
+            pxi = 5
         usb = constants.VI_INTF_USB
         tcpip = constants.VI_INTF_TCPIP
     constants.InterfaceType = InterfaceType
