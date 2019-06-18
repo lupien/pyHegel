@@ -439,14 +439,29 @@ class guzik_adp7104(BaseInstrument):
         else:
             dims = N
         if bits_16:
-            data = np.empty(dims, np.int16)
+            dtype = np.int16
         else:
-            data = np.empty(dims, np.uint8)
+            dtype = np.uint8
+        data = np.empty(dims, dtype)
+        #data[...] = 1
+        #print 'data init done!'
         data_2d = data if Nch>1 else data.reshape((1, -1))
         for i in range(Nch):
             res_arr[i].common.data.arr = data_2d[i].ctypes.data_as(POINTER(c_ubyte))
             res_arr[i].common.data.size = data_2d[i].nbytes
         self._gsa_data = data
+        # These are to try to obtain the res_arr[i].common.ampl_resolution
+        #  (and offset) updated
+        #   PREPARE is not enough. IMMEDIATE works but acts like a finish (does a full transfer)
+        #   could try to adjust data/array size but instead will contact guzik to find
+        #   a better way.
+        #arg.hdr.op_command = SDK.GSA_OP_PREPARE
+        #if SDK.GSA_Data_Multi(arg, Nch, res_arr) == SDK.GSA_FALSE:
+        #    raise RuntimeError(self.perror('Unable to finish preparing acq structure.'))
+        #arg.hdr.op_command = SDK.GSA_OP_IMMEDIATE_FINISH
+        #if SDK.GSA_Data_Multi(arg, Nch, res_arr) == SDK.GSA_FALSE:
+        #    raise RuntimeError(self.perror('Unable to force finish for acq structure.'))
+
 
     @staticmethod
     def conv_scale(data, res):
