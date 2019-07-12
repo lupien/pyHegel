@@ -342,17 +342,21 @@ class guzik_adp7104(BaseInstrument):
         sampling_period_ns = self._gsa_conf_ch.sampling_period_ns
         sampling_rate_GSs = 1./sampling_period_ns
         analog_bandwidth_MHz = self._gsa_conf_ch.analog_bandwidth_MHz
+        equalizer_en =  self._gsa_data_arg.common.equ_state != SDK.GSA_EQU_OFF
+        equalizer_mode =  self._gsa_data_arg.common.equ_state
         ret = locals()
         del ret['i'], ret['res_arr'], ret['self'], ret['SDK']
         return ret
 
-    def config(self, channels=None, n_S_ch=1024, bits_16=True, gain_dB=0.):
+    def config(self, channels=None, n_S_ch=1024, bits_16=True, gain_dB=0., equalizer_en=True):
         """
         if channels is None, it returns information about the current config.
         channels needs be a list of integer that represent the channels (1-4).
         It can also be a single integer
         bits_16 when False, returns 8 bit data.
         n_S_ch is the number of Sample per ch to read.
+        gain_dB is the gain in dB
+        equalizer_en when False turns off the FPGA equalizer.
         To free the memory, delete any user variable that remembers a previous result,
         than call config with a new size.
         """
@@ -408,6 +412,8 @@ class guzik_adp7104(BaseInstrument):
         arg.common.acq_adjust_up = SDK.GSA_TRUE
         arg.common.trigger_mode = SDK.GSA_DP_TRIGGER_MODE_IMMEDIATE
         arg.common.gain_dB = gain_dB
+        if not equalizer_en:
+            arg.common.equ_state = SDK.GSA_EQU_OFF
         ts = [np.zeros(10, np.uint) for i in range(4)]
         tf = [np.zeros(10, np.uint64) for i in range(4)]
         self._gsa_data_res_ts = ts # timestamp in seconds
