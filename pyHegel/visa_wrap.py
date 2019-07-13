@@ -183,7 +183,9 @@ def _visa_test_agilent(handle=None):
     if handle is None:
         handle = vpp43.visa_library()._handle
     _visa_lib_properties = _get_lib_properties(handle)
-    if 'agilent' in _visa_lib_properties['company'].lower():
+    company = _visa_lib_properties['company'].lower()
+    #print company
+    if 'agilent' in company or 'keysight' in company:
         _agilent_visa = True
     else:
         _agilent_visa = False
