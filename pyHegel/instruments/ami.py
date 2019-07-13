@@ -29,7 +29,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseInstrume
                             ChoiceStrings, ChoiceIndex, ChoiceLimits, ChoiceDevDep,\
                             make_choice_list, _fromstr_helper,\
                             decode_float64, visa_wrap, locked_calling, BaseDevice, mainStatusLine,\
-                            wait, release_lock_context
+                            wait, release_lock_context, resource_info
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 from .logical import ScalingDevice
 from ..types import dict_improved
@@ -45,7 +45,26 @@ from scipy.optimize import brentq
 ##    American Magnetics, Inc. Power Supply
 #######################################################
 
+# Firmware 2.59
+#   Added
+#      port 7185 (without hello stuff)
+#      CONFigure:LOCK:INDuctance, LOCK:INDuctance?
+#      CONFigure:LOCK:OPLimit, LOCK:OPLimit?
+#      *LED? #documentation rev9 for this is wrong. it is a integer (with bit field?)
+#     CONFigure:STABility:MODE, CONFigure:STABility:RESistor, STABility:MODE?, STABility:RESistor?
+#     CONFigure:INDuctance, INDuctance?, INDuctance:SENSe?
+#     CONFigure:PSwitch:TRANsition, PSwitch:TRANsition?
+#     CONFigure:OPLimit:MODE, CONFigure:OPLimit:ICSLOPE, CONFigure:OPLimit:ICOFFSET, CONFigure:OPLimit:TMAX, CONFigure:OPLimit:TSCALE, CONFigure:OPLimit:TOFFSET
+#     OPLimit:IC?, OPLimit:TEMP?, OPLimit:MODE?, OPLimit:ICSLOPE?, OPLimit:ICOFFSET?, OPLimit:TMAX?, OPLimit:TSCALE?, OPLimit:TOFFSET?
+#     QUenchFile?, QUenchBackup?
+#
+#   Removed
+#      INDuctance?
+#      CONFigure:CURRent:RATING, CURRent:RATING?
+#      CONFigure:LOCK:CURRent:RATING, LOCK:CURRent:RATING? # Note this is wrong in rev9 of the manual (it is present but does not work)
+
 @register_instrument('AMERICAN MAGNETICS INC.', 'MODEL 430')
+#@register_instrument('AMERICAN MAGNETICS INC.', 'MODEL 430', '2.59')
 #@register_instrument('AMERICAN MAGNETICS INC.', 'MODEL 430', '2.01')
 class AmericanMagnetics_model430(visaInstrument):
     """
@@ -77,13 +96,16 @@ class AmericanMagnetics_model430(visaInstrument):
     If magnet parameters are changed you should reload this device.
     address in the form:
        tcpip::A5076_Z-AX.local::7180::socket
-       port is 7180
+       port is 7180 or 7185 (with firmware >=2.59)
     """
     def __init__(self, visa_addr, max_ramp_rate=0.1, min_ramp_rate=1e-4, **kwargs):
         """ Set the max_ramp_rate, min_ramp_rate in A/s
         """
         kwargs['read_termination'] = '\r\n'
         kwargs['skip_id_test'] = True
+        self._port =  int(resource_info(visa_addr).resource_name.split('::')[2])
+        if self._port not in [7180, 7185]:
+            self.perror('Invalid port number in visa_addr (either 7180 or 7185).')
         self._conf_supply_cache = None
         self._conf_magnet_cache = None
         self._coil_constant = 0. # always in T/A
@@ -103,7 +125,10 @@ class AmericanMagnetics_model430(visaInstrument):
         conf_supply = self.conf_supply()
         self._coil_constant = scaleT = conf_magnet['coil_constant']
         scalekG = scaleT*10
-        max_current = min(conf_magnet['current_limit'], conf_magnet['current_rating'])
+        if not self._new_firmware:
+            max_current = min(conf_magnet['current_limit'], conf_magnet['current_rating'])
+        else:
+            max_current = conf_magnet['current_limit']
         min_current = -max_current if conf_supply['current_min'] != 0 else 0.
         self.current_target.max = max_current
         self.current_target.min = min_current
@@ -133,13 +158,6 @@ class AmericanMagnetics_model430(visaInstrument):
         self.ramp_rate_field_T.choices.fmts_lims[1] = (1e-4*scaleT, max_current*scaleT)
         self.ramp_rate_field_kG.choices.fmts_lims[1] = (1e-4*scalekG*10, max_current*scalekG)
         self._create_devs_helper() # to get logical devices return proper name (not name_not_found)
-
-    def init(self, full=False):
-        if full:
-            if self.read() != 'American Magnetics Model 430 IP Interface':
-                raise RuntimeError('Did not receive first expected message from instrument')
-            if self.read() != 'Hello.':
-                raise RuntimeError('Did not receive second expected message from instrument')
 
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
@@ -211,6 +229,7 @@ class AmericanMagnetics_model430(visaInstrument):
         volt_output_mode = ['0 to 5', '0 to 10', '-5 to 5', '-10 to 10', '-5 to 0', '0 to 8'][volt_output_mode]
         ret = locals()
         del ret['self']
+        del ret['use_cache']
         self._conf_supply_cache = ret
         return ret
 
@@ -222,15 +241,29 @@ class AmericanMagnetics_model430(visaInstrument):
         conv = lambda s: tuple(map(float, s.split(',')))
         stability_pct = float(self.ask('STABility?'))
         current_limit = float(self.ask('CURRent:LIMit?'))
-        current_rating = float(self.ask('CURRent:RATING?'))
+        if not self._new_firmware:
+            current_rating = float(self.ask('CURRent:RATING?'))
+            quench_rate = float(self.ask('QUench:RATE?'))
+        else:
+            stability_mode = ['auto', 'manual', 'test'][int(self.ask('STABility:MODE?'))]
+            stability_resistor_installed = do_bool(self.ask('STABility:RESistor?'))
+            persistent_switch_transition_mode = ['timer', 'voltage'][int(self.ask('PSwitch:TRANsition?'))]
+            inductance = float(self.ask('INDuctance?'))
+            quench_rate = int(self.ask('QUench:RATE?'))
+            #  Oplimit not active
+            #op_limit_mode = ['off', 'on_entry', 'cont_f(T)'][int(self.ask('OPLimit:MODE?'))]
+            #op_limit_ic_slope = float(self.ask('OPLimit:ICSLOPE?'))
+            #op_limit_ic_offset = float(self.ask('OPLimit:ICOFFSET?'))
+            #op_limit_t_max = float(self.ask('OPLimit:TMAX?'))
+            #op_limit_t_scale = float(self.ask('OPLimit:TSCALE?'))
+            #op_limit_t_offset = float(self.ask('OPLimit:TOFFSET?'))
         persistent_switch_installed = self.persistent_switch_installed.get()
         persistent_switch_current_mA = float(self.ask('PSwitch:CURRent?'))
         persistent_switch_heat_time = float(self.ask('PSwitch:HeatTIME?'))
         persistent_switch_cool_time = float(self.ask('PSwitch:CoolTIME?'))
         persistent_switch_cooling_gain_pct = float(self.ask('PSwitch:CoolingGAIN?'))
         persistent_switch_ramp_rate = self.persistent_switch_ramp_rate.get()
-        quench_detect_en = do_bool(self.ask('QUench:DETect?'))
-        quench_rate = float(self.ask('QUench:RATE?'))
+        quench_detect = ['off', 'current', 'temperature', 'both'][int(self.ask('QUench:DETect?'))] # only off, current for old firmware
         absober_installed = do_bool(self.ask('ABsorber?'))
         volt_limit = self.volt_limit.get()
         coil_constant = float(self.ask('COILconst?')) # this is either kG or T
@@ -252,7 +285,18 @@ class AmericanMagnetics_model430(visaInstrument):
         del ret['do_bool']
         del ret['conv']
         del ret['unit_field']
+        del ret['use_cache']
         self._conf_magnet_cache = ret
+        return ret
+
+    def _led_state_getdev(self):
+        val = int(self.ask('*LED?'))
+        ret = {}
+        ret['shift'] = bool(val&(1<<0))
+        ret['at_target'] = bool(val&(1<<1))
+        ret['persistent'] = bool(val&(1<<2))
+        ret['energized'] = bool(val&(1<<3))
+        ret['quenched'] = bool(val&(1<<4))
         return ret
 
     def _ramp_rate_field_checkdev_helper(self, unit=None, index=None):
@@ -430,6 +474,13 @@ class AmericanMagnetics_model430(visaInstrument):
         return self.current_magnet.get()
 
     def _create_devs(self):
+        if self._port == 7180:
+            if self.read() != 'American Magnetics Model 430 IP Interface':
+                raise RuntimeError('Did not receive first expected message from instrument')
+            if self.read() != 'Hello.':
+                raise RuntimeError('Did not receive second expected message from instrument')
+        fw_version = float(self.idn_split()['firmware'])
+        self._new_firmware = True if fw_version >= 2.59 else False
         self.ramp_wait_after = MemoryDevice(10., min=0.)
         self.persistent_wait_before = MemoryDevice(30., min=30., doc='This time is used to wait after a ramp but before turning persistent off')
         self.setpoint = scpiDevice('conf:current:target', 'current:target?', str_type=float)
@@ -462,7 +513,7 @@ class AmericanMagnetics_model430(visaInstrument):
         #self.ramp_rate_field = scpiDevice(getstr='RAMP:RATE:FIELD:1?', choices=ChoiceMultiple(['rate', 'max_field'], [float, float]),
         #            doc='Units are kG/s, T/s, kG/min or T/min see ramp_rate_unit and field_unit devices.')
         self.state = scpiDevice(getstr='STATE?', choices=ChoiceIndex(['ramping', 'holding', 'paused', 'ramping_manual_up', 'ramping_manual_down',
-                        'zeroing', 'quench', 'at_zero', 'heating_persistent_switch', 'cooling_persistent_switch'], offset=1))
+                        'zeroing', 'quench', 'at_zero', 'heating_persistent_switch', 'cooling_persistent_switch', 'ext_rampdown_active'], offset=1))
         self.persistent_switch_installed = scpiDevice('PSwitch:INSTalled?', str_type=bool)
         self.persistent_switch_ramp_rate = scpiDevice('CONFigure:PSwitch:PowerSupplyRampRate', 'PSwitch:PowerSupplyRampRate?', str_type=float, doc='Units are always A/s')
         self.persistent_switch_en = scpiDevice('PSwitch', str_type=bool)
@@ -482,6 +533,11 @@ class AmericanMagnetics_model430(visaInstrument):
                       choices=ChoiceMultiple(['rate', 'max_field'], [(float, rate_kG_lim), (float, (0, None))]),
                       allow_kw_as_dict=True, allow_missing_dict=True, allow_val_as_first_dict=True)
         self._devwrap('ramp_current', autoinit=False)
+        if self._new_firmware:
+            self._devwrap('led_state')
+            #self.op_limit_ic = scpiDevice(getstr='OPLimit:IC?', str_type=float)
+            #self.op_limit_temp = scpiDevice(getstr='OPLimit:TEMP?', str_type=float)
+
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
