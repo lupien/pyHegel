@@ -3187,12 +3187,14 @@ class visaInstrument(BaseInstrument):
           'USB0::0x0957::0x0118::MY49012345::0::INSTR'
           'USB::0x0957::0x0118::MY49012345'
     """
-    def __init__(self, visa_addr, skip_id_test=False, quiet_delete=False, keep_alive=False, keep_alive_time=15*60, **kwarg):
+    def __init__(self, visa_addr, skip_id_test=False, quiet_delete=False, keep_alive=False, keep_alive_time=15*60, no_visa_lock=False, **kwarg):
         """
         skip_id_test when True will skip doing the idn test.
         quiet_delete when True will prevent the print following an instrument delete
         keep_alive can True/False/'auto'. If auto, it is activated only when on a tcpip connection (hislip, socket, instr)
         keep_alive_time is the time in seconds between keep alive requests.
+        no_visa_lock when True prevents the use of the visa locking (thread locking is still used).
+                     This is useful if the visa library does not implement locking properly (like pyvisa-py)
 
         """
         # need to initialize visa before calling BaseInstrument init
@@ -3203,7 +3205,8 @@ class visaInstrument(BaseInstrument):
         self._keep_alive_thread = None
         if not CHECKING():
             self.visa = rsrc_mngr.open_resource(visa_addr, **kwarg)
-            self._lock_extra = Lock_Visa(self.visa)
+            if not no_visa_lock:
+                self._lock_extra = Lock_Visa(self.visa)
             #self.visa.timeout = 3 # in seconds
             # use 2.9 because I was getting 3.0 rounded to 10s timeouts on some visa lib configuration
             #     2.9 seemed to be rounded up to 3s instead
