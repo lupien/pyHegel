@@ -3504,7 +3504,7 @@ class visaInstrument(BaseInstrument):
 #    device status so it can still find out if the device is requesting service.
 
 class visaInstrumentAsync(visaInstrument):
-    def __init__(self, visa_addr, poll=False):
+    def __init__(self, visa_addr, poll=False, **kwarg):
         # poll can be True (for always polling) 'not_gpib' for polling for lan and usb but
         # use the regular technique for gpib
         # or force_handler to always use the handler
@@ -3514,7 +3514,7 @@ class visaInstrumentAsync(visaInstrument):
         self._async_last_status_time = 0
         self._async_last_esr = 0
         self._async_do_cleanup = False
-        super(visaInstrumentAsync, self).__init__(visa_addr)
+        super(visaInstrumentAsync, self).__init__(visa_addr, **kwarg)
         self._async_mode = 'srq'
         if CHECKING():
             is_gpib = False
