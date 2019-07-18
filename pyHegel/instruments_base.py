@@ -3187,7 +3187,8 @@ class visaInstrument(BaseInstrument):
           'USB0::0x0957::0x0118::MY49012345::0::INSTR'
           'USB::0x0957::0x0118::MY49012345'
     """
-    def __init__(self, visa_addr, skip_id_test=False, quiet_delete=False, keep_alive=False, keep_alive_time=15*60, no_visa_lock=False, **kwarg):
+    def __init__(self, visa_addr, skip_id_test=False, quiet_delete=False, keep_alive=False, keep_alive_time=15*60, no_visa_lock=False,
+                       timeout=2.9, **kwarg):
         """
         skip_id_test when True will skip doing the idn test.
         quiet_delete when True will prevent the print following an instrument delete
@@ -3195,6 +3196,7 @@ class visaInstrument(BaseInstrument):
         keep_alive_time is the time in seconds between keep alive requests.
         no_visa_lock when True prevents the use of the visa locking (thread locking is still used).
                      This is useful if the visa library does not implement locking properly (like pyvisa-py)
+        timeout is the visa timeout in seconds (default is 2.9s, often rounded to 3s; 3.0 was sometimes rounded up to 10s)
 
         """
         # need to initialize visa before calling BaseInstrument init
@@ -3207,10 +3209,7 @@ class visaInstrument(BaseInstrument):
             self.visa = rsrc_mngr.open_resource(visa_addr, **kwarg)
             if not no_visa_lock:
                 self._lock_extra = Lock_Visa(self.visa)
-            #self.visa.timeout = 3 # in seconds
-            # use 2.9 because I was getting 3.0 rounded to 10s timeouts on some visa lib configuration
-            #     2.9 seemed to be rounded up to 3s instead
-            self.set_timeout = 2.9 # in seconds
+            self.set_timeout = timeout
         to = time.time()
         self._last_rw_time = _LastTime(to, to) # When wait time are not 0, it will be replaced
         self._write_write_wait = 0.
