@@ -2444,7 +2444,6 @@ class ChoiceLimits(ChoiceBase):
         else:
             return 'Limits: %s <= val <= %s'%(self.min, self.max)
 
-
 class ChoiceStrings(ChoiceBase):
     """
        Initialize the class with a list of strings
@@ -2456,6 +2455,8 @@ class ChoiceStrings(ChoiceBase):
           ABCdef
        where: ABC is known as the short name and
               abcdef is known has the long name.
+       When the string has : separator, every part will be checked so for example
+          VOLTage:RATio will match voltage:ratio, volt:rat, volt:ratio voltage:rat
        When using in or searching with index method
              both long and short names are looked for
        normalizelong and normalizeshort return the above
@@ -2481,17 +2482,46 @@ class ChoiceStrings(ChoiceBase):
             # for short having '', use the long name instead
             # this happens for a string all in lower cap.
             self.short = [s if s!='' else l for s,l in zip(self.short, self.long)]
+            extra = {}
+            for i, v in enumerate(values):
+                if ':' in v:
+                    v_s = v.split(':')
+                    vl = [vi.lower() for vi in v_s]
+                    vs = [vi.translate(None, string.ascii_lowercase).lower() for vi in v_s]
+                    extra[i] = vl, vs
+            self.long_short = extra
+    def find_in_long_short(self, val):
+        if ':' not in val:
+            return None
+        val_s = val.split(':')
+        for i, v in self.long_short.iteritems():
+            vl, vs = v
+            if len(val_s) != len(vl):
+                continue
+            found = True
+            for val_si, vli, vsi in zip(val_s, vl, vs):
+                if val_si not in [vli, vsi]:
+                    found = False
+                    break
+            if found:
+                return i
+        return None
+
     def __contains__(self, x): # performs x in y; with y=Choice()
         xl = x.lower()
         inshort = xl in self.short
         inlong = xl in self.long
-        return inshort or inlong
+        inlongshort = self.find_in_long_short(xl) is not None
+        return inshort or inlong or inlongshort
     def index(self, value):
         xl = value.lower()
         try:
             return self.short.index(xl)
         except ValueError:
             pass
+        ret = self.find_in_long_short(xl)
+        if ret is not None:
+            return ret
         return self.long.index(xl)
     def normalizelong(self, x):
         return self.long[self.index(x)]
