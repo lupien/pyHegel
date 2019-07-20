@@ -2401,6 +2401,20 @@ class ChoiceBase(object):
     def __contains__(self, val):
         raise NotImplementedError, 'ChoiceBase subclass should overwrite __contains__'
 
+class ChoiceSimple(ChoiceBase):
+    """ This turns a list into a ChoiceBase with a specific converter """
+    def __init__(self, values, str_type=None):
+        self.values = values
+        self.str_type = str_type
+    def __call__(self, input_str):
+        return _fromstr_helper(input_str, self.str_type)
+    def tostr(self, val):
+        return _tostr_helper(val, self.str_type)
+    def __contains__(self, val):
+        return val in self.values
+    def __repr__(self):
+        return repr(self.values)
+
 class ChoiceLimits(ChoiceBase):
     """
     This ChoiceBase implements a min/max check.
