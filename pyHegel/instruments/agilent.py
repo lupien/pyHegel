@@ -477,12 +477,13 @@ class agilent_multi_34410A(visaInstrumentAsync):
                    'math_stat_en', 'math_limit_en', 'math_histogram_en', 'math_scale_en', 'math_trend_chart_en',
                    'math_smooth_en')
         math_extra = ()
-        if self.math_smooth_en.getcache():
+        model_new = m['model_new']
+        if m['model_65_70'] and self.math_smooth_en.getcache():
             math_extra += ('math_smooth_response',)
-        if self.math_scale_en.getcache():
+        if model_new and self.math_scale_en.getcache():
             math_extra += ('math_scale_func', 'math_scale_auto_ref_en', 'math_scale_dbm_ref_res', 'math_scale_db_ref_dbm',
                            'math_scale_gain', 'math_scale_offset', 'math_scale_scale_ref', 'math_scale_unit_en', 'math_scale_unit')
-        if self.math_histogram_en.getcache():
+        if model_new and self.math_histogram_en.getcache():
             math_extra += ('math_histogram_range_auto_en', 'math_histogram_range_lower', 'math_histogram_range_upper', 'math_histogram_npoints')
         if mode in choices[['curr:ac', 'volt:ac']]:
             extra = ('bandwidth', 'autorange', 'range',
@@ -517,16 +518,18 @@ class agilent_multi_34410A(visaInstrumentAsync):
             extra = ('autorange', 'range', 'null_en', 'null_val', 'secondary_meas')
         elif mode in choices[['temp']]:
             extra = ('nplc', 'aperture', 'aperture_en', 'null_en', 'null_val',
-                     'zero', 'temperature_transducer', 'temperature_transducer_subtype', 'secondary_meas')
+                     'zero', 'temperature_transducer', 'temperature_transducer_subtype',
+                     'secondary_meas',  'temperature_unit')
             t_ch = self.temperature_transducer.choices
             transducer = self.temperature_transducer.getcache()
             if transducer in t_ch[['rtd', 'frtd']]:
-                extra += ('temperature_transducer_rtd_ref', 'temperature_transducer_rtd_off', 'temperature_transducer_low_power_en')
+                extra += ('temperature_transducer_rtd_ref', 'temperature_transducer_rtd_off',
+                          'temperature_transducer_low_power_en')
             elif transducer in t_ch[['ther', 'fth']]:
                 extra += ('temperature_transducer_low_power_en',)
             elif transducer in t_ch[['tc']]:
                 extra += ('temperature_tcouple_check_en', 'temperature_tcouple_ref_temp', 'temperature_tcouple_offset',
-                          'temperature_tcouple_ref_type', 'temperature_unit')
+                          'temperature_tcouple_ref_type')
         full_list = [v for v in baselist + math_extra + extra if hasattr(self, v)]
         if show_removed:
             removed_list = [v for v in baselist + math_extra + extra if not hasattr(self, v)]
@@ -685,9 +688,9 @@ class agilent_multi_34410A(visaInstrumentAsync):
             if model_65_70:
                 ch_range_list += ['cap']
                 ch_null_list += ['cap']
+            ch_sec = mode_ch[ch_sec_list]
         ch_range = mode_ch[ch_range_list]
         ch_null = mode_ch[ch_null_list]
-        ch_sec = mode_ch[ch_sec_list]
         ch_aper = mode_ch[ch_aper_list]
         ch_aper_nplc = mode_ch[ch_aper_nplc_list]
         aper_max = float(self.ask('volt:aper? max'))
@@ -861,10 +864,15 @@ class agilent_multi_34410A(visaInstrumentAsync):
         self.math_min = scpiDevice(getstr='CALCulate:AVERage:MINimum?', str_type=float, trig=True)
         self.math_ptp = scpiDevice(getstr='CALCulate:AVERage:PTPeak?', str_type=float, trig=True)
         self.math_sdev = scpiDevice(getstr='CALCulate:AVERage:SDEViation?', str_type=float, trig=True)
-        self.math_scale_auto_ref_en = scpiDevice('CALCulate:SCALe:REFerence:AUTO', str_type=bool)
-        self.math_scale_dbm_ref_res = scpiDevice('CALCulate:SCALe:DBM:REFerence', str_type=float,
-                    choices=[50, 75, 93, 110, 124, 125, 135, 150, 250, 300, 500, 600, 800, 900, 1000, 1200, 8000])
-        self.math_scale_db_ref_dbm = scpiDevice('CALCulate:SCALe:DB:REFerence', str_type=float, min=-200, max=200)
+        if model_new:
+            self.math_scale_auto_ref_en = scpiDevice('CALCulate:SCALe:REFerence:AUTO', str_type=bool)
+            self.math_scale_dbm_ref_res = scpiDevice('CALCulate:SCALe:DBM:REFerence', str_type=float,
+                        choices=[50, 75, 93, 110, 124, 125, 135, 150, 250, 300, 500, 600, 800, 900, 1000, 1200, 8000])
+            self.math_scale_db_ref_dbm = scpiDevice('CALCulate:SCALe:DB:REFerence', str_type=float, min=-200, max=200)
+        else:
+            self.math_scale_dbm_ref_res = scpiDevice('CALCulate:DBM:REFerence', str_type=float,
+                        choices=[50, 75, 93, 110, 124, 125, 135, 150, 250, 300, 500, 600, 800, 900, 1000, 1200, 8000])
+            self.math_scale_db_ref_dbm = scpiDevice('CALCulate:DB:REFerence', str_type=float, min=-200, max=200)
         ch = ChoiceStrings('IMMediate', 'BUS', 'EXTernal')
         if model_DIG:
             ch = ChoiceStrings('IMMediate', 'BUS', 'EXTernal', 'INTernal')
