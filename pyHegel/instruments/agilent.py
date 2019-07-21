@@ -681,11 +681,13 @@ class agilent_multi_34410A(visaInstrumentAsync):
             ch_volt = mode_ch[['volt', 'volt:ac', 'volt:ratio']]
             ch_range_list = ['curr:ac', 'volt:ac', 'curr', 'volt', 'res', 'fres', 'volt:ratio']
             ch_null_list = ['curr:ac', 'volt:ac', 'curr', 'volt', 'freq', 'per', 'res', 'fres', 'temp']
+            ch_sec_list = ['curr:ac', 'volt:ac', 'curr', 'volt', 'volt:ratio', 'cap', 'freq', 'per', 'res', 'fres', 'temp']
             if model_65_70:
                 ch_range_list += ['cap']
                 ch_null_list += ['cap']
         ch_range = mode_ch[ch_range_list]
         ch_null = mode_ch[ch_null_list]
+        ch_sec = mode_ch[ch_sec_list]
         ch_aper = mode_ch[ch_aper_list]
         ch_aper_nplc = mode_ch[ch_aper_nplc_list]
         aper_max = float(self.ask('volt:aper? max'))
@@ -813,7 +815,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
                         }
             if model_65_70:
                 sec_dict[mode_ch[['cap']]] = ChoiceStrings(*base_ch)
-            self.secondary_meas = devOption(ch_null, '{mode}:SECondary', choices=ChoiceDevDep(self.mode, sec_dict),
+            self.secondary_meas = devOption(ch_sec, '{mode}:SECondary', choices=ChoiceDevDep(self.mode, sec_dict),
                 str_type=quoted_string(), skip_ratio_conv=True,
                 doc="""
                     Note that Calculate:data (if available) returns the values before any math operation
