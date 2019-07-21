@@ -34,10 +34,12 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDev, ChoiceDevSwitch, ChoiceIndex,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
                             decode_uint16_bin, _decode_block_base, decode_float64_2col,\
-                            decode_complex128, sleep, locked_calling, visa_wrap, _encode_block
+                            decode_complex128, sleep, locked_calling, visa_wrap, _encode_block,\
+                            ChoiceSimple
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 register_usb_name('Agilent Technologies', 0x0957)
+register_usb_name('Keysight Technologies', 0x2A8D)
 
 #######################################################
 ##    Agilent RF 33522A generator
@@ -421,10 +423,12 @@ class agilent_rf_MXG(agilent_rf_PSG):
 #######################################################
 
 #@register_instrument('Agilent Technologies', '34410A', '2.35-2.35-0.09-46-09')
+#@register_instrument('Keysight Technologies', '34465A', 'A.03.00-02.40-03.00-00.52-04-01')
+@register_instrument('Keysight Technologies', '34465A', usb_vendor_product=[0x2A8D, 0x0101], alias='34465A multimeter')
 @register_instrument('Agilent Technologies', '34410A', usb_vendor_product=[0x0957, 0x0607], alias='34410A multimeter')
 class agilent_multi_34410A(visaInstrumentAsync):
     """
-    This controls the agilent digital multimeters.
+    This controls the agilent digital multimeters (both 34410A and 34465A).
     Note that most of the devices requires a proper selection of the
     mode first. They can behave differently in various mode.
 
@@ -450,42 +454,87 @@ class agilent_multi_34410A(visaInstrumentAsync):
     Set it first.
 
     """
+    #def _async_trigger_helper(self):
+    #    if hasattr(self, 'init_resets_ptp'):
+    #        if self.init_resets_ptp.get():
+    #            self.write('DATA2:CLEar;:INITiate;*OPC')
+    #            return
+    #    self.write('INITiate;*OPC') # this assume trig_src is immediate for agilent multi
     def math_clear(self):
+        self.write('CALCulate:CLEar')
+    def math_stat_clear(self):
         self.write('CALCulate:AVERage:CLEar')
+    def math_histogram_clear(self):
+        self.write('CALCulate:TRANsform:HISTogram:CLEar')
     @locked_calling
-    def _current_config(self, dev_obj=None, options={}):
+    def _current_config(self, dev_obj=None, options={}, show_removed=False):
+        m = self._model
         mode = self.mode.getcache()
         choices = self.mode.choices
         baselist =('mode', 'trig_src', 'trig_delay', 'trig_count',
-                   'sample_count', 'sample_src', 'sample_timer', 'trig_delayauto',
-                   'line_freq', 'math_func')
+                   'sample_count', 'sample_pretrigger_count', 'sample_src', 'sample_timer', 'trig_delayauto',
+                   'line_freq', 'math_func',
+                   'math_stat_en', 'math_limit_en', 'math_histogram_en', 'math_scale_en', 'math_trend_chart_en',
+                   'math_smooth_en')
+        math_extra = ()
+        if self.math_smooth_en.getcache():
+            math_extra += ('math_smooth_response',)
+        if self.math_scale_en.getcache():
+            math_extra += ('math_scale_func', 'math_scale_auto_ref_en', 'math_scale_dbm_ref_res', 'math_scale_db_ref_dbm',
+                           'math_scale_gain', 'math_scale_offset', 'math_scale_scale_ref', 'math_scale_unit_en', 'math_scale_unit')
+        if self.math_histogram_en.getcache():
+            math_extra += ('math_histogram_range_auto_en', 'math_histogram_range_lower', 'math_histogram_range_upper', 'math_histogram_npoints')
         if mode in choices[['curr:ac', 'volt:ac']]:
             extra = ('bandwidth', 'autorange', 'range',
-                     'null_en', 'null_val', 'peak_mode_en')
+                     'null_en', 'null_val', 'peak_mode_en', 'secondary_meas')
+            if mode in choices[['curr:ac']]:
+                extra += ('range_current_terminal', 'current_switch_mode')
         elif mode in choices[['volt', 'curr']]:
             extra = ('nplc', 'aperture', 'aperture_en', 'zero', 'autorange', 'range',
-                     'null_en', 'null_val', 'peak_mode_en')
+                     'null_en', 'null_val', 'peak_mode_en', 'secondary_meas')
             if mode in choices[['volt']]:
                 extra += ('voltdc_impedance_autoHigh',)
+            elif mode in choices[['curr']]:
+                extra += ('range_current_terminal', 'current_switch_mode')
+        elif m['model_new'] and mode in choices[['volt:ratio']]:
+            extra = ('nplc', 'aperture', 'aperture_en', 'zero', 'autorange', 'range',
+                     'secondary_meas', 'voltdc_impedance_autoHigh')
         elif mode in choices[['cont', 'diode']]:
             extra = ()
         elif mode in choices[['freq', 'period']]:
             extra = ('aperture','null_en', 'null_val',  'freq_period_p_band',
-                        'freq_period_autorange', 'freq_period_volt_range')
+                        'freq_period_autorange', 'freq_period_volt_range', 'secondary_meas')
+            # 3.0 firmware seems to be in error:
+            #  freq_period_timeout_auto_en does not work for period (but doc says it should)
+            if mode in choices[['freq']]:
+                extra += ('freq_period_timeout_auto_en',)
         elif mode in choices[['res', 'fres']]:
-            extra = ('nplc', 'aperture', 'aperture_en', 'autorange', 'range',
-                     'null_en', 'null_val', 'res_offset_comp')
+            extra = ('nplc', 'aperture', 'aperture_en', 'autorange', 'range', 'res_low_power_en',
+                     'null_en', 'null_val', 'res_offset_comp', 'secondary_meas')
             if mode in choices[['res']]:
                 extra += ('zero',)
         elif mode in choices[['cap']]:
-            extra = ('autorange', 'range', 'null_en', 'null_val')
+            extra = ('autorange', 'range', 'null_en', 'null_val', 'secondary_meas')
         elif mode in choices[['temp']]:
             extra = ('nplc', 'aperture', 'aperture_en', 'null_en', 'null_val',
-                     'zero', 'temperature_transducer', 'temperature_transducer_subtype')
+                     'zero', 'temperature_transducer', 'temperature_transducer_subtype', 'secondary_meas')
             t_ch = self.temperature_transducer.choices
-            if self.temperature_transducer.getcache() in t_ch[['rtd', 'frtd']]:
-                extra += ('temperature_transducer_rtd_ref', 'temperature_transducer_rtd_off')
-        return self._conf_helper(*(baselist + extra + (options,)))
+            transducer = self.temperature_transducer.getcache()
+            if transducer in t_ch[['rtd', 'frtd']]:
+                extra += ('temperature_transducer_rtd_ref', 'temperature_transducer_rtd_off', 'temperature_transducer_low_power_en')
+            elif transducer in t_ch[['ther', 'fth']]:
+                extra += ('temperature_transducer_low_power_en',)
+            elif transducer in t_ch[['tc']]:
+                extra += ('temperature_tcouple_check_en', 'temperature_tcouple_ref_temp', 'temperature_tcouple_offset',
+                          'temperature_tcouple_ref_type', 'temperature_unit')
+        full_list = [v for v in baselist + math_extra + extra if hasattr(self, v)]
+        if show_removed:
+            removed_list = [v for v in baselist + math_extra + extra if not hasattr(self, v)]
+            print removed_list
+        ret = self._conf_helper(*full_list)
+        ret += ['installed_options=%s'%m['options']]
+        ret += self._conf_helper(options)
+        return ret
     @locked_calling
     def set_long_avg(self, time, force=False):
         """
@@ -532,19 +581,73 @@ class agilent_multi_34410A(visaInstrumentAsync):
         width = width*count
         print 'The full avg time is %f s (%s%s)'%(width, width_str, count_str)
         return width
+    def _ptp_clear(self):
+        self.write('DATA2:CLEar')
+    def _secondary_fetch_getformat(self, **kwarg):
+        ptp = self.secondary_meas.getcache() in ChoiceStrings('PTPeak')
+        ratio = self.mode.getcache() in self.mode.choices[['volt:ratio']]
+        if ptp:
+            multi = ['peak_min', 'peak_max', 'peak_ptp']
+        elif ratio:
+            multi = ['main_V', 'sense_V']
+        else:
+            multi = False
+        fmt = self.fetch._format
+        fmt.update(multi=multi)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _secondary_fetch_getdev(self):
+        ret = decode_float64(self.ask('DATA2?'))
+        if len(ret) == 1:
+            ret = ret[0]
+        return ret
+    def options(self):
+        # Call after model variable is set
+        m = self._model
+        if m['model_new']:
+            val = self.ask('SYSTem:LICense:CATalog?')
+            qs = quoted_string()
+            ret =  [qs(v) for v in val.split(',')]
+            if ret == ['']:
+                ret = []
+            if 'DIG' not in ret and m['model_65_70'] and float(m['firmware']) >= 3.0:
+                ret += ['DIG']
+        else:
+            ret = []
+        return ret
     def _create_devs(self):
+        idn_split = self.idn_split()
+        model = idn_split['model']
+        model_n = model[:5]
+        model_new = model.startswith('3446') or model.startswith('3447')
+        model_65_70 = model_new and model_n in ['34465', '34470']
+        firmware = idn_split['firmware'].split('-')[0]
+        if model_new:
+            firmware = firmware.split('.', 1)[1]
+        self._model = dict(model=model, model_n=model_n, model_new=model_new, model_65_70=model_65_70, firmware=firmware)
+        options = self.options()
+        model_DIG = 'DIG' in options
+        self._model['model_DIG'] = model_DIG
+        self._model['options'] = options
         # This needs to be last to complete creation
-        ch = ChoiceStrings(
-          'CURRent:AC', 'VOLTage:AC', 'CAPacitance', 'CONTinuity', 'CURRent', 'VOLTage',
-          'DIODe', 'FREQuency', 'PERiod', 'RESistance', 'FRESistance', 'TEMPerature', quotes=True)
-        self.mode = scpiDevice('FUNC', choices=ch)
+        mode_list = [ 'CURRent:AC', 'VOLTage:AC', 'CAPacitance', 'CONTinuity', 'CURRent', 'VOLTage',
+          'DIODe', 'FREQuency', 'PERiod', 'RESistance', 'FRESistance', 'TEMPerature']
+        if model_new:
+            mode_list += ['VOLTage:RATio']
+        mode_ch = ChoiceStrings(*mode_list, quotes=True)
+        self.mode = scpiDevice('FUNC', choices=mode_ch)
         def devOption(lims, *arg, **kwarg):
+            skip_ratio_conv = kwarg.pop('skip_ratio_conv', False)
             options = kwarg.pop('options', {}).copy()
             options_lim = kwarg.pop('options_lim', {}).copy()
             options_conv = kwarg.pop('options_conv', {}).copy()
             options.update(mode=self.mode)
             options_lim.update(mode=lims)
-            options_conv.update(mode=lambda val, quoted_val: val)
+            def mode_conv(val, quoted_val):
+                if model_new and not skip_ratio_conv:
+                    if val in mode_ch[['volt:ratio']]:
+                        val='volt'
+                return val
+            options_conv.update(mode=mode_conv)
             kwarg.update(options=options)
             kwarg.update(options_lim=options_lim)
             kwarg.update(options_conv=options_conv)
@@ -564,46 +667,94 @@ class agilent_multi_34410A(visaInstrumentAsync):
              (fetch_all needs to have more than one value)
         """)
         self.line_freq = scpiDevice(getstr='SYSTem:LFRequency?', str_type=float) # see also SYST:LFR:ACTual?
-        ch_aper = ch[['volt', 'curr', 'res', 'fres', 'temp', 'freq', 'period']]
-        ch_aper_nplc = ch[['volt', 'curr', 'res', 'fres', 'temp']]
+        ch_aper_list = ['volt', 'curr', 'res', 'fres', 'temp', 'freq', 'period']
+        ch_aper_nplc_list = ['volt', 'curr', 'res', 'fres', 'temp']
+        ch_zero_list = ['volt', 'curr', 'res', 'temp']
+        ch_range_list = ['curr:ac', 'volt:ac', 'cap', 'curr', 'volt', 'res', 'fres'] # everything except continuity, diode, freq, per and temperature
+        ch_volt = mode_ch[['volt', 'volt:ac']]
+        ch_current = mode_ch[['curr', 'curr:ac']]
+        ch_null_list = ['curr:ac', 'volt:ac', 'cap', 'curr', 'volt', 'freq', 'per', 'res', 'fres', 'temp'] # everything except continuity and diode
+        if model_new:
+            ch_aper_list += ['volt:ratio']
+            ch_aper_nplc_list += ['volt:ratio']
+            ch_zero_list += ['volt:ratio']
+            ch_volt = mode_ch[['volt', 'volt:ac', 'volt:ratio']]
+            ch_range_list = ['curr:ac', 'volt:ac', 'curr', 'volt', 'res', 'fres', 'volt:ratio']
+            ch_null_list = ['curr:ac', 'volt:ac', 'curr', 'volt', 'freq', 'per', 'res', 'fres', 'temp']
+            if model_65_70:
+                ch_range_list += ['cap']
+                ch_null_list += ['cap']
+        ch_range = mode_ch[ch_range_list]
+        ch_null = mode_ch[ch_null_list]
+        ch_aper = mode_ch[ch_aper_list]
+        ch_aper_nplc = mode_ch[ch_aper_nplc_list]
         aper_max = float(self.ask('volt:aper? max'))
         aper_min = float(self.ask('volt:aper? min'))
         # TODO handle freq, period where valid values are .001, .010, .1, 1 (between .001 and 1 can use setget)
         self.aperture = devOption(ch_aper, '{mode}:APERture', str_type=float, min = aper_min, max = aper_max, setget=True)
         self.aperture_en = devOption(ch_aper_nplc, '{mode}:APERture:ENabled', str_type=bool)
+        if not model_new:
+            nplc_list = [0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100]
+        else:
+            if model_n in ['34460', '34461']:
+                nplc_list = [0.02, 0.2, 1, 10, 100]
+            else:
+                if model_DIG:
+                    nplc_list = [0.001, 0.002, 0.006, 0.02, 0.06, 0.2, 1, 10, 100]
+                else:
+                    nplc_list = [0.02, 0.06, 0.2, 1, 10, 100]
         self.nplc = devOption(ch_aper_nplc, '{mode}:NPLC', str_type=float,
-                                   choices=[0.006, 0.02, 0.06, 0.2, 1, 2, 10, 100])
-        ch_band = ch[['curr:ac', 'volt:ac']]
+                                   choices=nplc_list)
+        ch_band = mode_ch[['curr:ac', 'volt:ac']]
         self.bandwidth = devOption(ch_band, '{mode}:BANDwidth', str_type=float,
                                    choices=[3, 20, 200]) # in Hz
-        ch_freqperi = ch[['freq', 'per']]
+        ch_freqperi = mode_ch[['freq', 'per']]
         self.freq_period_p_band = devOption(ch_freqperi, '{mode}:RANGe:LOWer', str_type=float,
                                    choices=[3, 20, 200]) # in Hz
         self.freq_period_autorange = devOption(ch_freqperi, '{mode}:VOLTage:RANGe:AUTO', str_type=bool) # Also use ONCE (immediate autorange, then off)
         self.freq_period_volt_range = devOption(ch_freqperi, '{mode}:VOLTage:RANGe', str_type=float,
                                                 choices=[.1, 1., 10., 100., 1000.]) # Setting this disables auto range
+        if model_new:
+            # 3.0 firmware seem to have an error (not the same as documentation
+            #self.freq_period_timeout_auto_en = devOption(ch_freqperi, '{mode}:TIMeout:AUTO', str_type=bool)
+            self.freq_period_timeout_auto_en = devOption(mode_ch[['freq']], '{mode}:TIMeout:AUTO', str_type=bool)
 
-        ch_zero = ch[['volt', 'curr', 'res', 'temp']] # same as ch_aper_nplc wihtout fres
+        ch_zero = mode_ch[ch_zero_list] # same as ch_aper_nplc wihtout fres
         self.zero = devOption(ch_zero, '{mode}:ZERO:AUTO', str_type=bool,
                               doc='Enabling auto zero double the time to take each point (the value and a zero correction is done for each point)') # Also use ONCE (immediate zero, then off)
-        ch_range = ch[[0, 1, 2,  4, 5,  9, 10]] # everything except continuity, diode, freq, per and temperature
         self.autorange = devOption(ch_range, '{mode}:RANGE:AUTO', str_type=bool) # Also use ONCE (immediate autorange, then off)
-        range_ch = ChoiceDevDep(self.mode, {ch[['volt', 'volt:ac']]:[.1, 1., 10., 100., 1000.],
-                                            ch[['curr', 'curr:ac']]:[.1e-3, 1e-3, 1e-2, 1e-1, 1, 3],
-                                            ch[['fres', 'res']]:[1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9] }) # in V, A, Ohm
+        current_list = [.1e-3, 1e-3, 1e-2, 1e-1, 1, 3]
+        range_dict = {ch_volt:[.1, 1., 10., 100., 1000.],
+                      ch_current:current_list,
+                      mode_ch[['fres', 'res']]:[1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9] } # in V, A, Ohm
+        if model_65_70:
+            current_list = [1e-6, 10e-6] + current_list
+            range_dict[mode_ch[['cap']]] = [1e-9, 10e-9, 100e-9, 1e-6, 10e-6, 100e-6]
+            self.current_switch_mode = scpiDevice('CURRent:SWITch:MODE', choices=ChoiceStrings('FAST', 'CONTinuous'))
+        if not model_new:
+            range_dict[mode_ch[['cap']]] = [1e-9, 10e-9, 100e-9, 1e-6, 10e-6]
+        range_ch = ChoiceDevDep(self.mode, range_dict)
+        if model_new and model_n not in ['34460']:
+            self.range_current_terminal = devOption(ch_current, '{mode}:TERMinals', str_type=float, choices=[3, 10])
         self.range = devOption(ch_range, '{mode}:RANGe', str_type=float, choices=range_ch) # Setting this disables auto range
-        ch_null = ch[[0, 1, 2,  4, 5,  7, 8, 9, 10, 11]] # everything except continuity and diode
         self.null_en = devOption(ch_null, '{mode}:NULL', str_type=bool)
         self.null_val = devOption(ch_null, '{mode}:NULL:VALue', str_type=float)
         self.voltdc_impedance_autoHigh = scpiDevice('VOLTage:IMPedance:AUTO', str_type=bool, doc='When True and V range <= 10V then impedance >10 GO else it is 10 MOhm')
-        tch = ChoiceStrings('FRTD', 'RTD', 'FTHermistor', 'THERmistor')
+        tch_list = ['FRTD', 'RTD', 'FTHermistor', 'THERmistor']
+        if model_65_70:
+            tch_list += ['TCouple']
+        tch = ChoiceStrings(*tch_list)
         self.temperature_transducer = scpiDevice('TEMPerature:TRANsducer:TYPE', choices=tch)
         tch_rtd = tch[['frtd', 'rtd']]
-        ch_temp_typ = ChoiceDevDep(self.temperature_transducer, {tch_rtd:[85], None:[2252, 5000, 10000]})
+        tch_therm = tch[['fth', 'ther']]
+        tch_rtd_therm = tch[['fth', 'ther', 'frtd', 'rtd']]
+        type_dict = {tch_rtd:ChoiceSimple([85], str_type=int), tch_therm:ChoiceSimple([2252, 5000, 10000], str_type=int)}
+        if model_65_70:
+            type_dict[tch[['tcouple']]] = ChoiceStrings(*list('EJKNRT'))
+        ch_temp_typ = ChoiceDevDep(self.temperature_transducer, type_dict)
         self.temperature_transducer_subtype = scpiDevice('TEMPerature:TRANsducer:{trans}:TYPE',
                                         choices = ch_temp_typ,
-                                        options=dict(trans=self.temperature_transducer),
-                                        str_type=int)
+                                        options=dict(trans=self.temperature_transducer))
         self.temperature_transducer_rtd_ref = scpiDevice('TEMPerature:TRANsducer:{trans}:RESistance',
                                         min = 49, max= 2.1e3, str_type=float,
                                         options=dict(trans=self.temperature_transducer),
@@ -611,40 +762,119 @@ class agilent_multi_34410A(visaInstrumentAsync):
         self.temperature_transducer_rtd_off = scpiDevice('TEMPerature:TRANsducer:{trans}:OCOMpensated', str_type=bool,
                                         options=dict(trans=self.temperature_transducer),
                                         options_lim=dict(trans=tch_rtd))
+        self.temperature_unit = scpiDevice('UNIT:TEMPerature', choices=ChoiceStrings('C', 'F', 'K'))
 
-        ch_compens = ch[['res', 'fres']]
-        self.res_offset_comp = devOption(ch_compens, '{mode}:OCOMpensated', str_type=bool)
-        ch_peak = ch[['volt', 'volt:ac', 'curr', 'curr:ac']]
-        self.peak_mode_en = devOption(ch_peak, '{mode}:PEAK:STATe', str_type=bool)
-        peak_op = dict(peak=self.peak_mode_en)
-        peak_op_lim = dict(peak=[True])
-        self.fetch_peaks_ptp = devOption(ch_peak, 'FETCh:{mode}:PTPeak', str_type=float,
+        if model_65_70:
+            self.temperature_tcouple_check_en = scpiDevice('TEMPerature:TRANsducer:TCouple:CHECk', str_type=bool)
+            self.temperature_tcouple_ref_temp = scpiDevice('TEMPerature:TRANsducer:TCouple:RJUNction', str_type=float, min=-20, max=80, setget=True)
+            self.temperature_tcouple_offset = scpiDevice('TEMPerature:TRANsducer:TCouple:RJUNction:OFFSet:ADJust', str_type=float, min=-20, max=20, setget=True)
+            self.temperature_tcouple_ref_type = scpiDevice('TEMPerature:TRANsducer:TCouple:RJUNction:TYPE', choices=ChoiceStrings('INTernal', 'FIXed'))
+            self.temperature_transducer_low_power_en = scpiDevice('TEMPerature:TRANsducer:{trans}:POWer:LIMit', str_type=bool,
+                                                    options=dict(trans=self.temperature_transducer),
+                                                    options_lim=dict(trans=tch_rtd_therm))
+
+        ch_compens = mode_ch[['res', 'fres']]
+        if model_65_70 or not model_new:
+            self.res_offset_comp = devOption(ch_compens, '{mode}:OCOMpensated', str_type=bool)
+        if model_65_70:
+            self.res_low_power_en = devOption(ch_compens, '{mode}:POWer:LIMit', str_type=bool)
+        if not model_new:
+            ch_peak = mode_ch[['volt', 'volt:ac', 'curr', 'curr:ac']]
+            self.peak_mode_en = devOption(ch_peak, '{mode}:PEAK:STATe', str_type=bool)
+            peak_op = dict(peak=self.peak_mode_en)
+            peak_op_lim = dict(peak=[True])
+            self.fetch_peaks_ptp = devOption(ch_peak, 'FETCh:{mode}:PTPeak', str_type=float,
                                          doc='Call this after a fetch or readval',
                                          options=peak_op, options_lim=peak_op_lim, autoinit=False, trig=True)
-        ch_peak_minmax = ch[['volt', 'curr']]
-        self.fetch_peaks_min = devOption(ch_peak_minmax, 'FETCh:{mode}:PEAK:MINimum', str_type=float,
+            ch_peak_minmax = mode_ch[['volt', 'curr']]
+            self.fetch_peaks_min = devOption(ch_peak_minmax, 'FETCh:{mode}:PEAK:MINimum', str_type=float,
                                          doc='Call this after a fetch or readval',
                                          options=peak_op, options_lim=peak_op_lim, autoinit=False, trig=True)
-        self.fetch_peaks_max = devOption(ch_peak_minmax, 'FETCh:{mode}:PEAK:MAXimum', str_type=float,
+            self.fetch_peaks_max = devOption(ch_peak_minmax, 'FETCh:{mode}:PEAK:MAXimum', str_type=float,
                                          doc='Call this after a fetch or readval',
                                          options=peak_op, options_lim=peak_op_lim, autoinit=False, trig=True)
-        ch = ChoiceStrings('NULL', 'DB', 'DBM', 'AVERage', 'LIMit')
-        self.math_func = scpiDevice('CALCulate:FUNCtion', choices=ch)
-        self.math_state = scpiDevice('CALCulate:STATe', str_type=bool)
+        if model_new:
+            # The Multi-34465/DMM_34465A_to_34410A_Differences_5992-0774EN.pdf
+            # document says that peak detection measurement is no longer cumulative and now requires
+            # a reset but that is not what I observed.
+            #self.init_resets_ptp = MemoryDevice(True, choices=[True, False], doc='This controls when ptp')
+            base_ch = ['OFF']
+            if model_65_70:
+                base_ch += ['CALCulate:DATA']
+            sec_dict = {mode_ch[['volt']]: ChoiceStrings(*(base_ch+['VOLTage:AC', 'PTPeak'])),
+                        mode_ch[['volt:ratio']]: ChoiceStrings(*(base_ch+['SENSe:DATA'])),
+                        mode_ch[['volt:ac']]: ChoiceStrings(*(base_ch+['FREQuency', 'VOLTage'])),
+                        mode_ch[['current']]: ChoiceStrings(*(base_ch+['CURRent:AC', 'PTPeak'])),
+                        mode_ch[['current:ac']]: ChoiceStrings(*(base_ch+['FREQuency', 'CURRent'])),
+                        mode_ch[['per']]: ChoiceStrings(*(base_ch+['FREQuency', 'VOLTage:AC'])),
+                        mode_ch[['freq']]: ChoiceStrings(*(base_ch+['PERiod', 'VOLTage:AC'])),
+                        mode_ch[['temp']]: ChoiceStrings(*(base_ch+['SENSe:DATA'])),
+                        mode_ch[['fres', 'res']]: ChoiceStrings(*base_ch)
+                        }
+            if model_65_70:
+                sec_dict[mode_ch[['cap']]] = ChoiceStrings(*base_ch)
+            self.secondary_meas = devOption(ch_null, '{mode}:SECondary', choices=ChoiceDevDep(self.mode, sec_dict),
+                str_type=quoted_string(), skip_ratio_conv=True,
+                doc="""
+                    Note that Calculate:data (if available) returns the values before any math operation
+                    The volt/current AC/DC options only work on the front panel. They do not work remotely.
+                    Sense:data is raw sensor value.
+                    """)
+                    #For PTPeak, see init_resets_ptp device to decide when resets are done (or use ptp_clear func).
+            self.ptp_clear = self._ptp_clear
+            self._devwrap('secondary_fetch', autoinit=False, trig=True)
+
+        if not model_new:
+            ch = ChoiceStrings('NULL', 'DB', 'DBM', 'AVERage', 'LIMit')
+            self.math_func = scpiDevice('CALCulate:FUNCtion', choices=ch)
+            self.math_state = scpiDevice('CALCulate:STATe', str_type=bool)
+        else:
+            self.math_stat_en = scpiDevice('CALCulate:AVERage', str_type=bool)
+            self.math_limit_en = scpiDevice('CALCulate:LIMit', str_type=bool)
+            self.math_histogram_en = scpiDevice('CALCulate:TRANsform:HISTogram', str_type=bool)
+            self.math_scale_en = scpiDevice('CALCulate:SCALe', str_type=bool)
+            self.math_trend_chart_en = scpiDevice('CALCulate:TCHart', str_type=bool)
+            if model_65_70:
+                self.math_smooth_en = scpiDevice('CALCulate:SMOothing', str_type=bool)
+                self.math_smooth_response = scpiDevice('CALCulate:SMOothing:RESPonse', choices=ChoiceStrings('SLOW', 'MEDium', 'FAST'))
+            ch = ChoiceStrings('DB', 'DBM')
+            if model_65_70:
+                ch = ChoiceStrings('DB', 'DBM', 'PCT', 'SCALe')
+                self.math_scale_gain = scpiDevice('CALCulate:SCALe:GAIN', str_type=float, setget=True)
+                self.math_scale_offset = scpiDevice('CALCulate:SCALe:OFFSet', str_type=float, setget=True)
+                self.math_scale_scale_ref = scpiDevice('CALCulate:SCALe:REFerence', str_type=float, setget=True)
+                self.math_scale_unit_en = scpiDevice('CALCulate:SCALe:UNIT:STATe', str_type=bool)
+                self.math_scale_unit = scpiDevice('CALCulate:SCALe:UNIT', str_type=quoted_string(), setget=True)
+            self.math_scale_func = scpiDevice('CALCulate:SCALe:FUNCtion', choices=ch)
+            self.math_histogram_range_auto_en = scpiDevice('CALCulate:TRANsform:HISTogram:RANGe:AUTO', str_type=bool)
+            self.math_histogram_range_lower = scpiDevice('CALCulate:TRANsform:HISTogram:RANGe:LOWer', str_type=float, setget=True)
+            self.math_histogram_range_upper = scpiDevice('CALCulate:TRANsform:HISTogram:RANGe:UPPer', str_type=float, setget=True)
+            self.math_histogram_npoints = scpiDevice('CALCulate:TRANsform:HISTogram:POINts', str_type=int, choices=[10, 20, 40, 100, 200, 400])
+            self.math_histogram_fetch = scpiDevice(getstr='CALCulate:TRANsform:HISTogram:ALL?', str_type=decode_float64,
+                    autoinit=False, trig=True, multi=True)
+            self.math_histogram_count = scpiDevice(getstr='CALCulate:TRANsform:HISTogram:COUNt?', str_type=int, autoinit=False, trig=True)
         self.math_avg = scpiDevice(getstr='CALCulate:AVERage:AVERage?', str_type=float, trig=True)
         self.math_count = scpiDevice(getstr='CALCulate:AVERage:COUNt?', str_type=float, trig=True)
         self.math_max = scpiDevice(getstr='CALCulate:AVERage:MAXimum?', str_type=float, trig=True)
         self.math_min = scpiDevice(getstr='CALCulate:AVERage:MINimum?', str_type=float, trig=True)
         self.math_ptp = scpiDevice(getstr='CALCulate:AVERage:PTPeak?', str_type=float, trig=True)
         self.math_sdev = scpiDevice(getstr='CALCulate:AVERage:SDEViation?', str_type=float, trig=True)
+        self.math_scale_auto_ref_en = scpiDevice('CALCulate:SCALe:REFerence:AUTO', str_type=bool)
+        self.math_scale_dbm_ref_res = scpiDevice('CALCulate:SCALe:DBM:REFerence', str_type=float,
+                    choices=[50, 75, 93, 110, 124, 125, 135, 150, 250, 300, 500, 600, 800, 900, 1000, 1200, 8000])
+        self.math_scale_db_ref_dbm = scpiDevice('CALCulate:SCALe:DB:REFerence', str_type=float, min=-200, max=200)
         ch = ChoiceStrings('IMMediate', 'BUS', 'EXTernal')
+        if model_DIG:
+            ch = ChoiceStrings('IMMediate', 'BUS', 'EXTernal', 'INTernal')
         self.trig_src = scpiDevice('TRIGger:SOURce', choices=ch)
-        self.trig_delay = scpiDevice('TRIGger:DELay', str_type=float) # seconds
-        self.trig_count = scpiDevice('TRIGger:COUNt', str_type=float)
-        self.sample_count = scpiDevice('SAMPle:COUNt', str_type=int)
+        self.trig_delay = scpiDevice('TRIGger:DELay', str_type=float, min=0) # seconds
+        self.trig_count = scpiDevice('TRIGger:COUNt', str_type=float, min=1) # The instruments uses float.
+        self.sample_count = scpiDevice('SAMPle:COUNt', str_type=int, min=1)
         ch = ChoiceStrings('IMMediate', 'TIMer')
         self.sample_src = scpiDevice('SAMPle:SOURce', choices=ch)
         self.sample_timer = scpiDevice('SAMPle:TIMer', str_type=float) # seconds
+        if model_65_70:
+            self.sample_pretrigger_count = scpiDevice('SAMPle:COUNt:PRETrigger', str_type=int, min=0)
         self.trig_delayauto = scpiDevice('TRIGger:DELay:AUTO', str_type=bool)
         self.readval = ReadvalDev(self.fetch)
         self.alias = self.readval
