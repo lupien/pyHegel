@@ -273,7 +273,7 @@ class iTest_be2102(visaInstrument):
         else:
             base += self._conf_helper('trigger_mode', 'trigger_delay', 'step_amplitude')
         return base + self._conf_helper('module_name', 'module_channels_indep',
-                                 'system_power', 'system_power_max', 'system_name', options)
+                                 'system_power', 'system_power_max', 'system_power_failed', 'system_name', options)
 
     #def _output_en_getdev(self):
     #    return _fromstr_helper(self.ask(self._pre+';OUTPut?'), bool)
@@ -400,6 +400,7 @@ class iTest_be2102(visaInstrument):
         self._program_f2_key = scpiDevice('SYSTem:KEY:DEF 1,{val}', 'SYSTem:KEY:DEF? 1', str_type=quoted_string(), doc=fkey_doc)
         self.system_power = scpiDevice(getstr='SYSTem:POWer?', choices=ChoiceMultiple(['volt_pos_25', 'power_pos_25_pct', 'volt_neg_25', 'power_neg_25_pct'], float))
         self.system_power_max = scpiDevice(getstr='SYSTem:POWer:MAX?', choices=ChoiceMultiple(['max_power_pos_25', 'max_power_neg_25'], float))
+        self.system_power_failed = scpiDevice('SYSTem:POWer:FAIL', str_type=bool, doc='To reset power failure, set to False')
         self.system_name = scpiDevice('SYSTem:NAME', str_type=quoted_string())
         #self._devwrap('level')
         self.alias = self.level
@@ -595,7 +596,7 @@ class iTest_be214x(visaInstrument):
         self.current_channel.set(orig_ch)
         base_conf = reorg(base)
         return base_conf + self._conf_helper('current_channel', 'trigger_out_inv_polarity_en', 'module_name', 'module_channels_indep',
-                                 'system_power', 'system_power_max', 'system_name', options)
+                                 'system_power', 'system_power_max', 'system_power_failed', 'system_name', options)
 
     #def _output_en_getdev(self):
     #    return _fromstr_helper(self.ask(self._pre+';OUTPut?'), bool)
@@ -758,6 +759,7 @@ class iTest_be214x(visaInstrument):
         self._program_f2_key = scpiDevice('SYSTem:KEY:DEF 1,{val}', 'SYSTem:KEY:DEF? 1', str_type=quoted_string(), doc=fkey_doc)
         self.system_power = scpiDevice(getstr='SYSTem:POWer?', choices=ChoiceMultiple(['volt_pos_25', 'power_pos_25_pct', 'volt_neg_25', 'power_neg_25_pct'], float))
         self.system_power_max = scpiDevice(getstr='SYSTem:POWer:MAX?', choices=ChoiceMultiple(['max_power_pos_25', 'max_power_neg_25'], float))
+        self.system_power_failed = scpiDevice('SYSTem:POWer:FAIL', str_type=bool, doc='To reset power failure, set to False')
         self.system_name = scpiDevice('SYSTem:NAME', str_type=quoted_string())
         #self._devwrap('level')
         self.alias = self.level
