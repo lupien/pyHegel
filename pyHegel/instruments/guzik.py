@@ -322,6 +322,29 @@ class guzik_adp7104(BaseInstrument):
         opts += self._conf_helper(options)
         return opts
 
+    def _read_ext_ref_state(self, board_num=0, src=-1, freq=0):
+        """
+        src = -1 (to return currently active channel), 0 for internal (200 MHz),
+               2 for 1 GHz, 3 for Sync clock
+        freq is the freq in MHz used for Sync clock entry
+        Note that the ext_ref_state is updated only after an acquisition is complete, not after
+              the config method.
+        """
+        SDK =  self._gsasdk
+        if src == 2:
+            freq = 1000 # This is needed when src=2 otherwise it does as if src == -1
+        elif src == 2:
+            freq = 200 # This might not be required but do it anyway.
+        arg = SDK.GSA_READ_CH_CLOCK_INFO_ARG(version=SDK.GSA_SDK_VERSION, rc_idx=board_num, clk_src=src, freq=freq)
+        res = SDK.GSA_READ_CH_CLOCK_INFO_RES()
+        if SDK.GSA_ReadChClockSourceInfo(arg, res) == SDK.GSA_FALSE:
+            raise RuntimeError(self.perror('Unable to read ext_ref_state'))
+        to_bool = lambda x: x != SDK.GSA_FALSE
+        to_same = lambda x: x
+        to_src = lambda x: {0:'internal', 2:'ext_1GHz', 3:'sync_clock'}.get(x, x)
+        conv = {'is_active':to_bool, 'is_connected':to_bool, 'is_locked':to_bool, 'clk_src':to_src, 'freq_MHz':to_same}
+        return {k:conv[k](getattr(res, k)) for k,t in res._fields_}
+
     def _read_config(self):
         SDK = self._gsasdk
         channels = self._gsa_data_arg.common.input_labels_list
@@ -344,11 +367,12 @@ class guzik_adp7104(BaseInstrument):
         analog_bandwidth_MHz = self._gsa_conf_ch.analog_bandwidth_MHz
         equalizer_en =  self._gsa_data_arg.common.equ_state != SDK.GSA_EQU_OFF
         equalizer_mode =  self._gsa_data_arg.common.equ_state
+        ref_clock = self._read_ext_ref_state()
         ret = locals()
         del ret['i'], ret['res_arr'], ret['self'], ret['SDK']
         return ret
 
-    def config(self, channels=None, n_S_ch=1024, bits_16=True, gain_dB=0., equalizer_en=True):
+    def config(self, channels=None, n_S_ch=1024, bits_16=True, gain_dB=0., equalizer_en=True, ext_ref='default', _hdr_func=None):
         """
         if channels is None, it returns information about the current config.
         channels needs be a list of integer that represent the channels (1-4).
@@ -357,8 +381,13 @@ class guzik_adp7104(BaseInstrument):
         n_S_ch is the number of Sample per ch to read.
         gain_dB is the gain in dB
         equalizer_en when False turns off the FPGA equalizer.
+        ext_ref can be 'default' which stays the same, 'int' (200 MHz), 'ext' for 1 GHz,
+            or one of the allowed sync_clock frequency in MHz.
+            Note that the change is only seen (like acqusition header) after a new acquisition.
         To free the memory, delete any user variable that remembers a previous result,
         than call config with a new size.
+        _hdr_func if given is a func passed with the data_arg structure before it gets used, so it
+        can be modified (useful when testing new parameter not already programmed)
         """
         if channels is None:
             return self._read_config()
@@ -428,6 +457,16 @@ class guzik_adp7104(BaseInstrument):
         else:
             arg.common.data_type = SDK.GSA_DATA_TYPE_SHIFTED8BIT
         arg.hdr.op_command = SDK.GSA_OP_CONFIGURE
+        if ext_ref != 'default':
+            if ext_ref == 'int':
+                arg.common.ref_clock_source = 0
+            elif ext_ref == 'ext':
+                arg.common.ref_clock_source = 2
+            else:
+                arg.common.ref_clock_source = 3
+                arg.common.ref_clock_freqMHz = ext_ref
+        if _hdr_func is not None:
+            _hdr_func(arg)
         if SDK.GSA_Data_Multi(arg, Nch, res_arr) == SDK.GSA_FALSE:
             raise RuntimeError(self.perror('Unable to finish initializing acq structure.'))
         self._gsa_data_arg = arg
