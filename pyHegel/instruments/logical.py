@@ -1031,6 +1031,22 @@ class FunctionWrap(LogicalDevice):
         checkfunc is called by a set. If not specified, the default one is used (can handle
         choices or min/max, but will skip checking the extra kwarg).
         getformatfunc can be defined if necessary. There is a default one.
+          The functions is called like f(FunctionWrap_object, **kwargs) where
+            kwargs are the arguments used in get.
+          If the function returns None, the internal handler is called which handles
+             graph, extra_conf, bin, xaxis, and updates options
+          Otherwise you should call it yourself and return format.
+          Here is a getformatfunc example:
+            def getformatfunc(obj, **kwargs):
+                # puts ch_1  ch_2 ... as column headers in main data file when sweeping
+                ch = kwargs.pop('ch', [1, 2])
+                fmt = obj._format
+                fmt.update(multi=['ch_%s'%i for i in ch])
+          to match a getfunc:
+            def getfunc(ch=[1, 2])
+                # returns multiple read of some_dev according to number of ch elements.
+                return [some_dev.get() for i in ch]
+
         use_ret_as_cache: will use the return value from set as the cached value.
         If you define a basedev or a basedevs list, those devices are included in the
         file headers. They are not read by default (autoget=False). If autoget is is set to 'all'
@@ -1070,8 +1086,9 @@ class FunctionWrap(LogicalDevice):
         else:
             self._checkfunc(val, **kwarg)
     def getformat(self, **kwarg):
-        if not self._getformatfunc:
-            return super(FunctionWrap, self).getformat(**kwarg)
-        else:
-            return self._getformatfunc(**kwarg)
+        if self._getformatfunc:
+            ret = self._getformatfunc(self, **kwarg)
+            if ret is not None:
+                return ret
+        return super(FunctionWrap, self).getformat(**kwarg)
 
