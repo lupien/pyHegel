@@ -572,12 +572,12 @@ def _write_conf(f, formats, extra_base=None, **kwarg):
         conf = fmt['base_conf']
         hdr = fmt['base_hdr_name']
         if conf:
-            f.write('#'+hdr+':=')
+            f.write('#'+hdr.encode('utf8')+':=')
             if isinstance(conf, list):
                 for c in conf:
-                    f.write(' '+rm_nl(c)+';')
+                    f.write(' '+rm_nl(c.encode('utf8'))+';')
             else:
-                f.write(' '+rm_nl(conf))
+                f.write(' '+rm_nl(conf.encode('utf8')))
             f.write('\n')
 
 def dump_conf(f, setdevs=None, getdevs=[], extra_conf=None):
