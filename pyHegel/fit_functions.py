@@ -115,6 +115,14 @@ def xcothx(x):
     # 1e-8 is enough to give exactly 1.
     #return where(x==0, 1., nx/tanh(nx))
     return nx/np.tanh(nx)
+    ###   could also have used:
+    # with np.errstate(invalid='ignore', divide='ignore'):
+    #     return np.nan_to_num(nx/np.tanh(nx))
+    ###
+    # np.nan_to_num before numpy version 1.17 does not have the option to change nan to something
+    # other than 0. To do that, use np.
+    # For numpy before 1.12.0 0/0 error was divide, now it is invalid
+    #  nan_to_num and errstate exist since at least numpy v1.3
 xcothx.display_str = r"$\frac{x}{\tanh(x)}"
 
 def noisePower(V, T, R=50.):
