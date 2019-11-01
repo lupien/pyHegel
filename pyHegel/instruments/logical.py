@@ -359,7 +359,7 @@ class ScalingDevice(LogicalDevice):
         self._offset = offset
         self._only_val = only_val
         self._invert_trans = invert_trans
-        self._calc_fist_n = calc_first_n
+        self._calc_first_n = calc_first_n
         self._keep_last_n = keep_last_n
         doc+= 'scale_factor=%g (initial)\noffset=%g\ninvert_trans=%s\ncalc_first_n=%s\nkeep_last_n=%s'%(scale_factor, offset, invert_trans, calc_first_n, keep_last_n)
         super(type(self), self).__init__(basedev=basedev, doc=doc, setget=setget, **extrak)
@@ -396,7 +396,8 @@ class ScalingDevice(LogicalDevice):
         self._getdev_p = True
     @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
-        head = ['Scaling:: fact=%r offset=%r invert_trans=%s basedev=%s'%(self._scale, self._offset, self._invert_trans, self._basedev.getfullname())]
+        head = ['Scaling:: fact=%r offset=%r invert_trans=%s calc_first_n=%s keep_last_n=%s basedev=%s'%(
+            self._scale, self._offset, self._invert_trans, self._calc_first_n, self._keep_last_n, self._basedev.getfullname())]
         return self._current_config_addbase(head, options=options)
     def conv_fromdev(self, raw):
         if self._invert_trans:
@@ -414,8 +415,8 @@ class ScalingDevice(LogicalDevice):
         if isinstance(raw, (list, tuple)):
             raw = np.asarray(raw)
         raw_conv = raw
-        if self._calc_fist_n:
-            raw_conv = raw[:self._calc_fist_n]
+        if self._calc_first_n:
+            raw_conv = raw[:self._calc_first_n]
         raw_keep = raw_conv
         if self._keep_last_n:
             raw_keep = raw[-self._keep_last_n:]
