@@ -350,17 +350,48 @@ class ScalingDevice(LogicalDevice):
        On writing it will write basedev.set((val - offset)/scale_factor)
        Unless invert_trans is True than the definition above are switched (reading <-> writing)
        When only_val is False, get returns a tuple of (converted val, base_device raw)
+       calc_first_n: set the number of values to convert in a multi valued basedev. Default of None, converts everything.
+       keep_last_n: is the number of values to keep unchanged from the end (for a previously converted
+                    sub device. Default of None keeps only the raw values from calc_first_n
     """
-    def __init__(self, basedev, scale_factor, offset=0., setget=False, only_val=False, invert_trans=False, doc='', **extrak):
+    def __init__(self, basedev, scale_factor, offset=0., setget=False, only_val=False, invert_trans=False, calc_first_n=None, keep_last_n=None, doc='', **extrak):
         self._scale = float(scale_factor)
         self._offset = offset
         self._only_val = only_val
         self._invert_trans = invert_trans
-        doc+= 'scale_factor=%g (initial)\noffset=%g\ninvert_trans=%s'%(scale_factor, offset, invert_trans)
+        self._calc_fist_n = calc_first_n
+        self._keep_last_n = keep_last_n
+        doc+= 'scale_factor=%g (initial)\noffset=%g\ninvert_trans=%s\ncalc_first_n=%s\nkeep_last_n=%s'%(scale_factor, offset, invert_trans, calc_first_n, keep_last_n)
         super(type(self), self).__init__(basedev=basedev, doc=doc, setget=setget, **extrak)
+        base_fmt = self._basedev.getformat(**self._basedev_kwarg)
+        base_multi = base_fmt['multi']
+        base_graph = base_fmt['graph']
+        multi = None
+        multi_c = None
+        graph = None
+        if isinstance(base_multi, list):
+            multi_c = base_multi
+            multi_r = None
+            graph = base_graph
+            if calc_first_n:
+                multi_c = base_multi[:calc_first_n]
+            if keep_last_n:
+                multi_r = base_multi[-keep_last_n:]
         if not only_val:
-            self._format['multi'] = ['scale', 'raw']
-            self._format['graph'] = [0]
+            if multi_c is None:
+                multi = ['scale', 'raw']
+                graph = [0]
+            else:
+                if multi_r is None:
+                    multi_r = map(lambda x: x+'_raw', multi_c)
+                multi = map(lambda x: x+'_scale', multi_c) + multi_r
+        else:
+            if multi_c is not None:
+                multi = multi_c
+        if multi is not None:
+            self._format['multi'] = multi
+        if graph is not None:
+            self._format['graph'] = graph
         self._setdev_p = True
         self._getdev_p = True
     @locked_calling_dev
@@ -380,11 +411,21 @@ class ScalingDevice(LogicalDevice):
             raw = (val - self._offset) / self._scale
         return raw
     def _prep_output(self, raw):
-        val = self.conv_fromdev(raw)
+        if isinstance(raw, (list, tuple)):
+            raw = np.asarray(raw)
+        raw_conv = raw
+        if self._calc_fist_n:
+            raw_conv = raw[:self._calc_fist_n]
+        raw_keep = raw_conv
+        if self._keep_last_n:
+            raw_keep = raw[-self._keep_last_n:]
+        val = self.conv_fromdev(raw_conv)
         if self._only_val:
             return val
         else:
-            return val, raw
+            if isinstance(val, np.ndarray):
+                return np.concatenate((val, raw_keep))
+            return val, raw_keep
     def _getdev_log(self):
         raw = self._cached_data[0]
         return self._prep_output(raw)
