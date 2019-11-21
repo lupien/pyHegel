@@ -904,11 +904,14 @@ class RampDevice(LogicalDevice):
             doc += 'interval=%g (initial)'%interval
         self._rate = rate
         self._interval = interval
+        self._do_stop = False
         self._accumulated_fix = 0
         self._accumulated_fix_warned = False
         super(RampDevice, self).__init__(basedev=basedev, doc=doc, autoget=False, **extrak)
         self._setdev_p = True # needed to enable BaseDevice Check, set (Checking mode)
         self._getdev_p = self._basedev._getdev_p # needed to enable Checking mode of BaseDevice get
+    def stop(self):
+        self._do_stop = True
     @property
     def rate(self):
         if self._mode_is_rate:
@@ -948,13 +951,14 @@ class RampDevice(LogicalDevice):
         dval_total = val - start_val
         if dval_total == 0:
             return
+        self._do_stop = False
         if self._mode_is_rate:
             rate = self._rate
             done = False
             # TODO, might prefer time.clock on windows
             too = to = time.time()
             dt_next = dt
-            while not done:
+            while not (done or self._do_stop):
                 wait(dt_next)
                 tf = time.time()
                 # If the time difference is too great (computer was busy running something else)
@@ -984,7 +988,7 @@ class RampDevice(LogicalDevice):
             prev_t = now = to
             dt_next = dt
             dval_total = val - start_val
-            while now < tf:
+            while now < tf or not self._do_stop:
                 wait(dt_next)
                 now = time.time()
                 if now >= tf:
@@ -995,7 +999,8 @@ class RampDevice(LogicalDevice):
                 dt_next = dt - (now- prev_t - dt)
                 dt_next = max(dt_next, 0.01)
                 prev_t = now
-            basedev.set(val, **base_kwarg)
+            if not self._do_stop:
+                basedev.set(val, **base_kwarg)
 
     def _checkdev(self, val, **kwarg):
         super(RampDevice, self)._checkdev(val, **kwarg)
