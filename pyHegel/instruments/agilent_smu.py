@@ -862,11 +862,11 @@ class agilent_SMU(visaInstrumentAsync):
                                                         """)
 
         self.range_current_meas = CommonDevice(self._get_meas_ranges,
-                                               lambda v, ch: v[ch][0],
+                                               lambda v, ch: v[ch-1][0],
                                                'RI {ch},{val}', choices=i_range_meas, ch_mode=True,
                                                doc='This does not apply on the force channel. Measurement then use the force range.')
         self.range_voltage_meas = CommonDevice(self._get_meas_ranges,
-                                               lambda v, ch: v[ch][1],
+                                               lambda v, ch: v[ch-1][1],
                                                'RV {ch},{val}', choices=v_range_meas, ch_mode=True,
                                                doc='This does not apply on the force channel. Measurement then use the force range.')
         self.range_meas_use_compliance_en = MemoryDevice_update(None, False, choices=[True, False], nch=Nmax)
