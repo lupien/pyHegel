@@ -1559,7 +1559,6 @@ class _Snap(object):
             out = self.out
         elif out != self.out:
             new_out = True
-            self.out = out
         if out is None:
             raise ValueError, 'Snap. No devices set for out'
         if not isinstance(out, list):
@@ -1570,7 +1569,6 @@ class _Snap(object):
         if filename is None:
             filename = self.filename
         elif filename != self.filename:
-            self.filename = filename
             new_file = True
             new_out = True
             self.cycle = 0
@@ -1585,6 +1583,8 @@ class _Snap(object):
             self.formats = formats
             _write_conf(f, formats, extra_base='snap_options', async=async)
             writevec(f, ['time']+hdrs, pre_str='#')
+            self.out = out
+            self.filename = filename
         else:
             formats = self.formats
         tme = clock.get()
