@@ -2763,7 +2763,7 @@ def make_choice_list(list_values, start_exponent, end_exponent):
           stop_expoenent = -3
     produces [1e-6, 3e-6, 1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3]
     """
-    powers = np.logspace(start_exponent, end_exponent, end_exponent-start_exponent+1)
+    powers = np.logspace(start_exponent, end_exponent, abs(end_exponent-start_exponent)+1)
     return (powers[:,None] * np.array(list_values)).flatten()
 
 
