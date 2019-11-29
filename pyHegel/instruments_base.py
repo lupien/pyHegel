@@ -1627,8 +1627,10 @@ class BaseInstrument(object):
                 continue
             if self.alias == obj:
                 ret += 'alias = '
-            val = obj.getcache()
-            ret += s+" = "+repr(val)+"\n"
+            val = repr(obj.getcache())
+            if len(val) > 200:
+                val = val[:100] + ' ... ' + val[-100:]
+            ret += s+" = "+val+"\n"
         np.set_printoptions(**poptions)
         return ret
     def idn(self):
