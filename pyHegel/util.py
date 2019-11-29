@@ -132,7 +132,7 @@ def _shape_compare(shape1, shape2, concatenate):
 _readfile_lastnames = []
 _readfile_lastheaders = []
 _readfile_lasttitles = []
-def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True, concatenate=False):
+def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True, concatenate=False, multi_force_def=np.nan):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -158,7 +158,8 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
      or (n_comuns, n_rows*n_files) if using concatenate
     When multi_sweep is True and the file was created from a multi sweep,
      n_rows is replaced by the correct shape to handle the multiple dimensions of the sweep
-     if possible.
+     if possible. When it is 'force', it creates the correct shape filled with multi_force_def for
+     unavailable values.
 
     The csv option can be True, False or 'auto'. When in auto, the file extension
     is used to detect wheter to use csv or not. When csv is used
@@ -188,6 +189,8 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     (array, filenames_list, titles_list, headers_list)
     """
     global _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
+    if multi_sweep not in [True, False, 'force']:
+        raise ValueError("multi_sweep needs to be one of True, False or 'force'")
     if not isinstance(filename, (list, tuple, np.ndarray)):
         filename = [filename]
     filelist = []
@@ -259,6 +262,7 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     if not multi:
         ret = ret[0]
     elif concatenate is not False:
+        shape = None
         ret = np.concatenate(ret, axis=concatenate)
     else:
         # convert into a nice numpy array. The data is copied and made contiguous
@@ -269,10 +273,19 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     if shape is not None:
         old_shape = ret.shape
         new_shape = old_shape[:-1] + shape
+        ncol = old_shape[0]
         try:
             ret.shape = new_shape
         except ValueError:
-            print 'Unable to convert shape from %s to %s (probably an incomplet sweep). Shape unadjusted.'%(old_shape, new_shape)
+            if multi_sweep == 'force':
+                new_ret = np.full(new_shape, multi_force_def)
+                r_flat = ret.reshape((ncol, -1)).T
+                nr_flat = new_ret.reshape((ncol, -1)).T
+                nr_flat[:len(r_flat)] = r_flat
+                ret = new_ret
+                print 'Forced shape from %s to %s.'%(old_shape, new_shape)
+            else:
+                print 'Unable to convert shape from %s to %s (probably an incomplet sweep). Shape unadjusted.'%(old_shape, new_shape)
         else:
             print 'Converted shape from %s to %s.'%(old_shape, new_shape)
     if getnames and getheaders:
