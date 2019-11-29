@@ -390,7 +390,7 @@ class sr865_lia(visaInstrument):
         self.timebase_mode = scpiDevice('tbmode', choices=ChoiceIndex(['auto', 'internal']))
         self.timebase_mode_state = scpiDevice(getstr='tbstat?', choices=ChoiceIndex(['auto', 'internal']))
         minfreq, maxfreq = 1e-3, 4e6
-        minsrc, maxsrc = 1e-9, 2
+        minsrc, maxsrc = 0, 2
         minsrc_off, maxsrc_off = -5, 5
         self.freq = scpiDevice('freq', str_type=float, setget=True, min=minfreq, max=maxfreq)
         self.freq_internal = scpiDevice('freqint', str_type=float, setget=True, min=minfreq, max=maxfreq)
@@ -407,8 +407,8 @@ class sr865_lia(visaInstrument):
             kwarg.update(options=options, options_apply=app, options_conv=conv)
             return scpiDevice(*arg, **kwarg)
         self.preset_freq = devChOption('PSTF {ch},{val}', 'PSTF? {ch}', str_type=float, min=minfreq, max=maxfreq)
-        self.preset_amp = devChOption('PSTA {ch},{val}', 'PSTF? {ch}', str_type=float, min=minsrc, max=maxsrc)
-        self.preset_offset = devChOption('PSTL {ch},{val}', 'PSTF? {ch}', str_type=float, min=minsrc_off, max=maxsrc_off)
+        self.preset_amp = devChOption('PSTA {ch},{val}', 'PSTA? {ch}', str_type=float, min=minsrc, max=maxsrc)
+        self.preset_offset = devChOption('PSTL {ch},{val}', 'PSTL? {ch}', str_type=float, min=minsrc_off, max=maxsrc_off)
         sens = ChoiceIndex(make_choice_list([1,.5,.2], 0, -9)[:-2], normalize=True)
         self.sens = scpiDevice('scal', choices=sens, doc='Set the sensitivity in V (for currents it is in uA). Only affects display and ch1-2 outputs, not the values read.')
         self.input_indicator = scpiDevice(getstr='ilvl?', str_type=int, doc='input range indicator. From 0 to 4 (overload)')
@@ -421,7 +421,7 @@ class sr865_lia(visaInstrument):
         self.auxout2 = scpiDevice('AUXV 1,{val}', 'AUXV? 1', str_type=float, setget=True, min=-10.5, max=10.5)
         self.auxout3 = scpiDevice('AUXV 2,{val}', 'AUXV? 2', str_type=float, setget=True, min=-10.5, max=10.5)
         self.auxout4 = scpiDevice('AUXV 3,{val}', 'AUXV? 3', str_type=float, setget=True, min=-10.5, max=10.5)
-        self.src_level = scpiDevice('slvl', str_type=float, min=minsrc, max=maxsrc, setget=True)
+        self.src_level = scpiDevice('slvl', str_type=float, min=minsrc, max=maxsrc, setget=True, doc='level resolution is 1 nV')
         self.src_offset = scpiDevice('soff', str_type=float, min=minsrc_off, max=maxsrc_off, setget=True, doc='DC voltage resolution is 0.1 mV. See also src_offset_mode')
         self.src_offset_mode = scpiDevice('refm', choices=ChoiceIndex(['common', 'differential']))
         self.reference_mode = scpiDevice('rsrc', choices=ChoiceIndex(['internal', 'external', 'dual', 'chop']))
