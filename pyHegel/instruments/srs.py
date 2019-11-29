@@ -50,6 +50,10 @@ class sr830_lia(visaInstrument):
 
     To read more than one channel at a time use readval/fetch(snap)
     Otherwise you can use x, y, t, theta
+
+    Note that the sync filters lowers the instrument resolution (so only use it if needed)
+    and it applies to the harmonic, not the fundamental (so it will not filter out the
+    fundamental frequency when detecting harmonics.)
     """
     # TODO setup snapsel to use the names instead of the numbers
     _snap_type = {1:'x', 2:'y', 3:'R', 4:'theta', 5:'Aux_in1', 6:'Aux_in2',
@@ -93,9 +97,11 @@ class sr830_lia(visaInstrument):
                                  'sync_filter', 'reserve_mode',
                                  'offset_expand_x', 'offset_expand_y', 'offset_expand_r',
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf',
+                                 'reference_trigger', 'ch1_out', 'ch2_out', 'display_conf1', 'display_conf2',
                                  'auxout1', 'auxout2', 'auxout3', 'auxout4', options)
     def _create_devs(self):
         self.freq = scpiDevice('freq', str_type=float, setget=True, min=0.001, max=102e3)
+        self.reference_trigger = scpiDevice('rslp', choices=ChoiceIndex(['sine_zero', 'ttl_rising', 'ttl_falling']))
         sens = ChoiceIndex(make_choice_list([2,5,10], -9, -1), normalize=True)
         self.sens = scpiDevice('sens', choices=sens, doc='Set the sensitivity in V (for currents it is in uA)')
         self.oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float)
@@ -115,6 +121,12 @@ class sr830_lia(visaInstrument):
         self.y = scpiDevice(getstr='outp? 2', str_type=float, trig=True)
         self.r = scpiDevice(getstr='outp? 3', str_type=float, trig=True)
         off_exp = ChoiceMultiple(['offset_pct', 'expand_factor'], [float, ChoiceIndex([1, 10 ,100])])
+        self.ch1_out = scpiDevice('fpop 1,{val}', 'fpop? 1', choices=ChoiceIndex(['display', 'X']))
+        self.ch2_out = scpiDevice('fpop 2,{val}', 'fpop? 2', choices=ChoiceIndex(['display', 'Y']))
+        disp_ratio1 = ChoiceMultiple(['display', 'ratio'], [ChoiceIndex(['X', 'R', 'Xnoise', 'AuxIn1', 'AuxIn2']), ChoiceIndex(['off', 'AuxIn1', 'AuxIn2'])])
+        disp_ratio2 = ChoiceMultiple(['display', 'ratio'], [ChoiceIndex(['Y', 'theta', 'Ynoise', 'AuxIn3', 'AuxIn3']), ChoiceIndex(['off', 'AuxIn3', 'AuxIn4'])])
+        self.display_conf1 = scpiDevice('DDEF 1,{val}', 'DDEF? 1', choices=disp_ratio1)
+        self.display_conf2 = scpiDevice('DDEF 2,{val}', 'DDEF? 2', choices=disp_ratio2)
         self.offset_expand_x = scpiDevice('oexp 1,{val}', 'oexp? 1', choices=off_exp, setget=True)
         self.offset_expand_y = scpiDevice('oexp 2,{val}', 'oexp? 2', choices=off_exp, setget=True)
         self.offset_expand_r = scpiDevice('oexp 3,{val}', 'oexp? 3', choices=off_exp, setget=True)
