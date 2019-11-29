@@ -24,12 +24,14 @@
 from __future__ import absolute_import
 
 import numpy as np
+import time
 from scipy.optimize import brentq as brentq_rootsolver
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceMultiple, ChoiceIndex, make_choice_list,\
-                            decode_float64, visa_wrap, locked_calling
+                            decode_float64, _decode_block_base, visa_wrap, locked_calling,\
+                            wait
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -178,6 +180,357 @@ class sr830_lia(visaInstrument):
         n_filter is the order of the filter: 1, 2, 3 ...
         By default time_constant and n_filter are the current ones
         When sec is True the input time is in sec, not in time_constants
+        """
+        if n_filter is None:
+            n_filter = self.filter_slope.getcache()
+            n_filter = self.filter_slope.choices.index(n_filter)+1
+        if time_constant is None:
+            time_constant = self.timeconstant.getcache()
+        if sec:
+            n_time_constant /= time_constant
+        t = n_time_constant
+        et = np.exp(-t)
+        if n_filter == 1:
+            return 1.-et
+        elif n_filter == 2:
+            return 1.-et*(1.+t)
+#        elif n_filter == 3:
+#            return 1.-et*(1.+t+0.5*t**2)
+#        elif n_filter == 4:
+#            return 1.-et*(1.+t+0.5*t**2+t**3/6.)
+        else:
+            # general formula: 1-exp(-t)*( 1+t +t**/2 + ... t**(n-1)/(n-1)!) )
+            m = 1.
+            tt = 1.
+            for i in range(1, n_filter):
+                tt *= t/i
+                m += tt
+            return 1.-et*m
+    def find_n_time(self, frac=.99, n_filter=None, time_constant=None, sec=False):
+        """
+        Does the inverse of find_fraction.
+        Here, given a fraction, we find the number of time_constants needed to wait.
+        When sec is true, it returs the time in sec not in number of time_constants.
+        """
+        if n_filter is None:
+            n_filter = self.filter_slope.getcache()
+            n_filter = self.filter_slope.choices.index(n_filter)+1
+        if time_constant is None:
+            time_constant = self.timeconstant.getcache()
+        func = lambda x: self.find_fraction(x, n_filter, time_constant)-frac
+        n_time = brentq_rootsolver(func, 0, 100)
+        if sec:
+            return n_time*time_constant
+        else:
+            return n_time
+
+#######################################################
+##    Stanford Research SR865 Lock-in Amplifier
+#######################################################
+
+register_usb_name('Stanford_Research_Systems', 0xB506)
+
+@register_instrument('Stanford_Research_Systems', 'SR865A', usb_vendor_product=[0xB506, 0x2000])
+#@register_instrument('Stanford_Research_Systems', 'SR865A', 'V1.51')
+class sr865_lia(visaInstrument):
+    """
+    Don't forget to set the async_wait to some usefull values.
+     might do set(sr1.async_wait, 1.)
+    when using 24dB/oct, 100ms filter.
+
+    You can use find_n_time and find_fraction to set the time.
+    For example: set(sr1.async_wait, sr1.find_n_time(.99,sec=True))
+
+    To read more than one channel at a time use readval/fetch(snap)
+    Otherwise you can use x, y, t, theta
+
+    Note that contrary to the SR830, this instrument sync filters applies to the fundamental
+    harmonic even if harmonics is turned on. It also does not lower the resolution.
+    """
+    # TODO scan mode, FFT, data capture and streaming
+    # Contratry to the SR830, the output buffers is overwritten after every request
+    # so it is unecessary to reset it.
+    # TODO check OPC usage
+    # TODO find out about advanced filters in my filter calculations
+
+    def _check_snapsel(self, sel):
+        if not (2 <= len(sel) <= 3):
+            raise ValueError, 'snap sel needs at least 1 and no more thant 3 elements'
+        if not isinstance(sel, (np.ndarray, list, tuple)):
+            sel = [sel]
+        return sel
+    def _snap_getdev(self, sel=['X', 'Y'], norm=False):
+        sel = self._check_snapsel(sel)
+        single = False
+        if len(sel) == 1:
+            single = True
+            sel = sel[0]
+            if sel in self._param_op:
+                sel = self._param_op.tostr(sel)
+                data = decode_float64(self.ask('outp? '+sel))
+            else:
+                sel = self._disp_param_op.tostr(sel)
+                data = decode_float64(self.ask('outr? '+sel))
+        else:
+            sel = [self._param_op.tostr(s) for s in sel]
+            data = decode_float64(self.ask('snap? '+','.join(sel)))
+        if norm:
+            amp = self.src_level.get()
+            data_norm = data/amp
+            data = np.concatenate( (data_norm, data) )
+            single = False
+        if single:
+            return data[0]
+        return data
+    def _snap_getformat(self, sel=['X', 'Y'], norm=False, **kwarg):
+        sel = self._check_snapsel(sel)
+        headers = sel
+        if norm:
+            headers = map(lambda x: x+'_norm', headers) + headers
+        d = self.snap._format
+        if len(headers) == 1:
+            headers = False
+        d.update(multi=headers, graph=range(len(sel)))
+        return BaseDevice.getformat(self.snap, sel=sel, **kwarg)
+
+    def _input_conf_setdev(self, val):
+        if val.startswith('I'):
+            if val == 'I100':
+                c = '100MEG'
+            else:
+                c = '1MEG'
+            self.write('ICUR %s'%c)
+            self.write('IVMD CURRent')
+        else:
+            self.write('ISRC %s'%val)
+            self.write('IVMD VOLTage')
+    def _input_conf_getdev(self):
+        is_I = bool(int(self.ask('ivmd?')))
+        if not is_I:
+            is_AB = bool(int(self.ask('isrc?')))
+            return 'A-B' if is_AB else 'A'
+        else:
+            is_100 = bool(int(self.ask('icur?')))
+            return 'I100' if is_100 else 'I1'
+
+    def _snap_bmp_getdev(self):
+        """ obtains a .BMP file capturing the display. the .bmp option is added if not provided. """
+        self.write('getscreen?')
+        while True:
+            # TODO could improve this logic
+            if self.read_status_byte()&0x10: # MAV bit set
+                break
+            wait(.1)
+        return _decode_block_base(self.read(raw=True))
+
+    def conf_datetime(self, set=False):
+        """ When set is True, it sends the current computer date and time to the device.
+            It always returns the devices date/time
+        """
+        if set:
+            dt = time.localtime()
+            for i,x in enumerate([dt.tm_mday, dt.tm_mon, dt.tm_year%100]):
+                self.write('date %i,%i'%(i, x))
+            for i,x in enumerate([dt.tm_sec, dt.tm_min, dt.tm_hour]):
+                self.write('time %i,%i'%(i, x))
+        sec, min, hour = [int(self.ask('time? %i'%i)) for i in range(3)]
+        day, month, year = [int(self.ask('date? %i'%i)) for i in range(3)]
+        return '%04i-%02i-%02i %02i:%02i:%02i'%(year+2000, month, day, hour, min, sec)
+
+    def auto_range(self):
+        self.write('ARNG')
+
+    def auto_offset(self, ch='x'):
+        """
+           commands the auto offset for channel ch
+           which can be 'x', 'y' or 'r'
+        """
+        choices=ChoiceIndex(['x', 'y', 'r'], offset=1)
+        ch_i = choices.tostr(ch)
+        self.write('aoff '+ch_i)
+    @locked_calling
+    def _current_config(self, dev_obj=None, options={}):
+        origsel = self.outch_sel.get()
+        ch_info = []
+        for c in ['X', 'Y', 'R']:
+            self.outch_sel.set(c)
+            expand = self.ch_expand.get()
+            offset_en = self.ch_offset_en.get()
+            offset_prct = self.ch_offset_prct.get()
+            ratio_en = self.ch_ratio_en.get()
+            info = dict(expand=expand, offset_en=offset_en, offset_prct=offset_prct, ratio_en=ratio_en)
+            ch_info.append('ch%s=%r'%(c, info))
+        self.outch_sel.set(origsel)
+        base = self._conf_helper('async_delay','async_wait', 'freq', 'freq_internal', 'freq_external',
+                                 'freq_detection', 'reference_trigger', 'reference_impedance', 'reference_mode',
+                                 'src_level', 'src_offset', 'src_offset_mode',
+                                 'input_range', 'input_conf', 'input_ground_en', 'input_dc_coupled_en',
+                                 'sens', 'harm', 'harm_dual', 'phase', 'timeconstant', 'filter_slope',
+                                 'filter_sync', 'filter_advanced_en', 'enbw',
+                                 'ch1_out', 'ch2_out')
+        rest = self._conf_helper('chopper_slots', 'chopper_phase', 'blazex_out',
+                                 'display_blank_en', 'display_dat1', 'display_dat2', 'display_dat3', 'display_dat4',
+                                 'auxout1', 'auxout2', 'auxout3', 'auxout4',
+                                 'timebase_mode', 'timebase_mode_state', options)
+        return base + ch_info + rest
+
+    def _create_devs(self):
+        self.timebase_mode = scpiDevice('tbmode', choices=ChoiceIndex(['auto', 'internal']))
+        self.timebase_mode_state = scpiDevice(getstr='tbstat?', choices=ChoiceIndex(['auto', 'internal']))
+        minfreq, maxfreq = 1e-3, 4e6
+        minsrc, maxsrc = 1e-9, 2
+        minsrc_off, maxsrc_off = -5, 5
+        self.freq = scpiDevice('freq', str_type=float, setget=True, min=minfreq, max=maxfreq)
+        self.freq_internal = scpiDevice('freqint', str_type=float, setget=True, min=minfreq, max=maxfreq)
+        self.freq_external = scpiDevice(getstr='freqext?', str_type=float)
+        self.freq_detection = scpiDevice(getstr='freqdet?', str_type=float)
+        self.reference_trigger = scpiDevice('rtrg', choices=ChoiceIndex(['sine_zero', 'ttl_rising', 'ttl_falling']))
+        self.reference_impedance = scpiDevice('refz', choices=ChoiceIndex(['50', '1M']))
+        self.preset_sel = MemoryDevice(1, choices=[1, 2, 3, 4])
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.preset_sel)
+            app = kwarg.pop('options_apply', ['ch'])
+            conv = dict(ch=lambda val, valstr: str(val-1))
+            kwarg.update(options=options, options_apply=app, options_conv=conv)
+            return scpiDevice(*arg, **kwarg)
+        self.preset_freq = devChOption('PSTF {ch},{val}', 'PSTF? {ch}', str_type=float, min=minfreq, max=maxfreq)
+        self.preset_amp = devChOption('PSTA {ch},{val}', 'PSTF? {ch}', str_type=float, min=minsrc, max=maxsrc)
+        self.preset_offset = devChOption('PSTL {ch},{val}', 'PSTF? {ch}', str_type=float, min=minsrc_off, max=maxsrc_off)
+        sens = ChoiceIndex(make_choice_list([1,.5,.2], 0, -9)[:-2], normalize=True)
+        self.sens = scpiDevice('scal', choices=sens, doc='Set the sensitivity in V (for currents it is in uA). Only affects display and ch1-2 outputs, not the values read.')
+        self.input_indicator = scpiDevice(getstr='ilvl?', str_type=int, doc='input range indicator. From 0 to 4 (overload)')
+        self.input_range = scpiDevice('irng', choices=ChoiceIndex([1, .3, .1, .03, .01]))
+        self.auxin1 = scpiDevice(getstr='oaux? 0', str_type=float)
+        self.auxin2 = scpiDevice(getstr='oaux? 1', str_type=float)
+        self.auxin3 = scpiDevice(getstr='oaux? 2', str_type=float)
+        self.auxin4 = scpiDevice(getstr='oaux? 3', str_type=float)
+        self.auxout1 = scpiDevice('AUXV 0,{val}', 'AUXV? 0', str_type=float, setget=True, min=-10.5, max=10.5)
+        self.auxout2 = scpiDevice('AUXV 1,{val}', 'AUXV? 1', str_type=float, setget=True, min=-10.5, max=10.5)
+        self.auxout3 = scpiDevice('AUXV 2,{val}', 'AUXV? 2', str_type=float, setget=True, min=-10.5, max=10.5)
+        self.auxout4 = scpiDevice('AUXV 3,{val}', 'AUXV? 3', str_type=float, setget=True, min=-10.5, max=10.5)
+        self.src_level = scpiDevice('slvl', str_type=float, min=minsrc, max=maxsrc, setget=True)
+        self.src_offset = scpiDevice('soff', str_type=float, min=minsrc_off, max=maxsrc_off, setget=True, doc='DC voltage resolution is 0.1 mV. See also src_offset_mode')
+        self.src_offset_mode = scpiDevice('refm', choices=ChoiceIndex(['common', 'differential']))
+        self.reference_mode = scpiDevice('rsrc', choices=ChoiceIndex(['internal', 'external', 'dual', 'chop']))
+        self.harm = scpiDevice('harm', str_type=int, min=1, max=99, setget=True)
+        self.harm_dual = scpiDevice('harmdual', str_type=int, min=1, max=99, setget=True)
+        self.phase = scpiDevice('phas', str_type=float, setget=True)
+        self.chopper_slots =  scpiDevice('bladeslots', choices=ChoiceIndex(['slt6', 'slt30']))
+        self.chopper_phase =  scpiDevice('bladephase', str_type=float, setget=True)
+        timeconstants = ChoiceIndex(make_choice_list([1, 3], -6, 4), normalize=True)
+        self.timeconstant = scpiDevice('oflt', choices=timeconstants)
+        filter_slopes=ChoiceIndex([6, 12, 18, 24])
+        self.filter_slope = scpiDevice('ofsl', choices=filter_slopes, doc='in dB/oct\n')
+        self.filter_sync = scpiDevice('sync', str_type=bool)
+        self.filter_advanced_en = scpiDevice('advfilt', str_type=bool)
+        self.enbw = scpiDevice(getstr='enbw?', str_type=float, doc='Does not include effect of sync filter.')
+        self.x = scpiDevice(getstr='outp? 1', str_type=float, trig=True)
+        self.y = scpiDevice(getstr='outp? 2', str_type=float, trig=True)
+        self.r = scpiDevice(getstr='outp? 3', str_type=float, trig=True)
+        self.theta = scpiDevice(getstr='outp? 4', str_type=float, trig=True)
+        self.ch1_out = scpiDevice('cout 0,{val}', 'cout? 0', choices=ChoiceIndex(['X', 'R']))
+        self.ch2_out = scpiDevice('cout 1,{val}', 'cout? 1', choices=ChoiceIndex(['Y', 'theta']))
+        self.outch_sel = MemoryDevice('X', choices=ChoiceIndex(['X', 'Y', 'R']))
+        def devChOutOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.outch_sel)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.ch_expand = devChOutOption('cexp {ch},{val}', 'cexp? {ch}', choices=ChoiceIndex([1, 10, 100]),
+                                        doc='expand only modifies display and output, not the read values.')
+        self.ch_offset_en = devChOutOption('cofa {ch},{val}', 'cofa? {ch}', str_type=bool)
+        self.ch_offset_prct = devChOutOption('cofp {ch},{val}', 'cofp? {ch}', str_type=float)
+        self.ch_ratio_en = devChOutOption('crat {ch},{val}', 'crat? {ch}', str_type=bool)
+        self.input_ground_en = scpiDevice('ignd', str_type=bool)
+        self.input_dc_coupled_en = scpiDevice('icpl', str_type=bool)
+        self.display_blank_en = scpiDevice('dblk', str_type=bool)
+        self.blazex_out = scpiDevice('blazex', choices=ChoiceIndex(['blazex', 'bipolar_sync', 'unipolar_sync']))
+        self.overload_status = scpiDevice(getstr='curovldstat?', str_type=int, doc=
+        """  These are the overlaod state at the time of the command. unused bit are not listed.
+            bit 0  (1):    CH1 output scale
+            bit 1  (2):    CH2 output scale
+            bit 3  (8):    Ext ref unlocked
+            bit 4  (16):   Input range
+            bit 8  (256):  Data Channel 1 Scale (green)
+            bit 9  (512):  Data Channel 2 Scale (blue)
+            bit 10 (1024): Data Channel 3 Scale (yellow)
+            bit 11 (2048): Data Channel 4 Scale (orange)
+        """)
+        param_op = ChoiceIndex(['X', 'Y', 'R', 'theta', 'in1', 'in2', 'in3', 'in4',
+                                'Xnoise', 'Ynoise', 'out1', 'out2', 'phase',
+                                'src_level', 'src_offset', 'Fint', 'Fext'])
+        self._param_op = param_op
+        self._disp_param_op = ChoiceIndex(['dat1', 'dat2', 'dat3', 'dat4'])
+        self.display_dat1 = scpiDevice('cdsp 0,{val}', 'cdsp? 0', choices=param_op, doc='This is the green display.')
+        self.display_dat2 = scpiDevice('cdsp 1,{val}', 'cdsp? 1', choices=param_op, doc='This is the blue display.')
+        self.display_dat3 = scpiDevice('cdsp 2,{val}', 'cdsp? 2', choices=param_op, doc='This is the yellow display.')
+        self.display_dat4 = scpiDevice('cdsp 3,{val}', 'cdsp? 3', choices=param_op, doc='This is the orange display.')
+        self.status_input_overload = scpiDevice(getstr='LIAS? 4', str_type=int)
+        self.status_byte = scpiDevice(getstr='LIAS?', str_type=int, doc=
+        """
+        Reading clears the status word. unused bits are not listed
+            bit 0  (1):    CH1 output scale overload
+            bit 1  (2):    CH2 output scale overload
+            bit 3  (8):    Ext ref unlocked
+            bit 4  (16):   Input range overload
+            bit 5  (32):   Sync filter frequency out of range
+            bit 6  (64):   Sync filter overload
+            bit 7  (128):  Data storage triggered
+            bit 8  (256):  Data Channel 1 scale overload (green)
+            bit 9  (512):  Data Channel 2 scale overload (blue)
+            bit 10 (1024): Data Channel 3 scale overload (yellow)
+            bit 11 (2048): Data Channel 4 scale overload (orange)
+            bit 12 (4096): Display capture to USB completed
+            bit 13 (8192): Scan started
+            bit 14 (16384):Scan completed
+        """)
+        self._devwrap('input_conf', choices=['A', 'A-B', 'I1', 'I100'], doc='For currents I1 refers to 1 MOhm, I100 refers to 100 MOhm\n')
+        self._devwrap('snap', trig=True, doc="""
+            This device can be called snap or fetch (they are both the same)
+            This device obtains simultaneous readings from many inputs (1-3).
+            To select the inputs, use the parameter
+             sel
+            which is ['X', 'Y'] by default.
+            The options are for:
+                %r
+            When reading only one value, you can also use:
+                %r
+            which correspond the the greem blue, yellow than orange display values.
+            The option norm when True return the data divided by the src_level (and followed by raw data)
+                """%(self._param_op, self._disp_param_op))
+        self.fetch = self.snap
+        self._devwrap('snap_bmp', autoinit=False, trig=True)
+        self.snap_bmp._format['bin']='.bmp'
+        self.snap_display = scpiDevice(getstr='snapd?', str_type=decode_float64, doc='This reads the 4 values on screen, as green, blue, yellow than orange.')
+        self.readval = ReadvalDev(self.fetch)
+        self.alias = self.readval
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+    def get_error(self):
+        err = int(self.ask('ERRS?'))
+        if err == 0:
+            return ['No errors']
+        errors = ['External 10 MHz clock input error.',
+                  'Battery backup failed.'
+                  '--', # unused
+                  '---', # unused
+                  'VXI-11 error.',
+                  'GPIB fast data transfer mode aborted',
+                  'USB device error.',
+                  'USB host error (memory stick error)']
+        errs = [e for e,i in enumerate(errors) if (err>>i)&1]
+        return errs
+
+    def find_fraction(self, n_time_constant, n_filter=None, time_constant=None, sec=False):
+        """
+        Calculates the fraction of a step function that is obtained after
+        n_time_constant*time_constant time when using n_filter
+        n_filter is the order of the filter: 1, 2, 3 ...
+        By default time_constant and n_filter are the current ones
+        When sec is True the input time is in sec, not in time_constants
+        This does not take into account sync or advanced filter.
         """
         if n_filter is None:
             n_filter = self.filter_slope.getcache()
