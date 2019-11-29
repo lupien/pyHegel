@@ -99,11 +99,13 @@ class sr830_lia(visaInstrument):
                                  'sync_filter', 'reserve_mode',
                                  'offset_expand_x', 'offset_expand_y', 'offset_expand_r',
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf',
-                                 'reference_trigger', 'ch1_out', 'ch2_out', 'display_conf1', 'display_conf2',
+                                 'reference_trigger', 'reference_mode',
+                                 'ch1_out', 'ch2_out', 'display_conf1', 'display_conf2',
                                  'auxout1', 'auxout2', 'auxout3', 'auxout4', options)
     def _create_devs(self):
         self.freq = scpiDevice('freq', str_type=float, setget=True, min=0.001, max=102e3)
         self.reference_trigger = scpiDevice('rslp', choices=ChoiceIndex(['sine_zero', 'ttl_rising', 'ttl_falling']))
+        self.reference_mode = scpiDevice('fmod', choices=ChoiceIndex(['external', 'internal']))
         sens = ChoiceIndex(make_choice_list([2,5,10], -9, -1), normalize=True)
         self.sens = scpiDevice('sens', choices=sens, doc='Set the sensitivity in V (for currents it is in uA)')
         self.oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float)
@@ -144,7 +146,17 @@ class sr830_lia(visaInstrument):
         # status: b0=Input/Reserver ovld, b1=Filter ovld, b2=output ovld, b3=unlock,
         # b4=range change (accross 200 HZ, hysteresis), b5=indirect time constant change
         # b6=triggered, b7=unused
-        self.status_byte = scpiDevice(getstr='LIAS?', str_type=int)
+        self.status_byte = scpiDevice(getstr='LIAS?', str_type=int, doc=
+        """
+        Reading clears the status word. Unused bits are not listed.
+            bit 0  (1):    Input or Amplifier overload
+            bit 1  (2):    Filter overload
+            bit 2  (4):    Output overload
+            bit 3  (8):    Unlocked reference
+            bit 4  (16):   Frequency range switch (200Hz)
+            bit 5  (32):   Timeconstant changed indirectly
+            bit 6  (64):   Triggered data storage
+        """)
         self._devwrap('snap', trig=True, doc="""
             This device can be called snap or fetch (they are both the same)
             This device obtains simultaneous readings from many inputs.
