@@ -257,7 +257,9 @@ class sr865_lia(visaInstrument):
     Otherwise you can use x, y, t, theta
 
     Note that contrary to the SR830, this instrument sync filters applies to the fundamental
-    harmonic even if harmonics is turned on. It also does not lower the resolution.
+    harmonic even if harmonics is turned on.
+    It also does not lower the resolution, but it requires a correct sensitivity range
+    that does not overload.
     """
     # TODO scan mode, FFT, data capture and streaming
     # Contratry to the SR830, the output buffers is overwritten after every request
