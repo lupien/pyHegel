@@ -2070,11 +2070,11 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
                 doc='Note that instrument can have this settings at index. In which case it returns an error.')
         self.marker_coupling_en = devCalcOption('CALCulate{ch}:MARKer:COUPled', str_type=bool)
         self.marker_en = devChMarkOption('CALCulate{ch}:MARKer{mkr}', str_type=bool)
-        self.marker_x = devChMarkOption('CALCulate{ch}:MARKer{mkr}:X', str_type=float, setget=True)
+        self.marker_x = devChMarkOption('CALCulate{ch}:MARKer{mkr}:X', str_type=float, setget=True, trig=True)
         # empty data is replaced by nan. The instrument also shows an error that seem unavoidable.
         self.marker_y = adjust_getformat(devChMarkOption('CALCulate{ch}:MARKer{mkr}:Y',
                                                          str_type=Block_Codec(sep=',', single_not_array=True, empty=np.nan),
-                                                         setget=True, autoinit=False), True)
+                                                         setget=True, autoinit=False, trig=True), True)
         self.marker_format = devChMarkOption('CALCulate{ch}:MARKer{mkr}:FORMat', choices=mkr_format_options,
                 doc='Note that instrument can have this settings at index. In which case it returns an error.')
         self.marker_name = devChMarkOption('CALCulate{ch}:MARKer{mkr}:NAME', str_type=quoted_string_znb())
@@ -2157,7 +2157,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         # ext_ref_freq does not work (documentation says so 2018-11)
         #self.ext_ref_freq = scpiDevice('ROSCillator:EXTernal:FREQuency', str_type=float)
 
-        self._devwrap('fetch', autoinit=False)
+        self._devwrap('fetch', autoinit=False, trig=True)
         self._devwrap('snap_png', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         self.alias = self.fetch
