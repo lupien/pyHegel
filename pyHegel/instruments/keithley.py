@@ -738,19 +738,20 @@ class keithley_2450_smu(visaInstrumentAsync):
         self.src_delay = srcDevOption('SOURce:{mode}:DELay', str_type=float, min=0, max=4, setget=True, doc='Extra time in seconds (after settling) between changing source and reading measurement. Changing it disables auto delay.')
         self.src_delay_auto_en = srcDevOption('SOURce:{mode}:DELay:AUTO', str_type=bool)
         self.src_high_cap_mode_en = srcDevOption('SOURce:{mode}:HIGH:CAPacitance', str_type=bool)
-        src_level_choices = ChoiceDevDep(self.src_mode, {src_mode_opt[['CURRent']]:ChoiceLimits(-1.05, 1.05), meas_mode_opt[['voltage']]:ChoiceLimits(-210, 210)})
+        #src_level_choices = ChoiceDevDep(self.src_mode, {src_mode_opt[['CURRent']]:ChoiceLimits(-1.05, 1.05), src_mode_opt[['voltage']]:ChoiceLimits(-210, 210)})
         #self.src_level = srcDevOption('SOURce:{mode}', str_type=float, choices=src_level_choices, setget=True)
         self._devwrap('src_level', setget=True)
 
         #self.src_V_limit = scpiDevice('SOURce:VOLTage:ILIMIt', str_type=float, min=1e-9, max=1.05, setget=True)
         #self.src_I_limit = scpiDevice('SOURce:CURRent:VLIMIt', str_type=float, min=0.02, max=210, setget=True)
-        limit_choices = {'VOLTage:ILIMit':ChoiceLimits(1e-9, 1.05), 'CURRent:VLIMit':ChoiceLimits(0.02, 210)}
+        #limit_choices = {'VOLTage:ILIMit':ChoiceLimits(1e-9, 1.05), 'CURRent:VLIMit':ChoiceLimits(0.02, 210)}
+        limit_choices = ChoiceDevDep(self.src_mode,{ src_mode_opt[['voltage']]:ChoiceLimits(1e-9, 1.05), src_mode_opt[['current']]:ChoiceLimits(0.02, 210)})
         self.src_limit = srcLimitDevOption('SOURce:{mode}', str_type=float, choices=limit_choices, setget=True)
         self.src_limit_tripped = srcLimitDevOption(getstr='SOURce:{mode}:TRIPped?', str_type=bool)
         protection_choices = ChoiceStrings('PROT2', 'PROT5', 'PROT10', 'PROT20', 'PROT40', 'PROT60', 'PROT80', 'PROT100', 'PROT120', 'PROT140', 'PROT160', 'PROT180', 'NONE')
         self.src_protection_level =  scpiDevice('SOURce:VOLTage:PROTection', choices=protection_choices)
         self.src_protection_tripped =  scpiDevice(getstr='SOURce:VOLTage:PROTection:TRIPped?', str_type=bool)
-        src_range_choices = ChoiceDevDep(self.src_mode, {src_mode_opt[['CURRent']]:ChoiceLimits(-1, 1), meas_mode_opt[['voltage']]:ChoiceLimits(-200, 200)})
+        src_range_choices = ChoiceDevDep(self.src_mode, {src_mode_opt[['CURRent']]:ChoiceLimits(-1, 1), src_mode_opt[['voltage']]:ChoiceLimits(-200, 200)})
         self.src_range = srcDevOption('SOURce:{mode}:RANGe', str_type=float, choices=src_range_choices, setget=True)
         self.src_range_auto_en = srcDevOption('SOURce:{mode}:RANGe:AUTO', str_type=bool)
         self.src_readback_en = srcDevOption('SOURce:{mode}:READ:BACK', str_type=bool)
