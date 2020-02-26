@@ -483,7 +483,6 @@ class AmericanMagnetics_model430(visaInstrument):
         self._new_firmware = True if fw_version >= 2.59 else False
         self.ramp_wait_after = MemoryDevice(10., min=0.)
         self.persistent_wait_before = MemoryDevice(30., min=30., doc='This time is used to wait after a ramp but before turning persistent off')
-        self.setpoint = scpiDevice('conf:current:target', 'current:target?', str_type=float)
         self.volt = scpiDevice(getstr='voltage:supply?', str_type=float)
         self.volt_magnet = scpiDevice(getstr='voltage:magnet?', str_type=float, doc='This is the voltage on the magnet if the proper connection are present.')
         self.volt_limit = scpiDevice(getstr='VOLTage:LIMit?', str_type=float)
