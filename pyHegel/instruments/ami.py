@@ -103,9 +103,14 @@ class AmericanMagnetics_model430(visaInstrument):
         """
         kwargs['read_termination'] = '\r\n'
         kwargs['skip_id_test'] = True
-        self._port =  int(resource_info(visa_addr).resource_name.split('::')[2])
-        if self._port not in [7180, 7185]:
-            self.perror('Invalid port number in visa_addr (either 7180 or 7185).')
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.asrl:
+            kwargs['baud_rate'] = 115200
+            self._port = None
+        else:
+            self._port =  int(resource_info(visa_addr).resource_name.split('::')[2])
+            if self._port not in [7180, 7185]:
+                self.perror('Invalid port number in visa_addr (either 7180 or 7185).')
         self._conf_supply_cache = None
         self._conf_magnet_cache = None
         self._coil_constant = 0. # always in T/A
