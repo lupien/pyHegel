@@ -30,8 +30,9 @@ from scipy.optimize import brentq as brentq_rootsolver
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceMultiple, ChoiceIndex, make_choice_list,\
+                            ChoiceDevDep, ChoiceLimits,\
                             decode_float64, _decode_block_base, visa_wrap, locked_calling,\
-                            wait
+                            wait, resource_info, ProxyMethod
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -1094,3 +1095,152 @@ class sr780_analyzer(visaInstrumentAsync):
         # can enable in status register with ERRE
         # enable *ese with *ese
         return int(self.ask('*esr?')),int(self.ask('ERRS?'))
+
+
+#######################################################
+##    Stanford Research DC205 Precision DC Voltage Source
+#######################################################
+
+#@register_instrument('Stanford_Research_Systems', 'DC205', 'ver1.80')
+@register_instrument('Stanford_Research_Systems', 'DC205', alias='DC205 Precision Voltage Source')
+class sr_dc205(visaInstrument):
+    """
+    This controls a Stanford Research DC205 Precision Voltage Source.
+    Changing the range is not allowed when the output is enabled.
+    Useful devices:
+        level
+        range
+        output_en
+    """
+    def __init__(self, visa_addr, usb=True, **kwargs):
+        """ When usb is True, the default, it sets the requisite baud rate for the internal usb to serial
+            converter. """
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.asrl:
+            if usb:
+                kwargs['baud_rate'] = 115200
+        super(sr_dc205, self).__init__(visa_addr, **kwargs)
+
+    def init(self, full=False):
+        if full:
+            self.write('TOKN 0')
+            self.write('DCPT 0, 1') # 0 to 1 transition for overload bit
+
+    def get_error(self):
+        exe = int(self.ask('LEXE?'))
+        cmd = int(self.ask('LCME?'))
+        exe_errors = {0:'NoErrors',
+                      1: 'Illegal value',
+                      2: 'Wrong Token',
+                      3: 'Invalid bit',
+                      4: 'Queue full',
+                      5: 'Not compatible'}
+        cmd_errors = {0: 'NoError',
+                      1: 'Illegal command',
+                      2: 'Undefined command',
+                      3: 'Illegal query',
+                      4: 'Illegal set',
+                      5: 'Missing parameter(s)',
+                      6: 'Extra parameter(s)',
+                      7: 'Null parameter(s)',
+                      8: 'Parameter buffer overflow',
+                      9: 'Bad floating-point',
+                      10: 'Bad integer',
+                      11: 'Bad integer token',
+                      12: 'Bad token value',
+                      13: 'Bad hex block',
+                      14: 'Unknown Token',
+                      }
+        exe_msg = exe_errors[exe]
+        cmd_msg = cmd_errors[cmd]
+        if exe == cmd == 0:
+            return "No Errors"
+        elif cmd == 0:
+            return exe_msg
+        elif exe == 0:
+            return cmd_msg
+        else:
+            return cmd_msg + ', ' + exe_msg
+    def _extra_check_output_en(self, val, dev_obj):
+        if self.output_en.get():
+            raise RuntimeError(dev_obj.perror('dev cannot be changed while output is enabled.'))
+
+    def trigger(self):
+        self.write('*TRG')
+    def scan_repeat_stop(self):
+        """ This turns off repeat. It will stop at the end of the current cycle. """
+        self.scan_repeat_en.set(False)
+
+    @locked_calling
+    def set_scan(self, start, stop, duration, range='current', updown=False, repeat=False):
+        """ range can be one of the ranges (1, 10, 100) or it can be
+                  'auto' to adjust depending on the start/stop values or
+                  'current' to select the currently enabled range.
+                  It defaults to current
+        """
+        if range not in ['current', 'auto', 1, 10, 100]:
+            raise ValueError('Invalid range.')
+        if range == 'current':
+            range = self.range.get()
+        elif range == 'auto':
+            largest = max(abs(start), abs(stop))
+            if largest > 10.1:
+                range = 100.
+            elif largest > 1.01:
+                range = 10.
+            else:
+                range = 1.
+        if abs(start) > range*1.01:
+            raise ValueError('start value is out of range')
+        if abs(stop) > range*1.01:
+            raise ValueError('stop value is out of range')
+        self.scan_range.set(range)
+        self.scan_start.set(start)
+        self.scan_stop.set(stop)
+        self.scan_time.set(duration)
+        self.scan_updown_en.set(updown)
+        self.scan_repeat_en.set(repeat)
+    @locked_calling
+    def show_scan(self):
+        return dict(range=self.scan_range.get(),
+                    start=self.scan_start.get(),
+                    stop=self.scan_stop.get(),
+                    duration=self.scan_stop.get(),
+                    updown=self.scan_updown_en.get(),
+                    repeat=self.scan_repeat_en.get())
+
+    @locked_calling
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('level', 'output_en', 'range', 'remote_sense_en', 'floating_en',
+                                 'is_overloaded', 'is_interlocked', 'is_overloaded_in_past',
+                                 'scan_range', 'scan_start', 'scan_stop',
+                                 'scan_time', 'scan_updown_en', 'scan_repeat_en', options)
+
+    def _create_devs(self):
+        self.floating_en = scpiDevice('ISOL', str_type=bool, doc="When False, the instrument is grounded. When True, it is floating with 10 MOhm")
+        extra_check_output_en = ProxyMethod(self._extra_check_output_en)
+        ranges = ChoiceIndex([1., 10., 100.])
+        self.range = scpiDevice('RNGE', choices=ranges, extra_check_func=extra_check_output_en)
+        self.remote_sense_en = scpiDevice('SENS', str_type=bool)
+        self.output_en =  scpiDevice('SOUT', str_type=bool)
+        level_choices = ChoiceDevDep(self.range, {1.: ChoiceLimits(-1.01, 1.01, str_type=float),
+                                                  10: ChoiceLimits(-10.1, 10.1, str_type=float),
+                                                  100:ChoiceLimits(-101., 101., str_type=float)})
+        self.level = scpiDevice('VOLT', choices=level_choices, setget=True)
+        self.is_overloaded = scpiDevice(getstr='OVLD?', str_type=bool)
+        self.is_interlocked = scpiDevice(getstr='ILOC?', str_type=bool)
+        self.is_overloaded_in_past = scpiDevice(getstr='DCEV? 0', str_type=bool)
+
+        self.scan_range = scpiDevice('SCAR', choices=ranges)
+        self.scan_start = scpiDevice('SCAB', str_type=float, setget=True)
+        self.scan_stop = scpiDevice('SCAE', str_type=float, setget=True)
+        self.scan_time = scpiDevice('SCAT', str_type=float, setget=True, min=0.1, max=9999.9)
+        self.scan_updown_en = scpiDevice('SCAS', str_type=bool)
+        self.scan_repeat_en = scpiDevice('SCAC', str_type=bool)
+        self.scan_display_update_en = scpiDevice('SCAD', str_type=bool)
+        self.scan_arm = scpiDevice('SCAA', str_type=bool)
+        self.scan_arm_status = scpiDevice(getstr='SCAA?', choices=ChoiceIndex(['idle', 'armed', 'scanning']))
+
+        self.alias = self.level
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
