@@ -532,6 +532,8 @@ def _errorbar(ax, x, y, yerr=None, label=None, **kwarg):
                 l = label
             if yerr is not None:
                 ye = yerr[..., i]
+            else:
+                ye = None
             ret.append(ax.errorbar(x, y[...,i], yerr=ye, label=l, **kwarg))
     else:
         if yerr is not None and yerr.shape == ():
