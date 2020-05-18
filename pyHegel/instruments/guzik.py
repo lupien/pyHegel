@@ -311,7 +311,7 @@ class guzik_adp7104(BaseInstrument):
             arg.hdr.op_command = SDK.GSA_OP_DESTROY
             Nch = self._gsa_Nch
             res_arr = self._gsa_data_res_arr
-            if SDK.GSA_Data_Multi(arg, Nch, res_arr, None) == SDK.GSA_FALSE:
+            if SDK.GSA_Data_Multi(arg, Nch, res_arr) == SDK.GSA_FALSE:
                 raise RuntimeError(self.perror('Unable to destroy op.'))
         self._gsa_data = None
         self._gsa_data_arg = None
