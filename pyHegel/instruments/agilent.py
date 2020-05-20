@@ -55,6 +55,10 @@ class agilent_rf_33522A(visaInstrument):
     New code should use the unumbered devices (numbered device are there for compatibility.)
     The devices
     """
+    def init(self, full=False):
+        # This should depend on the endian type of the machine. Here we assume intel which is LSB.
+        self.write('FORMat:BORDer SWAPped') # This is LSB
+        super(agilent_rf_33522A, self).init(full=full)
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = ['opt=%s'%self.available_options]
@@ -73,7 +77,7 @@ class agilent_rf_33522A(visaInstrument):
                                   'volt_limit_low', 'volt_limit_high', 'volt_limit_en', 'out_load_ohm', 'out_polarity',
                                   'freq', 'freq_mode', 'phase', 'mode', 'noise_bw', 'pulse_width',
                                   'mod_am_en', 'mod_am_depth_pct', 'mod_am_dssc_en', 'mod_am_src', 'mod_am_int_func', 'mod_am_int_freq',
-                                  'mod_fm_en', 'mod_phase_en')
+                                  'mod_fm_en', 'mod_phase_en', 'arb_filter', 'arb_sample_rate', 'arb_advance', 'arb_wave_seq')
         self.current_ch.set(curr_ch)
         return opts + self._conf_helper(options)
     def _create_devs(self):
@@ -128,6 +132,19 @@ class agilent_rf_33522A(visaInstrument):
         self.out_en = devChOption('OUTPut{ch}', str_type=bool)
         self.out_load_ohm = devChOption('OUTPut{ch}:LOAD', str_type=float, setget=True, min=1, doc="max is 10 kOhm. For High impedance (INFinity) use 9.9e37")
         self.out_polarity = devChOption('OUTPut{ch}:POLarity', choices=ChoiceStrings('NORMal', 'INVerted'))
+
+        self.arb_filter = devChOption('SOURce{ch}:FUNCtion:ARBitrary:FILTer', choices=ChoiceStrings('OFF', 'NORMal', 'STEP'))
+        self.arb_advance = devChOption('SOURce{ch}:FUNCtion:ARBitrary:ADVance', choices=ChoiceStrings('TRIGger', 'SRATe'))
+        self.arb_sample_rate = devChOption('SOURce{ch}:FUNCtion:ARBitrary:SRATe', str_type=float, setget=True)
+        self.arb_wave_seq = devChOption('SOURce{ch}:FUNCtion:ARBitrary', str_type=quoted_string(), doc=
+            """
+                Select one of the loaded file (.arb, .barb or .seq) to use.
+                Filename needs to be absolute and use \ (not /).
+            """)
+        self.arb_npoints = devChOption(getstr="SOURce{ch}:DATA:ATTRibute:POINts?", str_type=int)
+        self.arb_loaded_files = devChOption(getstr="SOURce{ch}:DATA:VOLatile:CATalog?", str_type=quoted_list())
+        self.arb_free_space = devChOption(getstr="SOURce{ch}:DATA:VOLatile:FREE?", str_type=int, doc='free space available in number of points (internally allocated in blocks of 128 points.)')
+
         # Modulations parameters  TODO  missing modulations are BPSK FSKey PWM
         self.mod_am_en = devChOption('SOURce{ch}:AM:STATe', str_type=bool)
         self.mod_am_depth_pct = devChOption('SOURce{ch}:AM:DEPTh', str_type=float, min=0, max=120, setget=True)
@@ -155,9 +172,20 @@ class agilent_rf_33522A(visaInstrument):
         self.offset2 = scpiDevice('SOUR2:VOLT:OFFS', str_type=float, min=-5, max=5)
         self.mode2 = scpiDevice('SOUR2:FUNC') # SIN, SQU, RAMP, PULS, PRBS, NOIS, ARB, DC
         self.out_en2 = scpiDevice('OUTPut2', str_type=bool) #OFF,0 or ON,1
+
+        self.remote_cwd = scpiDevice('MMEMory:CDIRectory', str_type=quoted_string(),
+                             doc=r"""
+                                  instrument default is INT:/
+                                  Available drives are INT or USB.
+                                  You can use / (if you are using \, make sure to use raw string r"" or
+                                  double them \\)
+                                  """)
+
         self.alias = self.freq
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+    def arb_sync(self):
+        self.write('FUNCtion:ARBitrary:SYNChronize')
     def phase_sync(self):
         self.write('PHASe:SYNChronize')
     def phase_ref(self, ch=None):
@@ -165,6 +193,127 @@ class agilent_rf_33522A(visaInstrument):
             self.current_ch.set(ch)
         ch=self.current_ch.getcache()
         self.write('SOURce{ch}:PHASe:REFerence'.format(ch=ch))
+    def get_file(self, remote_file, local_file=None):
+        """
+            Obtain the file remote_file from the analyzer and save it
+            on this computer as local_file if given, otherwise returns the data
+        """
+        s = self.ask('MMEMory:UPLoad? "%s"'%remote_file, raw=True)
+        s = _decode_block_base(s)
+        if local_file:
+            with open(local_file, 'wb') as f:
+                f.write(s)
+        else:
+            return s
+    def remote_ls(self, remote_path=None, show_space=False, show_size=False):
+        """
+            if remote_path is None, get catalog of device remote_cwd.
+            Directories are show with an ending /
+            returns None for empty and invalid directories.
+            if show_space is enable, it returns
+               file_list, used, free
+            if show_size is enabled, file_list are tuples of name, size
+        """
+        extra = ""
+        if remote_path:
+            extra = ' "%s"'%remote_path
+        res = self.ask('MMEMory:CATalog?'+extra)
+        p = res.split(',', 2)
+        used = int(p[0])
+        free = int(p[1])
+        if len(p) <= 2:
+            return None
+        # Here I presume no " or , can show up inside the filename.
+        lst = p[2].strip('"').rstrip('"').split('","')
+        outlst = []
+        for l in lst:
+            fname, ftype, fsize = l.split(',')
+            fsize = int(fsize)
+            if ftype == 'FOLD':
+                fname += '/'
+            if show_size:
+                outlst.append((fname, fsize))
+            else:
+                outlst.append(fname)
+        if show_space:
+            return outlst, used, free
+        return outlst
+
+    @locked_calling
+    def send_file(self, dest_file, local_src_file=None, src_data=None, overwrite=False):
+        """
+            dest_file: is the file name (absolute or relative to device remote_cwd)
+                       you can use / to separate directories
+            overwrite: when True will skip testing for the presence of the file on the
+                       instrument and proceed to overwrite it without asking confirmation.
+            Use one of local_src_file (local filename) or src_data (data string)
+        """
+        if not overwrite:
+            # split seeks both / and \
+            directory, filename = os.path.split(dest_file)
+            ls = self.remote_ls(directory)
+            if ls:
+                ls = map(lambda s: s.lower(), ls)
+                if filename.lower() in ls:
+                    raise RuntimeError('Destination file already exists. Will not overwrite.')
+        if src_data is local_src_file is None:
+            raise ValueError('You need to specify one of local_src_file or src_data')
+        if src_data and local_src_file:
+            raise ValueError('You need to specify only one of local_src_file or src_data')
+        if local_src_file:
+            with open(local_src_file, 'rb') as f:
+                src_data = f.read()
+        data_str = _encode_block(src_data)
+        # manually add terminiation to prevent warning if data already ends with termination
+        self.write('MMEMory:DOWNload:FNAMe "%s"'%dest_file)
+        self.write('MMEMory:DOWNload:DATA %s\n'%data_str, termination=None)
+    def arb_load_file(self, filename, ch=None):
+        """Load a file (.arb, .barb or .seq) on the device into the channel"""
+        if ch is not None:
+            self.current_ch.set(ch)
+        ch=self.current_ch.getcache()
+        self.write('MMEMory:LOAD:DATA{ch} "{filename}"'.format(ch=ch, filename=filename))
+    def arb_save_file(self, filename, ch=None):
+        """Save a file (.arb, .barb or .seq) on the device from the channel"""
+        if ch is not None:
+            self.current_ch.set(ch)
+        ch=self.current_ch.getcache()
+        self.write('MMEMory:STORe:DATA{ch} "{filename}"'.format(ch=ch, filename=filename))
+    # TODO add send sequence: SOURce{ch}:DATA:SEQuence
+    @locked_calling
+    def arb_send_data(self, name, data, ch=None, clear=False, load=True, floats=None):
+        """
+        name is needed to be used with arb_load_file (a string of up to 12 characters, no extension needed).
+             If name already exists, this will fail unless clear=True.
+        data can be a numpy array of float32 (from -1.0 to 1.0) or of int16 (from -32768 to 32767)
+              It can also be a string (bytes), but then floats needs to be specified.
+        clear when True erases all loaded files from the channel volatile memory.
+        floats when True/False, overrides the type detection. It is necessary when providing a string for the data.
+               True for floats, False for int16.
+        load  when True (default), it activates the data as the current waveform
+        """
+        if ch is not None:
+            self.current_ch.set(ch)
+        ch=self.current_ch.getcache()
+        if isinstance(data, bytes):
+            if floats is None:
+                raise ValueError('floats needs to be specified (True/False')
+        elif data.dtype == np.float32 or data.dtype == np.int16:
+            if floats is None:
+                floats = True if data.dtype == np.float32 else False
+        else:
+            if floats is None:
+                raise ValueError('Unknown data type and floats is not specified')
+            print 'Unknown data type in arb_send_data. Trying anyway...'
+        data_str = _encode_block(data)
+        if clear:
+            self.write('SOURce{ch}:DATA:VOLatile:CLEar'.format(ch=ch))
+        if floats:
+            self.write(b'SOURce{ch}:DATA:ARBitrary {name},{data}\n'.format(ch=ch, name=name, data=data_str), termination=None)
+        else:
+            self.write(b'SOURce{ch}:DATA:ARBitrary:DAC {name},{data}\n'.format(ch=ch, name=name, data=data_str), termination=None)
+        if load:
+            self.arb_wave_seq.set(name)
 
 
 #######################################################
