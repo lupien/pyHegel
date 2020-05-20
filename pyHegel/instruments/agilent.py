@@ -136,13 +136,24 @@ class agilent_rf_33522A(visaInstrument):
         self.arb_filter = devChOption('SOURce{ch}:FUNCtion:ARBitrary:FILTer', choices=ChoiceStrings('OFF', 'NORMal', 'STEP'))
         self.arb_advance = devChOption('SOURce{ch}:FUNCtion:ARBitrary:ADVance', choices=ChoiceStrings('TRIGger', 'SRATe'))
         self.arb_sample_rate = devChOption('SOURce{ch}:FUNCtion:ARBitrary:SRATe', str_type=float, setget=True)
-        self.arb_wave_seq = devChOption('SOURce{ch}:FUNCtion:ARBitrary', str_type=quoted_string(), doc=
-            """
+        # with firmware 5.02, it needs to can be r"int:\builtin/exp_fall.arb"
+        #  The first \ is required, otherwise there is no error (no beep) but the waveform is not displayed properly on the instrument
+        #   but is seems to be loaded.
+        # Also it will possibly crash (lock up) the instrument (it was like that also in firmware 1.11) when pressing
+        # some controls while in this state.
+        # force the fix
+        class fixed_quoted_string(quoted_string):
+            def tostr(self, unquoted_str):
+                fixed = unquoted_str.replace('/', '\\') # could limit to first element only
+                return super(fixed_quoted_string, self).tostr(fixed)
+        self.arb_wave_seq = devChOption('SOURce{ch}:FUNCtion:ARBitrary', str_type=fixed_quoted_string(), doc=
+            r"""
                 Select one of the loaded file (.arb, .barb or .seq) to use.
-                Filename needs to be absolute and use \ (not /).
+                Filename needs to be either the name given for arb_send_data or
+                the absolute name like: int:/builtin/exp_fall.arb
             """)
         self.arb_npoints = devChOption(getstr="SOURce{ch}:DATA:ATTRibute:POINts?", str_type=int)
-        self.arb_loaded_files = devChOption(getstr="SOURce{ch}:DATA:VOLatile:CATalog?", str_type=quoted_list())
+        self.arb_loaded_files = devChOption(getstr="SOURce{ch}:DATA:VOLatile:CATalog?", str_type=quoted_list(sep='","'))
         self.arb_free_space = devChOption(getstr="SOURce{ch}:DATA:VOLatile:FREE?", str_type=int, doc='free space available in number of points (internally allocated in blocks of 128 points.)')
 
         # Modulations parameters  TODO  missing modulations are BPSK FSKey PWM
@@ -188,6 +199,7 @@ class agilent_rf_33522A(visaInstrument):
         self.write('FUNCtion:ARBitrary:SYNChronize')
     def phase_sync(self):
         self.write('PHASe:SYNChronize')
+    @locked_calling
     def phase_ref(self, ch=None):
         if ch is not None:
             self.current_ch.set(ch)
@@ -267,12 +279,25 @@ class agilent_rf_33522A(visaInstrument):
         # manually add terminiation to prevent warning if data already ends with termination
         self.write('MMEMory:DOWNload:FNAMe "%s"'%dest_file)
         self.write('MMEMory:DOWNload:DATA %s\n'%data_str, termination=None)
-    def arb_load_file(self, filename, ch=None):
-        """Load a file (.arb, .barb or .seq) on the device into the channel"""
+    @locked_calling
+    def arb_load_file(self, filename, ch=None, clear=False, load=True):
+        """
+        Load a file (.arb, .barb or .seq) on the device into the channel.
+             If file is already loaded, this will fail unless clear=True.
+        clear when True erases all loaded files from the channel volatile memory.
+        load  when True (default), it activates the data as the current waveform
+        Note that int:/builtin/exp_rise.arb is always loaded, it is the default curve after a clear
+            so it can never be loaded directly.
+        """
         if ch is not None:
             self.current_ch.set(ch)
         ch=self.current_ch.getcache()
+        if clear:
+            self.write('SOURce{ch}:DATA:VOLatile:CLEar'.format(ch=ch))
         self.write('MMEMory:LOAD:DATA{ch} "{filename}"'.format(ch=ch, filename=filename))
+        if load:
+            self.arb_wave_seq.set(filename)
+    @locked_calling
     def arb_save_file(self, filename, ch=None):
         """Save a file (.arb, .barb or .seq) on the device from the channel"""
         if ch is not None:
