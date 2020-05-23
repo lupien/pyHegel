@@ -37,8 +37,10 @@ This module contains many utilities:
     read_blueforsTlog
     find_closest_times
     read_bluefors
+    read_bluefors_all
     read_blueforsRTF
     read_blueforsGauges
+    read_blueforsChannels
     sort_file
     find_index_closest
 Conversion functions and time constants calculation helpers:
@@ -606,6 +608,31 @@ def _read_helper(filename):
     else:
         return np.ndarray((2,0))
 
+def _read_bluefors_select(start_date, stop_date=None):
+    """
+    Helper to find the directories
+    start_date and stop_date are either epoch values (number of days since jan 1st 1970)
+    or strings giving the date '20150921' '2015-09-21', '2015-9-21', '150921', '15-09-21',
+    '15-9-21' or replace '-' with '/'
+    if stop_day is None, then today's date is used.
+    If start_date is an ndarray, it uses the minimum as start_date and maximum as stop_date
+    If start_date is a list, it is used directly.
+    This function returns the list of possible directories.
+    """
+    if isinstance(start_date, np.ndarray):
+        stop_date = start_date.max()
+        start_date = start_date.min()
+    elif isinstance(start_date, list):
+        return [ _parse_day(date) for date in start_date ]
+    start_date = _parse_day(start_date)
+    stop_date = _parse_day(stop_date)
+    date = start_date
+    dirs = []
+    while date <= stop_date:
+        dirs.append(date.strftime('%y-%m-%d'))
+        date += datetime.timedelta(days=1)
+    return dirs
+
 def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:/BlueFors/Log-files', merge_if_possible=True):
     """
     Reads and combines the data files for temperature channels selected.
@@ -619,19 +646,13 @@ def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:
     When merge_if_possible is True (default), it checks if all the channels have the same date, if so
     it combines them in a single (1+2*Nch, n) array. If it can't it outputs a warning and returns the list.
     if stop_day is None, then today's date is used.
-    If start_date is an ndarray, it uses the minimum as start_date and maximum as stop_date
+    If start_date is an ndarray, it uses the minimum as start_date and maximum as stop_date.
+    If start_date is a list, it is used directly.
     """
-    if isinstance(start_date, np.ndarray):
-        stop_date = start_date.max()
-        start_date = start_date.min()
-    start_date = _parse_day(start_date)
-    stop_date = _parse_day(stop_date)
-    date = start_date
     results = []
     for ch in channels:
         results.append(np.ndarray((0,3)))
-    while date <= stop_date:
-        dirname = date.strftime('%y-%m-%d')
+    for dirname in _read_bluefors_select(start_date, stop_date):
         Tfile = 'CH%i T {}.log'.format(dirname)
         Rfile = 'CH%i R {}.log'.format(dirname)
         for i,ch in enumerate(channels):
@@ -689,7 +710,6 @@ def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:
                         ar.append([tj, np.nan, Rvals[1, k]])
                         k += 1
                 results[i] = np.concatenate((results[i], np.append(np.array(ar))))
-        date += datetime.timedelta(days=1)
     results = [r.T for r in results]
     if merge_if_possible:
         for i in range(len(channels)-1):
@@ -785,6 +805,20 @@ def find_closest_times(data_set, times_to_search_for, max_delta=60*10.):
         return ret[0]
     return ret
 
+def read_blueforsChannels(filename):
+    """
+    Reads a bluefors log filename that contains Channels state (valve on/off).
+    Returns a list of (time, dict) tuples.
+    Note that main status of PANEL is also produced upon restart of valve program when some valve is open.
+    Power out or local lockout produces  all valves open.
+    """
+    v = read_bluefors(filename)
+    d = [(t,dict(zip(s[1::2], map(lambda ss: bool(int(ss.strip())), s[2::2])))) for t,s in v]
+    main_st = {1:'PROG', 4:'manual', 8:'PANEL ', 9:'GLITCH'}
+    for i in range(len(v)):
+        d[i][1]['main'] = main_st.get(int(v[i][1][0]), '!! UNKNOWN !!')
+    return d
+
 
 def read_blueforsGauges(filename):
     """
@@ -800,6 +834,75 @@ def read_blueforsGauges(filename):
     # unit: 0:mbar, 1:Torr, 2:Pascal
     v = [[t]+[float(x) for x in vals[3::6]] for t, vals in v]
     return np.array(v).T
+
+
+def _filename_build_check(file_base, logdir, dirname, quiet=False, missing_ok=True):
+    """ helper for filename building and checking) """
+    if not isinstance(file_base, list):
+        file_base = [file_base]
+    for f in file_base:
+        filename = os.path.join(logdir, dirname, f%dirname)
+        if os.path.isfile(filename):
+            return filename
+    # did not find it.
+    if missing_ok:
+        if not quiet:
+            print 'Skipping: %s'%filename
+        return None
+    return filename
+
+def read_bluefors_all(start_date, stop_date=None, logdir='C:/BlueFors/Log-files', flow=True, gauges=True, channels=False, missing_ok=True, quiet=False):
+    """
+    Reads bluefors log for flow, gauges and channels depending on the boolean values.
+    Returns the arrays read in the order flow, gauges, channels. For emptry flow, gauges, returns None.
+    start_date and stop_date are either epoch values (number of days since jan 1st 1970)
+    or strings giving the date '20150921' '2015-09-21', '2015-9-21', '150921', '15-09-21',
+    '15-9-21' or replace '-' with '/'
+    if stop_day is None, then today's date is used.
+    If start_date is an ndarray, it uses the minimum as start_date and maximum as stop_date.
+    If start_date is a list, it is used directly.
+    missing_ok, when True which is the default, just skip missing files without producing an exception (but prints it, unless quiet is True).
+                It is always on for channels (and quiet is on for it also).
+    """
+    data_flow = []
+    data_gauges = []
+    data_channels = []
+    if flow == gauges == channels == False:
+        raise ValueError('At least one of flow, gauges or channels should be True.')
+    filename_build_check = lambda file_base, quiet=quiet, missing_ok=missing_ok: _filename_build_check(file_base, logdir, dirname, quiet, missing_ok)
+    for dirname in _read_bluefors_select(start_date, stop_date):
+        if flow:
+            filename = filename_build_check('Flowmeter %s.log')
+            if filename is not None:
+                data_flow.append(read_blueforsRTF(filename))
+        if gauges:
+            # It used to be Maxigauge, now it is maxigauge
+            # These are not the same under case sensitive filesystems (like linux).
+            filename = filename_build_check(['maxigauge %s.log', 'Maxigauge %s.log'])
+            if filename is not None:
+                data_gauges.append(read_blueforsGauges(filename))
+        if channels:
+            filename = filename_build_check('Channels %s.log', missing_ok=True, quiet=True)
+            if filename is not None:
+                data_channels += read_blueforsChannels(filename)
+    ret = ()
+    if flow:
+        if len(data_flow):
+            ret += (np.concatenate(data_flow, axis=1), )
+        else:
+            ret += (None,)
+    if gauges:
+        if len(data_gauges):
+            ret += (np.concatenate(data_gauges, axis=1), )
+        else:
+            ret += (None,)
+    if channels:
+        ret += (data_channels, )
+    if len(ret) == 1:
+        ret = ret[0]
+    return ret
+
+
 
 #########################################################
 # Conversion functions, time constants calcs
