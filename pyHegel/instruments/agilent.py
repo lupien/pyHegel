@@ -471,19 +471,29 @@ class agilent_rf_PSG(visaInstrument):
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         # TODO Get the proper config
-        return self._conf_helper('oscillator_source', 'rf_en', 'ampl', 'ampl_unit', 'amp_flatness_corr_en',
+        gen = self._conf_helper('oscillator_source', 'rf_en', 'ampl', 'ampl_unit', 'amp_flatness_corr_en',
                                  'ampl_offset_db', 'ampl_reference_dbm', 'ampl_reference_en',
                                  'ampl_protection', 'ampl_mode', 'ampl_start', 'ampl_stop',
                                  'alc_en', 'alc_source', 'alc_bw', 'alc_bw_auto_en',
                                  'attenuation_db', 'attenuation_auto_en', 'amp_flatness_corr_en',
                                  'output_blanking_en', 'output_blanking_auto_en',
                                  'freq_mode', 'freq_cw', 'freq_start', 'freq_stop',
-                                 'freq_multiplier', 'freq_offset', 'freq_offset_en', 'freq_reference', 'freq_reference_en',
-                                 'phase', 'mod_en', 'mod_am_en', 'mod_fm_en', 'mod_phase_en', 'mod_pulse_en',
-                                 'mod_am_freq', 'mod_am_shape', 'mod_am_depth','mod_am_noise_type',
-                                 'mod_pulse_period', 'mod_pulse_width', options)
+                                 'freq_multiplier', 'freq_offset', 'freq_offset_en', 'freq_reference', 'freq_reference_en')
+        if self._installed_mod:
+            gen += self._conf_helper('phase', 'mod_en', 'mod_am_en', 'mod_fm_en', 'mod_phase_en',
+                                 'mod_am_freq', 'mod_am_shape', 'mod_am_depth', 'mod_am_noise_type')
+        if self._installed_lbfilter:
+            gen +=  self._conf_helper('low_band_filter')
+        if self._installed_pulse:
+            gen += self._conf_helper('mod_pulse_en', 'mod_pulse_period', 'mod_pulse_width')
+        return gen + ['installed_options=%s'%self.installed_options] + self._conf_helper(options)
     def _create_devs(self):
-        self.installed_options = scpiDevice(getstr='*OPT?')
+        self.installed_options = self.ask('*OPT?')
+        inst = self.installed_options.split(',')
+        self._installed_mod = True if 'UNT' in inst else False # AM, FM, Phase ad lf_out
+        self._installed_lbfilter = True if '1EH' in inst or '521' in inst else False
+        self._installed_pulse = True if 'UNU' in inst or 'UNW' in inst else False
+
         self.oscillator_source = scpiDevice(getstr=':ROSCillator:SOURce?', str_type=str)
         self.rf_en = scpiDevice(':OUTPut', str_type=bool)
         self.ampl = scpiDevice(':POWer', str_type=float, doc='unit depends on device ampl_unit', setget=True)
@@ -526,17 +536,22 @@ class agilent_rf_PSG(visaInstrument):
         self.freq_reference_en = scpiDevice(':FREQuency:REFerence:STATe', str_type=bool)
         self.phase = scpiDevice(':PHASe', str_type=float, min=-3.14, max=3.14, doc='Adjust phase arounf ref. In rad.')
         # TODO handle the marker stuff
-        self.mod_en = scpiDevice(':OUTPut:MODulation:STATe', str_type=bool)
-        self.mod_am_en = scpiDevice(':AM:STATe', str_type=bool)
-        self.mod_am_freq = scpiDevice(':AM:INTernal:FREQuency', str_type=float, min=0.5, max = 1e6, setget=True, doc="Frequency of the modulation. From 0 to 1MHz if mod_am_shape is 'sine'; 0 to 100KHz else.")
-        self.mod_am_depth = scpiDevice(':AM:DEPTh:LINear', str_type=float, min=0, max = 100, setget=True, doc='Modulation depth in percent')
-        self.mod_am_shape = scpiDevice(':AM:INTernal:FUNCtion:SHAPe', choices=ChoiceStrings('SINE', 'SQUare', 'TRIangle', 'NOISe'), doc="Shape of the modulation")
-        self.mod_am_noise_type = scpiDevice(':AM:INTernal:FUNCtion:NOISE', choices=ChoiceStrings('GAUSsian','UNIForm'), doc="The noise profile used if mod_am_shape is set to 'noise'")
-        self.mod_fm_en = scpiDevice(':FM:STATe', str_type=bool)
-        self.mod_phase_en = scpiDevice(':PM:STATe', str_type=bool)
-        self.mod_pulse_en = scpiDevice(':PULM:STATe', str_type=bool)
-        self.mod_pulse_period = scpiDevice(':PULM:INTernal:PERiod', str_type=float, min=10e-9, max = 42, setget=True, doc="Pulse period in s.")
-        self.mod_pulse_width = scpiDevice(':PULM:INTernal:PWIDth', str_type=float, min=10e-9, max = 42-20e-9, setget=True, doc="Pulse width duration in s.")
+        if self._installed_lbfilter:
+            self.low_band_filter = scpiDevice('LBFilter', str_type=bool)
+        if self._installed_mod:
+            # mod_en might also be required for pure _installed _pulse.
+            self.mod_en = scpiDevice(':OUTPut:MODulation:STATe', str_type=bool)
+            self.mod_am_en = scpiDevice(':AM:STATe', str_type=bool)
+            self.mod_am_freq = scpiDevice(':AM:INTernal:FREQuency', str_type=float, min=0.5, max = 1e6, setget=True, doc="Frequency of the modulation. From 0 to 1MHz if mod_am_shape is 'sine'; 0 to 100KHz else.")
+            self.mod_am_depth = scpiDevice(':AM:DEPTh:LINear', str_type=float, min=0, max = 100, setget=True, doc='Modulation depth in percent')
+            self.mod_am_shape = scpiDevice(':AM:INTernal:FUNCtion:SHAPe', choices=ChoiceStrings('SINE', 'SQUare', 'TRIangle', 'NOISe'), doc="Shape of the modulation")
+            self.mod_am_noise_type = scpiDevice(':AM:INTernal:FUNCtion:NOISE', choices=ChoiceStrings('GAUSsian','UNIForm'), doc="The noise profile used if mod_am_shape is set to 'noise'")
+            self.mod_fm_en = scpiDevice(':FM:STATe', str_type=bool)
+            self.mod_phase_en = scpiDevice(':PM:STATe', str_type=bool)
+        if self._installed_pulse:
+            self.mod_pulse_en = scpiDevice(':PULM:STATe', str_type=bool)
+            self.mod_pulse_period = scpiDevice(':PULM:INTernal:PERiod', str_type=float, min=10e-9, max = 42, setget=True, doc="Pulse period in s.")
+            self.mod_pulse_width = scpiDevice(':PULM:INTernal:PWIDth', str_type=float, min=10e-9, max = 42-20e-9, setget=True, doc="Pulse width duration in s.")
         self.alias = self.freq_cw
         # This needs to be last to complete creation
         super(agilent_rf_PSG,self)._create_devs()
