@@ -698,7 +698,10 @@ class zurich_UHF(BaseInstrument):
         system_devtype = self.ask('/{dev}/features/devtype', settings_only=False)[0]
         system_serial = self.ask('/{dev}/features/serial', settings_only=False)[0]
         #system_code = self.ask('/{dev}/features/code')[0] # not available in vs 13.10, in 14.02, 14.08 it returns an empty dict after a long timeout. It is a write only node.
-        system_options = self.ask('/{dev}/features/options', settings_only=False)[0]
+        system_options = self.ask('/{dev}/features/options', settings_only=False)[0].split('\n')
+        if system_options[-1] == '' and len(system_options) > 1:
+            system_options = system_options[:-1]
+        system_options = ','.join(system_options)
         #system_analog_board_rev = self.ask('/{dev}/system/analogboardrevision')[0]
         #system_digital_board_rev = self.ask('/{dev}/system/digitalboardrevision')[0]
         system_analog_board_rev = self.ask('/{dev}/system/boardrevisions/1', settings_only=False)[0] # To match web interface, 1=analog, 0=digital
