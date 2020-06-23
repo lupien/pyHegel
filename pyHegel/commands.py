@@ -562,12 +562,14 @@ def _itemgetter(*args):
         return lambda x: [ig(x)]
     return ig
 
+def _rm_nl_cr(s):
+    return s.replace('\n', '\\n').replace('\r', '\\r')
+
 def _write_conf(f, formats, extra_base=None, **kwarg):
     if extra_base is not None:
         extra = dict(base_hdr_name=extra_base, base_conf=[repr(kwarg)])
         formats = formats[:] # make a copy
         formats.append(extra)
-    rm_nl = lambda x: x.replace('\n', '\\n')
     for fmt in formats:
         conf = fmt['base_conf']
         hdr = fmt['base_hdr_name']
@@ -575,9 +577,9 @@ def _write_conf(f, formats, extra_base=None, **kwarg):
             f.write('#'+hdr.encode('utf8')+':=')
             if isinstance(conf, list):
                 for c in conf:
-                    f.write(' '+rm_nl(c.encode('utf8'))+';')
+                    f.write(' '+_rm_nl_cr(c.encode('utf8'))+';')
             else:
-                f.write(' '+rm_nl(conf.encode('utf8')))
+                f.write(' '+_rm_nl_cr(conf.encode('utf8')))
             f.write('\n')
 
 def dump_conf(f, setdevs=None, getdevs=[], extra_conf=None):
@@ -595,7 +597,7 @@ def dump_conf(f, setdevs=None, getdevs=[], extra_conf=None):
 
 def _write_comment(f, text):
     # text should be unicode
-    writevec(f, [text.encode('utf_8')], pre_str='#C# ')
+    writevec(f, [_rm_nl_cr(text.encode('utf_8'))], pre_str='#C# ')
 
 class Loop_Control(object):
     def __init__(self):

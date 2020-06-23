@@ -392,6 +392,7 @@ def _write_dev(val, filename, format=format, first=False):
     if doheader: # if either is not None or not ''
         if header:
             for h in header:
+                h = h.replace('\n', '\\n').replace('\r', '\\r')
                 f.write('#'+h+'\n')
         if extra_conf: # not None or ''
             # extra_conf should be a complete string including # and new lines
