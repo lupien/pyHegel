@@ -222,6 +222,7 @@ class agilent_rf_33522A(visaInstrument):
             if remote_path is None, get catalog of device remote_cwd.
             Directories are show with an ending /
             returns None for empty and invalid directories.
+            The drives are called INT: and USB:.
             if show_space is enable, it returns
                file_list, used, free
             if show_size is enabled, file_list are tuples of name, size
@@ -239,7 +240,7 @@ class agilent_rf_33522A(visaInstrument):
         lst = p[2].strip('"').rstrip('"').split('","')
         outlst = []
         for l in lst:
-            fname, ftype, fsize = l.split(',')
+            fname, ftype, fsize = l.rsplit(',', 2)
             fsize = int(fsize)
             if ftype == 'FOLD':
                 fname += '/'
@@ -306,16 +307,21 @@ class agilent_rf_33522A(visaInstrument):
         self.write('MMEMory:STORe:DATA{ch} "{filename}"'.format(ch=ch, filename=filename))
     # TODO add send sequence: SOURce{ch}:DATA:SEQuence
     @locked_calling
-    def arb_send_data(self, name, data, ch=None, clear=False, load=True, floats=None):
+    def arb_send_data(self, name, data, ch=None, clear=False, load=True, floats=None, csv=False):
         """
         name is needed to be used with arb_load_file (a string of up to 12 characters, no extension needed).
              If name already exists, this will fail unless clear=True.
         data can be a numpy array of float32 (from -1.0 to 1.0) or of int16 (from -32768 to 32767)
               It can also be a string (bytes), but then floats needs to be specified.
+              There needs to be at least 8 data points.
         clear when True erases all loaded files from the channel volatile memory.
+               (same as clear_volatile_mem)
         floats when True/False, overrides the type detection. It is necessary when providing a string for the data.
                True for floats, False for int16.
-        load  when True (default), it activates the data as the current waveform
+        load  when True (default), it activates the data as the current waveform.
+              Note that this will change the amplitude/offset to 100 mVpp/0.
+              To load it yourself use the arb_wave_seq device.
+        csv when True, the the input data should be a string with comma separated values. floats needs to be specified.
         """
         if ch is not None:
             self.current_ch.set(ch)
@@ -330,9 +336,12 @@ class agilent_rf_33522A(visaInstrument):
             if floats is None:
                 raise ValueError('Unknown data type and floats is not specified')
             print 'Unknown data type in arb_send_data. Trying anyway...'
-        data_str = _encode_block(data)
+        if csv:
+            data_str = data
+        else:
+            data_str = _encode_block(data)
         if clear:
-            self.write('SOURce{ch}:DATA:VOLatile:CLEar'.format(ch=ch))
+            self.clear_volatile_mem()
         if floats:
             self.write(b'SOURce{ch}:DATA:ARBitrary {name},{data}\n'.format(ch=ch, name=name, data=data_str), termination=None)
         else:
@@ -340,6 +349,12 @@ class agilent_rf_33522A(visaInstrument):
         if load:
             self.arb_wave_seq.set(name)
 
+    @locked_calling
+    def clear_volatile_mem(self, ch=None):
+        if ch is not None:
+            self.current_ch.set(ch)
+        ch=self.current_ch.getcache()
+        self.write('SOURce{ch}:DATA:VOLatile:CLEar'.format(ch=ch))
 
 #######################################################
 ##    Agilent EPM power meter
