@@ -980,7 +980,7 @@ class lakeshore_340(visaInstrument):
         return ret
     def _create_devs(self):
         rev_str = self.ask('rev?')
-        conv = ChoiceMultiple(['master_rev_date', 'master_rev_num', 'master_serial_num', 'sw1', 'input_rev_date',
+        conv = ChoiceMultiple(['main_rev_date', 'main_rev_num', 'main_serial_num', 'sw1', 'input_rev_date',
                          'input_rev_num', 'option_id', 'option_rev_date', 'option_rev_num'], fmts=str)
         rev_dic = conv(rev_str)
         ch_Base = ChoiceStrings('A', 'B')
@@ -1996,7 +1996,7 @@ class MagnetController_SMC(visaInstrument):
                                     3:'Quenched!! and External trip',
                                     4:'Brick trip',
                                     5:'Heatsink overtemperature trip',
-                                    6:'Slave trip',
+                                    6:'Subordinate trip',
                                     7:'Heatsink overvoltage trip'}[error_code%10])
                 # Polarity switch (I/V) != 0. error is only reset once a proper polarity change is performed
                 # i.e. when changing polarity (operating_parameters reverse option)  with I=V=0.
@@ -2091,28 +2091,28 @@ class MagnetController_SMC(visaInstrument):
 #######################################################
 
 class pfeiffer_turbo_loop(threading.Thread):
-    def __init__(self, master):
+    def __init__(self, main):
         super(pfeiffer_turbo_loop, self).__init__()
-        self.master = master
+        self.main = main
         self._stop = False
     def cancel(self):
         self._stop = True
     def run(self):
         # empty buffer
-        self.master.visa.flush(visa_wrap.constants.VI_IO_IN_BUF_DISCARD)
+        self.main.visa.flush(visa_wrap.constants.VI_IO_IN_BUF_DISCARD)
         # trow away first partial data
-        self.master.read()
+        self.main.read()
         while True:
             if self._stop:
                 return
-            string = self.master.read()
-            res = self.master.parse(string)
+            string = self.main.read()
+            res = self.main.parse(string)
             if res is None:
                 continue
             param, data = res
-            #self.master._alldata_lock.acquire()
-            self.master._alldata[param] = data, time.time()
-            #self.master._alldata_lock.release()
+            #self.main._alldata_lock.acquire()
+            self.main._alldata[param] = data, time.time()
+            #self.main._alldata_lock.release()
     def wait(self, timeout=None):
         # we use a the context manager because join uses sleep.
         with _sleep_signal_context_manager():
@@ -2853,7 +2853,7 @@ class ah_2550a_capacitance_bridge(visaInstrumentAsync):
         # flags & 0x10 is ready for command
         if flags & 0x20:
             errors.append('Execution Erro')
-        # flags & 0x40 is Master summary
+        # flags & 0x40 is Main summary
         # flags & 0x80 is message available
         if len(errors):
             return ', '.join(errors)

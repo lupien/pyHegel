@@ -248,7 +248,7 @@ class Cryomech(object):
         """ questions:
               3: Product ID
               4: Software version
-              5: Reset slave
+              5: Reset subordinate
               6: Acknowledge power fail
               7: Protocol stack version
               9: Obtain compressor display

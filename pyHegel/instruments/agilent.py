@@ -1991,7 +1991,7 @@ register_usb_name('PNA network analyser', 0x0957, 0x0118)
 #       *ESE     To set/query the bit flag that toggles bit 5 of IEEE status
 # For IEEE status: contains :operation (bit 7), :questionable (bit 3)
 #                           event (bit 5), error (bit 2), message available (bit 4)
-#                           Request Service =RQS (bit 6) also MSS (master summary) which
+#                           Request Service =RQS (bit 6) also MSS (main summary) which
 #                                     is instantenous RQS. RQS is latched
 #                           Not that first bit is bit 0
 # To read error (bit 2): v.ask(':system:error?')

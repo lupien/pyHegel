@@ -515,15 +515,15 @@ class lecroy_vbs_scpi(scpiDevice):
         super(lecroy_vbs_scpi,self).__init__(setstr, getstr, *arg, autoget=autoget, **kwarg)
 
 #######################################################
-##    LeCroy WaveMaster 820Zi-A
+##    LeCroy WaveMain 820Zi-A
 #######################################################
 
-#@register_instrument('LECROY', 'WM820ZI-A', '7.2.1', alias='WM820ZI-A WaveMaster scope')
-#@register_instrument('LECROY', 'WM820ZI-A', '7.8.0', alias='WM820ZI-A WaveMaster scope')
-@register_instrument('LECROY', 'WM820ZI-A', alias='WM820ZI-A WaveMaster scope')
-class lecroy_wavemaster(visaInstrumentAsync):
+#@register_instrument('LECROY', 'WM820ZI-A', '7.2.1', alias='WM820ZI-A WaveMain scope')
+#@register_instrument('LECROY', 'WM820ZI-A', '7.8.0', alias='WM820ZI-A WaveMain scope')
+@register_instrument('LECROY', 'WM820ZI-A', alias='WM820ZI-A WaveMain scope')
+class lecroy_wavemain(visaInstrumentAsync):
     """
-    This instrument controls a LeCroy WaveMaster 820Zi-A
+    This instrument controls a LeCroy WaveMain 820Zi-A
      To use this instrument, the most useful devices are probably:
        fetch
        readval
@@ -546,7 +546,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         # open Interrupt channel port)
         self._trigmode_mode = None
         self._trigmode_avgn = None
-        super(lecroy_wavemaster, self).__init__(visa_addr, poll=True)
+        super(lecroy_wavemain, self).__init__(visa_addr, poll=True)
         response = self.ask('Reference_CLocK?')
         if response in  ['WARNING : CURRENT REMOTE CONTROL INTERFACE IS TCPIP',
                          'WARNING : CURRENT REMOTE CONTROL INTERFACE IS LSIB',
@@ -556,7 +556,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self.write('Comm_ORDer LO') # can be LO or HI: LO=LSB first
         self.write('Comm_ForMaT DEF9,WORD,BIN') #DEF9=IEEE 488.2 block data, WORD (default is BYTE)
         self.write('Comm_HeaDeR OFF') #can be OFF, SHORT, LONG. OFF removes command echo and units
-        super(lecroy_wavemaster, self).init(full=full)
+        super(lecroy_wavemain, self).init(full=full)
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         ch_info = []
@@ -697,12 +697,12 @@ class lecroy_wavemaster(visaInstrumentAsync):
         if use_vbs:
             self.vbs_write(command)
         else:
-            super(lecroy_wavemaster, self).write(command)
+            super(lecroy_wavemain, self).write(command)
     def ask(self, command, raw=False, chunk_size=None, use_vbs=False):
         if use_vbs:
             return self.vbs_ask(command)
         else:
-            return super(lecroy_wavemaster, self).ask(command, raw=raw, chunk_size=chunk_size)
+            return super(lecroy_wavemain, self).ask(command, raw=raw, chunk_size=chunk_size)
     def _snap_png_getdev(self, area='dso', white_back=False):
         """
         Use like this: get(wave.snap_png, filename='testname.png')
@@ -931,7 +931,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         else:
             raise RuntimeError(self.perror('The channel used for async detect of acquisition number is invalid'))
     def _async_detect(self, max_time=.5): # 0.5 s max by default
-        ret = super(lecroy_wavemaster, self)._async_detect(max_time)
+        ret = super(lecroy_wavemain, self)._async_detect(max_time)
         if not ret:
             # This cycle is not finished
             return ret
@@ -1195,7 +1195,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self._devwrap('parameter_fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
-        super(lecroy_wavemaster, self)._create_devs()
+        super(lecroy_wavemain, self)._create_devs()
 
 # Directory for DISK option can use FLPY, HDD, C, D ...
 # Lots of unknown trig_select modes like cascaded

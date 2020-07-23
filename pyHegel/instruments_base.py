@@ -2073,8 +2073,8 @@ class ReadvalDev(BaseDevice):
         if not self._do_local_doc:
             return super(ReadvalDev, self)._get_docstring(added=added)
         else:
-            basename = self._slave_dev.name
-            subdoc = self._slave_dev.__doc__
+            basename = self._subordinate_dev.name
+            subdoc = self._subordinate_dev.__doc__
             doc = """
                   This device behaves like doing a run_and_wait followed by a
                   {0}. When in async mode, it will trigger the device and then do
@@ -2090,19 +2090,19 @@ class ReadvalDev(BaseDevice):
             self._do_local_doc = True
         else:
             self._do_local_doc = False
-        self._slave_dev = dev
+        self._subordinate_dev = dev
         if autoinit is None:
             autoinit = dev._autoinit
         super(ReadvalDev,self).__init__(redir_async=dev, autoinit=autoinit, doc=doc, get_has_check=True, **kwarg)
         self._getdev_p = True
     def _getdev(self, **kwarg):
-        self.instr._async_select([(self._slave_dev, kwarg)])
+        self.instr._async_select([(self._subordinate_dev, kwarg)])
         self.instr.run_and_wait()
-        ret = self._slave_dev.get(**kwarg)
-        self._last_filename = self._slave_dev._last_filename
+        ret = self._subordinate_dev.get(**kwarg)
+        self._last_filename = self._subordinate_dev._last_filename
         return ret
     def getformat(self, **kwarg):
-        d = self._slave_dev.getformat(**kwarg)
+        d = self._subordinate_dev.getformat(**kwarg)
         d['obj'] = self
         return d
 
@@ -2888,7 +2888,7 @@ class Dict_SubDevice(BaseDevice):
         key can be a single value, or a list of values (in which case set/get will work
         on a list)
         force_default, set the default value of force used in check/set.
-            It can be True, False or 'slave' which means to let the subdevice handle the
+            It can be True, False or 'subordinate' which means to let the subdevice handle the
             insertion of the missing parameters
         """
         self._subdevice = subdevice
@@ -2979,7 +2979,7 @@ class Dict_SubDevice(BaseDevice):
                 msg_src = 'element %i'%i
             self._general_check(v, lims=lim, msg_src=msg_src)
         force = self._force_helper(force)
-        allow = {True:True, False:'cache', 'slave':False}[force]
+        allow = {True:True, False:'cache', 'subordinate':False}[force]
         self._check_cache['allow'] = allow
         op = self._check_cache['fnct_str']
         # otherwise, the check will be done by set in _setdev below
