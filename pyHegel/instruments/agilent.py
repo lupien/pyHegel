@@ -1354,8 +1354,12 @@ class infiniiVision_3000(visaInstrumentAsync):
 #######################################################
 
 #@register_instrument('Agilent Technologies', 'N9010A', 'A.12.13')
-@register_instrument('Agilent Technologies', 'N9010A', usb_vendor_product=[0x0957, 0x0B0B], alias='N9010A EXA')
+@register_instrument('Agilent Technologies', 'N9010A', usb_vendor_product=[0x0957, 0x0B0B], alias='N9010A EXA', skip_add=True)
 #@register_instrument('Agilent Technologies', 'N9030A', 'A.12.13')
+@register_instrument('Keysight Technologies', 'N9030A', usb_vendor_product=[0x2A8D, 0x0D0B], alias='N9030A PXA', skip_add=True)
+# We have an updated PXA to windows 10. The usb vendor changed to 0x2A8D, but ht idn still says Agilent.
+# The usb, is registered with the alias so the previous and next line makes all possible combinations.
+#@register_instrument('Agilent Technologies', 'N9030A', 'A.26.10', usb_vendor_product=[0x2A8D, 0x0D0B], alias='N9030A PXA', skip_add=True)
 @register_instrument('Agilent Technologies', 'N9030A', usb_vendor_product=[0x0957, 0x0D0B], alias='N9030A PXA')
 class agilent_EXA(visaInstrumentAsync):
     """
