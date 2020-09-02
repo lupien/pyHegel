@@ -1611,6 +1611,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
        record to filename (if not None) the values from devs
          uses sweep.path
        Also display it on a figure
+       devs is either a list of devices or a single device.
        interval is in seconds
        npoints is max number of points. If None, it will only stop
         on CTRL-C...
