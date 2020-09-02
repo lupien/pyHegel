@@ -2482,6 +2482,7 @@ class agilent_ENA(agilent_PNAL):
         freq_start, freq_stop, freq_cw
         power_en
         power_dbm_port1, power_dbm_port2
+        bias_en, bias_level, bias_port
         marker_x, marker_y
         cont_trigger
         trig_source
@@ -2563,6 +2564,7 @@ class agilent_ENA(agilent_PNAL):
                                  'power_slope', 'power_slope_en',
                                  'power_dbm_port1', 'power_dbm_port2',
                                  'power_dbm_port3', 'power_dbm_port4',
+                                 'bias_en', 'bias_level', 'bias_port',
                                  'npoints', 'sweep_gen',
                                  'sweep_time', 'sweep_type',
                                  'bandwidth', 'bandwidth_auto_en', 'bandwidth_auto_limit', 'cont_trigger',
@@ -2573,6 +2575,7 @@ class agilent_ENA(agilent_PNAL):
                                  'power_en', 'power_couple',
                                  'power_slope', 'power_slope_en',
                                  'power_dbm_port1', 'power_dbm_port2',
+                                 'bias_en', 'bias_level', 'bias_port',
                                  'npoints',
                                  'sweep_time', 'sweep_type',
                                  'bandwidth', 'bandwidth_auto_en', 'bandwidth_auto_limit', 'cont_trigger',
@@ -2691,6 +2694,9 @@ class agilent_ENA(agilent_PNAL):
         self.marker_discrete_en = devMkrEnOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:DISCrete', str_type=bool)
         self.marker_x = devMkrEnOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:X', str_type=float, trig=True)
         self.marker_y = devMkrEnOption('CALC{ch}:TRACe{trace}:MARKer{mkr}:Y', str_type=decode_float64, multi=['val1', 'val2'], graph=[0,1], trig=True)
+        self.bias_en = scpiDevice('SOURce:BIAS:ENABle', str_type=bool)
+        self.bias_level = scpiDevice('SOURce:BIAS:VOLTage', str_type=float, min=-40, max=40, doc="In volt.", setget=True)
+        self.bias_port = scpiDevice('SOURce:BIAS:PORT', choices=ChoiceStrings('LFOut', 'P1'))
         self.power_en = scpiDevice('OUTPut', str_type=bool)
         self.power_couple = devChOption(':SOURce{ch}:POWer:PORT:COUPle', str_type=bool)
         self.power_slope = devChOption(':SOURce{ch}:POWer:SLOPe', str_type=float, min=-2, max=2)
