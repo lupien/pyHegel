@@ -86,14 +86,26 @@ import csv
 
 ##################################################
 
-def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0):
+def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0, skiprows=0, **kwargs):
+    """\
+       Load a csv file using the reader from the csv module.
+       It does some extra cleaning, and converts data using dtype.
+       skiprows is the nimber of line to skip before parsing the file.
+       unpack then True, does a transpose on the returned data (like for loadtxt).
+       ndim is the minimum dimension of the returned array (like for loadtxt).
+       the kwargs arguments are passed on to the csv.reader
+    """
     X=[]
     # The docs says to use mode 'rb' but if the file uses mac termination it will fail
     # (should be rare). So instead use 'rU' (the parser can always deal with newline)
     # see http://bugs.python.org/issue8387
     with open(filename, 'rU') as f:
-        reader = csv.reader(f)
+        reader = csv.reader(f, **kwargs)
+        skip_count = 0
         for line in reader:
+            if skip_count < skiprows:
+                skip_count += 1
+                continue
             try:
                 if line[-1] is '':
                     # some files have an ending , sep which produces an empty last field
@@ -134,7 +146,7 @@ def _shape_compare(shape1, shape2, concatenate):
 _readfile_lastnames = []
 _readfile_lastheaders = []
 _readfile_lasttitles = []
-def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True, concatenate=False, multi_force_def=np.nan):
+def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True, concatenate=False, multi_force_def=np.nan, opts={}):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -177,6 +189,10 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     concatenante, when True, will merge rows from multiple files together.
       It can also be set to an integer to select the axes to merge (it
       is -1 when using True)
+
+    opts is a dictionnary of options passed to the actual reader which is np.load (when dtype is given),
+      np.load (for files ending in .npy), util.loadtxt_csv (for csv files) and np.loadtxt
+      otherwise.
 
     The list of files is saved in the global variable _readfile_lastnames.
     When the parameter getnames=True, the return value is a tuple
@@ -240,9 +256,9 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     first_shape = None
     for fn in filelist:
         if dtype is not None:
-            current = np.fromfile(fn, dtype=dtype)
+            current = np.fromfile(fn, dtype=dtype, **opts)
         elif fn.lower().endswith('.npy'):
-            current = np.load(fn)
+            current = np.load(fn, **opts)
         else:
             if csv=='auto':
                 if fn.lower().endswith('.csv'):
@@ -252,9 +268,9 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
             else:
                 docsv = csv
             if docsv:
-                current = loadtxt_csv(fn).T
+                current = loadtxt_csv(fn, **opts).T
             else:
-                current = np.loadtxt(fn).T
+                current = np.loadtxt(fn, **opts).T
         if first_shape is None:
             first_shape = current.shape
         elif not _shape_compare(first_shape, current.shape, concatenate):
