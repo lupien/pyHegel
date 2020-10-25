@@ -23,8 +23,9 @@
 
 """
 This module contains many utilities:
-    loadtxt_csv
     readfile
+    loadtxt_csv
+    read_comments
     merge_pdf
     savefig
     savefig_reset
@@ -83,6 +84,79 @@ except ImportError:
 import pylab
 import glob
 import csv
+import re
+
+##################################################
+
+def read_comments(filename, comments='#', pick=None, before=False, skiprows=0):
+    """ reads comments in filename
+        Goes line by line and counts line that do not start with the comments string symbol
+        (comments can also be a list of symbols)
+        pick are the start string of comments to find. Can be a string or a list of strings.
+        Or if it is None, will be automatic to find comment pyHegel saves in files.
+        It returns a list of tuple of (comments, prev_line_count, timestamp)
+         and the final count. The timestamp is None if it is not known.
+        where timestamp is extracted from the comment header when pick is None and
+        when it was saved with the data (for data generated with versions of pyHegel that
+        contain this read_comments function).
+        So prev_line_count will be the index to the line following the comment.
+        If you prefer it to point to the previous line, use option before
+        or convert it like this:
+           [ (c, max(i-1,0), t) for c, i, t in result]
+        skiprows is to skip lines at the start.
+    """
+    if isinstance(comments, (basestring, bytes)):
+        comments = [comments]
+    comments = [re.escape(c) for c in comments]
+    time_re = False
+    if pick is None:
+        numeric_const_pattern = r'[-+]?(?:(?:\d*\.\d+)|(?:\d+\.?))(?:[Ee][+-]?\d+)?'
+        pick = [r'\#C\# ', r'\#C\:%s\# '%numeric_const_pattern]
+        pick_re = re.compile('(' + '|'.join(pick) + ')')
+        time_re = re.compile(r'\#C\:(%s)\# $'%numeric_const_pattern)
+    else:
+        if isinstance(pick, (basestring, bytes)):
+            pick = [pick]
+        pick_re = re.compile('(' + '|'.join(re.escape(c) for c in pick) + ')')
+    # use a group to return the group in the split
+    comments_re = re.compile('(' + '|'.join(comments + pick) + ')')
+    count = 0
+    skip_count = 0
+    result = []
+    with open(filename, 'rU') as f:
+        for line in f:
+            if skip_count < skiprows:
+                skip_count += 1
+                continue
+            split = comments_re.split(line, maxsplit=1)
+            if len(split) == 1: # no comments
+                count += 1
+                continue
+            # we have a general comment, now check if it is a pick one
+            split = pick_re.split(line, maxsplit=1)
+            if len(split) == 1: # not a pick comment
+                continue
+            # we have a pick comment
+            comment = split[-1].rstrip()
+            token = split[-2]
+            if time_re:
+                timestamp = time_re.match(token)
+                if timestamp is not None:
+                    timestamp = float(timestamp.group(1))
+            else:
+                timestamp = None
+            if split[0].strip() == '':
+                # comment starts at beginning of line (except for empty spaces)
+                i = count
+                if before:
+                    i = max(0, i-1)
+                result.append( (comment, i, timestamp) )
+            else:
+                # comment is probably on the end of a data line, make it point to this line.
+                result.append( (comment, count, timestamp) )
+                count += 1
+    return result, count
+
 
 ##################################################
 

@@ -597,7 +597,10 @@ def dump_conf(f, setdevs=None, getdevs=[], extra_conf=None):
 
 def _write_comment(f, text):
     # text should be unicode
-    writevec(f, [_rm_nl_cr(text.encode('utf_8'))], pre_str='#C# ')
+    # This the old way.
+    #writevec(f, [_rm_nl_cr(text.encode('utf_8'))], pre_str='#C# ')
+    # This is the new way.
+    writevec(f, [_rm_nl_cr(text.encode('utf_8'))], pre_str='#C:%r# '%time.time())
 
 class Loop_Control(object):
     def __init__(self):
