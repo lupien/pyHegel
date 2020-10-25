@@ -220,7 +220,7 @@ def _shape_compare(shape1, shape2, concatenate):
 _readfile_lastnames = []
 _readfile_lastheaders = []
 _readfile_lasttitles = []
-def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True, concatenate=False, multi_force_def=np.nan, opts={}):
+def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True, concatenate=False, multi_force_def=np.nan, comments=False, opts={}):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -264,25 +264,33 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
       It can also be set to an integer to select the axes to merge (it
       is -1 when using True)
 
-    opts is a dictionnary of options passed to the actual reader which is np.load (when dtype is given),
+    opts is a dictionnary of options passed to the actual reader which is np.fromfile (when dtype is given),
       np.load (for files ending in .npy), util.loadtxt_csv (for csv files) and np.loadtxt
       otherwise.
 
+    comments when True, will read and return a list of all in-line comments in the file using
+       read_comments. comments can also be a dictionnary, in which case they are the options
+       to read_comments. When enabled, the return values will be
+         (array, comments).
+
     The list of files is saved in the global variable _readfile_lastnames.
     When the parameter getnames=True, the return value is a tuple
-    (array, filenames_list)
+    (array, filenames_list) or (array, comments, filenames_list)
     The headers of the FIRST file are saved in the global variable _readfile_lastheaders.
     The headers are recognized has lines starting with #
     The last header is probably the title line (_readfile_lastheaders[-1]) and is parsed into
     _readfile_lasttitles (assuming columns are separated by tabs)
     When the parameter getheaders=True, the return value is a tuple
-    (array, titles_list, headers_list)
+    (array, titles_list, headers_list) or (array, comments, titles_list, headers_list)
     If both getheaders and getnames are True, the the return value is a tuple
-    (array, filenames_list, titles_list, headers_list)
+    (array, filenames_list, titles_list, headers_list) or (array, comments, filenames_list, titles_list, headers_list)
     """
     global _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
     if multi_sweep not in [True, False, 'force']:
         raise ValueError("multi_sweep needs to be one of True, False or 'force'")
+    if comments is True:
+        comments = {}
+    do_comments = comments is not False
     if not isinstance(filename, (list, tuple, np.ndarray)):
         filename = [filename]
     filelist = []
@@ -327,6 +335,8 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     if concatenate is True:
         concatenate = -1
     ret = []
+    comments_array = []
+    do_comment_reshape = False
     first_shape = None
     for fn in filelist:
         if dtype is not None:
@@ -350,15 +360,32 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
         elif not _shape_compare(first_shape, current.shape, concatenate):
             raise RuntimeError('Not all objects have same shape. "%s"=%s and "%s"=%s'%
                                 (filelist[0], first_shape, fn, current.shape))
+        if do_comments:
+            ret_comments, data_len = read_comments(fn, **comments)
+            if data_len != current.shape[-1]:
+                raise RuntimeError('Incompatible data length between read data (%i) and read comments (%i).'%(current.shape[-1], data_len))
+            comments_array.append(ret_comments)
         ret.append(current)
     if not multi:
         ret = ret[0]
+        if do_comments and shape is None:
+            comments_array = comments_array[0]
+        else:
+            do_comment_reshape = True
     elif concatenate is not False:
         shape = None
+        if do_comments:
+            # fixup comments index for concatenation.
+            offsets = [0] + list(np.cumsum([r.shape[-1] for r in ret])[:-1])
+            a = []
+            for o, ca in zip(offsets, comments_array):
+                a.extend( [ (c, j+o, t) for c,j,t in ca] )
+            comments_array = a
         ret = np.concatenate(ret, axis=concatenate)
     else:
         # convert into a nice numpy array. The data is copied and made contiguous
         ret = np.array(ret)
+        do_comment_reshape = True
     if ret.ndim == 3:
         # we make a copy to make it a nice contiguous array
         ret = ret.swapaxes(0,1).copy()
@@ -380,14 +407,24 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
                 print 'Unable to convert shape from %s to %s (probably an incomplet sweep). Shape unadjusted.'%(old_shape, new_shape)
         else:
             print 'Converted shape from %s to %s.'%(old_shape, new_shape)
-    if getnames and getheaders:
-        return (ret, filelist, titles, hdrs)
-    elif getnames:
-        return (ret, filelist)
-    elif getheaders:
-        return (ret, titles, hdrs)
-    else:
+    if do_comments and do_comment_reshape:
+        a = []
+        N = len(filelist)
+        sh = ret.shape[1:]
+        # note that np.unravel_index is the opposite of np.ravel_multi_index
+        for i, ca in enumerate(comments_array):
+            a.extend( [ (c, np.unravel_index(j+i*N, sh), t) for c,j,t in ca] )
+        comments_array = a
+    if not do_comments and not getnames and not getheaders:
         return ret
+    ret = (ret, )
+    if do_comments:
+        ret = ret + (comments_array,)
+    if getnames:
+        ret = ret + (filelist, )
+    if getheaders:
+        ret = ret + (titles, hdrs)
+    return ret
 
 ##################################################
 
