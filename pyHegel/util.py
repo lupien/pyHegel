@@ -219,10 +219,35 @@ def _shape_compare(shape1, shape2, concatenate):
         shape2 = [s for i,s in enumerate(shape2) if i != axes]
     return shape1 == shape2
 
+def _reshape_helper(data, shape, force=False, force_def=np.nan, file=None):
+    if shape is not None:
+        old_shape = data.shape
+        new_shape = old_shape[:-1] + shape
+        ncol = old_shape[0]
+        if file is not None:
+            pre = file+': '
+        else:
+            pre = ''
+        try:
+            data = data.reshape(new_shape)
+        except ValueError:
+            if force:
+                new_data = np.full(new_shape, force_def)
+                data_flat = data.reshape((ncol, -1)).T
+                nd_flat = new_data.reshape((ncol, -1)).T
+                nd_flat[:len(data_flat)] = data_flat
+                data = new_data
+                print pre+'Forced shape from %s to %s.'%(old_shape, new_shape)
+            else:
+                print pre+'Unable to convert shape from %s to %s (probably an incomplet sweep). Shape unadjusted.'%(old_shape, new_shape)
+        else:
+            print pre+'Converted shape from %s to %s.'%(old_shape, new_shape)
+    return data
+
 _readfile_lastnames = []
 _readfile_lastheaders = []
 _readfile_lasttitles = []
-def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True, concatenate=False, multi_force_def=np.nan, comments=False, opts={}):
+def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True, concatenate=False, multi_force_def=np.nan, comments=False, encoding='utf8', opts={}):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -265,6 +290,9 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     concatenante, when True, will merge rows from multiple files together.
       It can also be set to an integer to select the axes to merge (it
       is -1 when using True)
+
+    encoding is the encoding used to convert text to unicode (for headers, comments).
+      It defaults to utf8. Use latin1 if you have some random binary data.
 
     opts is a dictionnary of options passed to the actual reader which is np.fromfile (when dtype is given),
       np.load (for files ending in .npy), util.loadtxt_csv (for csv files) and np.loadtxt
@@ -313,8 +341,8 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
         multi = False
     hdrs = []
     titles = []
-    if dtype is None: # binary files don't have headers
-        with open(filelist[0], 'rU') as f: # only the first file
+    if dtype is None and not filelist[0].lower().endswith('.npy'): # binary files don't have headers
+        with io.open(filelist[0], 'rt', encoding=encoding) as f: # only the first file
             while True:
                 line = f.readline()
                 if len(line) == 0:
@@ -332,13 +360,14 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     if multi_sweep and len(hdrs)>2 and hdrs[-2].startswith(multi_hdr):
         shape_s = hdrs[-2][len(multi_hdr):].strip().split(',')
         shape = tuple([int(s) for s in shape_s])
+        do_reshape = lambda data, fn: _reshape_helper(data, shape, multi_sweep=='force', multi_force_def, fn)
     else:
         shape = None
+        do_reshape = lambda data, fn: data
     if concatenate is True:
         concatenate = -1
     ret = []
     comments_array = []
-    do_comment_reshape = False
     first_shape = None
     for fn in filelist:
         if dtype is not None:
@@ -357,65 +386,59 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
                 current = loadtxt_csv(fn, **opts).T
             else:
                 current = np.loadtxt(fn, **opts).T
+        N_lines = current.shape[-1]
+        current = do_reshape(current, fn)
         if first_shape is None:
             first_shape = current.shape
         elif not _shape_compare(first_shape, current.shape, concatenate):
             raise RuntimeError('Not all objects have same shape. "%s"=%s and "%s"=%s'%
                                 (filelist[0], first_shape, fn, current.shape))
         if do_comments:
-            ret_comments, data_len = read_comments(fn, **comments)
-            if data_len != current.shape[-1]:
-                raise RuntimeError('Incompatible data length between read data (%i) and read comments (%i).'%(current.shape[-1], data_len))
+            ret_comments, data_len = read_comments(fn, encoding=encoding, **comments)
+            if data_len != N_lines:
+                raise RuntimeError('Incompatible data length between read data (%i) and read comments (%i).'%(N_lines, data_len))
             comments_array.append(ret_comments)
         ret.append(current)
+    do_comment_reshape = True
     if not multi:
         ret = ret[0]
         if do_comments and shape is None:
             comments_array = comments_array[0]
-        else:
-            do_comment_reshape = True
+            do_comment_reshape = False
     elif concatenate is not False:
-        shape = None
         if do_comments:
             # fixup comments index for concatenation.
-            offsets = [0] + list(np.cumsum([r.shape[-1] for r in ret])[:-1])
+            # could be on multi dim data.
+            offsets = [0] + list(np.cumsum([r.shape[concatenate] for r in ret])[:-1])
             a = []
-            for o, ca in zip(offsets, comments_array):
-                a.extend( [ (c, j+o, t) for c,j,t in ca] )
+            def adjust_shape(index, offset, data):
+                sh = data.shape
+                i = list(np.unravel_index(index, sh))
+                i[concatenate] += offset
+                i = i[1:] # now skip the column index
+                if len(i) == 1:
+                    return i[0]
+                return tuple(i)
+            for o, ca, r in zip(offsets, comments_array, ret):
+                a.extend( [ (c, adjust_shape(j, o, r), t) for c,j,t in ca] )
             comments_array = a
         ret = np.concatenate(ret, axis=concatenate)
+        do_comment_reshape = False
     else:
         # convert into a nice numpy array. The data is copied and made contiguous
-        ret = np.array(ret)
-        do_comment_reshape = True
-    if ret.ndim == 3:
-        # we make a copy to make it a nice contiguous array
-        ret = ret.swapaxes(0,1).copy()
-    if shape is not None:
-        old_shape = ret.shape
-        new_shape = old_shape[:-1] + shape
-        ncol = old_shape[0]
-        try:
-            ret.shape = new_shape
-        except ValueError:
-            if multi_sweep == 'force':
-                new_ret = np.full(new_shape, multi_force_def)
-                r_flat = ret.reshape((ncol, -1)).T
-                nr_flat = new_ret.reshape((ncol, -1)).T
-                nr_flat[:len(r_flat)] = r_flat
-                ret = new_ret
-                print 'Forced shape from %s to %s.'%(old_shape, new_shape)
-            else:
-                print 'Unable to convert shape from %s to %s (probably an incomplet sweep). Shape unadjusted.'%(old_shape, new_shape)
+        # the .npy with dim 3 is to match the behavior of a previous version.
+        if dtype is not None:
+            ret = np.array(ret)
+        elif filelist[0].lower().endswith('.npy') and ret[0].ndim != 2:
+            ret = np.array(ret)
         else:
-            print 'Converted shape from %s to %s.'%(old_shape, new_shape)
+            ret = np.array(ret).swapaxes(0,1).copy()
     if do_comments and do_comment_reshape:
         a = []
-        N = len(filelist)
         sh = ret.shape[1:]
         # note that np.unravel_index is the opposite of np.ravel_multi_index
         for i, ca in enumerate(comments_array):
-            a.extend( [ (c, np.unravel_index(j+i*N, sh), t) for c,j,t in ca] )
+            a.extend( [ (c, np.unravel_index(j+i*N_lines, sh), t) for c,j,t in ca] )
         comments_array = a
     if not do_comments and not getnames and not getheaders:
         return ret
