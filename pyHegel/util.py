@@ -66,6 +66,7 @@ import os
 import os.path
 import subprocess
 import numpy as np
+import io
 from scipy.optimize import brentq as brentq_rootsolver
 from scipy.special import gamma
 
@@ -88,7 +89,7 @@ import re
 
 ##################################################
 
-def read_comments(filename, comments='#', pick=None, before=False, skiprows=0):
+def read_comments(filename, comments='#', pick=None, before=False, skiprows=0, encoding='utf8'):
     """ reads comments in filename
         Goes line by line and counts line that do not start with the comments string symbol
         (comments can also be a list of symbols)
@@ -104,6 +105,7 @@ def read_comments(filename, comments='#', pick=None, before=False, skiprows=0):
         or convert it like this:
            [ (c, max(i-1,0), t) for c, i, t in result]
         skiprows is to skip lines at the start.
+        encoding is the encoding used to convert to unicode.
     """
     if isinstance(comments, (basestring, bytes)):
         comments = [comments]
@@ -123,7 +125,7 @@ def read_comments(filename, comments='#', pick=None, before=False, skiprows=0):
     count = 0
     skip_count = 0
     result = []
-    with open(filename, 'rU') as f:
+    with io.open(filename, 'rt', encoding=encoding) as f:
         for line in f:
             if skip_count < skiprows:
                 skip_count += 1
