@@ -136,10 +136,6 @@ the pyHegel command so you can start a session. Or use a full install ::
 
     python setup.py install
 
-In case you are doing an install on a secondary version of python on windows,
-you can prevent the running of the post install script (which adds the shortcuts)
-by adding the option --no-post
-
 Documentation
 --------------
 

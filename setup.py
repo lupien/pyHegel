@@ -104,7 +104,9 @@ entry_points = {
 options = {}
 
 # Parse the arguments for extra flags
-do_post = True
+#do_post = True
+# As of 2020-10-26, fully disable post script.
+do_post = False
 if '--no-post' in sys.argv:
     do_post = False
     sys.argv.remove('--no-post')
@@ -113,7 +115,6 @@ if '--no-post' in sys.argv:
 post_script = 'pyHegel_postinstall.py'
 def _post_install(cmd='install'):
     if not do_post:
-        print 'Skipping post install'
         return
     print 'Running post install'
     from subprocess import call
