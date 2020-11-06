@@ -2273,6 +2273,26 @@ class scaled_float(object):
     def tostr(self, val):
         return _tostr_helper(val/self.scale, float)
 
+class float_as_fixed(object):
+    def __init__(self, conversion='%.1f', strip=None):
+        """
+        on output for floats, instead of using the standard rep, it will
+        use the conversion specified.
+        It can also remove the strip string from the beginning (when not None).
+        """
+        self.conv = conversion
+        self.strip = strip
+    def __call__(self, input_str):
+        strip = self.strip
+        if strip is not None:
+            if not input_str.startswith(strip):
+                raise ValueError('Missing expected "%s" at start of string'%strip)
+            input_str = input_str[len(strip):]
+        return float(input_str)
+    def tostr(self, val):
+        return self.conv%val
+
+
 class quoted_string(object):
     def __init__(self, quote_char='"', quiet=False, tostr=True, fromstr=True):
         """
