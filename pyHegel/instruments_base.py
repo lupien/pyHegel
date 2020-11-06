@@ -2307,6 +2307,72 @@ class quoted_string(object):
             raise ValueError, 'The given string already contains a quote :%s:'%quote_char
         return quote_char+unquoted_str+quote_char
 
+def protected_sep_split(input_str, sep=',', lengths=None, protect='"', clean=False):
+    """
+    lengths: is a list of string lengths to use to split. It can also be an
+            integer, in which case it is applied to all elements. If any length
+            is None, then length is not used for splitting. Length splitting (element other
+            thant None) disables protection. If the list is too short, the last value is reused.
+    protect: is the single quote string or a list of the start and end strings (for example to use '(', ')')
+             to prevent sep from splitting the entries.
+             Can be set to False, to disable protection.
+    clean: when True, the protect symbols are removed.
+    """
+    if isinstance(protect, (list, tuple)):
+        start_str, end_str = protect
+    else:
+        start_str = end_str = protect
+    if not isinstance(lengths, (list, tuple, np.ndarray)):
+        lengths = [lengths]
+    lst = []
+    i = 0
+    Nl = len(lengths)
+    def incr_il(il):
+        il = min(il+1, Nl-1)
+        return il, lengths[il]
+    il, L = incr_il(-1)
+    Nin = len(input_str)
+    buf = ''
+    while True:
+        if L is not None:
+            lst.append(input_str[i:i+L])
+            i = i+L
+            il, L = incr_il(il)
+            if i == Nin:
+                break
+            elif input_str[i:].startswith(sep):
+                i += len(sep)
+            else:
+                raise ValueError('Missing expected separator')
+        else:
+            i_sep = input_str.find(sep, i)
+            if start_str is not False:
+                i_start = input_str.find(start_str, i)
+            else:
+                i_start = -1
+            if i_sep != -1 and (i_sep < i_start or i_start == -1):
+                # sep before start (or no start)
+                lst.append(buf + input_str[i:i_sep])
+                i = i_sep + len(sep)
+                buf = ''
+                il, L = incr_il(il)
+            elif i_start != -1:
+                buf += input_str[i:i_start]
+                # we found a start, look for matching end
+                i_end = input_str.find(end_str, i_start+len(start_str))
+                if i_end == -1:
+                    raise ValueError('Missing matching end protection string.')
+                if clean:
+                    # append, keeping protect symbol
+                    buf += input_str[i_start+len(start_str):i_end]
+                else:
+                    buf += input_str[i_start:i_end+len(end_str)]
+                i = i_end + len(end_str)
+            else: # no sep, no start
+                lst.append(buf+input_str[i:])
+                break
+    return lst
+
 class quoted_list(quoted_string):
     def __init__(self, sep=',', element_type=None, protect_sep=None, **kwarg):
         super(quoted_list,self).__init__(**kwarg)
@@ -2330,26 +2396,7 @@ class quoted_list(quoted_string):
     def __call__(self, quoted_l, skip_type=False):
         unquoted = super(quoted_list,self).__call__(quoted_l)
         if self._protect_sep is not None:
-            start_sym, end_sym = self._protect_sep
-            lst = []
-            s = 0
-            i = 0
-            while i<len(unquoted):
-                # skip a start_sym to end_sym region
-                c = unquoted[i]
-                if c in start_sym:
-                    ind = start_sym.find(c)
-                    i = unquoted.find(end_sym[ind],i+1)
-                    if i == -1:
-                        i = len(unquoted)
-                        break
-                elif c in self._sep:
-                    lst.append(unquoted[s:i])
-                    i += 1
-                    s = i
-                else:
-                    i += 1
-            lst.append(unquoted[s:])
+            lst = protected_sep_split(unquoted, sep=self._sep, protect=self._protect_sep, clean=False)
         else:
             lst = unquoted.split(self._sep)
         if self._element_type is not None and not skip_type:
@@ -2771,7 +2818,7 @@ def make_choice_list(list_values, start_exponent, end_exponent):
 
 
 class ChoiceMultiple(ChoiceBase):
-    def __init__(self, field_names, fmts=int, sep=',', ending_sep=False, ending_sep_get=None, allow_missing_keys=False, reading_sep=None):
+    def __init__(self, field_names, fmts=int, sep=',', ending_sep=False, ending_sep_get=None, allow_missing_keys=False, reading_sep=None, protect_sep=False):
         """
         This handles scpi commands that return a list of options like
          1,2,On,1.34
@@ -2791,12 +2838,15 @@ class ChoiceMultiple(ChoiceBase):
         ending_sep_get, when not None it overrides ending_sep for reading.
         allow_missing_keys when True, will not produce error for missing field_names when checking
         readding_sep when not None is used instead of sep when obtaining data from instrument.
+        protect_sep as in protected_sep_split
+        If any of the fmts has a fixed_length_on_read attribute, it is used for the length in protected_sep_split
         """
         self.field_names = field_names
         if not isinstance(fmts, (list, np.ndarray)):
             fmts = [fmts]*len(field_names)
         fmts_type = []
         fmts_lims = []
+        fixed_length = []
         for f in fmts:
             if not isinstance(f, tuple):
                 if isinstance(f, ChoiceBase):
@@ -2805,8 +2855,10 @@ class ChoiceMultiple(ChoiceBase):
                     f = (f, None)
             fmts_type.append(f[0])
             fmts_lims.append(f[1])
+            fixed_length.append(getattr(f[0], 'fixed_length_on_read', None))
         self.fmts_type = fmts_type
         self.fmts_lims = fmts_lims
+        self.fixed_length = fixed_length
         self.sep = sep
         self.ending_sep_set = ending_sep
         self.ending_sep_get = ending_sep
@@ -2814,6 +2866,7 @@ class ChoiceMultiple(ChoiceBase):
             self.ending_sep_get = ending_sep_get
         self.reading_sep = sep if reading_sep is None else reading_sep
         self.allow_missing_keys = allow_missing_keys
+        self.protect_sep = protect_sep
     def __call__(self, fromstr):
         sep = self.reading_sep
         if self.ending_sep_get:
@@ -2821,7 +2874,7 @@ class ChoiceMultiple(ChoiceBase):
                 fromstr = fromstr[:-len(sep)]
             else:
                 raise ValueError('Expected ending sep in class %s'%self.__class__.__name__)
-        v_base = fromstr.split(sep)
+        v_base = protected_sep_split(fromstr, sep=sep, lengths=self.fixed_length, protect=self.protect_sep)
         if len(v_base) != len(self.field_names):
             raise ValueError('Invalid number of parameters in class %s'%self.__class__.__name__)
         v_conv = []
@@ -3389,7 +3442,7 @@ class visaInstrument(BaseInstrument):
     @locked_calling
     def read(self, raw=False, count=None, chunk_size=None):
         """ reads data.
-            The default is to read until an end is resived in chunk_size blocks
+            The default is to read until an end is received in chunk_size blocks
              (if chunk_size is not given, uses the default chunk_size)
             It then strips then termination characters unless raw is False.
             When a count is given, it does not wait for an end. It
