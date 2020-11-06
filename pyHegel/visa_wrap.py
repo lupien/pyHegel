@@ -346,11 +346,14 @@ def _write_helper(self, message, termination='default'):
     # For new: overides the resource write to remove handling of encoding
     termination = self.write_termination if termination == 'default' else termination
     if termination:
-        if message.endswith(termination):
+        # termination could be unicode. This could force a conversion to unicode of message
+        # prevent that by forcing termination to str (for python2)
+        # This allows using the encoding attribute of the class
+        if message.endswith(str(termination)):
             _warnings.warn("write message already ends with "
                           "termination characters", stacklevel=2)
         else:
-            message += termination
+            message += str(termination)
     self.write_raw(message)
 
 def _read_helper(self, termination='default', chunk_size=None):
