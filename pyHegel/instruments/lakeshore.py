@@ -25,18 +25,76 @@ from __future__ import absolute_import
 
 import numpy as np
 import time
+import re
+
 
 from ..instruments_base import visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice,\
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep,\
-                            ChoiceStrings, ChoiceIndex,\
-                            make_choice_list,\
-                            visa_wrap, locked_calling, wait,\
+                            ChoiceStrings, ChoiceIndex, ChoiceDevDep,\
+                            make_choice_list, decode_float64, float_as_fixed,\
+                            visa_wrap, locked_calling, wait, ProxyMethod,\
                             resource_info
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 from .logical import FunctionDevice, ScalingDevice
+
+register_idn_alias('Lake Shore Cryotronics', 'LSCI')
+
+#  These observations are on model 336
+# Lakeshore displays random characters for ascii 0-31
+# character 127 is a space
+# Only 7bit are used (even on tcpip)
+# However, gpib does allow above 128.
+# in 128-159, it is the same as CP437.
+# from 160-180 they are symbols used for the lakeshore display. Some are 2 or 4 character long
+#  like setpoint (SP, 168+169) or K/min (175-178). The degree symbol is at the regular 167.
+# At and above 180 it is random character again.
+
+class quoted_name(object):
+    def __init__(self, length=15):
+        self._length = length
+        self.fixed_length_on_read = length
+    def __call__(self, read_str):
+        # the instruments returns a self._length characters string with spaces if unused
+        # remove the extra spaces
+        return read_str.rstrip()
+    def tostr(self, input_str):
+        if len(input_str) > self._length:
+            print('String "%s" is longer than allowed %i char. It is truncated.')
+            input_str = input_str[:self._length]
+        for c in input_str:
+            # gpib would allow more but to be safe, force it to a valid range.
+            if ord(c)<32 or ord(c)>128 or c == '"':
+                raise ValueError('Invalid character in string. Only ascii between 32 and 127 are accepted (excluding ")')
+        return '"'+input_str+'"'
+
+class dotted_quad(object):
+    """ Accepts a string in the correct format, or a list of integers. Returns a string """
+    def __call__(self, read_str):
+        return read_str
+    def tostr(self, input_str):
+        if isinstance(input_str, basestring):
+            m = re.match(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$', input_str)
+            if m is None:
+                raise ValueError('Invalid string. Needs to be in 000.000.000.000 format.')
+            input_str = [int(i) for i in m.groups()]
+        if len(input_str) != 4:
+            raise ValueError('Invalid format. Requires 4 integers.')
+        for d in input_str:
+            if d >255 or d<0:
+                raise ValueError('Invalid Integer. Needs to be in range 0-255')
+        return '.'.join('%d'%d for d in input_str)
+
+
+# without these, 1e-12 can be read as 1 by lakeshore
+# However since for anything above 1e-4 repr does not use exponent formulation
+# it will still work correclty most of the time with just float.
+
+float_fix1 = float_as_fixed('%.1f')
+float_fix3 = float_as_fixed('%.3f')
+float_fix6 = float_as_fixed('%.6f')
 
 #######################################################
 ##    Lakeshore 325 Temperature controller
@@ -107,12 +165,674 @@ class lakeshore_325(visaInstrument):
         self.tb = scpiDevice(getstr='KRDG? B', str_type=float) #in Kelvin
         self.sa = scpiDevice(getstr='SRDG? A', str_type=float) #in sensor unit: Ohm, V or mV
         self.sb = scpiDevice(getstr='SRDG? B', str_type=float) #in sensor unit
-        self.status_a = scpiDevice(getstr='RDGST? A', str_type=int) #flags 1(0)=invalid, 16(4)=temp underrange,
-                               #32(5)=temp overrange, 64(6)=sensor under (<0), 128(7)=sensor overrange
-                               # 000 = valid
-        self.status_b = scpiDevice(getstr='RDGST? b', str_type=int)
+        self.status_a = scpiDevice(getstr='RDGST? A', str_type=int, doc="""\
+                         flags:
+                               0      = valid
+                               1  (0) = invalid
+                               16 (4) = temp underrange
+                               32 (5) = temp overrange
+                               64 (6) = sensor under (<0)
+                               128(7) = sensor overrange
+                        """)
+        self.status_b = scpiDevice(getstr='RDGST? b', str_type=int, doc="""\
+                         flags:
+                               0      = valid
+                               1  (0) = invalid
+                               16 (4) = temp underrange
+                               32 (5) = temp overrange
+                               64 (6) = sensor under (<0)
+                               128(7) = sensor overrange
+                        """)
         self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in %
         self.sp = scpiDevice(setstr='SETP 1,', getstr='SETP? 1', str_type=float)
+        self._devwrap('fetch', autoinit=False)
+        self.alias = self.fetch
+        # This needs to be last to complete creation
+        super(type(self),self)._create_devs()
+
+#######################################################
+##    Lakeshore 336 Temperature controller
+#######################################################
+
+#TODO:       handle set/get timeing.
+
+# Curve entry details.
+# - Entries need to be in ascending sensor and be 200 items long or have a 0, 0 entry to finish
+# - the entries are not reordered on remote only on the front panel.
+# - A curve can be written/read past the 0,0 value but it is not used.
+# - Bad entries (not increasing or past 0,0) do not produce errors.
+# - Values way out of range are stripped (111.1V on diode is like 11.1V)
+# - When changing item 1 or 2, the coefficient (header) is set to positive or negative
+#    depending on the temp values of the first 2 points. It can be overriden later with header.
+
+# For ouput configuration
+#  analog configures the monitor output mode (and the polarity for closed/zone for 3,4)
+#  htrset configure output 1,2
+#  outmode configures the control mode for output 1-4
+#  warmup configures the warmup output mode
+#  changing input_ch in either analog or outmode changes the other one.
+
+# Note that PID, manual, zone should work for all 4 output channels (manual is wrong).
+# Zones pid, and other settings are used only when the setpoint changes which upper is being used.
+#  once the change is done, parameters like PIDs can be changed and they are not overriden until
+#  the setpoint crosses another upper limit. Changing the parameters directly does not update the zone parameters.
+
+#t=t1
+#t._read_write_wait, t._write_write_wait = (.05, .05)
+#write_wait=0
+#while True:
+#    t.curve_delete(31, password=t._passwd_check)
+#    wait(0)
+#    vals = arange(1, 200)
+#    t.get_error()
+#    rr=[t.curve_data_point.set(ch=31, i=i, sensor=i/100., temp=i/10., password=t._passwd_check) for i in vals]
+#    wait(write_wait)
+#    hdr, v = t.curve_get(31)
+#    wait(.1)
+#    err =  t.get_error()
+#    wait(.1)
+#    i=v.shape[1]+1
+#    print all(v == vals/array([[100.],[10]])), err, v.shape, i, t.curve_data_point.get(ch=31, i=i)
+#t.curve_delete(31, password=t._passwd_check)
+
+# For serial read_write, write_write of 0., 0.07 seems to work fine.
+#   0.05, 0.05 does not work: False Command Error. (2L, 141L) 142 dict_improved(sensor=0.0, temp=0.0)
+#   with opc, 0,0 it does not produce errors.
+# For gpib 0,0 does not produce errors, even for 0,0
+# for tcpip, no errors for noopc, 0,0 with a write_wait of 20s. And no error with opc and 0,0 and write_wait=0.
+
+# reading speed:
+#   %time v=[get(t3.t) for i in range(100)]
+#   %time v=[t3.ask('krdg? a') for i in range(100)]
+#   %time v=[t3.ask('*opc?') for i in range(100)]
+# for gpib is 6 ms/read, 100 ms/read for *opc?
+# for tcpip is 20 ms/read (*opc is 19)
+# for serial it is 6.6ms (krdg is 5.7), 4 ms/read for *opc?
+#      however, if loaded with option no_visa_lock=True, both get t and krdg ask take 5.7 ms
+
+# writing speed
+# write_test = lambda dev, n: ([dev.write('setp 1,%.2f'%(100+i)) for i in range(n)], dev.ask('*opc?'))
+# write_test_noopc = lambda dev, n: ([dev.write('setp 1,%.2f'%(100+i)) for i in range(n)],)
+# %time v=write_test(t3, 100)
+# for gpib is ~ 3 ms/sample (but varies a lot depending on the 100 and non-monotonically). wait_times set to 0,0
+# for tcpip, with noopc I get 6 ms/write (wait time to 0,0), with opc I get 110 ms/write
+# for usb, both give about 50ms/write (wait time to 0,0)
+
+
+#@register_instrument('LSCI', 'MODEL336', '2.9')
+@register_instrument('LSCI', 'MODEL336')
+class lakeshore_336(visaInstrument):
+    """
+       Temperature controller used for He3 system
+       Useful device:
+           s
+           t
+           fetch
+           status_ch
+           current_ch
+       s and t return the sensor or kelvin value of a certain channel
+       which defaults to current_ch
+       status_ch returns the status of ch
+       fetch allows to read all active channels
+
+       When using the ethernet adapater, the port is 7777 so the visa address
+       will look like:
+           tcpip::lsci-336.mshome.net::7777::socket
+    """
+    _passwd_check = "IknowWhatIamDoing"
+    def __init__(self, visa_addr, *args, **kwargs):
+        """
+        option write_with_opc can have value, True, False, or 'auto' which enables it
+          for tcpip and usb connection.
+        """
+        self._write_with_opc = kwargs.pop('write_with_opc', 'auto')
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.asrl:
+            baud_rate = kwargs.pop('baud_rate', 57600)
+            parity = kwargs.pop('parity', visa_wrap.constants.Parity.odd)
+            data_bits = kwargs.pop('data_bits', 7)
+            stop_bits = kwargs.pop('stop_bits', visa_wrap.constants.StopBits.one)
+            kwargs['baud_rate'] = baud_rate
+            kwargs['parity'] = parity
+            kwargs['data_bits'] = data_bits
+            kwargs['stop_bits'] = stop_bits
+            if self._write_with_opc == 'auto':
+                self._write_with_opc = True
+        elif  rsrc_info.interface_type == visa_wrap.constants.InterfaceType.tcpip:
+            term = kwargs.pop('read_termination', '\r\n')
+            kwargs['read_termination'] = term
+            if self._write_with_opc == 'auto':
+                self._write_with_opc = True
+        if self._write_with_opc == 'auto':
+            self._write_with_opc = False
+        # see also the begining of _create_devs for write timings.
+        super(lakeshore_336, self).__init__(visa_addr, *args, **kwargs)
+    @locked_calling
+    def write(self, val, termination='default', opc=None):
+        if opc is None:
+            opc = self._write_with_opc
+        if opc and '?' not in val:
+            # This will speed up pure write on tcpip connection (which adds a 100 ms delay)
+            # write-read sequence only add a 20 ms delay.
+            val = val+';*opc?'
+            self.ask(val)
+        else:
+            super(lakeshore_336, self).write(val, termination=termination)
+    @locked_calling
+    def _current_config(self, dev_obj=None, options={}):
+        old_ch = self.current_ch.getcache()
+        old_crv = self.current_crv.getcache()
+        ch = self.enabled_list.getcache()
+        ch_list = []
+        in_name = []
+        in_crv = []
+        in_crv_hdr = []
+        in_type = []
+        in_diode_current = []
+        in_filter = []
+        in_tlimit = []
+        in_t = []
+        for c in ch:
+            ch_list.append(c)
+            in_type.append(self.input_type.get(ch=c))
+            crv_i = self.input_crv.get()
+            in_crv.append(crv_i)
+            in_crv_hdr.append(self.curve_hdr.get(ch=crv_i))
+            in_t.append(self.t.get())
+            in_name.append(self.input_name.get())
+            in_diode_current.append(self.input_diode_current.get())
+            in_filter.append(self.input_filter.get())
+            in_tlimit.append(self.temperature_limit.get())
+        self.current_ch.set(old_ch)
+        self.current_crv.set(old_crv)
+        base_input = ['current_ch=%r'%ch_list, 'input_name=%r'%in_name, 't=%r'%in_t, 'input_type=%r'%in_type,
+                      'input_crv=%r'%in_crv, 'curve_hdr=%r'%in_crv_hdr, 'input_filter=%r'%in_filter,
+                      'temperature_limit=%r'%in_tlimit]
+        old_ch = self.current_output.get()
+        out_confs = []
+        out_pid = []
+        out_setpoint = []
+        out_manual = []
+        out_range = []
+        for i in range(1, 5):
+            cnf = self.conf_output(i)
+            out_confs.append(cnf)
+            if cnf.mode in ['closed loop PID', 'zone', 'open loop']:
+                out_manual.append(self.output_manual_pct.get())
+            else:
+                out_manual.append(None)
+            if cnf.mode in ['closed loop PID', 'zone']:
+                out_pid.append(self.pid.get())
+                out_setpoint.append(self.setpoint.get())
+            else:
+                out_pid.append(None)
+                out_setpoint.append(None)
+            out_range.append(self.output_range.get())
+        self.current_output.set(old_ch)
+        base_output = ['output_conf=%r'%out_confs, 'pid=%r'%out_pid, 'setpoint=%r'%out_setpoint,
+                       'output_manual_pct=%r'%out_manual, 'output_range=%r'%out_range]
+        base = base_input + base_output + self._conf_helper(options)
+        return base
+    def _enabled_list_getdev(self):
+        old_ch = self.current_ch.getcache()
+        ret = []
+        for c in self.current_ch.choices:
+            d = self.input_type.get(ch=c)
+            if d['type'] != 'disabled':
+                ret.append(c)
+        self.current_ch.set(old_ch)
+        return ret
+    def get_oper_status(self, latched=True):
+        if latched:
+            op = int(self.ask('OPSTR?'))
+        else:
+            op = int(self.ask('OPST?'))
+        st = lambda bit: bool(op&(1<<bit))
+        ret = dict(processor_com_err = st(7),
+                   calibration_err = st(6),
+                   autotune_done = st(5),
+                   new_sensor_rdg = st(4),
+                   loop1_ramp_done = st(3),
+                   loop2_ramp_done = st(2),
+                   sensor_overload = st(1),
+                   alarming = st(0))
+        return ret
+    def _get_esr(self):
+        return int(self.ask('*esr?'))
+    def get_error(self):
+        ret = []
+        esr = self._get_esr()
+        if esr&0x80:
+            ret.append('Power on.')
+        if esr&0x20:
+            ret.append('Command Error.')
+        if esr&0x10:
+            ret.append('Execution Error.')
+        if esr&0x04:
+            ret.append('Query Error (output queue full).')
+        if esr&0x01:
+            ret.append('OPC received.')
+        if len(ret) == 0:
+            ret = 'No Error.'
+        else:
+            ret = ' '.join(ret)
+        return ret
+    def _fetch_helper(self, ch=None):
+        if ch is None:
+            ch = self.enabled_list.getcache()
+        if not isinstance(ch, (list, ChoiceBase)):
+            ch = [ch]
+        return ch
+    def _fetch_getformat(self, **kwarg):
+        ch = kwarg.get('ch', None)
+        ch = self._fetch_helper(ch)
+        multi = []
+        graph = []
+        for i, c in enumerate(ch):
+            graph.append(2*i)
+            multi.extend([c+'_T', c+'_S'])
+        fmt = self.fetch._format
+        fmt.update(multi=multi, graph=graph)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_getdev(self, ch=None):
+        """
+        reads thermometers temperature and their sensor values.
+        option ch: can be a single channel or a list of channels.
+                   by default (None), all active channels are used
+                   possible channels names are:
+                       A, B, C, D
+        """
+        ch = self._fetch_helper(ch)
+        ret = []
+        all_ts = self.ask('KRDG? 0; SRDG? 0')
+        ts,ss = all_ts.split(';')
+        ts = [float(v) for v in ts.split(',')]
+        ss = [float(v) for v in ss.split(',')]
+        ch_ind = dict(A=0, B=1, C=2, D=3)
+        for c in ch:
+            i = ch_ind[c.upper()]
+            ret.append(ts[i])
+            ret.append(ss[i])
+        return ret
+    def alarm_reset(self):
+        """ Clears both high and low alarms of all channels """
+        self.write('ALMRST')
+    def minmax_reset(self):
+        """ Clears min/max for all inputs """
+        self.write('MNMXRST')
+    def output_do_autotune(self, ch, mode):
+        """ Starts autotuning a control loop. The output ch needs to be specified.
+            mode is one of: 'P', 'PI', 'PID'
+            Read the status of autotuning with output_tune_status"""
+        mode_opt = dict(p=0, pi=1, pid=2)
+        if ch not in self.current_output.choices:
+            raise ValueError('Invalid output channel selection')
+        mode = mode.lower()
+        if mode not in mode_opt:
+            raise ValueError("Invalid mode. Should be one of: 'P', 'PI', 'PID'.")
+        self.write('ATUNE %i,%i'%(ch, mode_opt[mode]))
+    def _check_empty_curve(self, curve):
+        pt = self.curve_data_point.get(ch=curve, i=1)
+        if pt.sensor == pt.temp == 0.:
+            return True
+        return False
+    def _check_password(self, password, dev=None):
+        if dev is not None:
+            password = dev._check_cache['kwarg']['password']
+        if password != self._passwd_check:
+            raise ValueError('Invalid password.')
+    @locked_calling
+    def do_softcal(self, target_curve, standard, serial_no, t1, s1, t2, s2, t3, s3, password=None):
+        """\
+        Generates a soft cal using t1, t2, t3 temperatures in K with sensor values s1, s2, s3.
+        target_curve should be empty unless force is True.
+        standard is one of 'diode', 'pt100', 'pt1000'
+         diode is for model 421, 470, 471
+        If the curve is not empty, you need to specify the password (same as for curve_delete)
+        otherwise it will not work.
+        diodes requires points around 4.2, 77 and 305 K (s1 can be anything (suggest 1.6) for a 2 pt softcal valid above 30)
+        pt requires points around 77, 305 and 480 K (for 2pt softcal, extrapolate s3)
+        """
+        if target_curve<21 or target_curve>59:
+            raise ValueError("target_curve invalid. It needs to be in the 21-59 range.")
+        if standard not in ['diode', 'pt100', 'pt1000']:
+            raise ValueError("Invalid standard. It should be one of: 'diode', 'pt100', 'pt1000'")
+        standard = dict(diode=1, pt100=6, pt1000=7)[standard]
+        conv = quoted_name(10)
+        serial_no = conv.tostr(serial_no)
+        if not self._check_empty_curve(target_curve):
+            print('Curve is already present! Erasing if password is correct.')
+            self._check_password(password)
+            # no need for delete.
+            #self.curve_delete(target_curve, password=password)
+        self.write('SCAL %i,%i,%s,%.3f,%.6f,%.3f,%.6f,%.3f,%.6f'%(standard, target_curve, serial_no, t1, s1, t2, s2, t3, s3))
+        # This softcal operation seems to take 150 ms (on gpib, usb) using *opc?
+    def _output_pct_getdev(self, ch=None):
+        """ The output power in percent """
+        if ch is not None:
+            self.current_output.set(ch)
+        ch = self.current_output.getcache()
+        if ch <= 2:
+            return float(self.ask('HTR? %i'%ch))
+        else:
+            return float(self.ask('AOUT? %i'%ch))
+    @locked_calling
+    def curve_get(self, curve):
+        """ Returns the curve header, following with the data as an 2xn array with 2 being sensors, temp """
+        hdr = self.curve_hdr.get(ch=curve)
+        data = []
+        for i in range(1, 201):
+            d = self.curve_data_point.get(i=i)
+            if d.temp == d.sensor == 0:
+                break
+            data.append([d.sensor, d.temp])
+        return hdr, np.array(data).T
+    @locked_calling
+    def curve_set(self, target_curve, name, serial_no, format, sensors, temps, sp_limit_K=None, password=None):
+        """ if targt_curve already exists, you need to enter the proper password (see curve_delete).
+            target_curve is the curve to change (21-59)
+            name is a 15 character string for the calibration name
+            serial_no is a 10 character string for the calibration serial number
+            format is one of: 'mv/K', 'V/K', 'Ohm/K', 'log Ohm/K'
+            sp_limit_K if not given will be the highest value in temps.
+            sensors and temps are the calibration data (sensors needs to be increasing, and there needs to be
+            at most 200 points)
+        """
+        # coefficient will be set with the data automatically.
+        if target_curve<21 or target_curve>59:
+            raise ValueError("target_curve invalid. It needs to be in the 21-59 range.")
+        Nsensors, Ntemps = len(sensors), len(temps)
+        if Nsensors != Ntemps:
+            raise ValueError('sensors and temps vectors are not the same length.')
+        if Nsensors < 2:
+            raise ValueError('Not enough data points')
+        if Nsensors > 200:
+            raise ValueError('too many data points')
+        if list(sensors) != sorted(sensors):
+            raise ValueError('sensors are not in ascending order.')
+        if sp_limit_K is None:
+            sp_limit_K = max(temps)
+        if not self._check_empty_curve(target_curve):
+            print('Curve is already present! Erasing if password is correct.')
+            self._check_password(password)
+            #self.curve_delete(target_curve, password=password)
+        # Curve is either not present or we just checked the proper password, so we no longer need to check for passwords.
+        self.curve_hdr.set(ch=target_curve, name=name, serial_no=serial_no, format=format, sp_limit_K=sp_limit_K, password=self._passwd_check)
+        for i, (s,t) in enumerate(zip(sensors, temps)):
+            self.curve_data_point.set(ch=target_curve, i=i+1, sensor=s, temp=t, password=self._passwd_check)
+        if i != 199:
+            # since we did not erase the full curve, we need to right the end curve entry
+            self.curve_data_point.set(ch=target_curve, i=i+2, sensor=0, temp=0, password=self._passwd_check)
+
+    def curve_delete(self, curve, password=None):
+        self._check_password(password)
+        if 21 <= curve <= 59:
+            self.ask('crvdel %i;*opc?'%curve)
+            # seems to take about 120 ms.
+        else:
+            raise ValueError('Invalid curve number. Needs to be in the 21-59 range.')
+    curve_delete.__doc__ = """ will clear one of the curve (21-59). For it to work you need to enter the password: "%s" """%_passwd_check
+
+    @locked_calling
+    def conf_zone(self, out_ch, uppers=None, Ps=None, Is=None, Ds=None, manuals=None, ranges=None, inputs=None, rates=None):
+        """ when uppers is None, show the zone settings for out_ch.
+            Otherwise all the paramters are lists (or arrays) and need to be of the same length <=10.
+            uppers are the <= criteria for selecting the other parameters from the setpoint value.
+        """
+        if uppers is None:
+            data = dict_improved([('uppers', []), ('Ps', []), ('Is', []), ('Ds', []), ('manuals', []), ('ranges', []), ('inputs', []), ('rates', [])])
+            for z in range(10):
+                ret = self.output_zone.get(outch=out_ch, zone=z+1)
+                if ret.upper == 0:
+                    break
+                for k in ret:
+                    data[k+'s'].append(ret[k])
+            return data
+        else:
+            if len(uppers) != len(Ps) != len(Is) != len(Ds) != len(manuals) != len(ranges) != len(inputs) != len(rates):
+                raise ValueError('One of the data is not of the same length as the others')
+            if len(uppers) > 10:
+                raise ValueError('You need less than 10 data')
+            z=-1
+            for z, (u, P, I, D, m, r, i, ra) in enumerate(zip(uppers, Ps, Is, Ds, manuals, ranges, inputs, rates)):
+                self.output_zone.set(outch=out_ch, zone=z+1, upper=u, P=P, I=I, D=D, manual=m, range=r, input=i, rate=ra)
+            if z < 9:
+                self.output_zone.set(outch=out_ch, zone=z+2, upper=0, P=50, I=20, D=0, manual=0, range='off', input='none', rate=0)
+
+    @locked_calling
+    def conf_output(self, out_ch, mode=None, input_ch=None, powerup_en=None, control=None, percentage=None, units=None, high=None, low=None, bipolar_en=None, ramp_rate=None, ramp_en=None,
+                    resistance=None, max_current=None, max_user=None, display_unit=None):
+        """
+        Configure out_ch
+        if mode is None, returns the settings of the out_ch, otherwise
+          mode is one of 'off', 'closed loop PID', 'zone', 'open loop', 'monitor out', 'warmup supply'
+          monitor out and warmup supply only for out_ch 3 or 4.
+        For all modes except 'off', provide input_ch.
+        For all modes except 'off', 'monitor out', provide powerup_en.
+        if mode is 'warmup supply', also supply control('auto off', 'continuous'), percentage
+        if mode is 'monitor out', also supply units('Kelvin', 'Celsius', 'Sensor'), high, low, bipolar_en
+        if mode is 'closed loop PID', 'zone', provide, ramp_rate, ramp_en
+        if mode is 'closed loop PID', 'zone', 'open loop'
+                and out_ch=1,2, also provide resistance, max_current or max_user, display_unit
+                and out_ch=3,4, then provide bipolar_en
+        """
+        if mode is None:
+            main = self.output_mode.get(outch=out_ch)
+            mode = main.mode
+            main = dict(main)
+            if mode == 'off':
+                main = dict(mode=mode)
+            elif mode == 'warmup supply':
+                ret = self.output_warmup.get(outch=out_ch)
+                main.update(ret)
+            elif mode == 'monitor out':
+                ret = self.output_analog.get(outch=out_ch)
+                main.update(ret)
+                main.pop('powerup_en')
+            else:
+                if mode in ['closed loop PID', 'zone']:
+                    ret = self.ramp_control.get(outch=out_ch)
+                    main['ramp_rate'] = ret.rate
+                    main['ramp_en'] = ret.en
+                if out_ch in [1, 2]:
+                    ret = self.output_htr_set.get(outch=out_ch)
+                    main.update(ret)
+                else:
+                    ret = self.output_analog.get(outch=out_ch)
+                    main['bipolar_en'] = ret.bipolar_en
+            return dict_improved(sorted(main.items()))
+        elif mode == 'off':
+            self.output_mode.set(outch=out_ch, mode=mode)
+        else:
+            if mode != 'monitor_out':
+                if powerup_en is None:
+                    raise ValueError('You need to specify powerup_en')
+                self.output_mode.set(outch=out_ch, mode=mode, input_ch=input_ch, powerup_en=powerup_en)
+            else:
+                self.output_mode.set(outch=out_ch, mode=mode, input_ch=input_ch)
+            if mode == 'warmup supply':
+                self.output_warmup.set(outch=out_ch, control=control, percentage=percentage)
+            elif mode == 'monitor out':
+                if bipolar_en is None:
+                    raise ValueError('You need to specify bipolar_en')
+                self.output_analog.set(outch=out_ch, input_ch=input_ch, units=units, high=high, low=low, bipolar_en=bipolar_en)
+            else:
+                if mode in ['closed loop PID', 'zone']:
+                    if ramp_en is None:
+                        raise ValueError('You need to specify ramp_en')
+                    self.ramp_control.set(outch=out_ch, en=ramp_en, rate=ramp_rate)
+                if out_ch in [1, 2]:
+                    if max_user is not None:
+                        max_current = 0
+                    else:
+                        max_user = max_current
+                    self.output_htr_set.set(outch=out_ch, resistance=resistance, max_current=max_current, max_user=max_user, display_unit=display_unit)
+                else:
+                    if bipolar_en is None:
+                        raise ValueError('You need to specify bipolar_en')
+                    self.output_analog.set(outch=out_ch, input_ch=input_ch, bipolar_en=bipolar_en)
+
+    def _create_devs(self):
+        if self.visa.is_serial():
+            if not self._write_with_opc:
+                # we need to set this before any writes.
+                # otherwise some write request are lost.
+                self._write_write_wait = 0.075
+        elif self.visa.is_tcpip():
+            # The socket connections seems to buffer all requests, so unlike
+            # for serial there are no loss, however, the socket handler in the instrument
+            # seems to be delaying all writes byt 110 ms.
+            # so to not get too far ahead in pyHegel lets match the delay, unless we use opc.
+            if not self._write_with_opc:
+                self._write_write_wait = 0.105
+        else: #GPIB
+            self._write_write_wait = 0.0
+        #TODO: handle 3062 option card (adds channels D1 - D5)
+        #ch_Base = ChoiceStrings('A', 'B', 'C', 'D', 'D2', 'D3', 'D4', 'D5')
+        #ch_Base = ChoiceStrings('A', 'B', 'C', 'D1', 'D2', 'D3', 'D4', 'D5')
+        ch_Base = ChoiceStrings('A', 'B', 'C', 'D')
+        #ch_sel = ChoiceIndex('none', 'A', 'B', 'C', 'D', 'D2', 'D3', 'D4', 'D5')
+        ch_sel = ChoiceIndex(['none', 'A', 'B', 'C', 'D'])
+        self.current_ch = MemoryDevice('A', choices=ch_Base)
+        def devChOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_ch)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.t = devChOption(getstr='KRDG? {ch}', str_type=float, doc='Return the temperature in Kelvin for the selected sensor(ch)')
+        self.s = devChOption(getstr='SRDG? {ch}', str_type=float, doc='Return the sensor value in Ohm, V(diode), mV (thermocouple), nF (for capacitance)  for the selected sensor(ch)')
+        self.thermocouple_block_temp = scpiDevice(getstr='TEMP?', str_type=float)
+        self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int, doc="""\
+                         flags:
+                               0      = valid
+                               1  (0) = invalid
+                               16 (4) = temp underrange
+                               32 (5) = temp overrange
+                               64 (6) = sensor under (<0)
+                               128(7) = sensor overrange
+                        """)
+        self.alarm_conf = devChOption('ALARM {ch},{val}', 'ALARM? {ch}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                      choices=ChoiceMultiple(['enabled', 'high_setpoint', 'low_setpoint', 'deadband', 'latch_en', 'audible', 'visible'],
+                                                             [bool, float, float_fix6, float_fix6, bool, bool, bool]))
+        self.alarm_status = devChOption(getstr='ALARMST? {ch}', choices=ChoiceMultiple(['high', 'low'], [bool, bool]))
+        intypes = ChoiceIndex(['disabled', 'diode', 'PTC_RTD', 'NTC_RTD', 'thermocouple', 'capacitance'])
+        units = ChoiceIndex({1:'Kelvin', 2:'Celsius', 3:'Sensor'})
+        ranges_disabled = ChoiceIndex({0:0})
+        ranges_diode = ChoiceIndex({0:2.5, 1:10}) # V
+        ranges_PTC = ChoiceIndex(make_choice_list([1, 3], 1, 4)[:-1], normalize=True) # Ohm
+        ranges_NTC = ChoiceIndex(make_choice_list([1, 3], 1, 5)[:-1], normalize=True) # Ohm
+        type_ranges = ChoiceMultipleDep('type', {'disabled':ranges_disabled, 'diode':ranges_diode, 'PTC_RTD':ranges_PTC, 'NTC_RTD':ranges_NTC})
+        self.input_type = devChOption('INTYPE {ch},{val}', 'INTYPE? {ch}',
+                                      allow_kw_as_dict=True, allow_missing_dict=True,
+                                      choices=ChoiceMultiple(['type', 'autorange_en', 'range', 'compensation_en', 'units'], [intypes, bool, type_ranges, bool, units]))
+        self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
+                                      allow_kw_as_dict=True, allow_missing_dict=True,
+                                      choices=ChoiceMultiple(['filter_en', 'n_points', 'window'], [bool, (int, (2, 64)), (int, (1,10))]),
+                                      doc="""\
+                                      This is an exponential filter with time constant T*ln(N/(N-1))
+                                      where T is the sampling time (0.1 s) and N is the filter n_points
+                                      npoints=8 --> time constant = 0.75 s, equivalent bandwidth = 0.335 Hz
+                                      """)
+        # The filter is T_i = (1/N)t_i + (1-(1/N))T_(i-1),  where T is the filtered temperature, t is the unfiltered temperature
+        self.input_diode_current = devChOption('DIOCUR {ch},{val}', 'DIOCUR? {ch}', choices=ChoiceIndex({0:10e-6, 1:1e-3}), doc=
+                """Only valid when input is a diode type. Options are in Amps.
+                   Default of instrument is 10 uA (used after every change of sensor type).""")
+        self.input_name = devChOption('INNAME {ch},{val}', 'INNAME? {ch}', str_type=quoted_name(15))
+
+        self.input_crv = devChOption('INCRV {ch},{val}', 'INCRV? {ch}', str_type=int)
+        self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
+                                      choices=ChoiceMultiple(['filter_en', 'n_points', 'window'], [bool, int, int]))
+        self.temperature_limit = devChOption('TLIMIT {ch},{val}', 'TLIMIT? {ch}', str_type=float_fix3)
+        self.minmax = devChOption(getstr='MDAT? {ch}', str_type=decode_float64, multi=['min', 'max'])
+        self.current_output = MemoryDevice(1, choices=[1, 2, 3, 4])
+        def devOutOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(outch=self.current_output)
+            app = kwarg.pop('options_apply', ['outch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        pid_ch = ChoiceMultiple(['P', 'I', 'D'], [(float_fix1, (0.1, 1000)), (float_fix1,(0, 1000)), (float_fix1, (0, 200))])
+        self.pid = devOutOption('PID {outch},{val}', 'PID? {outch}', allow_kw_as_dict=True, allow_missing_dict=True, choices=pid_ch, multi=pid_ch.field_names, doc="You can use as set(tc.pid, P=21). I is reset rate in mHz. Set I to 0 to turn it off.")
+        self.pid_P = Dict_SubDevice(self.pid, 'P', force_default=False)
+        self.pid_I = Dict_SubDevice(self.pid, 'I', force_default=False)
+        self.pid_D = Dict_SubDevice(self.pid, 'D', force_default=False)
+        self.output_manual_pct = devOutOption('MOUT {outch},{val}', 'MOUT? {outch}', str_type=float_fix3)
+        Hrange = ChoiceIndex(['off', 'low', 'medium', 'high'])
+        Hrange2 = ChoiceIndex(['off', 'on'])
+        out_choice = ChoiceDevDep(self.current_output, {(1,2): Hrange, (3,4):Hrange2})
+        self.output_range = devOutOption('RANGE {outch},{val}', 'RANGE? {outch}',
+                                       choices=out_choice)
+        self.setpoint = devOutOption(setstr='SETP {outch},{val}', getstr='SETP? {outch}', str_type=float_fix3)
+        self.ramp_control = devOutOption('RAMP {outch},{val}', 'RAMP? {outch}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                       choices=ChoiceMultiple(['en', 'rate'], [bool, (float_fix3,(0.0, 100))]), doc="Activates the sweep mode. rate is in K/min.", setget=True)
+        self.ramp_sweeping_status = devOutOption(getstr='RAMPST? {outch}', str_type=bool)
+        self.output_tune_status = scpiDevice(getstr='TUNEST?', choices=ChoiceMultiple(['active_tuning', 'outch', 'in_error', 'stage'], [bool, int, bool, int]))
+        self.output_mode = devOutOption('OUTMODE {outch},{val}', 'OUTMODE? {outch}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                           choices=ChoiceMultiple(['mode', 'input_ch', 'powerup_en'], [
+                                               ChoiceIndex(['off', 'closed loop PID', 'zone', 'open loop', 'monitor out', 'warmup supply']), ch_sel, bool]))
+        self.output_htr_set = devOutOption('HTRSET {outch},{val}', 'HTRSET? {outch}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                           choices=ChoiceMultiple(['resistance', 'max_current', 'max_user', 'display_unit'], [
+                                               ChoiceIndex([25, 50], offset=1), ChoiceIndex([0, 0.707, 1, 1.414, 2]), float_fix3, ChoiceIndex(['current', 'power'], offset=1)]),
+                                           options_lim=dict(outch=(1,2)), autoinit=False, doc='max_current set to 0 selects the max_user value')
+        self.output_warmup = devOutOption('WARMUP {outch},{val}', 'WARMUP? {outch}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                          choices=ChoiceMultiple(['control', 'percentage'], [ChoiceIndex(['auto off', 'continuous']), float_fix3]),
+                                          options_lim=dict(outch=(3,4)), autoinit=False)
+        self.output_analog = devOutOption('ANALOG {outch},{val}', 'ANALOG? {outch}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                          choices=ChoiceMultiple(['input_ch', 'units', 'high', 'low', 'bipolar_en'],
+                                                                 [ch_sel, units, float_fix3, float_fix3, bool]),
+                                          options_lim=dict(outch=(3,4)), autoinit=False)
+        self.current_zone = MemoryDevice(1, choices=list(range(1,11)))
+        self.output_zone = devOutOption('ZONE {outch},{zone},{val}', 'ZONE? {outch},{zone}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                  options=dict(zone=self.current_zone), options_apply=['zone', 'outch'],
+                                  choices=ChoiceMultiple(['upper', 'P', 'I', 'D', 'manual', 'range', 'input', 'rate'],
+                                                         [float_fix3, (float_fix1, (0.1, 1000)), (float_fix1,(0, 1000)), (float_fix1, (0, 200)), (float_fix3, (0, 100)), out_choice, ch_sel, (float_fix3, (0., 100))]),
+                                  doc="rate is in K/min. an input set as 'none' will use the previously assigned sensor. ", autoinit=False)
+        self.current_relay = MemoryDevice(1, choices=[1, 2])
+        def devRelayOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_relay)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.relay_control = devRelayOption('RELAY {ch},{val}', 'RELAY? {ch}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                            choices=ChoiceMultiple(['mode', 'alarm_input_ch', 'alarm_type'],
+                                                                   [ChoiceIndex(['off', 'on', 'alarm']), ch_Base, ChoiceIndex(['low', 'high', 'both'])]))
+        self.relay_status = devRelayOption(getstr='RELAYST? {ch}', str_type=bool)
+
+        self.display_brightness = scpiDevice('BRIGT', str_type=int, min=1, max=32)
+        self.display_leds_en = scpiDevice('LEDS', str_type=bool)
+        self.net_conf = scpiDevice('NET', allow_kw_as_dict=True, allow_missing_dict=True,
+                                   choices=ChoiceMultiple(['dhcp_en', 'autoip_en', 'static_ip', 'subnet_mask', 'gateway', 'primary_dns', 'secondary_dns', 'pref_hostname', 'pref_domain', 'description'],
+                                                                 [bool, bool, dotted_quad(), dotted_quad(), dotted_quad(), dotted_quad(), dotted_quad(), quoted_name(15),quoted_name(64), quoted_name(32)]), autoinit=False)
+        self.net_state = scpiDevice(getstr='NETID?', choices=ChoiceMultiple(['lan_status', 'ip_addr', 'subnet_mask', 'gateway', 'primary_dns', 'secondary_dns', 'actual_hostname', 'actual_domain', 'mac_address'],
+                                                                            [int, str, str, str, str, str, str, quoted_name(15), quoted_name(32)]),
+                                    doc="""\
+                                    lan_status:
+                                           0: connected using static ip
+                                           1: connected using dhcp
+                                           2: connected using autoip
+                                           3: address not acquired error
+                                           4: duplicate initial ip address error
+                                           5: duplicate ongoing ip address error
+                                           6: cable unplugged
+                                           7: module error
+                                           8: acquiring address
+                                           9: ethernet disabled.""", autoinit=False)
+        self.current_crv = MemoryDevice(1, choices=range(1, 60))
+        self.curve_hdr = scpiDevice('CRVHDR {ch},{val}', 'CRVHDR? {ch}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                    options=dict(ch=self.current_crv, password=None), options_apply=['ch'],
+                                    extra_check_func=ProxyMethod(self._check_password),
+                                    choices=ChoiceMultiple(['name', 'serial_no', 'format', 'sp_limit_K', 'coefficient'],
+                                                           [quoted_name(15), quoted_name(10), ChoiceIndex(['mv/K', 'V/K', 'Ohm/K', 'log Ohm/K'], offset=1), float_fix3, ChoiceIndex(['negative', 'positive'], offset=1)]),
+                                                            doc='To perform a set you need to set password to "%s"\n'%self._passwd_check, autoinit=False)
+        self.curve_data_point = scpiDevice('CRVPT {ch},{i},{val}', 'CRVPT? {ch},{i}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                           extra_check_func=ProxyMethod(self._check_password),
+                                           options=dict(ch=self.current_crv, i=1, password=None), options_lim=dict(i=(1,200)), options_apply=['ch'],
+                                           doc='To perform a set you need to set password to "%s"\n'%self._passwd_check,
+                                           choices=ChoiceMultiple(['sensor', 'temp'], [float_fix6, float_fix6]), autoinit=False)
+        self._devwrap('enabled_list')
+        self._devwrap('output_pct')
         self._devwrap('fetch', autoinit=False)
         self.alias = self.fetch
         # This needs to be last to complete creation
@@ -226,9 +946,16 @@ class lakeshore_340(visaInstrument):
             return scpiDevice(*arg, **kwarg)
         self.t = devChOption(getstr='KRDG? {ch}', str_type=float, doc='Return the temperature in Kelvin for the selected sensor(ch)')
         self.s = devChOption(getstr='SRDG? {ch}', str_type=float, doc='Return the sensor value in Ohm, V(diode), mV (thermocouple), nF (for capacitance)  for the selected sensor(ch)')
-        self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=invalid, 16(4)=temp underrange,
-                               #32(5)=temp overrange, 64(6)=sensor under (<0), 128(7)=sensor overrange
-                               # 000 = valid
+        self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int, doc="""\
+                         flags:
+                               0      = valid
+                               1  (0) = invalid
+                               2  (1) = old reading
+                               16 (4) = temp underrange
+                               32 (5) = temp overrange
+                               64 (6) = sensor under (<0)
+                               128(7) = sensor overrange
+                        """)
         self.input_set = devChOption('INSET {ch},{val}', 'INSET? {ch}', choices=ChoiceMultiple(['enabled', 'compens'],[bool, int]))
         self.input_crv = devChOption('INCRV {ch},{val}', 'INCRV? {ch}', str_type=int)
         self.input_type = devChOption('INTYPE {ch},{val}', 'INTYPE? {ch}',
@@ -255,15 +982,6 @@ class lakeshore_340(visaInstrument):
 #######################################################
 ##    Lakeshore 224 Temperature monitor
 #######################################################
-class quoted_name(object):
-    def __call__(self, read_str):
-        # the instruments returns a 15 character string with spaces if unused
-        return read_str.rstrip()
-    def tostr(self, input_str):
-        if '"' in input_str:
-            raise ValueError, 'The given string already contains a quote :":'
-        return '"'+input_str[:15]+'"'
-
 #@register_instrument('LSCI', 'MODEL224', '1.0')
 @register_instrument('LSCI', 'MODEL224')
 class lakeshore_224(lakeshore_340):
@@ -354,9 +1072,15 @@ class lakeshore_224(lakeshore_340):
             return scpiDevice(*arg, **kwarg)
         self.t = devChOption(getstr='KRDG? {ch}', str_type=float, doc='Return the temperature in Kelvin for the selected sensor(ch)')
         self.s = devChOption(getstr='SRDG? {ch}', str_type=float, doc='Return the sensor value in Ohm, V(diode), mV (thermocouple), nF (for capacitance)  for the selected sensor(ch)')
-        self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=invalid, 16(4)=temp underrange,
-                               #32(5)=temp overrange, 64(6)=sensor under (<0), 128(7)=sensor overrange
-                               # 000 = valid
+        self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int, doc="""\
+                         flags:
+                               0      = valid
+                               1  (0) = invalid
+                               16 (4) = temp underrange
+                               32 (5) = temp overrange
+                               64 (6) = sensor under (<0)
+                               128(7) = sensor overrange
+                        """)
         self.input_crv = devChOption('INCRV {ch},{val}', 'INCRV? {ch}', str_type=int)
         intypes = ChoiceIndex({0:'disabled', 1:'diode', 2:'PTC_RTD', 3:'NTC_RTD'})
         units = ChoiceIndex({1:'Kelvin', 2:'Celsius', 3:'Sensor'})
@@ -706,6 +1430,18 @@ class lakeshore_370(visaInstrument):
             return scpiDevice(*arg, **kwarg)
         self.t = devChOption(getstr='RDGK? {ch}', str_type=float, doc='Return the temperature in Kelvin for the selected sensor(ch)')
         self.s = devChOption(getstr='RDGR? {ch}', str_type=float, doc='Return the sensor value in Ohm for the selected sensor(ch)')
+        self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int, doc="""\
+                         flags:
+                               0      = valid
+                               1  (0) = CS OVL
+                               2  (1) = VCM OVL
+                               4  (2) = VMIX OVL
+                               8  (3) = VDIF OVL
+                               16 (4) = R overrange
+                               32 (5) = R underrange
+                               64 (6) = T overrange
+                               128(7) = T underrange
+                        """)
         self.status_ch = devChOption(getstr='RDGST? {ch}', str_type=int) #flags 1(0)=CS OVL, 2(1)=VCM OVL, 4(2)=VMIX OVL, 8(3)=VDIF OVL
                                #16(4)=R. OVER, 32(5)=R. UNDER, 64(6)=T. OVER, 128(7)=T. UNDER
                                # 000 = valid
