@@ -258,12 +258,34 @@ class lakeshore_325(visaInstrument):
 # for tcpip, with noopc I get 6 ms/write (wait time to 0,0), with opc I get 110 ms/write
 # for usb, both give about 50ms/write (wait time to 0,0)
 
+# write read test
+#def wr_test(n, dev, delay=0., usesetget=False):
+#    for i in range(n):
+#        v = 200.+i
+#        if usesetget:
+#           set(dev.setpoint, v, outch=1)
+#        else:
+#           dev.write('setp 1,%.3f'%v)
+#        wait(delay)
+#        if usesetget:
+#           rd = get(dev.setpoint)
+#        else:
+#           rd = float(dev.ask('setp? 1'))
+#        iseq = '==' if rd == v else '!='
+#        print '%.3f %s %.3f'%(v, iseq, rd)
+# All tcpip, gpib, usb return lots of != here
+# To prevent errors I needed a delay of 85 ms for gpib, 65 ms for tcpip, 80 ms for usb
+#   this was using the opc mode for tcpip, serial.
+
+# This device will add at least 100 ms to setget operations to make sure to read back
+# an updated value.
+scpiDevice_lk = lambda *args, **kwargs: scpiDevice(*args, setget_delay=0.1, **kwargs)
 
 #@register_instrument('LSCI', 'MODEL336', '2.9')
 @register_instrument('LSCI', 'MODEL336')
 class lakeshore_336(visaInstrument):
     """
-       Temperature controller used for He3 system
+       Lakeshore 336 Temperature controller
        Useful device:
            s
            t
@@ -699,7 +721,7 @@ class lakeshore_336(visaInstrument):
             options.update(ch=self.current_ch)
             app = kwarg.pop('options_apply', ['ch'])
             kwarg.update(options=options, options_apply=app)
-            return scpiDevice(*arg, **kwarg)
+            return scpiDevice_lk(*arg, **kwarg)
         self.t = devChOption(getstr='KRDG? {ch}', str_type=float, doc='Return the temperature in Kelvin for the selected sensor(ch)')
         self.s = devChOption(getstr='SRDG? {ch}', str_type=float, doc='Return the sensor value in Ohm, V(diode), mV (thermocouple), nF (for capacitance)  for the selected sensor(ch)')
         self.thermocouple_block_temp = scpiDevice(getstr='TEMP?', str_type=float)
@@ -751,19 +773,21 @@ class lakeshore_336(visaInstrument):
             options.update(outch=self.current_output)
             app = kwarg.pop('options_apply', ['outch'])
             kwarg.update(options=options, options_apply=app)
-            return scpiDevice(*arg, **kwarg)
+            return scpiDevice_lk(*arg, **kwarg)
         pid_ch = ChoiceMultiple(['P', 'I', 'D'], [(float_fix1, (0.1, 1000)), (float_fix1,(0, 1000)), (float_fix1, (0, 200))])
-        self.pid = devOutOption('PID {outch},{val}', 'PID? {outch}', allow_kw_as_dict=True, allow_missing_dict=True, choices=pid_ch, multi=pid_ch.field_names, doc="You can use as set(tc.pid, P=21). I is reset rate in mHz. Set I to 0 to turn it off.")
+        self.pid = devOutOption('PID {outch},{val}', 'PID? {outch}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                choices=pid_ch, multi=pid_ch.field_names, setget=True,
+                                doc="You can use as set(tc.pid, P=21). I is reset rate in mHz. Set I to 0 to turn it off.")
         self.pid_P = Dict_SubDevice(self.pid, 'P', force_default=False)
         self.pid_I = Dict_SubDevice(self.pid, 'I', force_default=False)
         self.pid_D = Dict_SubDevice(self.pid, 'D', force_default=False)
-        self.output_manual_pct = devOutOption('MOUT {outch},{val}', 'MOUT? {outch}', str_type=float_fix3)
+        self.output_manual_pct = devOutOption('MOUT {outch},{val}', 'MOUT? {outch}', str_type=float_fix3, setget=True)
         Hrange = ChoiceIndex(['off', 'low', 'medium', 'high'])
         Hrange2 = ChoiceIndex(['off', 'on'])
         out_choice = ChoiceDevDep(self.current_output, {(1,2): Hrange, (3,4):Hrange2})
         self.output_range = devOutOption('RANGE {outch},{val}', 'RANGE? {outch}',
                                        choices=out_choice)
-        self.setpoint = devOutOption(setstr='SETP {outch},{val}', getstr='SETP? {outch}', str_type=float_fix3)
+        self.setpoint = devOutOption(setstr='SETP {outch},{val}', getstr='SETP? {outch}', str_type=float_fix3, setget=True)
         self.ramp_control = devOutOption('RAMP {outch},{val}', 'RAMP? {outch}', allow_kw_as_dict=True, allow_missing_dict=True,
                                        choices=ChoiceMultiple(['en', 'rate'], [bool, (float_fix3,(0.0, 100))]), doc="Activates the sweep mode. rate is in K/min.", setget=True)
         self.ramp_sweeping_status = devOutOption(getstr='RAMPST? {outch}', str_type=bool)
@@ -794,15 +818,15 @@ class lakeshore_336(visaInstrument):
             options.update(ch=self.current_relay)
             app = kwarg.pop('options_apply', ['ch'])
             kwarg.update(options=options, options_apply=app)
-            return scpiDevice(*arg, **kwarg)
+            return scpiDevice_lk(*arg, **kwarg)
         self.relay_control = devRelayOption('RELAY {ch},{val}', 'RELAY? {ch}', allow_kw_as_dict=True, allow_missing_dict=True,
                                             choices=ChoiceMultiple(['mode', 'alarm_input_ch', 'alarm_type'],
                                                                    [ChoiceIndex(['off', 'on', 'alarm']), ch_Base, ChoiceIndex(['low', 'high', 'both'])]))
         self.relay_status = devRelayOption(getstr='RELAYST? {ch}', str_type=bool)
 
-        self.display_brightness = scpiDevice('BRIGT', str_type=int, min=1, max=32)
-        self.display_leds_en = scpiDevice('LEDS', str_type=bool)
-        self.net_conf = scpiDevice('NET', allow_kw_as_dict=True, allow_missing_dict=True,
+        self.display_brightness = scpiDevice_lk('BRIGT', str_type=int, min=1, max=32)
+        self.display_leds_en = scpiDevice_lk('LEDS', str_type=bool)
+        self.net_conf = scpiDevice_lk('NET', allow_kw_as_dict=True, allow_missing_dict=True,
                                    choices=ChoiceMultiple(['dhcp_en', 'autoip_en', 'static_ip', 'subnet_mask', 'gateway', 'primary_dns', 'secondary_dns', 'pref_hostname', 'pref_domain', 'description'],
                                                                  [bool, bool, dotted_quad(), dotted_quad(), dotted_quad(), dotted_quad(), dotted_quad(), quoted_name(15),quoted_name(64), quoted_name(32)]), autoinit=False)
         self.net_state = scpiDevice(getstr='NETID?', choices=ChoiceMultiple(['lan_status', 'ip_addr', 'subnet_mask', 'gateway', 'primary_dns', 'secondary_dns', 'actual_hostname', 'actual_domain', 'mac_address'],
@@ -820,13 +844,13 @@ class lakeshore_336(visaInstrument):
                                            8: acquiring address
                                            9: ethernet disabled.""", autoinit=False)
         self.current_crv = MemoryDevice(1, choices=range(1, 60))
-        self.curve_hdr = scpiDevice('CRVHDR {ch},{val}', 'CRVHDR? {ch}', allow_kw_as_dict=True, allow_missing_dict=True,
+        self.curve_hdr = scpiDevice_lk('CRVHDR {ch},{val}', 'CRVHDR? {ch}', allow_kw_as_dict=True, allow_missing_dict=True,
                                     options=dict(ch=self.current_crv, password=None), options_apply=['ch'],
                                     extra_check_func=ProxyMethod(self._check_password),
                                     choices=ChoiceMultiple(['name', 'serial_no', 'format', 'sp_limit_K', 'coefficient'],
                                                            [quoted_name(15), quoted_name(10), ChoiceIndex(['mv/K', 'V/K', 'Ohm/K', 'log Ohm/K'], offset=1), float_fix3, ChoiceIndex(['negative', 'positive'], offset=1)]),
                                                             doc='To perform a set you need to set password to "%s"\n'%self._passwd_check, autoinit=False)
-        self.curve_data_point = scpiDevice('CRVPT {ch},{i},{val}', 'CRVPT? {ch},{i}', allow_kw_as_dict=True, allow_missing_dict=True,
+        self.curve_data_point = scpiDevice_lk('CRVPT {ch},{i},{val}', 'CRVPT? {ch},{i}', allow_kw_as_dict=True, allow_missing_dict=True,
                                            extra_check_func=ProxyMethod(self._check_password),
                                            options=dict(ch=self.current_crv, i=1, password=None), options_lim=dict(i=(1,200)), options_apply=['ch'],
                                            doc='To perform a set you need to set password to "%s"\n'%self._passwd_check,
