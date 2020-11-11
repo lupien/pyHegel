@@ -822,7 +822,7 @@ class BaseDevice(object):
     def __init__(self, autoinit=True, doc='', setget=False, allow_kw_as_dict=False,
                   allow_missing_dict=False, allow_val_as_first_dict=False, get_has_check=False,
                   min=None, max=None, choices=None, multi=False, graph=True,
-                  trig=False, redir_async=None):
+                  trig=False, redir_async=None, setget_delay=None):
         # instr and name updated by instrument's _create_devs
         # doc is inserted before the above doc
         # autoinit can be False, True or a number.
@@ -840,6 +840,9 @@ class BaseDevice(object):
         # get_has_check, make it true if the _getdev produces the Runtime_Get_Para_Checked
         #  exception (calls _get_para_checked). This is needed for proper CHECKING mode
         #  or if executing the get has not side effect.
+        # setget_delay is an minimum wait time between a set and a following get of a values.
+        #   some device take time to update, and enabling setget would return the wrong values
+        #   without an added delay.
         self.instr = None
         self.name = 'foo'
         # Use thread local data to keep the last_filename and a version of cache
@@ -851,6 +854,7 @@ class BaseDevice(object):
         self._setdev_p = None
         self._getdev_p = None
         self._setget = setget
+        self._setget_delay = setget_delay
         self._trig = trig
         self._redir_async = redir_async
         self._last_filename = None
@@ -927,6 +931,7 @@ class BaseDevice(object):
         if not CHECKING():
             self._set_delayed_cache = None  # used in logical devices
             self._setdev(val, **set_kwarg)
+            self._local_data.last_set_time = time.time()
             if self._setget:
                 val = self.get(**kwarg)
             elif self._set_delayed_cache is not None:
@@ -940,6 +945,11 @@ class BaseDevice(object):
         if self._getdev_p is None:
             raise NotImplementedError, self.perror('This device does not handle _getdev')
         if not CHECKING() or self._get_has_check:
+            if self._setget_delay is not None:
+                last = getattr(self._local_data, 'last_set_time', 0)
+                extra_wait = self._setget_delay - (time.time() - last)
+                if extra_wait > 0:
+                    wait(extra_wait)
             self._last_filename = None
             format = self.getformat(**kwarg)
             kwarg.pop('graph', None) #now remove graph from parameters (was needed by getformat)
