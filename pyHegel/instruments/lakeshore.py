@@ -602,6 +602,7 @@ class lakeshore_336(visaInstrument):
         """ when uppers is None, show the zone settings for out_ch.
             Otherwise all the paramters are lists (or arrays) and need to be of the same length <=10.
             uppers are the <= criteria for selecting the other parameters from the setpoint value.
+            The last entry applies even for setpoints above uppers (uppers is not used for the last entry.)
         """
         if uppers is None:
             data = dict_improved([('uppers', []), ('Ps', []), ('Is', []), ('Ds', []), ('manuals', []), ('ranges', []), ('inputs', []), ('rates', [])])
