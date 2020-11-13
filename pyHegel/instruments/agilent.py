@@ -2371,7 +2371,7 @@ class agilent_PNAL(visaInstrumentAsync):
             kwarg.update(options=options, options_lim=options_lim)
             return devMkrOption(*arg, **kwarg)
         self.marker_en = devMkrOption('CALC{ch}:MARKer{mkr}', str_type=bool, autoinit=5)
-        marker_funcs = ChoiceStrings('MAXimum', 'MINimum', 'RPEak', 'LPEak', 'NPEak', 'TARGet', 'LTARget', 'RTARget', 'COMPression')
+        marker_funcs = ChoiceStrings('NONE', 'MAXimum', 'MINimum', 'RPEak', 'LPEak', 'NPEak', 'TARGet', 'LTARget', 'RTARget', 'COMPression')
         self.marker_trac_func = devMkrEnOption('CALC{ch}:MARKer{mkr}:FUNCtion', choices=marker_funcs)
         # This is set only
         self.marker_exec = devMkrOption('CALC{ch}:MARKer{mkr}:FUNCTION:EXECute', choices=marker_funcs, autoget=False)
