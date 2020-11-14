@@ -31,10 +31,11 @@ import re
 from ..instruments_base import visaInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice,\
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep,\
-                            ChoiceStrings, ChoiceIndex, ChoiceDevDep,\
+                            ChoiceStrings, ChoiceIndex, ChoiceDevDep, ChoiceLimits,\
                             make_choice_list, decode_float64, float_as_fixed,\
                             visa_wrap, locked_calling, wait, ProxyMethod,\
-                            resource_info
+                            resource_info, _general_check, release_lock_context,\
+                            mainStatusLine
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -94,6 +95,7 @@ class dotted_quad(object):
 
 float_fix1 = float_as_fixed('%.1f')
 float_fix3 = float_as_fixed('%.3f')
+float_fix4 = float_as_fixed('%.4f')
 float_fix6 = float_as_fixed('%.6f')
 
 #######################################################
@@ -615,6 +617,8 @@ class lakeshore_336(visaInstrument):
                 raise ValueError('One of the data is not of the same length as the others')
             if len(uppers) > 10:
                 raise ValueError('You need less than 10 data')
+            if list(uppers) != sorted(uppers):
+                raise ValueError('uppers are not in ascending order.')
             z=-1
             for z, (u, P, I, D, m, r, i, ra) in enumerate(zip(uppers, Ps, Is, Ds, manuals, ranges, inputs, rates)):
                 self.output_zone.set(outch=out_ch, zone=z+1, upper=u, P=P, I=I, D=D, manual=m, range=r, input=i, rate=ra)
@@ -1556,3 +1560,526 @@ class lakeshore_372(lakeshore_370):
         super(lakeshore_372, self).__init__(visa_addr, *args, scanner=scanner, **kwargs)
 
 
+#######################################################
+##    Lakeshore 625 Magnet controller
+#######################################################
+
+# Test timings:
+#  gpib does not seem to need extra waits.
+#  serial writes requires more than 50 ms of wait or to use opc.
+#       without opc, 60 ms is not enough. 75 ms is probably enough.
+#     with opc, the writes last about 50 ms and seem stable
+
+# Timing test:
+#def rep(dev, n):
+#    for i in range(1, n+1):
+#        v = 0.
+#        for j in range(i):
+#            v = .1 + j/100.
+#            dev.write('setv %.4f'%v)
+#        last = float(dev.ask('setv?'))
+#        iseq = '==' if abs(last - v)<1e-5 else '!='
+#        print '%.4f %s %.4f'%(v, iseq, last)
+#write_test = lambda dev, n: ([dev.write('setv %.3f'%((100+i)/100.)) for i in range(n)], dev.ask('*opc?'))
+#def wr_test(n, dev, delay=0., usesetget=False):
+#    for i in range(n):
+#        v = 100.+i
+#        v = (100.+i)/100.
+#        if usesetget:
+#            set(dev.compliance_voltage, v)
+#        else:
+#            dev.write('setv %.4f'%v)
+#        wait(delay)
+#        if usesetget:
+#            rd = get(dev.compliance_voltage)
+#        else:
+#            rd = float(dev.ask('setv?'))
+#        iseq = '==' if rd == v else '!='
+#        print '%.3f %s %.3f'%(v, iseq, rd)
+
+
+#@register_instrument('LSCI', 'MODEL625', '1.3/1.1')
+@register_instrument('LSCI', 'MODEL625')
+class lakeshore_625(visaInstrument):
+    """\
+    Lakeshore 625 Magnet controller.
+    This is the driver of American Magnetics model 430 magnet controller.
+    Useful devices:
+        ramp_current
+        ramp_field_T
+        ramp_field_kG
+        current
+        current_magnet
+        field_T
+        field_kG
+        volt
+        volt_magnet
+        target_current
+        field_target_kG
+        field_target_T
+        ramp_rate_current
+        ramp_rate_field_kG
+        ramp_rate_field_T
+    Useful methods:
+        conf_ramp_segments
+
+    If magnet parameters are changed (coil_constant, limits) you should reload this device.
+
+    Note that the pause button on the instrument remembers the previous target when the ramping light flashes.
+    It will return to that target when pressed again even if new target have been given remotely,
+    """
+    _passwd_check = "IknowWhatIamDoing"
+    def __init__(self, visa_addr, max_ramp_rate=None, *args, **kwargs):
+        """
+        option write_with_opc can have value, True, False, or 'auto' which enables it
+          for serial connection.
+        The instrument can handle 9600, 19200, 38400 or 57600 for serial baud_rate.
+        Set the max_ramp_rate in A/s
+        """
+        self._write_with_opc = kwargs.pop('write_with_opc', 'auto')
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.asrl:
+            baud_rate = kwargs.pop('baud_rate', 9600)
+            parity = kwargs.pop('parity', visa_wrap.constants.Parity.odd)
+            data_bits = kwargs.pop('data_bits', 7)
+            stop_bits = kwargs.pop('stop_bits', visa_wrap.constants.StopBits.one)
+            kwargs['baud_rate'] = baud_rate
+            kwargs['parity'] = parity
+            kwargs['data_bits'] = data_bits
+            kwargs['stop_bits'] = stop_bits
+            if self._write_with_opc == 'auto':
+                self._write_with_opc = True
+        if self._write_with_opc == 'auto':
+            self._write_with_opc = False
+        # see also the beginning of _create_devs for write timings.
+        self._coil_constant = 0. # always in T/A
+        self._max_ramp_rate = max_ramp_rate
+        self._orig_target_cache = None
+        self._last_state = None
+        super(lakeshore_625, self).__init__(visa_addr, *args, **kwargs)
+        self._extra_create_dev()
+
+    @locked_calling
+    def write(self, val, termination='default', opc=None):
+        if opc is None:
+            opc = self._write_with_opc
+        if opc and '?' not in val:
+            # This will speed up pure write on tcpip connection (which adds a 100 ms delay)
+            # write-read sequence only add a 20 ms delay.
+            val = val+';*opc?'
+            self.ask(val)
+        else:
+            super(lakeshore_625, self).write(val, termination=termination)
+    def _current_config(self, dev_obj=None, options={}):
+        base = self._conf_helper('coil_constant', 'field_T', 'field_target_T', 'compliance_voltage', 'ramp_rate_current', 'ramp_rate_unit',
+                                 'last_persistent_current', 'field', 'current', 'voltage', 'voltage_remote', 'persistent_conf', 'limits',
+                                 'quench_conf', 'ramp_rate_current_persistent', 'trig_current', 'external_prog_mode', 'ramp_segment_en')
+        base += ['get_persistent_status=%r'%self.get_persistent_status(), 'get_oper_status=%r'%self.get_oper_status(latched=False),
+                 'get_error_status=%r'%self.get_error_status(latched=False)]
+        if self.ramp_segment_en.getcache():
+            base += ['conf_ramp_segments=%r'%self.conf_ramp_segments()]
+        return base + self._conf_helper(options)
+    def clear_errors(self):
+        """ Clears the operational and persistent switch heater errors"""
+        self.write('ERCL')
+    def get_oper_status(self, latched=True):
+        if latched:
+            op = int(self.ask('OPSTR?'))
+        else:
+            op = int(self.ask('OPST?'))
+        st = lambda bit: bool(op&(1<<bit))
+        ret = dict_improved(psh_stable = st(2),
+                   ramp_done = st(1),
+                   in_compliance = st(0))
+        return ret
+    def get_error_status(self, latched=True):
+        """Returns the hardware, operational and persistent switch error status"""
+        if latched:
+            vals = self.ask('ERSTR?')
+        else:
+            vals = self.ask('ERST?')
+        hw_err, oper_err, psh_err = [int(v, 10) for v in vals.split(',')]
+        st = lambda err, bit: bool(err&(1<<bit))
+        ret = dict_improved(hw_dac_not_responding = st(hw_err, 5),
+                   hw_output_control_failure = st(hw_err, 4),
+                   hw_output_over_voltage = st(hw_err, 3),
+                   hw_output_over_current = st(hw_err, 2),
+                   hw_low_line_voltage = st(hw_err, 1),
+                   hw_temperature_fault = st(hw_err, 0),
+                   magnet_discharge_crowbar = st(oper_err, 6),
+                   magnet_quench_detected = st(oper_err, 5),
+                   remote_inhibit_detected = st(oper_err, 4),
+                   temperature_high = st(oper_err, 3),
+                   high_line_voltage = st(oper_err, 2),
+                   external_prog_too_high = st(oper_err, 1),
+                   calibration_error = st(oper_err, 0),
+                   psh_short = st(psh_err, 1),
+                   psh_open = st(psh_err, 0))
+        return ret
+    def _get_esr(self):
+        return int(self.ask('*esr?'))
+    def get_error(self):
+        """ see also get_error_status """
+        ret = []
+        esr = self._get_esr()
+        if esr&0x80:
+            ret.append('Power on.')
+        if esr&0x20:
+            ret.append('Command Error.')
+        if esr&0x10:
+            ret.append('Execution Error.')
+        if esr&0x04:
+            ret.append('Query Error (output queue full).')
+        if esr&0x01:
+            ret.append('OPC received.')
+        if len(ret) == 0:
+            ret = 'No Error.'
+        else:
+            ret = ' '.join(ret)
+        return ret
+    def set_persistent(self, enable, force=False, password=None):
+        if enable:
+            if force and self._check_password(password=password):
+                self.write('PSH 99')
+            else:
+                self.write('PSH 1')
+        else:
+            self.write('PSH 0')
+    def get_persistent_status(self):
+        st = self.persistent_status.get()
+        return ['off', 'on', 'warming', 'cooling'][st]
+    @locked_calling
+    def stop(self):
+        """This stops the current ramp within a few seconds."""
+        # the stop commands does not seem to always work (at least for small ramp rates)
+        # So do it manually
+        if self._get_states() == 'ramping':
+            #self.write('STOP')
+            cur = self.current.get()
+            self.target_current.set(cur)
+            self._ramping_helper('ramping', ['paused'], extra_wait=0)
+    def _check_password(self, password, dev=None):
+        if dev is not None:
+            password = dev._check_cache['kwarg']['password']
+        if password != self._passwd_check:
+            raise ValueError('Invalid password.')
+    def conf_ramp_segments(self, currents=None, rates=None):
+        """ when currents is None, show the ramp segments.
+            Otherwise all the parameters are lists (or arrays) and need to be of the same length <=5.
+            currents are the <= criteria for selecting the other parameters from the effective target_current
+            value (considering it ramps).
+            currents need to be in increasing order (otherwise entries will be skipped). The last entry
+            is used for targets above the currents value (the last currents value is unused).
+            If the first entry current is 0, it is used for all targets.
+        """
+        if currents is None:
+            data = dict_improved([('currents', []), ('rates', [])])
+            for z in range(5):
+                ret = self.ramp_segment_para.get(segment=z+1)
+                if ret.current == 0 and z != 0:
+                    break
+                for k in ret:
+                    data[k+'s'].append(ret[k])
+                if ret.current == 0:
+                    break
+            return data
+        else:
+            if len(currents) != len(rates):
+                raise ValueError('One of the data is not of the same length as the others')
+            if len(currents) > 5:
+                raise ValueError('You need less than 5 data')
+            if list(currents) != sorted(currents):
+                raise ValueError('currents are not in ascending order.')
+            z=-1
+            for z, (c, r) in enumerate(zip(currents, rates)):
+                self.ramp_segment_para.set(segment=z+1, current=c, rate=r)
+            if z < 4 and c!= 0:
+                self.ramp_segment_para.set(segment=z+2, current=0, rate=0.001)
+    def _current_magnet_getdev(self):
+        if self.get_persistent_status() != 'on':
+            return self.last_persistent_current.get()
+        else:
+            return self.current.get()
+    def _ramp_rate_current_unit_helper(self, unit=None):
+        if unit is not None:
+            self.ramp_rate_unit.set(unit)
+        unit = self.ramp_rate_unit.get()
+        factor = dict(min=60., s=1.)[unit]
+        return factor
+    def _ramp_rate_current_getdev(self, unit=None):
+        factor = self._ramp_rate_current_unit_helper(unit)
+        rate = self.ramp_rate_current_raw.get()
+        return rate*factor
+    def _ramp_rate_current_checkdev(self, rate, unit=None):
+        factor = self._ramp_rate_current_unit_helper(unit)
+        BaseDevice._checkdev(self.ramp_rate_current, rate)
+    def _ramp_rate_current_setdev(self, rate, unit=None):
+        """ unit can be 'min' or 's' for A/min or A/s """
+        # check already changed the unit
+        factor = self._ramp_rate_current_unit_helper()
+        self.ramp_rate_current_raw.set(rate/factor)
+
+    def _ramp_rate_field_T_getdev(self, unit=None):
+        factor = self._ramp_rate_current_unit_helper(unit)
+        rate = self.ramp_rate_current_raw.get()
+        return rate*factor * self._coil_constant
+    def _ramp_rate_field_T_checkdev(self, rate, unit=None):
+        factor = self._ramp_rate_current_unit_helper(unit)
+        BaseDevice._checkdev(self.ramp_rate_field_T, rate)
+    def _ramp_rate_field_T_setdev(self, rate, unit=None):
+        """ unit can be 'min' or 's' for T/min or T/s """
+        # check already changed the unit
+        factor = self._ramp_rate_current_unit_helper()
+        self.ramp_rate_current_raw.set(rate/factor/self._coil_constant)
+
+    def _ramp_rate_field_kG_getdev(self, unit=None):
+        factor = self._ramp_rate_current_unit_helper(unit)
+        rate = self.ramp_rate_current_raw.get()
+        return rate*factor * self._coil_constant*10
+    def _ramp_rate_field_kG_checkdev(self, rate, unit=None):
+        factor = self._ramp_rate_current_unit_helper(unit)
+        BaseDevice._checkdev(self.ramp_rate_field_kG, rate)
+    def _ramp_rate_field_kG_setdev(self, rate, unit=None):
+        """ unit can be 'min' or 's' for kG/min or kG/s """
+        # check already changed the unit
+        factor = self._ramp_rate_current_unit_helper()
+        self.ramp_rate_current_raw.set(rate/factor/self._coil_constant/10)
+
+
+    @locked_calling
+    def _extra_create_dev(self):
+        d = self.coil_constant.get()
+        if d.units == 'T/A':
+            scaleT = d.constant
+        else:
+            scaleT = d.constant/10.
+        self._coil_constant = scaleT
+        scalekG = scaleT*10
+        d = self.limits.get()
+        max_current = d.current
+        max_rate = d.ramp
+        min_current = -max_current
+        self.target_current.max = max_current
+        self.target_current.min = min_current
+        max_fieldT = max_current*scaleT
+        min_fieldT = min_current*scaleT
+        max_fieldkG = max_fieldT*10
+        min_fieldkG = min_fieldT*10
+        self.field_target_T = ScalingDevice(self.target_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT)
+        self.field_target_kG = ScalingDevice(self.target_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG)
+        self.field_T = ScalingDevice(self.current_magnet, scaleT, quiet_del=True, doc='Field in magnet (even in persistent mode)')
+        self.field_kG = ScalingDevice(self.current_magnet, scalekG, quiet_del=True, doc='Field in magnet (even in persistent mode)')
+        rmin, rmax = .0001, self._max_ramp_rate
+        if rmax is None:
+            rmax = max_rate
+        self.ramp_rate_current.choices.choices['min'].min = rmin*60
+        self.ramp_rate_current.choices.choices['min'].max = rmax*60
+        self.ramp_rate_current.choices.choices['s'].min = rmin
+        self.ramp_rate_current.choices.choices['s'].max = rmax
+        self.ramp_rate_field_T.choices.choices['min'].min = rmin*scaleT*60
+        self.ramp_rate_field_T.choices.choices['min'].max = rmax*scaleT*60
+        self.ramp_rate_field_T.choices.choices['s'].min = rmin*scaleT
+        self.ramp_rate_field_T.choices.choices['s'].max = rmax*scaleT
+        self.ramp_rate_field_kG.choices.choices['min'].min = rmin*scalekG*60
+        self.ramp_rate_field_kG.choices.choices['min'].max = rmax*scalekG*60
+        self.ramp_rate_field_kG.choices.choices['s'].min = rmin*scalekG
+        self.ramp_rate_field_kG.choices.choices['s'].max = rmax*scalekG
+        self.ramp_current.max = max_current
+        self.ramp_current.min = min_current
+        self.ramp_field_T = ScalingDevice(self.ramp_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT)
+        self.ramp_field_kG = ScalingDevice(self.ramp_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG)
+        self._create_devs_helper() # to get logical devices return proper name (not name_not_found)
+
+    def _get_states(self):
+        errors = self.get_error_status(latched=False)
+        pers = self.get_persistent_status()
+        oper = self.get_oper_status(latched=False)
+        for k, v in errors.items():
+            # for any error we say we are quenched to stop the ramp.
+            if v:
+                return 'quench'
+        if oper.psh_stable or pers in ['on', 'off']:
+            return {False:'ramping', True:'paused'}[oper.ramp_done]
+        return pers # so either warming or cooling
+
+    def _ramping_helper(self, stay_states, end_states=None, extra_wait=None):
+        wait(0.2) # wait some time to allow previous change to affect the _get_states results.
+        to = time.time()
+        switch_time = self.persistent_conf.getcache().delay
+        if stay_states == 'cooling':
+            prog_base = 'Magnet Cooling switch: {time}/%.1f'%switch_time
+        elif stay_states == 'warming':
+            prog_base = 'Magnet Heating switch: {time}/%.1f'%switch_time
+        else: # ramping
+            prog_base = 'Magnet Ramping {current:.3f}/%.3f A'%self.target_current.getcache()
+        if isinstance(stay_states, basestring):
+            stay_states = [stay_states]
+        with release_lock_context(self):
+            with mainStatusLine.new(priority=10, timed=True) as progress:
+                while self._get_states() in stay_states:
+                    wait(.1)
+                    progress(prog_base.format(current=self.current.get(), time=time.time()-to))
+            if self._get_states() == 'quench':
+                raise RuntimeError(self.perror('The magnet QUENCHED!!! (or some other error, see get_error_status'))
+            if extra_wait:
+                wait(extra_wait, progress_base='Magnet wait')
+        if end_states is not None:
+            if isinstance(end_states, basestring):
+                end_states = [end_states]
+            if self._get_states() not in end_states:
+                raise RuntimeError(self.perror('The magnet state did not change to %s as expected'%end_states))
+
+    @locked_calling
+    def do_persistent(self, to_pers, quiet=True, extra_wait=None):
+        """
+        This function goes in/out of persistent mode.
+        to_pers to True to go into persistent mode (turn persistent switch off, ramp to zero and leave magnet energized)
+                   False to go out of persistent mode (reenergize leads and turn persistent switch on)
+        It returns the previous state of the persistent switch.
+        """
+        def print_if(s):
+            if not quiet:
+                print s
+        if not self.persistent_conf.getcache().psh_present:
+            return True
+        state = self._get_states()
+        if state in ['cooling', 'warming']:
+            raise RuntimeError(self.perror('persistent switch is currently changing state. Wait.'))
+        if state in ['ramping']:
+            raise RuntimeError(self.perror('Magnet is ramping. Stop that before changing the persistent state.'))
+        if state in ['quench']:
+            raise RuntimeError(self.perror('The magnet QUENCHED!!! (or some other error, see get_error_status'))
+        orig_switch_en = self.get_persistent_status()
+        if orig_switch_en not in ['on', 'off']:
+            raise RuntimeError(self.perror('persistent switch is currently changing state. Wait.'))
+        orig_switch_en = orig_switch_en == 'on'
+        # we are in pause state
+        if to_pers:
+            if orig_switch_en:
+                # switch is active
+                print_if('Turning persistent switch off and waiting for cooling...')
+                self.set_persistent(False)
+                self._ramping_helper('cooling', 'paused')
+            print_if('Ramping to zero ...')
+            self.target_current.set(0.)
+            self._ramping_helper('ramping', 'paused', extra_wait)
+        else: # go out of persistence
+            if not orig_switch_en:
+                # This is the same as self.last_persistent_current.get()
+                tmp_target = self.current_magnet.get()
+                print_if('Ramping to previous target ...')
+                self.target_current.set(tmp_target)
+                # The ramp is fast but still wait and extra 5 s for stability before pausing.
+                self._ramping_helper('ramping', 'paused', 5.)
+                print_if('Turning persistent switch on and waiting for heating...')
+                self.set_persistent(True)
+                self._ramping_helper('warming', 'paused', extra_wait)
+        return orig_switch_en
+
+    def _do_ramp(self, current_target, wait):
+        self.target_current.set(current_target)
+        self._ramping_helper('ramping', ['paused'], wait)
+
+    def _ramp_current_checkdev(self, val, return_persistent='auto', wait=None, quiet=True):
+        if return_persistent not in [True, False, 'auto']:
+            raise ValueError(self.perror("Invalid return_persistent option. Should be True, False or 'auto'"))
+        BaseDevice._checkdev(self.ramp_current, val)
+
+    def _ramp_current_setdev(self, val, return_persistent='auto', wait=None, quiet=True):
+        """ Goes to the requested setpoint and then waits until it is reached.
+            After the instrument says we have reached the setpoint, we wait for the
+            duration set by ramp_wait_after (in s).
+            return_persistent can be True (always), False (never) or 'auto' (the default)
+                              which returns to state from start of ramp.
+            wait can be used to set a wait time (in s) after the ramp. It overrides ramp_wait_after.
+            When going to persistence it waits persistent_wait_before before cooling the switch.
+
+            When using get, returns the magnet current.
+        """
+        def print_if(s):
+            if not quiet:
+                print s
+        ps_installed = self.persistent_conf.getcache().psh_present
+        if wait is None:
+            wait = self.ramp_wait_after.getcache()
+        if ps_installed:
+            # Go out of persistent (turn persistent switch on)
+            prev_switch_en = self.do_persistent(to_pers=False, quiet=quiet)
+            # Now change the field
+            print_if('Ramping...')
+            if return_persistent == True or (return_persistent == 'auto' and not prev_switch_en):
+                self._do_ramp(val, self.persistent_wait_before.getcache())
+                self.do_persistent(to_pers=True, quiet=quiet, extra_wait=wait)
+            else:
+                self._do_ramp(val, wait)
+        else: # no persistent switch installed
+            print_if('Ramping...')
+            self._do_ramp(val, wait)
+
+    def _ramp_current_getdev(self):
+        return self.current_magnet.get()
+
+    def _create_devs(self):
+        if self.visa.is_serial():
+            if not self._write_with_opc:
+                # we need to set this before any writes.
+                # otherwise some write request are lost.
+                self._write_write_wait = 0.075
+        else: #GPIB
+            self._write_write_wait = 0.0
+        # This instrument does not require the scpiDevice_lk that adds extra time between set and get.
+        #scpiDev = scpiDevice_lk
+        scpiDev = scpiDevice
+        self.ramp_wait_after = MemoryDevice(10., min=0.)
+        self.persistent_wait_before = MemoryDevice(30., min=30., doc='This time is used to wait after a ramp but before turning persistent off')
+        self.ramp_rate_unit = MemoryDevice('min', choices=['min', 's'])
+        def scpiDev_prot(*args, **kwargs):
+            options = kwargs.pop('options', {}).copy()
+            options.update(password=None)
+            doc = kwargs.pop('doc', "")
+            doc += '\nTo perform a set you need to set password to "%s"\n'%self._passwd_check
+            kwargs.update(options=options, extra_check_func=ProxyMethod(self._check_password))
+            return scpiDevice(*args, **kwargs)
+
+        self.display = scpiDev('DISP', choices=ChoiceMultiple(['mode', 'volt_sense_display_en', 'brightness_pct'], [ChoiceIndex(['current', 'field']), bool, ChoiceIndex([0, 25, 75, 100])]))
+        self.coil_constant = scpiDev_prot('FLDS', choices=ChoiceMultiple(['units', 'constant'], [ChoiceIndex(['T/A', 'kG/A']), float_fix6]))
+        self.limits = scpiDev_prot('LIMIT', choices=ChoiceMultiple(['current', 'voltage', 'ramp'],
+                                                                   [(float_fix4, (0, 60.1)), (float_fix4, (0.1, 5)), (float_fix4, (0.0001, 99.999))]),
+                                     allow_kw_as_dict=True, allow_missing_dict=True,
+                                     doc='rate in A/s')
+        self.persistent_status = scpiDev(getstr='PSH?', str_type=int, doc="""\
+                                0= heater off
+                                1= heater on
+                                2= heater warming
+                                3= heater cooling
+                                """)
+        self.last_persistent_current = scpiDev(getstr='PSHIS?', str_type=float)
+        self.field = scpiDev(getstr='RDGF?', str_type=float, doc='unit are T or kG depending on coil_constant')
+        self.current = scpiDev(getstr='RDGI?', str_type=float)
+        self.voltage = scpiDev(getstr='RDGV?', str_type=float)
+        self.voltage_remote = scpiDev(getstr='RDGRV?', str_type=float)
+        self.persistent_conf = scpiDev_prot('PSHS', choices=ChoiceMultiple(['psh_present', 'current_mA', 'delay'], [bool, (int, (10, 125)), (int, (5, 100))]))
+        self.quench_conf = scpiDev_prot('QNCH', choices=ChoiceMultiple(['quench_detect_en', 'rate'], [bool, (float_fix4, (0.01, 10))]))
+        self.ramp_rate_current_raw = scpiDev('RATE', str_type=float_fix4, doc='rate in A/s', min=0.0001, max=99.999)
+        self.ramp_rate_current_persistent = scpiDev('RATEP', choices=ChoiceMultiple(['use_pers_rate_en', 'rate'], [bool, (float_fix4, (0.0001, 99.999))]), doc='rate in A/s')
+        self.target_field_raw = scpiDev('SETF', str_type=float, doc='unit are T or kG depending on coil_constant')
+        self.target_current = scpiDev('SETI', str_type=float_fix4, min=-60.1, max=60.1)
+        self.compliance_voltage = scpiDev('SETV', str_type=float_fix4, min=0.1, max=5)
+        self.trig_current = scpiDev('TRIG', str_type=float_fix4, min=-60.1, max=60.1)
+        self.external_prog_mode = scpiDev('XPGM', choices=ChoiceIndex(['internal', 'external', 'sum']))
+        self.current_segment = MemoryDevice(1, choices=list(range(1, 6)))
+        self.ramp_segment_en = scpiDev('RSEG', str_type=bool)
+        self.ramp_segment_para = scpiDev('RSEGS {segment},{val}', 'RSEGS? {segment}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                         choices=ChoiceMultiple(['current', 'rate'], [(float_fix4, (0, 60.1)), (float_fix4, (0.0001, 99.999))]), doc='rate in A/s',
+                                         options=dict(segment=self.current_segment), options_apply=['segment'], autoinit=False)
+        rate_A_lim = ChoiceDevDep(self.ramp_rate_unit, dict(min=ChoiceLimits(min=0, max=0), s=ChoiceLimits(min=0, max=0)))
+        rate_T_lim = ChoiceDevDep(self.ramp_rate_unit, dict(min=ChoiceLimits(min=0, max=0), s=ChoiceLimits(min=0, max=0)))
+        rate_kG_lim = ChoiceDevDep(self.ramp_rate_unit, dict(min=ChoiceLimits(min=0, max=0), s=ChoiceLimits(min=0, max=0)))
+        self._devwrap('ramp_rate_current', choices=rate_A_lim)
+        self._devwrap('ramp_rate_field_T', choices=rate_T_lim, autoinit=False)
+        self._devwrap('ramp_rate_field_kG', choices=rate_kG_lim, autoinit=False)
+        self._devwrap('current_magnet')
+        self._devwrap('ramp_current', autoinit=False)
+        self.alias = self.current_magnet
+        # This needs to be last to complete creation
+        super(lakeshore_625, self)._create_devs()
