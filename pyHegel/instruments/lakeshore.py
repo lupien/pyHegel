@@ -1048,7 +1048,6 @@ class lakeshore_224(lakeshore_340):
             ch = options.get('ch', None)
             ch = self._fetch_helper(ch)
             ch_list = []
-            in_set = []
             in_crv = []
             in_type = []
             in_diode = []
@@ -1889,6 +1888,7 @@ class lakeshore_625(visaInstrument):
         self.ramp_current.min = min_current
         self.ramp_field_T = ScalingDevice(self.ramp_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT)
         self.ramp_field_kG = ScalingDevice(self.ramp_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG)
+        self.alias = self.field_T
         self._create_devs_helper() # to get logical devices return proper name (not name_not_found)
 
     def _get_states(self):
@@ -2063,8 +2063,8 @@ class lakeshore_625(visaInstrument):
         self.quench_conf = scpiDev_prot('QNCH', choices=ChoiceMultiple(['quench_detect_en', 'rate'], [bool, (float_fix4, (0.01, 10))]))
         self.ramp_rate_current_raw = scpiDev('RATE', str_type=float_fix4, doc='rate in A/s', min=0.0001, max=99.999)
         self.ramp_rate_current_persistent = scpiDev('RATEP', choices=ChoiceMultiple(['use_pers_rate_en', 'rate'], [bool, (float_fix4, (0.0001, 99.999))]), doc='rate in A/s')
-        self.target_field_raw = scpiDev('SETF', str_type=float, doc='unit are T or kG depending on coil_constant')
-        self.target_current = scpiDev('SETI', str_type=float_fix4, min=-60.1, max=60.1)
+        self.target_field_raw = scpiDev('SETF', str_type=float, doc='unit are T or kG depending on coil_constant', setget=True)
+        self.target_current = scpiDev('SETI', str_type=float_fix4, min=-60.1, max=60.1, setget=True)
         self.compliance_voltage = scpiDev('SETV', str_type=float_fix4, min=0.1, max=5)
         self.trig_current = scpiDev('TRIG', str_type=float_fix4, min=-60.1, max=60.1)
         self.external_prog_mode = scpiDev('XPGM', choices=ChoiceIndex(['internal', 'external', 'sum']))
@@ -2080,7 +2080,6 @@ class lakeshore_625(visaInstrument):
         self._devwrap('ramp_rate_field_T', choices=rate_T_lim, autoinit=False)
         self._devwrap('ramp_rate_field_kG', choices=rate_kG_lim, autoinit=False)
         self._devwrap('current_magnet')
-        self._devwrap('ramp_current', autoinit=False)
-        self.alias = self.current_magnet
+        self._devwrap('ramp_current', autoinit=False, setget=True)
         # This needs to be last to complete creation
         super(lakeshore_625, self)._create_devs()
