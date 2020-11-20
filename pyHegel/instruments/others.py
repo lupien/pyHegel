@@ -46,6 +46,9 @@ from .logical import FunctionDevice, ScalingDevice
 import threading
 import weakref
 
+# for agilent pump
+import operator
+
 # for BIAS-DAC
 import struct
 
@@ -873,6 +876,194 @@ class pfeiffer_turbo_log(visaInstrument):
         #self.alias = self.field
         # This needs to be last to complete creation
         super(pfeiffer_turbo_log, self)._create_devs()
+
+#######################################################
+##    Agilent TPS-compact
+#######################################################
+
+class agilent_dev(BaseDevice):
+    def __init__(self, window, type, enable_set=False, *args, **kwargs):
+        super(agilent_dev, self).__init__(*args, **kwargs)
+        self._window = window
+        self._window_type = type
+        self._getdev_p = 'foo'
+        if enable_set:
+            self._setdev_p = 'foo'
+    def _getdev(self):
+        ret = self.instr.ask_window(self._window, type=self._window_type)
+        if isinstance(self.choices, ChoiceBase):
+            ret = self.choices(ret)
+        return ret
+    def _setdev(self, val):
+        if isinstance(self.choices, ChoiceBase):
+            val = self.choices.tostr(val) # here to tostr might return a number.
+        parsed = self.instr.write_window(self._window, val, self._window_type)
+        if parsed != 'ack':
+            raise RuntimeError(self.perror('Invalid response: %s'%parsed))
+        self.setcache(val)
+
+
+@register_instrument('Agilent', 'TPS')
+class agilent_tps_pump(visaInstrument):
+    """
+    This is the driver for a TPS compact agilent pump.
+    Most useful devices:
+        pressure
+        rotation_rpm
+    Available methods:
+        ask_window
+        write_window
+    """
+    # we had trouble with the Visa serial connection that kept frezzing.
+    # So we use the serial module instead.
+    def __init__(self, visa_address, serial_address=0, **kwargs):
+        """
+        serial_address should be 0 for RS-232, and 0-31 for RS-485
+        """
+        self._serial_address = serial_address
+        cnsts = visa_wrap.constants
+        baud_rate = kwargs.pop('baud_rate', 9600)
+        parity = kwargs.pop('parity', cnsts.Parity.none)
+        data_bits = kwargs.pop('data_bits', 8)
+        stop_bits = kwargs.pop('stop_bits', visa_wrap.constants.StopBits.one)
+        kwargs['baud_rate'] = baud_rate
+        kwargs['parity'] = parity
+        kwargs['data_bits'] = data_bits
+        kwargs['stop_bits'] = stop_bits
+        kwargs['write_termination'] = ''
+        kwargs['read_termination'] = ''
+        super(agilent_tps_pump, self).__init__(visa_address, **kwargs)
+    def idn(self):
+        return 'Agilent,TPS,no_serial,no_firmare'
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('pressure_unit', options)
+    def _do_chksum(self, message):
+        cks = reduce(operator.xor, bytearray(message))
+        return '%02X'%cks
+    def _parse(self, string, window, read=False):
+        string = bytes(string) # string can be a bytearray which returns int when indexing. Make it bytes.
+        chksum = string[-2:]
+        if self._do_chksum(string[1:-2]) != chksum:
+            raise RuntimeError('Invalid Checksum: %r'%string)
+        if string[0] != '\x02' or string[-3] != '\x03':
+            raise RuntimeError('Invalid start/end: %r'%string)
+        addr = string[1]
+        if addr != chr(0x80 + self._serial_address):
+            raise RuntimeError('Invalid address: %r'%string)
+        resp = string[2]
+        known_answers = {'\x06':'ack', '\x15': 'nack', '\x32': 'unknown window',
+                         '\x33': 'wrong type', '\x34': 'out of range', '\x35':'window disabled'}
+        if len(string) == 6:
+            ret = known_answers[resp]
+            if read:
+                raise RuntimeError('Invalid response (%s): %r'%(ret, string))
+            return ret
+        win = int(string[2:5])
+        if win != window:
+            raise RuntimeError('Invalid window: %r'%string)
+        if string[5] != '\x30':
+            raise RuntimeError('Invalid read-write code: %r'%string)
+        return string[6:-3]
+    def _create_req(self, window, data=None, type='string'):
+        """ if data is None, creates a request for a value.
+            possible types:
+                boolean
+                real
+                integer
+                exp
+                string
+        """
+        addr = chr(0x80+self._serial_address)
+        if window>999 or window<0:
+            raise ValueError(self.perror('window is out of range'))
+        window = '%03i'%window
+        if data is None:
+            # read
+            rw = '\x30'
+            data_str = ''
+        else:
+            # write
+            rw = '\x31'
+            if type == 'boolean':
+                data_str = '1' if data else '0'
+            elif type in ['real', 'integer']:
+                if data >=1e6 or data <=-1e-5:
+                    raise ValueError(self.perror('Data is too large'))
+                if type == 'integer':
+                    data_str = '%06d'%data
+                else:
+                    # TODO improve this when needed. I have not seen it used.
+                    data_str = '%06.2f'%data
+                data_str = data_str[:6]
+            elif type == 'exp':
+                data_str = '%.1E'%data
+            elif type == 'string':
+                data_str = '%-10s'%data
+                data_str = data_str[:10]
+            else:
+                raise ValueError(self.perror('Invalid type'))
+        req = '\x02' + addr + window + rw + data_str + '\x03'
+        chksum = self._do_chksum(req[1:])
+        req += chksum
+        return req
+
+    def read(self, raw=False, count=None, chunk_size=None):
+        ret = ''
+        while True:
+            c = self.visa.read_raw_n(1)
+            if c == '\x02':
+                # start
+                if ret != '':
+                    print 'We are loosing some reply: %r'% ret
+                ret = c
+            elif c == '\x03': # end
+                cksum = self.visa.read_raw_n_all(2)
+                return ret+c+cksum
+            else:
+                ret += c
+
+    def get_param(self, data_str, window, type='string'):
+        """ possible type:
+                boolean
+                string
+                integer
+                real
+                exp
+        """
+        val = self._parse(data_str, window, read=True)
+        if type == 'boolean':
+            return bool(int(val))
+        elif type in ['real', 'exp']:
+            return float(val)
+        elif type == 'integer':
+            return int(val)
+        elif type in 'string':
+            # I have seen responses of 10 and 12 bytes
+            # The are left align with extra spaces.
+            return val.rstrip(' ')
+        else:
+            raise ValueError(self.perror('Invalid type'))
+        return val
+    def ask_window(self, window, type='string'):
+        request = self._create_req(window)
+        result = self.ask(request)
+        return self.get_param(result, window, type)
+    def write_window(self, window, data, type='string'):
+        request = self._create_req(window, data, type)
+        ret = self.ask(request)
+        parsed =  self._parse(ret, window)
+        return parsed
+    def _create_devs(self):
+        self.pressure_unit = agilent_dev(163, 'integer', enable_set=True, choices=ChoiceSimpleMap({0:'mbar', 1:'Pa', 2:'Torr'}))
+        self.pressure = agilent_dev(224, 'exp', autoinit=False)
+        self.rotation_rpm = agilent_dev(226, 'real')
+        self.pump_current_mA = agilent_dev(200, 'real')
+        self.pump_voltage = agilent_dev(201, 'real')
+        self.controller_temp = agilent_dev(216, 'real')
+        self.alias = self.pressure
+        # This needs to be last to complete creation
+        super(agilent_tps_pump, self)._create_devs()
+
 
 #######################################################
 ##    Delft BIAS-DAC
