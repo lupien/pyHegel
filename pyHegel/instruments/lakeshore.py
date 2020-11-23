@@ -452,9 +452,16 @@ class lakeshore_336(visaInstrument):
         ch = self._fetch_helper(ch)
         multi = []
         graph = []
+        old_ch = self.current_ch.getcache()
         for i, c in enumerate(ch):
+            name = self.input_name.get(ch=c)
+            name = name.strip().replace(' ', '_')
+            extra = ''
+            if name != '':
+                extra = '_'+name
             graph.append(2*i)
-            multi.extend([c+'_T', c+'_S'])
+            multi.extend([c+extra+'_T', c+extra+'_S'])
+        self.current_ch.set(old_ch)
         fmt = self.fetch._format
         fmt.update(multi=multi, graph=graph)
         return BaseDevice.getformat(self.fetch, **kwarg)
