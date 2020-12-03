@@ -882,19 +882,24 @@ class pfeiffer_turbo_log(visaInstrument):
 #######################################################
 
 class agilent_dev(BaseDevice):
-    def __init__(self, window, type, enable_set=False, *args, **kwargs):
+    def __init__(self, window, type, enable_set=False, time_scale=False, *args, **kwargs):
         super(agilent_dev, self).__init__(*args, **kwargs)
         self._window = window
         self._window_type = type
         self._getdev_p = 'foo'
+        self._time_scale = time_scale
         if enable_set:
             self._setdev_p = 'foo'
     def _getdev(self):
         ret = self.instr.ask_window(self._window, type=self._window_type)
         if isinstance(self.choices, ChoiceBase):
             ret = self.choices(ret)
+        if self._time_scale:
+            ret = 0.2 * ret
         return ret
     def _setdev(self, val):
+        if self._time_scale:
+            val = int(val/0.2)
         if isinstance(self.choices, ChoiceBase):
             val = self.choices.tostr(val) # here to tostr might return a number.
         parsed = self.instr.write_window(self._window, val, self._window_type)
@@ -908,8 +913,17 @@ class agilent_tps_pump(visaInstrument):
     """
     This is the driver for a TPS compact agilent pump.
     Most useful devices:
+        pumping_en
+        vent_open_en
+        vent_automatic_en
         pressure
         rotation_rpm
+        rotation_Hz
+        pump_power
+        pump_current
+        pump_voltage
+        pump_status
+    Some devices require control_mode to be in 'serial' to allow set.
     Available methods:
         ask_window
         write_window
@@ -936,7 +950,7 @@ class agilent_tps_pump(visaInstrument):
     def idn(self):
         return 'Agilent,TPS,no_serial,no_firmare'
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('pressure_unit', options)
+        return self._conf_helper('pumping_en', 'pressure_unit', 'pump_status', options)
     def _do_chksum(self, message):
         cks = reduce(operator.xor, bytearray(message))
         return '%02X'%cks
@@ -1054,12 +1068,38 @@ class agilent_tps_pump(visaInstrument):
         parsed =  self._parse(ret, window)
         return parsed
     def _create_devs(self):
+        self.pumping_en = agilent_dev(0, 'boolean', enable_set=True)
+        # It does not seem possible to enable low speed
+        #self.pump_low_speed_en = agilent_dev(1, 'boolean', enable_set=True)
+        self.pump_soft_start_en = agilent_dev(100, 'boolean', enable_set=True)
         self.pressure_unit = agilent_dev(163, 'integer', enable_set=True, choices=ChoiceSimpleMap({0:'mbar', 1:'Pa', 2:'Torr'}))
-        self.pressure = agilent_dev(224, 'exp', autoinit=False)
+        #self.pressure = agilent_dev(224, 'exp', autoinit=False)
+        self.pressure = agilent_dev(224, 'exp')
         self.rotation_rpm = agilent_dev(226, 'real')
         self.pump_current_mA = agilent_dev(200, 'real')
         self.pump_voltage = agilent_dev(201, 'real')
         self.controller_temp = agilent_dev(216, 'real')
+        #self.vent_control = agilent_dev(122, 'boolean', enable_set=True, choices=ChoiceSimpleMap({False:'closed', True:'open'}))
+        self.vent_open_en = agilent_dev(122, 'boolean', enable_set=True)
+        self.vent_automatic_en = agilent_dev(125, 'boolean', enable_set=True, choices=ChoiceSimpleMap({False:True, True:False}))
+        self.vent_opening_delay = agilent_dev(126, 'integer', enable_set=True, time_scale=True, doc='in seconds')
+        self.vent_opening_time = agilent_dev(147, 'integer', enable_set=True, time_scale=True, doc='in seconds. 0 is infinite')
+        self.rotation_speed_reading_when_stopping_en = agilent_dev(167, 'boolean', enable_set=True)
+        self.control_mode = agilent_dev(8, 'boolean', enable_set=True, choices=ChoiceSimpleMap({False:'serial', True:'remote'}))
+        self.active_stop_en = agilent_dev(107, 'boolean', enable_set=True)
+        # Field taken from Agilent T-plus program
+        self.pump_status = agilent_dev(205, 'integer', doc="""\
+            0: Stop, 1: Waiting interlock, 2: Ramp, 3: Autotuning, 4: Braking, 5: Normal, 6: Fail""")
+        self.error_code = agilent_dev(206, 'integer', doc="""\
+            0: No Error, 1: No connection, 2: Pump overtemp, 4: Controller overtemp, 8: Power fail,
+            16: --, 32: --, 64: Short circuit, 128: Too high load""")
+        self.pump_power = agilent_dev(202, 'real')
+        self.pump_temp = agilent_dev(204, 'real')
+        self.rotation_Hz = agilent_dev(203, 'real') # t-plus says it is the rotation target, but it fallows  rotation_rpm
+        self.controller_heatsink_temp = agilent_dev(211, 'real') # t-plus says: (208=25 C, ... 128=60 C), but I think its in Celsius
+        self.controller_part_number = agilent_dev(319, 'string')
+        self.controller_serial_number = agilent_dev(323, 'string')
+        # Others: 106=Cooling (0:air or water)
         self.alias = self.pressure
         # This needs to be last to complete creation
         super(agilent_tps_pump, self)._create_devs()
