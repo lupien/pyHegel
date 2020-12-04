@@ -507,6 +507,30 @@ class guzik_adp7104(BaseInstrument):
         #if SDK.GSA_Data_Multi(arg, Nch, res_arr) == SDK.GSA_FALSE:
         #    raise RuntimeError(self.perror('Unable to force finish for acq structure.'))
 
+    def last_equ_overflow(self):
+        SDK = self._gsasdk
+        over = [res.common.equ_overflow == SDK.GSA_TRUE for res in self._gsa_data_res_arr]
+        if self._gsa_Nch == 1:
+            return over[0]
+        return over[:self._gsa_Nch]
+    def last_data_format(self):
+        """ obtains the data format for the last results. It can be:
+              8: for shifted 8 bit (uint8)
+              10: for shifted 10 bit (uint16 with only using lower 10 bits)
+              16: for int 15bit (int16, using full 16 bits (except when equalizer is off, then it can be 15 lower bits))
+             It could also be 0 for the default setting (like before an acquisition).
+        """
+        SDK = self._gsasdk
+        conv = {SDK.GSA_DATA_TYPE_DEFAULT:0,
+                SDK.GSA_DATA_TYPE_SHIFTED8BIT:8,
+                SDK.GSA_DATA_TYPE_SHIFTED10BIT:10,
+                SDK.GSA_DATA_TYPE_INT15BIT:16}
+        fmt =  [res.common.data_type for res in self._gsa_data_res_arr]
+        f = fmt[0]
+        for i in range(self._gsa_Nch):
+            if fmt[i] != f:
+                raise RuntimeError(self.perror('Unexpected data format. They are not all the same.'))
+        return conv[f]
 
     @staticmethod
     def conv_scale(data, res):
