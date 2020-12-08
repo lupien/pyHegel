@@ -950,7 +950,7 @@ class agilent_tps_pump(visaInstrument):
     def idn(self):
         return 'Agilent,TPS,no_serial,no_firmare'
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('pumping_en', 'pressure_unit', 'pump_status', options)
+        return self._conf_helper('pumping_en', 'pressure_unit', 'pump_status', 'pump_life_hour', 'pump_cycles', 'tip_seal_life_hour', options)
     def _do_chksum(self, message):
         cks = reduce(operator.xor, bytearray(message))
         return '%02X'%cks
@@ -1099,6 +1099,9 @@ class agilent_tps_pump(visaInstrument):
         self.controller_heatsink_temp = agilent_dev(211, 'real') # t-plus says: (208=25 C, ... 128=60 C), but I think its in Celsius
         self.controller_part_number = agilent_dev(319, 'string')
         self.controller_serial_number = agilent_dev(323, 'string')
+        self.tip_seal_life_hour = agilent_dev(358, 'real')
+        self.pump_cycles = agilent_dev(301, 'real')
+        self.pump_life_hour = agilent_dev(302, 'real')
         # Others: 106=Cooling (0:air or water)
         self.alias = self.pressure
         # This needs to be last to complete creation
