@@ -185,8 +185,18 @@ class oxford_ips120_10(visaInstrument):
         super(oxford_ips120_10, self).__init__(visa_addr, *args, **kwargs)
         self._extra_create_dev()
 
+    def _isobus_helper(self, isobus=None):
+        ret = ''
+        if isobus is False:
+            return ret
+        if isobus is None:
+            isobus = self._isobus_num
+        if isobus is not None:
+            ret = '@%i'%isobus
+        return ret
+
     @locked_calling
-    def clear_buffers(self, check=True):
+    def clear_buffers(self, check=True, isobus=None):
         """ This clears the communication buffers.
             Necessary after a timeout caused by a button being pressed
             on the instrument.
@@ -198,6 +208,8 @@ class oxford_ips120_10(visaInstrument):
         prev_timeout = self.set_timeout
         last = None
         self.write('BAD99', no_read=True, no_clear=True)
+        iso = self._isobus_helper(isobus)
+        check_val = '?' + iso + 'BAD99'
         self.set_timeout = 0.3
         try:
             while True:
@@ -211,16 +223,21 @@ class oxford_ips120_10(visaInstrument):
                 except OxfordTimeoutError:
                     self._last_read_exception_timeout = False
                 if check:
-                    if last is not None and last == '?BAD99':
+                    if last is not None and last == check_val:
                         break
                 else:
                     break
         finally:
+            pass
             self.set_timeout = prev_timeout
 
     def init(self, full=False):
         if full:
             self.clear_buffers()
+            status = self.status.get()
+            if status.locrem == 'local locked':
+                print 'Unlocking'
+                self.control_mode(remote=False, locked=False)
 
     def control_remotelocal(self, *args, **kwargs):
         raise NotImplementedError
@@ -246,13 +263,9 @@ class oxford_ips120_10(visaInstrument):
         """
         if not no_clear and self._last_read_exception_timeout:
             print 'Clearing buffers!'
-            self.clear_buffers()
-        if isobus is None:
-            isobus = self._isobus_num
-        if isobus is False:
-            pass
-        elif isobus is not None:
-            val = '@%i'%isobus + val
+            self.clear_buffers(isobus=isobus)
+        iso = self._isobus_helper(isobus)
+        val = iso + val
         if quiet:
             if quiet != 'skip':
                 val = '$' + val
@@ -266,7 +279,7 @@ class oxford_ips120_10(visaInstrument):
             i = 0
             while i<2:
                 i += 1
-                ret = self.ask(val, skip_error_handling=True)
+                ret = self.ask(val, skip_error_handling=True, isobus=False)
                 if ret.startswith('?'):
                     if self.status.get().locrem.startswith('local'):
                         if self._allow_local_override:
