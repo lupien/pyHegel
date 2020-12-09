@@ -59,9 +59,12 @@ float_fix6 = float_as_fixed('%.6f')
 
 # When ramping, it is not possible to set the switch (even if it is on and we set it to on.)
 
-# TODO
-# Make it more stable vs pressing buttons (it times out.)
-# After a timeout error need to clear_buffers (on gpib) or empty the buffer before the next read for serial
+# The instrument seem to have a bit of space on its read buffer. So it can handle
+# a few short writes before overflow. This is important because the instrument
+# does not handle the operation when a key is pressed.
+# So my handling for those key presses is to wait and retry the read.
+# But if someone breaks, the buffer will need to be emptied. So I add a new command (and bad)
+# command to be able to find out when the buffer as actually been empty.
 
 class OxfordError(RuntimeError):
     """ Base error for Oxford communication """
@@ -188,8 +191,9 @@ class oxford_ips120_10(visaInstrument):
             Necessary after a timeout caused by a button being pressed
             on the instrument.
         """
+        #print 'CLEAR'
         # for gpib could use self.visa.clear()
-        # However I can hangs of instrument communication when I do that.
+        # However I can hang the instrument communication when I do that.
         # And for serial that does not work.
         prev_timeout = self.set_timeout
         last = None
@@ -203,7 +207,7 @@ class oxford_ips120_10(visaInstrument):
                 # so it has not returned anything yet.
                 try:
                     while True:
-                        last = self.read()
+                        last = self.read(retry_on_timeout=False)
                 except OxfordTimeoutError:
                     self._last_read_exception_timeout = False
                 if check:
@@ -235,17 +239,28 @@ class oxford_ips120_10(visaInstrument):
         return '%s,%s,%s,%s'%(vendor, model, 'xxx', '%s/%s'%(date,vers))
 
     @locked_calling
-    def write(self, val, termination='default', quiet=False, no_read=False, no_clear=False):
-        """ quiet tells the instrument not to reply """
+    def write(self, val, termination='default', isobus=None, quiet=False, no_read=False, no_clear=False):
+        """ quiet tells the instrument not to reply
+            isobus can be a number, None (to use instrument isobus) or False to override
+             the instrument isobus and use None.
+        """
         if not no_clear and self._last_read_exception_timeout:
+            print 'Clearing buffers!'
             self.clear_buffers()
-        if self._isobus_num is not None:
-            val = '@%i'%self._isobus_num + val
+        if isobus is None:
+            isobus = self._isobus_num
+        if isobus is False:
+            pass
+        elif isobus is not None:
+            val = '@%i'%isobus + val
         if quiet:
             if quiet != 'skip':
                 val = '$' + val
             super(oxford_ips120_10, self).write(val, termination=termination)
         elif no_read:
+            if no_read == 'ask':
+                # This is to protect agains a CRTL-C between write and read
+                self._last_read_exception_timeout = True
             super(oxford_ips120_10, self).write(val, termination=termination)
         else:
             i = 0
@@ -265,35 +280,48 @@ class oxford_ips120_10(visaInstrument):
                     break
 
     @locked_calling
-    def ask(self, question, raw=False, chunk_size=None, skip_error_handling=False):
+    def ask(self, question, raw=False, chunk_size=None, isobus=None, skip_error_handling=False, retry_on_timeout=True, no_clear=False):
         """
         Does write then read.
         With raw=True, replaces read with a read_raw.
         This is needed when dealing with binary data. The
         base read strips newlines from the end always.
         """
+        # I would normally used the _delayed_signal_context_manager here
+        # But because read can loop (too handle instrument keypress),
+        # we do not use the manager here to allow KeyboardInterrupt to work.
         # If we get random ? responses (because of unstable serial),
         #  Could implement some retry attempts here.
         #  It would deal with both basic writes and general ask.
-        # we prevent CTRL-C from breaking between write and read using context manager
-        with _delayed_signal_context_manager():
-            self.write(question, no_read=True)
-            ret = self.read(raw=raw, chunk_size=chunk_size)
+        # Enable this to force clearing the buffers if some CTRL-C between write and read.
+        self.write(question, no_read='ask', isobus=isobus)
+        ret = self.read(raw=raw, chunk_size=chunk_size, retry_on_timeout=retry_on_timeout)
         if not skip_error_handling and ret.startswith('?'):
             self._last_errors.append(ret)
             raise RuntimeError('Request failed: %s'%ret)
         return ret
 
     @locked_calling
-    def read(self, raw=False, count=None, chunk_size=None, timeout_check=True):
-        self._last_read_exception_timeout = False
-        try:
-            return super(oxford_ips120_10, self).read(raw=raw, count=count, chunk_size=chunk_size)
-        except visa_wrap.VisaIOError as exc:
-            if timeout_check and exc.error_code == visa_wrap.constants.StatusCode.error_timeout:
-                self._last_read_exception_timeout = True
-                raise OxfordTimeoutError(self.perror('The instrument timedout. It might be because of a button press on the instrument.'))
-            raise
+    def read(self, raw=False, count=None, chunk_size=None, timeout_check=True, retry_on_timeout=True):
+        repeats = 0
+        with mainStatusLine.new(priority=10, timed=True) as progress:
+            while True:
+                try:
+                    #print 'Reading %i'%repeats
+                    ret = super(oxford_ips120_10, self).read(raw=raw, count=count, chunk_size=chunk_size)
+                    self._last_read_exception_timeout = False
+                    return ret
+                except visa_wrap.VisaIOError as exc:
+                    if timeout_check and exc.error_code == visa_wrap.constants.StatusCode.error_timeout:
+                        self._last_read_exception_timeout = True
+                        if retry_on_timeout:
+                            repeats += 1
+                            progress('Repeating read (possible key pressed on instrument) #%i'%repeats)
+                            wait(0.1) # to allow updating graphics
+                            continue
+                        else:
+                            raise OxfordTimeoutError(self.perror('The instrument timed-out. It might be because of a button press on the instrument.'))
+                    raise
 
     def _current_config(self, dev_obj=None, options={}):
         base = self._conf_helper('field_T', 'field_target_T', 'current_magnet', 'current_target',
@@ -623,7 +651,6 @@ class oxford_ips120_10(visaInstrument):
 
     def _create_devs(self):
         self.write('Q4', quiet='skip') # CR termination with extended resolution
-        self.visa.read_termination = '\r'
         self.current = scpiDevice(getstr='R0', str_type=float_as_fixed('%.6f', 'R'))
         self.voltage = scpiDevice(getstr='R1', str_type=float_as_fixed('%.6f', 'R'))
         self.current_measured = scpiDevice(getstr='R2', str_type=float_as_fixed('%.6f', 'R'), doc='measured current, with 0.01 A resolution (current dev is more accurate)')
