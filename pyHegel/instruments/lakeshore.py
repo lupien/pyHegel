@@ -1803,7 +1803,8 @@ class lakeshore_625(visaInstrument):
             if z < 4 and c!= 0:
                 self.ramp_segment_para.set(segment=z+2, current=0, rate=0.001)
     def _current_magnet_getdev(self):
-        if self.get_persistent_status() != 'on':
+        ps_installed = self.persistent_conf.getcache().psh_present
+        if ps_installed and self.get_persistent_status() != 'on':
             return self.last_persistent_current.get()
         else:
             return self.current.get()
