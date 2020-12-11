@@ -348,7 +348,8 @@ class guzik_adp7104(BaseInstrument):
     def _read_config(self):
         SDK = self._gsasdk
         channels = self._gsa_data_arg.common.input_labels_list
-        gain_db = self._gsa_data_arg.common.gain_dB
+        #gain_db = self._gsa_data_arg.common.gain_dB
+        gain_db = self._gsa_data_res_arr[0].common.used_input_gain_dB
         bits_16 =(True if self._gsa_data_arg.common.data_type == SDK.GSA_DATA_TYPE_INT15BIT else False)
         n_S_ch = self._gsa_data_res_arr[0].common.data_len
         Nch = self._gsa_Nch
