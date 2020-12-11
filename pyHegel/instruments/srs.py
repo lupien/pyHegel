@@ -44,6 +44,11 @@ from ..instruments_registry import register_instrument, register_usb_name, regis
 @register_instrument('Stanford_Research_Systems', 'SR830', alias='SR830 LIA')
 class sr830_lia(visaInstrument):
     """
+    Most useful devices:
+        readval/fetch
+        srclvl
+        freq
+
     Don't forget to set the async_wait to some usefull values.
      might do set(sr1.async_wait, 1.)
     when using 24dB/oct, 100ms filter.
@@ -247,6 +252,12 @@ register_usb_name('Stanford_Research_Systems', 0xB506)
 #@register_instrument('Stanford_Research_Systems', 'SR865A', 'V1.51')
 class sr865_lia(visaInstrument):
     """
+    Most useful devices:
+        readval/fetch
+        src_level
+        src_offset
+        freq
+
     Don't forget to set the async_wait to some usefull values.
      might do set(sr1.async_wait, 1.)
     when using 24dB/oct, 100ms filter.
@@ -440,10 +451,10 @@ class sr865_lia(visaInstrument):
         self.filter_sync = scpiDevice('sync', str_type=bool)
         self.filter_advanced_en = scpiDevice('advfilt', str_type=bool)
         self.enbw = scpiDevice(getstr='enbw?', str_type=float, doc='Does not include effect of sync filter.')
-        self.x = scpiDevice(getstr='outp? 1', str_type=float, trig=True)
-        self.y = scpiDevice(getstr='outp? 2', str_type=float, trig=True)
-        self.r = scpiDevice(getstr='outp? 3', str_type=float, trig=True)
-        self.theta = scpiDevice(getstr='outp? 4', str_type=float, trig=True)
+        self.x = scpiDevice(getstr='outp? 0', str_type=float, trig=True)
+        self.y = scpiDevice(getstr='outp? 1', str_type=float, trig=True)
+        self.r = scpiDevice(getstr='outp? 2', str_type=float, trig=True)
+        self.theta = scpiDevice(getstr='outp? 3', str_type=float, trig=True)
         self.ch1_out = scpiDevice('cout 0,{val}', 'cout? 0', choices=ChoiceIndex(['X', 'R']))
         self.ch2_out = scpiDevice('cout 1,{val}', 'cout? 1', choices=ChoiceIndex(['Y', 'theta']))
         self.outch_sel = MemoryDevice('X', choices=ChoiceIndex(['X', 'Y', 'R']))
