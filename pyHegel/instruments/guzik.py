@@ -32,8 +32,9 @@ import sys
 import ctypes
 import os
 import time
+import gc
 
-from ctypes import c_long, c_int, c_uint, c_uint64, c_ubyte, POINTER, byref, create_string_buffer, Structure, Array
+from ctypes import c_long, c_int, c_uint, c_uint64, c_ubyte, POINTER, byref, create_string_buffer, Structure, Array, pointer
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseInstrument,\
                             scpiDevice, MemoryDevice, ReadvalDev, BaseDevice,\
@@ -235,6 +236,13 @@ class guzik_adp7104(BaseInstrument):
         SDK = self._gsasdk
         _SDK = SDK
         self._computer_memsize = get_memory()
+        libversion = SDK.BSTR()
+        SDK.GSA_FullLibVersionGet(byref(libversion))
+        full_lib_version = ''
+        for i in libversion:
+            if i == 0:
+                break
+            full_lib_version += chr(i)
         self._gsa_sys_cfg = SDK.GSA_SYS_CFG(version=SDK.GSA_SDK_VERSION)
         print 'Starting instrument initialization. This could take some time (20s)...'
         if SDK.GSA_SysInit(self._gsa_sys_cfg) != SDK.GSA_TRUE:
@@ -280,7 +288,8 @@ class guzik_adp7104(BaseInstrument):
                                   brd_info=ppdict(brd_info),
                                   brd_info_rc=ppdict(brd_info_rc),
                                   brd_gpu= ppdict(brd_gpu),
-                                  chs_info=ppdict(chs_info))
+                                  chs_info=ppdict(chs_info),
+                                  full_lib_version=full_lib_version)
         self.config(1)
 
     @staticmethod
@@ -315,10 +324,19 @@ class guzik_adp7104(BaseInstrument):
                 raise RuntimeError(self.perror('Unable to destroy op.'))
         self._gsa_data = None
         self._gsa_data_arg = None
+        self._gsa_data_res_tf = None
+        self._gsa_data_res_ts = None
+        # free previous data memory
+        self.fetch.setcache(None)
+        # Finally make sure memory is released.
+        # Note that at least for numpy 1.16.5, python 2.7.16, ctypes 1.1.0
+        #  ndarray.ctypes creates a loop from ctypes.cast. To clean that requires a collect.
+        gc.collect()
 
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = ['config=%s'%self.config()]
+        opts += ['full_lib_version=%r'%self._conf_general.full_lib_version]
         opts += self._conf_helper(options)
         return opts
 
@@ -349,8 +367,8 @@ class guzik_adp7104(BaseInstrument):
         SDK = self._gsasdk
         channels = self._gsa_data_arg.common.input_labels_list
         #gain_db = self._gsa_data_arg.common.gain_dB
-        gain_db = self._gsa_data_res_arr[0].common.used_input_gain_dB
         bits_16 =(True if self._gsa_data_arg.common.data_type == SDK.GSA_DATA_TYPE_INT15BIT else False)
+        bits_n = self.last_data_format()
         n_S_ch = self._gsa_data_res_arr[0].common.data_len
         Nch = self._gsa_Nch
         conv_offset = []
@@ -358,11 +376,15 @@ class guzik_adp7104(BaseInstrument):
         res_arr = self._gsa_data_res_arr
         low_pass_filter_MHz = []
         high_pass_filter_MHz = []
+        gain_dB = []
+        offset = []
         for i in range(Nch):
             conv_offset.append(res_arr[i].common.data_offset)
             conv_resolution.append(res_arr[i].common.ampl_resolution*1e-3)
             low_pass_filter_MHz.append(res_arr[i].common.used_lpf_cutoff_frq_MHz)
             high_pass_filter_MHz.append(res_arr[i].common.used_hpf_cutoff_frq_MHz)
+            gain_dB.append(res_arr[i].common.used_input_gain_dB)
+            offset.append(res_arr[i].common.ampl_offset_mV/1e3)
         sampling_period_ns = self._gsa_conf_ch.sampling_period_ns
         sampling_rate_GSs = 1./sampling_period_ns
         analog_bandwidth_MHz = self._gsa_conf_ch.analog_bandwidth_MHz
@@ -373,20 +395,24 @@ class guzik_adp7104(BaseInstrument):
         del ret['i'], ret['res_arr'], ret['self'], ret['SDK']
         return ret
 
-    def config(self, channels=None, n_S_ch=1024, bits_16=True, gain_dB=0., equalizer_en=True, ext_ref='default', _hdr_func=None):
+    def config(self, channels=None, n_S_ch=1024, bits_16=True, gain_dB=0., offset=0., equalizer_en=True, force_slower_sampling=False, ext_ref='default', _hdr_func=None):
         """
         if channels is None, it returns information about the current config.
         channels needs be a list of integer that represent the channels (1-4).
         It can also be a single integer
         bits_16 when False, returns 8 bit data.
         n_S_ch is the number of Sample per ch to read.
-        gain_dB is the gain in dB
+        gain_dB is the gain in dB (can be a list). Range is probably (-22 to 32).
+              see gz.print_structure(gz._gsa_conf_ch) to confirm.
+        offset is the input offset to use (in V) (can be a list)
         equalizer_en when False turns off the FPGA equalizer.
         ext_ref can be 'default' which stays the same, 'int' (200 MHz), 'ext' for 1 GHz,
             or one of the allowed sync_clock frequency in MHz.
             Note that the change is only seen (like acqusition header) after a new acquisition.
+        force_slower_sampling, when True will make single channel (or 1,3 or 2,4 pairs) sample
+                 at 16 GS/s instead of 32 GS/s (it will also decrease the bandwith to 6.5 GHz from 10 GHz)
         To free the memory, delete any user variable that remembers a previous result,
-        than call config with a new size.
+        then call config with a new size. You might also need to call collect_garbage().
         _hdr_func if given is a func passed with the data_arg structure before it gets used, so it
         can be modified (useful when testing new parameter not already programmed)
         """
@@ -441,23 +467,48 @@ class guzik_adp7104(BaseInstrument):
         #arg.common.acq_timeout = 0 # in us. -1 for infinite
         arg.common.acq_adjust_up = SDK.GSA_TRUE
         arg.common.trigger_mode = SDK.GSA_DP_TRIGGER_MODE_IMMEDIATE
-        arg.common.gain_dB = gain_dB
+        if isinstance(gain_dB, (list, tuple, np.ndarray)):
+            if len(gain_dB) != Nch:
+                raise ValueError(self.perror('Incorrect number of gain_db elements'))
+            for i, g in enumerate(gain_dB):
+                arg.common.input_gains_dB[i] = g
+        else:
+            arg.common.gain_dB = gain_dB
+        if isinstance(offset, (list, tuple, np.ndarray)):
+            if len(offset) != Nch:
+                raise ValueError(self.perror('Incorrect number of offset elements'))
+            for i, off in enumerate(offset):
+                arg.common.input_offsets_mV[i] = off*1e3
+        else:
+            arg.common.offset_mV = offset*1e3
         if not equalizer_en:
             arg.common.equ_state = SDK.GSA_EQU_OFF
         ts = [np.zeros(10, np.uint) for i in range(4)]
         tf = [np.zeros(10, np.uint64) for i in range(4)]
         self._gsa_data_res_ts = ts # timestamp in seconds
         self._gsa_data_res_tf = tf # timestamp in femtoseconds
+        def set_addr(np_object, ct):
+            # This used to work
+            #return np_object.ctypes.data_as(POINTER(ct))
+            # Now we need (otherwise some pointers are left and we need to collect_garbage)
+            return pointer(ct.from_address(np_object.ctypes.data))
         for i in range(4):
             res_arr[i].common.timestamp_seconds.size = len(ts[i])
-            res_arr[i].common.timestamp_seconds.arr = ts[i].ctypes.data_as(POINTER(c_uint))
+            #res_arr[i].common.timestamp_seconds.arr = ts[i].ctypes.data_as(POINTER(c_uint))
+            res_arr[i].common.timestamp_seconds.arr = set_addr(ts[i], c_uint)
             res_arr[i].common.timestamp_femtoseconds.size = len(tf[i])
-            res_arr[i].common.timestamp_femtoseconds.arr = tf[i].ctypes.data_as(POINTER(c_uint64))
+            #res_arr[i].common.timestamp_femtoseconds.arr = tf[i].ctypes.data_as(POINTER(c_uint64))
+            res_arr[i].common.timestamp_femtoseconds.arr = set_addr(tf[i], c_uint64)
         if bits_16:
             arg.common.data_type = SDK.GSA_DATA_TYPE_INT15BIT
         else:
             arg.common.data_type = SDK.GSA_DATA_TYPE_SHIFTED8BIT
         arg.hdr.op_command = SDK.GSA_OP_CONFIGURE
+        if force_slower_sampling:
+            # other decimation can be entered but it will only decimate by 2
+            # when sampling is at 32 GSa/s.
+            # Other decimation are possible, but require an extra license.
+            arg.common.decimation_factor = 2
         if ext_ref != 'default':
             if ext_ref == 'int':
                 arg.common.ref_clock_source = 0
@@ -472,9 +523,6 @@ class guzik_adp7104(BaseInstrument):
             raise RuntimeError(self.perror('Unable to finish initializing acq structure.'))
         self._gsa_data_arg = arg
         self._gsa_data_res_arr = res_arr
-        # free previous data memory
-        self.fetch.setcache(None)
-        self._gsa_data = None
         N = res_arr[0].common.data_len
         for i in range(Nch):
             if res_arr[i].common.data_len != N:
@@ -493,7 +541,8 @@ class guzik_adp7104(BaseInstrument):
         #print 'data init done!'
         data_2d = data if Nch>1 else data.reshape((1, -1))
         for i in range(Nch):
-            res_arr[i].common.data.arr = data_2d[i].ctypes.data_as(POINTER(c_ubyte))
+            #res_arr[i].common.data.arr = data_2d[i].ctypes.data_as(POINTER(c_ubyte))
+            res_arr[i].common.data.arr = set_addr(data_2d[i], c_ubyte)
             res_arr[i].common.data.size = data_2d[i].nbytes
         self._gsa_data = data
         # These are to try to obtain the res_arr[i].common.ampl_resolution
@@ -538,6 +587,11 @@ class guzik_adp7104(BaseInstrument):
         return (data-res.common.data_offset)*(res.common.ampl_resolution*1e-3)
 
     def _fetch_getdev(self, raw=True):
+        """
+        options:
+            raw: when True (default) it will return the integer. When False, converts to volts.
+            bin (see get documentation)
+        """
         SDK = self._gsasdk
         arg = self._gsa_data_arg
         res_arr = self._gsa_data_res_arr
