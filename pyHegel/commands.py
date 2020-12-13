@@ -721,6 +721,8 @@ class _Sweep(instruments.BaseInstrument):
                   any extension like '.bin' or false to save as text.
                   with '.npy', it is saved in npy format
                   with '.npz', it is saved using numpy.savez_compressed
+                  Anything else will use numpy tofile and change the extension.
+                  '.ext' does the same but keeps the extension
     """)
     path = instruments.MemoryDevice('')
     graph = instruments.MemoryDevice(True)
@@ -1846,6 +1848,13 @@ def get(dev, filename=None, extra_conf=None, **kwarg):
        extra_conf behaves like in sweep.
 
        The options for the device are listed as keyword arguments (**kwarg).
+       Standard options are (can also see sweep.out):
+          bin:    To overwrite filesave format/extension can be
+                  any extension like '.bin' or false to save as text.
+                  with '.npy', it is saved in npy format
+                  with '.npz', it is saved using numpy.savez_compressed
+                  Anything else will use numpy tofile and change the extension.
+                  '.ext' does the same but keeps the extension
        Example:
             get(dmm1) # uses dmm1.alias which is dmm1.readval
             # use filename and keyword argument unit with value 'db_deg'
