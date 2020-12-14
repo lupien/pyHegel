@@ -167,6 +167,17 @@ class agilent_SMU(visaInstrumentAsync):
     """
     This is to control the E5281B precision medium power SMU modules within
     an E5270B mainframe.
+    Useful devices:
+        readval
+        fetch
+        level
+        compliance
+    To configure the instrument, look at the methods:
+        conf_general
+        conf_integration
+        conf_ch
+        set_mode
+        conf_staircase
     """
     def __init__(self, *args, **kwargs):
         self._wrapped_cached_results = {}
@@ -280,7 +291,7 @@ class agilent_SMU(visaInstrumentAsync):
             full_chs = [[c, 'ch'] for c in self.set_mode()['channels']]
             return full_chs, auto, mode
         auto = auto.lower()
-        if auto not in ['all', 'i', 'v']:
+        if auto not in ['all', 'i', 'v', 'force', 'compliance']:
             raise ValueError(self.perror("Invalid auto setting"))
         if chs is None:
             chs = [i+1 for i,v in enumerate(self._get_enabled_state()) if v]
@@ -289,6 +300,8 @@ class agilent_SMU(visaInstrumentAsync):
         if not isinstance(chs, (list, tuple, np.ndarray)):
             chs = [chs]
         full_chs = []
+        conv_force = dict(voltage='v', current='i')
+        conv_compl = dict(voltage='i', current='v')
         for ch in chs:
             if isinstance(ch, basestring):
                 meas = ch[0].lower()
@@ -301,10 +314,18 @@ class agilent_SMU(visaInstrumentAsync):
             else:
                 if ch not in self._valid_ch:
                     raise ValueError(self.perror('Invalid channel requested'))
-                if auto in ['all', 'i']:
-                    full_chs.append([ch, 'i'])
-                if auto in ['all', 'v']:
-                    full_chs.append([ch, 'v'])
+                if auto in ['force', 'compliance']:
+                    func = self._get_function_cached(ch).mode
+                    if auto == 'force':
+                        func = conv_force[func]
+                    else:
+                        func = conv_compl[func]
+                    full_chs.append([ch, func])
+                else:
+                    if auto in ['all', 'i']:
+                        full_chs.append([ch, 'i'])
+                    if auto in ['all', 'v']:
+                        full_chs.append([ch, 'v'])
         return full_chs, auto, mode
 
     def _fetch_getformat(self,  **kwarg):
@@ -336,8 +357,8 @@ class agilent_SMU(visaInstrumentAsync):
         """
         auto/chs can are only used when measurement_spot_en is True
         auto can be: 'all' (both V and I), 'I' or 'V' to get just one,
-                     force/compliance to get the force value (source) or
-                       the complicance value
+                     'force'/'compliance' to get the force value (source) or
+                       the compliance value
         auto is used when chs is None (all enabled channels)
            or chs is a list of channel numbers.
         Otherwise, chs can also use strings like 'v1' to read the voltage of channel 1
@@ -624,6 +645,15 @@ class agilent_SMU(visaInstrumentAsync):
         """ when call with no parameters, returns all channels settings,
         when called with only one ch selected, only returns its settings.
         Otherwise modifies the settings that are not None
+        range is for the range for the force
+        comp_range is the range for the compliance
+        Vmeas_range, Imeas_range are the measurement range (only works on compliance side)
+        polarity is the value for compliance_polarity_auto_en
+        integrator for integration_type
+        meas_range_comp is range_meas_use_compliance_en
+        filter is output_filter_en
+        series is series_resistor_en
+        meas_auto_type is not used when set_mode mode is set to 'stair'
         """
         para_dict = OrderedDict(function=self.function,
                                 level=self.level,
@@ -740,7 +770,7 @@ class agilent_SMU(visaInstrumentAsync):
         call with no values to see current setup.
         When setting it uses the current settings of ch for func, range and compliance.
         When reading there are the values that will be used.
-        WARNING: you probably don't want the settings of ch after calling this function.
+        WARNING: you probably don't want to change the settings of ch (func, range, compliance) after calling this function.
         end_to can be 'start' or 'stop'
         mode can be 'linear', 'log', 'linear_updown', 'log_updown'
           updown makes it go from start to stop then from stop to start.
@@ -842,14 +872,14 @@ class agilent_SMU(visaInstrumentAsync):
         self.range_voltage = MemoryDevice_ch(0., choices=v_range, doc="""
                                           This is for compliance/force. Not for measurement.
                                           It is a MemoryDevice (so cannot be read from instrument.)
-                                          See active_range_voltage to see what is the instrument using.
+                                          See active_range_voltage to see what the instrument is using.
                                           0. means auto range.
                                           Otherwise the range set is a minimum one. It will use higher ones if necessary.
                                           """)
         self.range_current = MemoryDevice_ch(0., choices=i_range, doc="""
                                           This is for compliance/force. Not for measurement.
                                           It is a MemoryDevice (so cannot be read from instrument.)
-                                          See active_range_current to see what is the instrument using.
+                                          See active_range_current to see what the instrument is using.
                                           0. means auto range.
                                           Otherwise the range set is a minimum one. It will use higher ones if necessary.
                                           """)
@@ -864,11 +894,21 @@ class agilent_SMU(visaInstrumentAsync):
         self.range_current_meas = CommonDevice(self._get_meas_ranges,
                                                lambda v, ch: v[ch-1][0],
                                                'RI {ch},{val}', choices=i_range_meas, ch_mode=True,
-                                               doc='This does not apply on the force channel. Measurement then use the force range.')
+                                               doc="""\
+                                               Negative ranges are fixed range. Positive ranges are limited autoranging ones (can
+                                               autorange to a larger value but will not gol lower.)
+                                               See also range_meas_use_compliance_en. When that is enabled it will override this range on spot measurement
+                                               and instead use the compliance range.
+                                               This does not apply on the force channel. Measurement then use the force range.""")
         self.range_voltage_meas = CommonDevice(self._get_meas_ranges,
                                                lambda v, ch: v[ch-1][1],
                                                'RV {ch},{val}', choices=v_range_meas, ch_mode=True,
-                                               doc='This does not apply on the force channel. Measurement then use the force range.')
+                                               doc="""\
+                                               Negative ranges are fixed range. Positive ranges are limited autoranging ones (can
+                                               autorange to a larger value but will not gol lower.)
+                                               See also range_meas_use_compliance_en. When that is enabled it will override this range on spot measurement
+                                               and instead use the compliance range.
+                                               This does not apply on the force channel. Measurement then use the force range.""")
         self.range_meas_use_compliance_en = MemoryDevice_update(None, False, choices=[True, False], nch=Nmax)
 
         self.remote_display_en = CommonDevice(self._get_display_settings,
