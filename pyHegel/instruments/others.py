@@ -878,6 +878,130 @@ class pfeiffer_turbo_log(visaInstrument):
         super(pfeiffer_turbo_log, self)._create_devs()
 
 #######################################################
+##    Pfeiffer ASM 390 leak detector
+#######################################################
+
+class compressed_fmt(object):
+    """ This is to handle the floating point values returned like
+           123-45 which means 123e-45
+    """
+    def __init__(self, skip_end=None):
+        self._skip_end = skip_end
+    def __call__(self, input_str):
+        if self._skip_end is not None:
+            ok = False
+            for e in self._skip_end:
+                if input_str.endswith(e):
+                    input_str = input_str[:-len(e)]
+                    ok = True
+                    break
+            if not ok:
+                raise RuntimeError('Missing ending character.')
+        if len(input_str) != 6:
+            raise RuntimeError('Invalid floating point value')
+        if input_str[3] not in ['+', '-']:
+            raise RuntimeError('Invalid floating point value')
+        s = input_str[:3] + 'e' + input_str[3:]
+        return float(s)
+
+#@register_instrument('Pfeiffer', 'ASM390', 'L0413 V3.7r01')
+@register_instrument('Pfeiffer', 'ASM390')
+class pfeiffer_leak_detector_ASM390(visaInstrument):
+    """
+    This instruments class will communicate with a Pfeiffer ASM390 leak detector.
+    It uses the advanced mode.
+    It can use the usb connector (which looks like a serial port to the computer)
+    """
+    def __init__(self, visa_addr, *args, **kwargs):
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.asrl:
+            baud_rate = kwargs.pop('baud_rate', 9600)
+            parity = kwargs.pop('parity', visa_wrap.constants.Parity.none)
+            data_bits = kwargs.pop('data_bits', 8)
+            stop_bits = kwargs.pop('data_bits',  visa_wrap.constants.StopBits.one)
+            read_term = kwargs.pop('read_termination', '\r')
+            write_term = kwargs.pop('write_termination', '\r')
+            kwargs['baud_rate'] = baud_rate
+            kwargs['parity'] = parity
+            kwargs['data_bits'] = data_bits
+            kwargs['stop_bits'] = stop_bits
+            kwargs['read_termination'] = read_term
+            kwargs['write_termination'] = write_term
+        super(pfeiffer_leak_detector_ASM390, self).__init__(visa_addr, *args, **kwargs)
+    @locked_calling
+    def read(self, raw=False, count=None, chunk_size=None, skip_response_handler=False):
+        ret = super(pfeiffer_leak_detector_ASM390, self).read(raw=raw, count=count, chunk_size=chunk_size)
+        if skip_response_handler:
+            return ret
+        ak = ret[0]
+        ret = ret[1:]
+        if ak not in ['\x06', '\x15']:
+            raise RuntimeError(self.perror('Invalid aknowledgement received.'))
+        if ak == '\x15':
+            raise RuntimeError(self.perror('Incorrect command.'))
+        return ret
+    def _current_config(self, dev_obj=None, options={}):
+        base = self._conf_helper('tracer_gas', 'autozero_en', 'leak_cal', 'leak_uncal', 'leak_unit', 'pressure_inlet', 'pressure_cell')
+        base += ['status=%r'%self.get_status()]
+        return base + self._conf_helper(options)
+    def idn(self):
+        version = self.ask('?MD')
+        model, firm = version.split(' ', 1)
+        return 'Pfeiffer,%s,NoSerial,%s'%(model, firm)
+    def get_error(self):
+        err = self.ask('?ER')
+        if err == '0':
+            return 'No Error.'
+        else:
+            return err
+    def get_warning(self):
+        err = self.ask('?WA')
+        if err == '0':
+            return 'No Warning.'
+        else:
+            return err
+    def get_status(self):
+        status = self.status.get()
+        st = lambda bit: bool(status&(1<<bit))
+        if not st(2):
+            cycle = 'out'
+        else:
+            n = (status>>3)&3
+            cycle = ['roughing', 'gross leak', 'normal', 'high sensitivity'][n]
+        # bits 12, 13 and 15 should return 1.
+        # However bit 13 seems to be 0.
+        #if not (st(12) and st(13) and st(15)):
+        #    raise RuntimeError(self.perror('Unexpected status value.'))
+        result = dict_improved(filament_used=(status&1)+1,
+                               filament_on=st(1),
+                               cycle=cycle,
+                               sniffing_en=st(5),
+                               autocal_ok=st(6),
+                               control_panel_locked=not st(7),
+                               default_presence=not st(8),
+                               vent_en=st(9),
+                               cycle_start_avail=st(10),
+                               hv_pump_sync=st(11),
+                               sniffer_probe_clogged=not st(14))
+        return result
+    def _create_devs(self):
+        self.pressure_inlet = scpiDevice(getstr='?PE', str_type=compressed_fmt())
+        self.pressure_cell = scpiDevice(getstr='?PS', str_type=compressed_fmt())
+        self.leak_cal = scpiDevice(getstr='?LE', str_type=compressed_fmt(skip_end=['R', 'C']))
+        self.leak_uncal = scpiDevice(getstr='?LE2', str_type=compressed_fmt())
+        self.status = scpiDevice(getstr='?ST', str_type=int)
+        self.leak_unit = scpiDevice('=UN{val}','?UN', choices=ChoiceIndex(
+                            ['mbar.l/s', 'Pa.m3/s', 'Torr.l/s', 'atm.cc/s', 'ppm', 'sccm', 'sccs', 'mTorr.l/s'], offset=1))
+#    These are from the documention but do not work.
+#                            ['ppm', 'mbar.l/s', 'Pa.m3/h', 'Torr.l/s', 'gr/yr', 'oz/yr', 'lb/yr', 'custom']))
+        self.tracer_gas = scpiDevice(getstr='?GZ', choices=ChoiceIndex({2:'H', 3:'He3', 4:'He4'}))
+        self.gage_status = scpiDevice(getstr='?GAU')
+        self.autozero_en = scpiDevice(getstr='?AZ', choices=ChoiceSimpleMap(dict(E=True, D=False)))
+        self.alias = self.leak_cal
+        # This needs to be last to complete creation
+        super(pfeiffer_leak_detector_ASM390, self)._create_devs()
+
+#######################################################
 ##    Agilent TPS-compact
 #######################################################
 
