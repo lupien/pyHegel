@@ -25,16 +25,9 @@ from __future__ import absolute_import
 
 import numpy as np
 from ..instruments_base import BaseInstrument,\
-                            BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice,\
-                            ChoiceBase, ChoiceMultiple, ChoiceMultipleDep,\
-                            ChoiceStrings, ChoiceIndex, ChoiceDevDep, ChoiceLimits,\
-                            make_choice_list, decode_float64, float_as_fixed,\
-                            visa_wrap, locked_calling, wait, ProxyMethod,\
-                            resource_info, _general_check, release_lock_context,\
-                            mainStatusLine
-from ..types import dict_improved
-
-from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
+                            MemoryDevice,\
+                            wait, ProxyMethod
+from ..instruments_registry import register_instrument
 
 from ..ni_dstp import Dstp_Client, TimeStamp
 from collections import OrderedDict
