@@ -1870,6 +1870,11 @@ class agilent_PNAL(visaInstrumentAsync):
     def init(self, full=False):
         self.write(':format REAL,64')
         self.write(':format:border swap')
+        if self.select_trace.get() == '':
+            # The newer firmware does not have a trace selected from the start
+            # So pick one.
+            lst = self.channel_list.getcache()
+            self.select_trace.set(lst.keys()[0])
         super(agilent_PNAL, self).init(full=full)
     @locked_calling
     def _async_trig(self):
