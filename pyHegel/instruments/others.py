@@ -1191,6 +1191,13 @@ class agilent_tps_pump(visaInstrument):
         ret = self.ask(request)
         parsed =  self._parse(ret, window)
         return parsed
+    def _pressure_getdev(self):
+        p = self.pressure_raw.get()
+        if p>1e9:
+            # overange
+            unit = self.pressure_unit.getcache()
+            return {'mbar':1.5e3, 'Pa':150e3, 'Torr':1e3}
+        return p
     def _create_devs(self):
         self.pumping_en = agilent_dev(0, 'boolean', enable_set=True)
         # It does not seem possible to enable low speed
@@ -1198,7 +1205,7 @@ class agilent_tps_pump(visaInstrument):
         self.pump_soft_start_en = agilent_dev(100, 'boolean', enable_set=True)
         self.pressure_unit = agilent_dev(163, 'integer', enable_set=True, choices=ChoiceSimpleMap({0:'mbar', 1:'Pa', 2:'Torr'}))
         #self.pressure = agilent_dev(224, 'exp', autoinit=False)
-        self.pressure = agilent_dev(224, 'exp')
+        self.pressure_raw = agilent_dev(224, 'exp')
         self.rotation_rpm = agilent_dev(226, 'real')
         self.pump_current_mA = agilent_dev(200, 'real')
         self.pump_voltage = agilent_dev(201, 'real')
@@ -1227,6 +1234,7 @@ class agilent_tps_pump(visaInstrument):
         self.pump_cycles = agilent_dev(301, 'real')
         self.pump_life_hour = agilent_dev(302, 'real')
         # Others: 106=Cooling (0:air or water)
+        self._devwrap('pressure')
         self.alias = self.pressure
         # This needs to be last to complete creation
         super(agilent_tps_pump, self)._create_devs()
