@@ -1196,7 +1196,7 @@ class agilent_tps_pump(visaInstrument):
         if p>1e9:
             # overange
             unit = self.pressure_unit.getcache()
-            return {'mbar':1.5e3, 'Pa':150e3, 'Torr':1e3}
+            return {'mbar':1.5e3, 'Pa':150e3, 'Torr':1e3}[unit]
         return p
     def _create_devs(self):
         self.pumping_en = agilent_dev(0, 'boolean', enable_set=True)
