@@ -65,7 +65,8 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
            'iprint', 'ilist', 'dlist', 'find_all_instruments', 'checkmode', 'check',
            'batch', 'sleep', 'load', 'load_all_usb', 'load_all_gpib', 'test_gpib_srq_state',
            'task', 'top', 'kill', '_init_pyHegel_globals', '_faster_timer', 'quiet_KeyboardInterrupt',
-           'Loop_Control']
+           'Loop_Control',
+           'Sequencer', 'Seq_Wait_i', 'Seq_Wait', 'Seq_Func', 'Seq_Funcs', 'Seq_Keep_Going', 'Seq_End']
 
 # not in __all__: local_config _globaldict
 #             _Clock _update_sys_path writevec _get_dev_kw _getheaders
@@ -92,7 +93,7 @@ def _init_pyHegel_globals(g=None, show_greet=True):
         which will do the same (it uses the caller's frame globals).
         It is necessary for load to modify the correct environment and
         for instruments_base to find the proper names.
-        Setting show_greet to False skips displaying the greetings
+        ,Setting show_greet to False skips displaying the greetings
     """
     global _globaldict
     if g is None:
@@ -1608,8 +1609,132 @@ class _Snap(object):
 
 snap = _Snap()
 
-def _record_execafter(command, i, vals):
-    exec command
+class Seq_Wait_i(object):
+    def __init__(self, n_iter_wait):
+        """ n_iter_wait is the number of iterations to wait """
+        self.n_iter_wait = n_iter_wait
+    def __call__(self, param_dict):
+        i = param_dict['i']
+        seq_start_i = param_dict['seq_start_i']
+        return (i-seq_start_i) >= self.n_iter_wait
+
+class Seq_Wait(object):
+    def __init__(self, wait):
+        """ wait time to stay in this sequence in seconds """
+        self.wait = wait
+    def __call__(self, param_dict):
+        dt = time.time() - param_dict['seq_start_time']
+        return dt >= self.wait
+
+class Seq_End(object):
+    """ This will stop the sequencer """
+    def __call__(self, param_dict):
+        return 'end'
+
+class Seq_Keep_Going(object):
+    """ This will never stop the sequencer """
+    def __call__(self, param_dict):
+        return False
+
+class Seq_Func(object):
+    """ This buffers a function for later call """
+    def __init__(self, func, *args, **kwargs):
+        """ will later call func with positional paramters args and keywords parameters kwargs.
+            Extra keyword arguments:
+              seq_force_ret can be True (default) which forces the
+                       the call to always return True, or False to return the result of the func itsetlf.
+              pass_params when True, will add param_dict to the kwargs of the call. It is False by default.
+        """
+        self.func = func
+        self.args = args
+        self.force_ret = kwargs.pop('seq_force_ret', True)
+        self.pass_param = kwargs.pop('pass_param', False)
+        self.kwargs = kwargs
+    def __call__(self, param_dict):
+        kwargs = self.kwargs
+        if self.pass_param:
+            kwargs = kwargs.copy()
+            kwargs['param_dict'] = param_dict
+        ret = self.func(*self.args, **kwargs)
+        if self.force_ret:
+            return True
+        return ret
+
+class Seq_Funcs(object):
+    """ This is a list pf Seq_Func to perform in series, returning the result of the last one. """
+    def __init__(self, *seq_funcs):
+        """ Example of use:
+             Seq_Funcs(Seq_Func(set, magnet.field_target_t, 1), Seq_Func(set, magnet.mode, 'goto_field'))
+        """
+        self.seq_funcs = seq_funcs
+    def __call__(self, param_dict):
+        for seq_func in self.seq_funcs:
+            ret = seq_func(param_dict)
+        return ret
+
+class Sequencer(object):
+    def __init__(self, *operations):
+        """
+        Give a list of operations to perform in sequence.
+        an operation is a callable that will receive a dictionnary of parameters and returns True or False, or 'end'
+         True will move move the next sequence when called.
+         'end' will stop the sequencer (see Seq_End)
+        The paramters dict is the one received by the call augmented with seq_start_i, seq_start_time, seq_start_time_prev,
+         seq_start_first
+        which are the iteration and time of the start of the current operation, the last time of the previous operation and
+         if this is the first call for this operation.
+        If the sequence reaches past the last operation, it will return an 'end'
+        Do build the sequence, you can use:
+            Seq_Wait_I, Seq_Wait, Seq_Func, Seq_Funcs, Seq_End, Seq_Keep_Going
+        For example:
+         Sequencer(Seq_Wait_i(10), Seq_Func(set, magnet.field_target_T, 1), lambda p: get(magnet.ramping), Seq_Wait(20)
+        which will wait 10 iterations, then set the magnet to ramp to 1 T, then wait for the magnet to stop ramping and
+        finally wait 20 seconds.
+        """
+        self.operations = operations
+        self.N = len(operations)
+        self.seq_no = 0
+        self.seq_start_i = 0
+        self.seq_start_time = 0
+        self.seq_start_time_prev = 0
+    def __call__(self, param_dict):
+        if self.seq_no >= self.N:
+            # we keep going when we reach the end of the sequence.
+            return False
+        i = param_dict['i']
+        if i == 0:
+            self.seq_no = 0
+            self.seq_start_i = 0
+        seq_start_first = False
+        if i == self.seq_start_i:
+            self.seq_start_time = time.time()
+            seq_start_first = True
+        # lets not change caller dict
+        param_dict = param_dict.copy()
+        param_dict['seq_start_i'] = self.seq_start_i
+        param_dict['seq_start_time'] = self.seq_start_time
+        param_dict['seq_start_time_prev'] = self.seq_start_time_prev
+        param_dict['seq_start_first'] = seq_start_first
+        ret = self.operations[self.seq_no](param_dict)
+        if ret == 'end':
+            return False
+        if ret:
+            self.seq_no += 1
+            self.seq_start_time_prev = time.time()
+            self.seq_start_i = i+1
+        return True
+
+
+def _record_execafter(command, i, vals, vals_full, iter_total):
+    iter_part = i+1
+    if isinstance(command, basestring):
+        keep_going = True
+        exec (command, _globaldict, locals())
+        return keep_going
+    else:
+        param_dict = dict(i=i, vals=vals, vals_full=vals_full, saved_vals=vals, read_vals=vals_full,
+                iter_part=iter_part, iter_total=iter_total)
+        return command(param_dict)
 
 
 _record_trace_num = 0
@@ -1629,6 +1754,21 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
        The variables i represent the current cycle index.
        The variable vars contain all the values read. It is a flat list
        that contains all the data to be saved on a row of the main file.
+       vals_full still has vector data (saved in extra files) and is unflattened. It starts
+           with the time.
+       iter_part is i+1 (it goes from 1 to iter_total)
+       iter_total is the value of npoints (could be None)
+
+       It can also be a function. The function signature is:
+          func(data_dict)
+       where data_dict is a dictionnary with contents:
+             i: current iteration
+             vals, saved_vals: the data to be saved in the file (like vals above)
+             vals_full, read_vals_full: all the data read, not flatten (like vals_full above)
+             iter_part:  the number of the current interation (goes 1-iter_total)
+             iter_total: the total number of iterations (i.e. npoints)
+       with return value a boolean. When False, stop iterating.
+       See Sequencer for a simple way to produce a sequence of operations (like a field sweep).
 
        In after, you can always read a value with get. Or to prevent actually talking to
        the device (and respond faster) you can obtain the cache value with
@@ -1672,15 +1812,15 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
         while npoints is None or i < npoints:
             tme = clock.get()
             if async:
-                vals = _readall_async(devs, formats, i)
+                vals, vals_full = _readall_async(devs, formats, i, output_full=True)
             else:
-                vals = _readall(devs, formats, i)
+                vals, vals_full = _readall(devs, formats, i, output_full=True)
             if after is not None:
-                _record_execafter(after, i, [tme]+vals)
+                after_ret = _record_execafter(after, i, [tme]+vals, [tme]+vals_full, npoints)
             t.addPoint(tme, gsel(vals))
             if f:
                 writevec(f, [tme]+vals)
-            if t.abort_enabled:
+            if t.abort_enabled or not after_ret:
                 break
             i += 1
             if npoints is None or i < npoints:
