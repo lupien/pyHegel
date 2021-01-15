@@ -21,6 +21,23 @@
 #                                                                            #
 ##############################################################################
 
+"""
+This modules contains functions to perform numerical derivatives in different ways to
+compare them. The all use and return the same vector format.
+Many of the functions require uniform point spacing.
+Functions:
+    D1
+    Dn
+    Du
+    Dfilter
+    Dspline
+Be careful with spline. It is not always easy to pick proper parameters (too much
+or too little smoothing).
+
+For smoothing curves (not derivatives) you might also try the external package statsmodel.
+In particular, statsmodels.nonparametric.smoothers_lowess.lowess
+"""
+
 from __future__ import absolute_import
 
 from numpy import diff
