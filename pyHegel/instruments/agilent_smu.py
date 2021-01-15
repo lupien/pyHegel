@@ -161,12 +161,15 @@ class CommonDevice(BaseDevice):
         super(CommonDevice, self)._checkdev(val)
 
 
+#@register_instrument('Agilent Technologies', 'B1500A', 'A.06.01.2019.0423')
 #@register_instrument('Agilent Technologies', 'E5270B', 'B.01.13')
+@register_instrument('Agilent Technologies', 'B1500A', alias='B1500A SMU', skip_add=True)
 @register_instrument('Agilent Technologies', 'E5270B', alias='E5270B SMU')
 class agilent_SMU(visaInstrumentAsync):
     """
     This is to control the E5281B precision medium power SMU modules within
-    an E5270B mainframe.
+    an E5270B mainframe. And also the B1517A (HR), B1511B (MP) SMU in the
+    B1500A (Semiconductor Device Analyzer) mainframe.
     Useful devices:
         readval
         fetch
@@ -178,9 +181,23 @@ class agilent_SMU(visaInstrumentAsync):
         conf_ch
         set_mode
         conf_staircase
+    Note: The B1500A needs to have the EasyExpert Start button running for
+          remote GPIB to work. Do not start the application.
     """
     def __init__(self, *args, **kwargs):
+        """
+        smu_channel_map when specified, is a dictionnary of slot number (keys) to smu channel
+                number (values). If not given, it will be created with automatically for slots
+                with smu modules in increasing order starting at 1.
+        """
         self._wrapped_cached_results = {}
+        self._smu_channel_map = kwargs.pop('smu_channel_map', None)
+        if self._smu_channel_map is not None:
+            ch_map = self._smu_channel_map
+            N = len(ch_map)
+            if len(set(ch_map.values())) != N:
+                # repeated keys is not possible.
+                raise ValueError('Invalid smu_channel_map: repeated key or value.')
         super(agilent_SMU, self).__init__(*args, **kwargs)
 
     def init(self, full=False):
@@ -247,10 +264,18 @@ class agilent_SMU(visaInstrumentAsync):
         return 0
 
     def get_error(self):
-        errors = self.ask('ERR?')
-        errn = [int(s) for s in errors.split(',')]
-        errm = ['%i: %s'%(e, self.ask('EMG? %i'%e)) for e in errn]
-        return ', '.join(errm)
+        if self._isB1500:
+            error = self.ask('ERRX?')
+            er_no, er_mes = error.split(',', 1)
+            er_no = int(er_no)
+            er_mes = quoted_string()(er_mes)
+            errm = '%i: %s'%(er_no, er_mes)
+        else:
+            errors = self.ask('ERR?')
+            errn = [int(s) for s in errors.split(',')]
+            errm = ['%i: %s'%(e, self.ask('EMG? %i'%e)) for e in errn]
+            errm = ', '.join(errm)
+        return errm
 
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
@@ -287,14 +312,14 @@ class agilent_SMU(visaInstrumentAsync):
     def _fetch_opt_helper(self, chs=None, auto='all'):
         mode = 'spot'
         if not self.measurement_spot_en.get():
-            mode = self.set_mode().mode
+            mode = self.set_mode().meas_mode
             full_chs = [[c, 'ch'] for c in self.set_mode()['channels']]
             return full_chs, auto, mode
         auto = auto.lower()
         if auto not in ['all', 'i', 'v', 'force', 'compliance']:
             raise ValueError(self.perror("Invalid auto setting"))
         if chs is None:
-            chs = [i+1 for i,v in enumerate(self._get_enabled_state()) if v]
+            chs = [self._slot2smu[i+1] for i,v in enumerate(self._get_enabled_state()) if v]
             if len(chs) == 0:
                 raise RuntimeError(self.perror('All channels are off so cannot fetch.'))
         if not isinstance(chs, (list, tuple, np.ndarray)):
@@ -315,7 +340,7 @@ class agilent_SMU(visaInstrumentAsync):
                 if ch not in self._valid_ch:
                     raise ValueError(self.perror('Invalid channel requested'))
                 if auto in ['force', 'compliance']:
-                    func = self._get_function_cached(ch).mode
+                    func = self._get_function_cached(self._smu2slot[ch]).mode
                     if auto == 'force':
                         func = conv_force[func]
                     else:
@@ -420,18 +445,19 @@ class agilent_SMU(visaInstrumentAsync):
             ch = curr_ch.get()
         else:
             curr_ch.set(ch)
-        return ch
+        return self._smu2slot[ch]
 
-    def _level_comp_check_helper(self, fnc, val, comp=False):
+    def _level_comp_check_helper(self, slot, fnc, val, comp=False):
         if fnc.mode == 'disabled':
             raise RuntimeError(self.perror('The output is currently disabled.'))
         mode = fnc.mode
         if comp:
             mode = 'current' if mode == 'voltage' else 'voltage'
         if mode == 'current':
-            _general_check(val, min=-.1, max=.1)
+            mx = self._i_range_max[slot]
         else:
-            _general_check(val, min=-100, max=100)
+            mx = self._v_range_max[slot]
+        _general_check(val, min=-mx, max=mx)
 
     def _function_getdev(self, ch=None):
         """ Possible values are 'voltage', 'current', 'disabled'
@@ -471,7 +497,7 @@ class agilent_SMU(visaInstrumentAsync):
         BaseDevice._checkdev(self.function, val)
         if val != 'disabled' and compliance is not None:
             fnc = dict_improved(mode=val)
-            self._level_comp_check_helper(fnc, compliance, comp=True)
+            self._level_comp_check_helper(ch, fnc, compliance, comp=True)
 
     def _level_getdev(self, ch=None):
         """ ch is the option to select the channel number.
@@ -488,7 +514,7 @@ class agilent_SMU(visaInstrumentAsync):
     def _level_checkdev(self, val, ch=None):
         ch = self._ch_helper(ch)
         fnc = self._get_function_cached(ch)
-        self._level_comp_check_helper(fnc, val, comp=False)
+        self._level_comp_check_helper(ch, fnc, val, comp=False)
 
     def _compliance_getdev(self, ch=None):
         """ ch is the option to select the channel number.
@@ -505,7 +531,7 @@ class agilent_SMU(visaInstrumentAsync):
     def _compliance_checkdev(self, val, ch=None):
         ch = self._ch_helper(ch)
         fnc = self._get_function_cached(ch)
-        self._level_comp_check_helper(fnc, val, comp=True)
+        self._level_comp_check_helper(ch, fnc, val, comp=True)
 
     def _set_level_comp(self, ch, fnc=None, level=None, comp=None):
         if fnc is None:
@@ -609,28 +635,45 @@ class agilent_SMU(visaInstrumentAsync):
         return self._measIV_helper(voltage=False, ch=ch, range=range, rgdev=self.range_current_meas)
 
 
-    def _integration_set_helper(self, speed=True, mode=None, time=None):
+    def _integration_set_helper(self, type='speed', mode=None, time=None):
         prev_result = self._get_avg_time_and_autozero()
-        if speed:
+        if type == 'speed':
             prev_result = prev_result['high_speed']
-            base = 'AIT 0,%s,%i'
-        else:
+            base = 'AIT 0,%s'
+        elif type == 'res':
             prev_result = prev_result['high_res']
-            base = 'AIT 1,%s,%i'
+            base = 'AIT 1,%s'
+        elif type == 'pulse':
+            prev_result = prev_result['pulse']
+            base = 'AIT 2,%s'
+        prev_mode = prev_result[0]
         if mode is None:
-            mode = prev_result[0]
+            mode = prev_mode
+        mode_str = self._integ_choices.tostr(mode)
         if time is None:
+            # If time is not given, switch only the mode, and use the intrument default time
+            if prev_mode != mode:
+                self.write(base%mode_str)
+                return
             time = prev_result[1]
-        if mode == 'plc':
-            time = min(time, 100) # limit to 100.
-        mode = self._integ_choices.tostr(mode)
-        self.write(base%(mode, time))
+        if mode == 'time':
+            base += ',%.7e'
+        else:
+            base += ',%i'
+        self.write(base%(mode_str, time))
 
     def conf_general(self, autozero=None, remote_display=None, auto_calib=None):
+        """\
+        When called with no parameters, returns all settings. Otherwise:
+        autozero sets auto_zero_en (this is only for the high resolution adc)
+        remote_display sets remote_display_en (not usefull on B1500A)
+        auto_calib set calibration_auto_en
+        measurement_spot_en sets measurement_spot_en
+        """
         para_dict = dict(autozero=self.auto_zero_en,
                          remote_display=self.remote_display_en,
                          auto_calib=self.calibration_auto_en,
-                         measurement_spot_en=self.measurement_spot_en )
+                         measurement_spot_en=self.measurement_spot_en)
         params = locals()
         if all(params.get(k) is None for k in para_dict):
             return {k:dev.get() for k, dev in para_dict.items()}
@@ -655,19 +698,19 @@ class agilent_SMU(visaInstrumentAsync):
         series is series_resistor_en
         meas_auto_type is not used when set_mode mode is set to 'stair'
         """
-        para_dict = OrderedDict(function=self.function,
-                                level=self.level,
-                                range=None,
-                                compliance=self.compliance,
-                                comp_range=None,
-                                polarity=self.compliance_polarity_auto_en,
-                                integrator=self.integration_type,
-                                Vmeas_range=self.range_voltage_meas,
-                                Imeas_range=self.range_current_meas,
-                                meas_range_comp=self.range_meas_use_compliance_en,
-                                filter=self.output_filter_en,
-                                series_r=self.series_resistor_en,
-                                meas_auto_type=self.meas_auto_type)
+        para_dict = OrderedDict([('function', self.function),
+                                ('range', None),
+                                ('level', self.level),
+                                ('comp_range', None),
+                                ('compliance', self.compliance),
+                                ('polarity', self.compliance_polarity_auto_en),
+                                ('integrator', self.integration_type),
+                                ('Vmeas_range', self.range_voltage_meas),
+                                ('Imeas_range', self.range_current_meas),
+                                ('meas_range_comp', self.range_meas_use_compliance_en),
+                                ('filter', self.output_filter_en),
+                                ('series_rv', self.series_resistor_en),
+                                ('meas_auto_type', self.meas_auto_type)])
         params = locals()
         def adjust_range(func):
             if func == 'current':
@@ -687,18 +730,42 @@ class agilent_SMU(visaInstrumentAsync):
                 adjust_range(func)
                 result_dict[c] = {k:dev.get() for k, dev in para_dict.items()}
             return result_dict
-        for k, dev in para_dict.items():
-            func = self.function.get(ch=ch)
+        else:
+            func = params.get('function', None)
+            if func is None:
+                func = self.function.get(ch=ch)
             adjust_range(func)
-            val = params.get(k)
-            if val is not None:
-                dev.set(val)
+            for k, dev in para_dict.items():
+                val = params.get(k)
+                if val is not None:
+                    dev.set(val)
 
-    def conf_integration(self, speed_mode=None, speed_time=None, resol_mode=None, resol_time=None):
-        para_dict = dict(speed_mode=self.integration_high_speed_mode,
-                         speed_time=self.integration_high_speed_time,
-                         resol_mode=self.integration_high_resolution_mode,
-                         resol_time=self.integration_high_resolution_time)
+    def conf_integration(self, speed_mode=None, speed_time=None, resol_mode=None, resol_time=None, pulse_mode=None, pulse_time=None):
+        u"""
+        When called with no parameters, returns all settings. Otherwise:
+        speed_mode sets integration_high_speed_mode
+        speed_time sets integration_high_speed_time
+        resol_mode sets integration_high_resolution_mode
+        resol_time sets integration_high_resolution_time
+        pulse_mode sets integration_pulse_mode
+        pulse_time sets integration_pulse_time
+
+        For 'auto' mode the time of averaging is N*initial_average (N is 1-1023 for spped, 1-127 for resol)
+        For 'manual' mode the time of number of averaging is N for speed (1-1023) or
+                        N*(80 µs) for resol (1-127)
+                    (for speed, the number of reading per sample is >256 Sa/cycle. It is not
+                    the 128 that seem to be specified in the datasheet.)
+        For 'plc' the averging time is N*plc (N is 1-100).
+                speed and pulse takes 128 readings per cycle (16.7 ms (60Hz) or 20 ms(50Hz)), resol takes 1.
+        For 'time', you provide the actual measurement time (max of 20 ms). Only valid for speed and pulse.
+        """
+        # OrderedDict to update mode before time, otherwise times are truncated.
+        para_dict = OrderedDict([('speed_mode', self.integration_high_speed_mode),
+                         ('speed_time', self.integration_high_speed_time),
+                         ('resol_mode', self.integration_high_resolution_mode),
+                         ('resol_time', self.integration_high_resolution_time),
+                         ('pulse_mode', self.integration_pulse_mode),
+                         ('pulse_time', self.integration_pulse_time)])
         params = locals()
         if all(params.get(k) is None for k in para_dict):
             return {k:dev.get() for k, dev in para_dict.items()}
@@ -707,44 +774,47 @@ class agilent_SMU(visaInstrumentAsync):
             if val is not None:
                 dev.set(val)
 
-    def set_mode(self, mode=None, channels=None, **kwargs):
+    def set_mode(self, meas_mode=None, channels=None, **kwargs):
         """
-        To use one of these mode, set measurement_spot_en to False
+        This configures one of the instrument internal measurment mode.
+        To use one of these mode, set measurement_spot_en to False.
         if no options are given, it returns the current setting
-        mode can be 'single' or 'stair'
+        meas_mode can be 'single' or 'stair'
         channels is a list of channels to read. When not specified it uses
           the current instrument set, and if never set, all the active channels.
         when using 'stair' extra keywords are passed to conf_staircase
         """
         res = self._get_tn_av_cm_fmt_mm()
         res_mode = res['meas_mode']
-        res_channels = [i+1 for i,v in enumerate(res['enabled']) if v]
-        if mode == channels == None:
-            mode = res_mode
-            channels = res_channels
-            ret = dict_improved([('mode', mode), ('channels', channels)])
-            if mode == 'stair':
+        res_slots = [i+1 for i,v in enumerate(res['enabled']) if v and i+1 in self._smu_slots]
+        if meas_mode == channels == None:
+            meas_mode = res_mode
+            channels = [self._slot2smu[c] for c in res_slots]
+            ret = dict_improved([('meas_mode', meas_mode), ('channels', channels)])
+            if meas_mode == 'stair':
                 ret['stair'] = self.conf_staircase()
             return ret
         valid_modes = dict(single=1, stair=16)
-        if mode is None:
-            mode = res['meas_mode']
-        elif mode not in valid_modes:
-            raise ValueError(self.perror('Selected an invalide mode'))
+        if meas_mode is None:
+            meas_mode = res['meas_mode']
+        elif meas_mode not in valid_modes:
+            raise ValueError(self.perror('Selected an invalide meas_mode'))
         if channels is None:
-             channels = res_channels
+             channels =  [self._slot2smu[c] for c in res_slots]
         elif not isinstance(channels, (list, tuple, np.ndarray)):
             channels = [channels]
         if any(c not in self._valid_ch for c in channels):
             raise ValueError(self.perror('Invalid channel selection'))
         if len(channels) == 0:
             en_ch = self._get_enabled_state()
-            channels = [i+1 for i,v in enumerate(en_ch) if v]
+            en_slots = [i+1 for i,v in enumerate(en_ch) if v]
+            channels =  [self._slot2smu[c] for c in en_slots]
             if len(channels) == 0:
                 raise RuntimeError(self.perror('All channels are disabled. You should enable at least one.'))
-        self.write('MM %i,%s'%(valid_modes[mode], ','.join(map(str, channels))))
+        slots = [self._smu2slot[c] for c in channels]
+        self.write('MM %i,%s'%(valid_modes[meas_mode], ','.join(map(str, slots))))
         N_kwargs = len(kwargs)
-        if mode == 'stair' and N_kwargs > 0:
+        if meas_mode == 'stair' and N_kwargs > 0:
             self.conf_staircase(**kwargs)
         elif N_kwargs > 0:
             raise ValueError(self.perror('extra arguments are invalid'))
@@ -765,7 +835,7 @@ class agilent_SMU(visaInstrumentAsync):
             x = np.concatenate( (x, x[::-1]) )
         self._x_axis = x
 
-    def conf_staircase(self, ch=None, start=None, stop=None, nsteps=None, mode=None, end_to=None, hold=None, delay=None):
+    def conf_staircase(self, ch=None, start=None, stop=None, nsteps=None, mode=None, end_to=None, hold=None, delay=None, Icomp=None, Pcomp=None):
         """
         call with no values to see current setup.
         When setting it uses the current settings of ch for func, range and compliance.
@@ -774,11 +844,13 @@ class agilent_SMU(visaInstrumentAsync):
         end_to can be 'start' or 'stop'
         mode can be 'linear', 'log', 'linear_updown', 'log_updown'
           updown makes it go from start to stop then from stop to start.
+        Icomp is the current compliance. None reuses the previous value. 'empty' will remove the setting.
+        Pcomp is the power compliance. None reuses the previous value. 'empty' will remove the setting.
         """
         func = None
         para_val = locals()
-        params = ['func', 'ch', 'start', 'stop', 'nsteps', 'mode', 'end_to', 'hold', 'delay']
-        params_prev = ['sweep_var', 'sweep_ch', 'start', 'stop', 'steps', 'mode', 'ending_value', 'hold_time', 'delay_time']
+        params = ['func', 'ch', 'start', 'stop', 'nsteps', 'mode', 'end_to', 'hold', 'delay', 'Icomp', 'Pcomp']
+        params_prev = ['sweep_var', 'sweep_ch', 'start', 'stop', 'steps', 'mode', 'ending_value', 'hold_time', 'delay_time', 'compliance', 'power']
         conf = dict_improved([(p,para_val[p]) for p in params])
         allnone = False
         if all(v is None for v in conf.values()):
@@ -787,13 +859,18 @@ class agilent_SMU(visaInstrumentAsync):
         for k in prev_stair.keys():
             if k == 'abort':
                 continue
-            if k in ['active_range', 'power', 'compliance']:
+            if k in ['active_range']:
                 conf[k] = prev_stair[k]
             else:
                 kp = params[params_prev.index(k)]
                 if conf[kp] is None:
                     conf[kp] = prev_stair[k]
+        if conf['Icomp'] is None:
+            conf['Icomp'] = 'empty'
+        if conf['Pcomp'] is None:
+            conf['Pcomp'] = 'empty'
         if allnone:
+            # This will use the previous sweep_var as func if it was available.
             self._calc_x_axis(conf)
             return conf
         del conf['func']
@@ -826,15 +903,24 @@ class agilent_SMU(visaInstrumentAsync):
             raise ValueError(self.perror("Invalid steps (must be 1-1001)."))
         if not (0 <= conf.hold <= 655.35):
             raise ValueError(self.perror("Invalid hold (must be 0-655.35)."))
-        if not (0 <= conf.hold <= 65.535):
+        if not (0 <= conf.delay <= 65.535):
             raise ValueError(self.perror("Invalid delay (must be 0-65.535)."))
         mode_ch = {'linear':1, 'log':2, 'linear_updown':3, 'log_updown':4}
         if conf.mode not in mode_ch:
             raise ValueError(self.perror("Invalid mode (must be one of %r)."%mode_ch.keys()))
         end_to_ch = dict(start=1, stop=2)
         mode = mode_ch[conf.mode]
-        #self.write(base%(conf.ch, mode, sRange, conf.start, conf.stop, conf.nsteps, compliance))
-        self.write(base%(conf.ch, mode, sRange, conf.start, conf.stop, conf.nsteps))
+        slot = self._smu2slot[conf.ch]
+        base_str = base%(slot, mode, sRange, conf.start, conf.stop, conf.nsteps)
+        Pcomp = conf.Pcomp
+        Icomp = conf.Icomp
+        if conf.Pcomp != 'empty' and Icomp == 'empty':
+            Icomp = 20e-3
+        if Icomp != 'empty':
+            base_str += ',%.7e'%Icomp
+        if Pcomp != 'empty':
+            base_str += ',%.7e'%Pcomp
+        self.write(base_str)
         self.write('WT %.7e,%.7e'%(conf.hold, conf.delay))
         self.write('WM 1,%i'%end_to_ch[conf.end_to])
         conf.func = func
@@ -843,30 +929,86 @@ class agilent_SMU(visaInstrumentAsync):
 
     def _create_devs(self):
         self.write('BC') # make sure to empty output buffer
-        valid_ch, options_dict, Nmax = self._get_unit_conf()
-        self._valid_ch = valid_ch
-        self._Nvalid_ch = len(valid_ch)
+        self._isB1500 = self.idn_split()['model'] in ['B1500A']
+        valid_ch, options_dict, smu_slots, Nmax = self._get_unit_conf()
+        #self._valid_ch = valid_ch
+        #self._Nvalid_ch = len(valid_ch)
+        self._valid_all_ch = valid_ch
+        self._Nvalid_all_ch = len(valid_ch)
         self._unit_conf = options_dict
-        self._N_channels = Nmax
-        self.current_channel = MemoryDevice(valid_ch[0], choices=valid_ch)
-        # E5281B/E5287A also has 5:0.5, 50:5.; 5280B/E5290A also has 2000:200.
-        v_range = ChoiceIndex({0:0., 5:0.5, 20:2., 50:5., 200:20., 400:40., 1000:100.})
-        v_range_meas =  ChoiceIndex({0:0., 5:0.5,   20:2.,   50:5.,   200:20.,   400:40.,   1000:100.,
-                                          -5:-0.5, -20:-2., -50:-5., -200:-20., -400:-40., -1000:-100.})
-        self._v_range_meas_choices = v_range_meas
+        self._smu_slots = smu_slots
+        #self._valid_ch = smu_slots
+        #self._Nvalid_ch = len(smu_slots)
+        self._N_slots = Nmax
+        if self._smu_channel_map is None:
+            self._smu_channel_map = {s:(i+1) for i,s in enumerate(smu_slots)}
+        if len(self._smu_channel_map) != len(smu_slots):
+            print "Warning: missing some channels in the smu_channel_map"
+        if [s for s in self._smu_channel_map.keys() if s not in smu_slots] != []:
+            raise ValueError('smu_channel_map is using slots which are not smus.')
+        self._slot2smu = self._smu_channel_map
+        self._smu2slot = {c:s for s,c in self._smu_channel_map.items()}
+        self._valid_ch = sorted(self._smu_channel_map.values())
+        self._Nvalid_ch = len(self._valid_ch)
+        smu_chs = self._valid_ch
+        smu_slots = self._smu2slot.items()
+
+        self.current_channel = MemoryDevice(smu_chs[0], choices=smu_chs)
+        #v_range = ChoiceIndex({0:0., 5:0.5, 20:2., 50:5., 200:20., 400:40., 1000:100.})
+        v_range_all = ChoiceIndex({0:0., 20:2., 5:0.5, 20:2., 50:5., 200:20., 400:40., 1000:100., 2000:200.})
+        v_range_HRMP = ChoiceIndex({0:0., 5:0.5, 20:2., 50:5., 200:20., 400:40., 1000:100.})
+        v_range_HP = ChoiceIndex({0:0., 20:2., 200:20., 400:40., 1000:100., 2000:200.})
+        v_range_MC = ChoiceIndex({0:0.,  2:0.2,   20:2.,   200:20.,   400:40.})
+        #v_range_meas =  ChoiceIndex({0:0., 5:0.5,   20:2.,   50:5.,   200:20.,   400:40.,   1000:100.,
+        #                                  -5:-0.5, -20:-2., -50:-5., -200:-20., -400:-40., -1000:-100.})
+        v_range_meas_HRMP =  ChoiceIndex({0:0., 5:0.5,   20:2.,   50:5.,   200:20.,   400:40.,   1000:100.,
+                                               -5:-0.5, -20:-2., -50:-5., -200:-20., -400:-40., -1000:-100.})
+        v_range_meas_HP =  ChoiceIndex({0:0.,  20:2.,   200:20.,   400:40.,   1000:100.,   2000:200.,
+                                              -20:-2., -200:-20., -400:-40., -1000:-100., -2000:-200.})
+        v_range_meas_MC =  ChoiceIndex({0:0.,  2:0.2,   20:2.,   200:20.,   400:40.,
+                                              -2:-0.2, -20:-2., -200:-20., -400:-40.})
+        v_range_meas_all =  ChoiceIndex({0:0., 5:0.5,   20:2.,   50:5.,   200:20.,   400:40.,   1000:100.,   2000:200.,
+                                              -5:-0.5, -20:-2., -50:-5., -200:-20., -400:-40., -1000:-100., -2000:-200.})
+        self._v_range_meas_choices = v_range_meas_all
+        sel = {'HRSMU':v_range_HRMP, 'MPSMU':v_range_HRMP, 'HPSMU':v_range_HP, 'MCSMU':v_range_MC}
+        v_range = ChoiceDevDep(self.current_channel, {ch:sel[self._unit_conf[slot][1]] for ch,slot in smu_slots})
+        sel = {'HRSMU':v_range_meas_HRMP, 'MPSMU':v_range_meas_HRMP, 'HPSMU':v_range_meas_HP, 'MCSMU':v_range_meas_MC}
+        v_range_meas = ChoiceDevDep(self.current_channel, {ch:sel[self._unit_conf[slot][1]] for ch,slot in smu_slots})
+        sel = {'HRSMU':100., 'MPSMU':100., 'HPSMU':200., 'MCSMU':40.}
+        self._v_range_max = {slot:sel[self._unit_conf[slot][1]] for ch,slot in smu_slots}
         # E5287A+E5288A ASU has: 8:1e-12
         # E5287A has: 9:10e-12, 10: 100e-12
         # E5280B/E5281B/E5287A has: 11:1e-9, 12:10e-9
         # E5291A has: 20:200e-3
-        # E5280B/E5290A has: 20:1.
-        i_range = ChoiceIndex({0:0., 11:1e-9, 12:10e-9, 13:100e-9, 14:1e-6, 15:10e-6, 16:100e-6, 17:1e-3, 18:10e-3, 19:100e-3})
-        i_range_meas = ChoiceIndex({0:0., 11:1e-9,   12:10e-9,   13:100e-9,   14:1e-6,   15:10e-6,   16:100e-6,   17:1e-3,   18:10e-3,   19:100e-3,
-                                         -11:-1e-9, -12:-10e-9, -13:-100e-9, -14:-1e-6, -15:-10e-6, -16:-100e-6, -17:-1e-3, -18:-10e-3, -19:-100e-3})
-        self._i_range_meas_choices = i_range_meas
+        #i_range = ChoiceIndex({0:0., 11:1e-9, 12:10e-9, 13:100e-9, 14:1e-6, 15:10e-6, 16:100e-6, 17:1e-3, 18:10e-3, 19:100e-3})
+        i_range_all = ChoiceIndex({0:0., 8:1e-12, 9:10e-12, 10:100e-12, 11:1e-9, 12:10e-9, 13:100e-9, 14:1e-6, 15:10e-6, 16:100e-6, 17:1e-3, 18:10e-3, 19:100e-3, 20:1.})
+        i_range_HR = ChoiceIndex({0:0., 9:10e-12, 10:100e-12, 11:1e-9, 12:10e-9, 13:100e-9, 14:1e-6, 15:10e-6, 16:100e-6, 17:1e-3, 18:10e-3, 19:100e-3})
+        i_range_MP = ChoiceIndex({0:0., 11:1e-9, 12:10e-9, 13:100e-9, 14:1e-6, 15:10e-6, 16:100e-6, 17:1e-3, 18:10e-3, 19:100e-3})
+        i_range_HP = ChoiceIndex({0:0., 11:1e-9, 12:10e-9, 13:100e-9, 14:1e-6, 15:10e-6, 16:100e-6, 17:1e-3, 18:10e-3, 19:100e-3, 20:1.})
+        i_range_MC = ChoiceIndex({0:0., 15:10e-6, 16:100e-6, 17:1e-3, 18:10e-3, 19:100e-3, 20:1.})
+        #i_range_meas = ChoiceIndex({0:0., 11:1e-9,   12:10e-9,   13:100e-9,   14:1e-6,   15:10e-6,   16:100e-6,   17:1e-3,   18:10e-3,   19:100e-3,
+        #                                 -11:-1e-9, -12:-10e-9, -13:-100e-9, -14:-1e-6, -15:-10e-6, -16:-100e-6, -17:-1e-3, -18:-10e-3, -19:-100e-3})
+        i_range_meas_HR = ChoiceIndex({0:0.,  9:10e-12,   10:100e-12,   11:1e-9,   12:10e-9,   13:100e-9,   14:1e-6,   15:10e-6,   16:100e-6,   17:1e-3,   18:10e-3,   19:100e-3,
+                                             -9:-10e-12, -10:-100e-12, -11:-1e-9, -12:-10e-9, -13:-100e-9, -14:-1e-6, -15:-10e-6, -16:-100e-6, -17:-1e-3, -18:-10e-3, -19:-100e-3})
+        i_range_meas_MP = ChoiceIndex({0:0., 11:1e-9,   12:10e-9,   13:100e-9,   14:1e-6,   15:10e-6,   16:100e-6,   17:1e-3,   18:10e-3,   19:100e-3,
+                                            -11:-1e-9, -12:-10e-9, -13:-100e-9, -14:-1e-6, -15:-10e-6, -16:-100e-6, -17:-1e-3, -18:-10e-3, -19:-100e-3})
+        i_range_meas_HP = ChoiceIndex({0:0., 11:1e-9,   12:10e-9,   13:100e-9,   14:1e-6,   15:10e-6,   16:100e-6,   17:1e-3,   18:10e-3,   19:100e-3,   20:1.,
+                                            -11:-1e-9, -12:-10e-9, -13:-100e-9, -14:-1e-6, -15:-10e-6, -16:-100e-6, -17:-1e-3, -18:-10e-3, -19:-100e-3, -20:-1.})
+        i_range_meas_MC = ChoiceIndex({0:0., 15:10e-6,   16:100e-6,   17:1e-3,   18:10e-3,   19:100e-3,   20:1.,
+                                            -15:-10e-6, -16:-100e-6, -17:-1e-3, -18:-10e-3, -19:-100e-3, -20:-1.})
+        i_range_meas_all = ChoiceIndex({0:0.,  9:10e-12,   10:100e-12,   11:1e-9,   12:10e-9,   13:100e-9,   14:1e-6,   15:10e-6,   16:100e-6,   17:1e-3,   18:10e-3,   19:100e-3,   20:1.,
+                                              -9:-10e-12, -10:-100e-12, -11:-1e-9, -12:-10e-9, -13:-100e-9, -14:-1e-6, -15:-10e-6, -16:-100e-6, -17:-1e-3, -18:-10e-3, -19:-100e-3, -20:-1.})
+        self._i_range_meas_choices = i_range_meas_all
+        sel = {'HRSMU':i_range_HR, 'MPSMU':i_range_MP, 'HPSMU':i_range_HP, 'MCSMU':i_range_MC}
+        i_range = ChoiceDevDep(self.current_channel, {ch:sel[self._unit_conf[slot][1]] for ch,slot in smu_slots})
+        sel = {'HRSMU':i_range_meas_HR, 'MPSMU':i_range_meas_MP, 'HPSMU':i_range_meas_HP, 'MCSMU':i_range_meas_MC}
+        i_range_meas = ChoiceDevDep(self.current_channel, {ch:sel[self._unit_conf[slot][1]] for ch,slot in smu_slots})
+        sel = {'HRSMU':100e-3, 'MPSMU':100e-3, 'HPSMU':1., 'MCSMU':1.}
+        self._i_range_max = {slot:sel[self._unit_conf[slot][1]] for ch,slot in smu_slots}
 
         def MemoryDevice_ch(*args, **kwargs):
             args = (self._set_level_comp,) + args
-            kwargs['nch'] = Nmax
+            kwargs['nch'] = Nmax # Uses internal array of slots
             return MemoryDevice_update(*args, **kwargs)
 
         self.range_voltage = MemoryDevice_ch(0., choices=v_range, doc="""
@@ -936,25 +1078,42 @@ class agilent_SMU(visaInstrumentAsync):
                                            'CMM {ch},{val}', ch_mode=True,
                                            choices=ChoiceIndex(['compliance', 'current', 'voltage', 'force']))
 
-        self._integ_choices = ChoiceIndex(['auto', 'manual', 'plc'])
+        hr_integ = ChoiceIndex(['auto', 'manual', 'plc'])
+        if self._isB1500:
+            self._integ_choices = ChoiceIndex(['auto', 'manual', 'plc', 'time'])
+            pulse_integ =  ChoiceIndex(['plc', 'time'])
+        else:
+            self._integ_choices = hr_integ
         self.integration_high_speed_mode = CommonDevice(self._get_avg_time_and_autozero,
                                                              lambda v: v['high_speed'][0],
-                                                             lambda self, val: self.instr._integration_set_helper(speed=True, mode=val),
+                                                             lambda self, val: self.instr._integration_set_helper(type='speed', mode=val),
                                                              choices=self._integ_choices)
         self.integration_high_resolution_mode = CommonDevice(self._get_avg_time_and_autozero,
                                                              lambda v: v['high_res'][0],
-                                                             lambda self, val: self.instr._integration_set_helper(speed=False, mode=val),
-                                                             choices=self._integ_choices)
+                                                             lambda self, val: self.instr._integration_set_helper(type='res', mode=val),
+                                                             choices=hr_integ)
         self.integration_high_speed_time = CommonDevice(self._get_avg_time_and_autozero,
                                                              lambda v: v['high_speed'][1],
-                                                             lambda self, val: self.instr._integration_set_helper(speed=True, time=val),
-                                                             type=int, min=1, max=1023, setget=True,
-                                                             doc=""" time is internally limited to 100 for plc mode """)
+                                                             lambda self, val: self.instr._integration_set_helper(type='speed', time=val),
+                                                             choices=ChoiceDevDep(self.integration_high_speed_mode, dict(auto=ChoiceLimits(1, 1023, int), manual=ChoiceLimits(1, 1023, int), plc=ChoiceLimits(1, 100, int), time=ChoiceLimits(2e-6, 20e-3, float))),
+                                                             setget=True,
+                                                             doc=""" allowed values depends on integration_high_speed_mode """)
         self.integration_high_resolution_time = CommonDevice(self._get_avg_time_and_autozero,
                                                              lambda v: v['high_res'][1],
-                                                             lambda self, val: self.instr._integration_set_helper(speed=False, time=val),
-                                                             type=int, min=1, max=127, setget=True,
-                                                             doc=""" time is internally limited to 100 for plc mode """)
+                                                             lambda self, val: self.instr._integration_set_helper(type='res', time=val),
+                                                             choices=ChoiceDevDep(self.integration_high_resolution_mode, dict(auto=ChoiceLimits(1, 127, int), manual=ChoiceLimits(1, 127, int), plc=ChoiceLimits(1, 100, int))),
+                                                             setget=True,
+                                                             doc=""" allowed values depends on integration_high_resolution_mode """)
+        if self._isB1500:
+            self.integration_pulse_mode = CommonDevice(self._get_avg_time_and_autozero,
+                                                                 lambda v: v['pulse'][0],
+                                                                 lambda self, val: self.instr._integration_set_helper(type='pulse', mode=val),
+                                                                 choices=self._integ_choices)
+            self.integration_pulse_time = CommonDevice(self._get_avg_time_and_autozero,
+                                                                 lambda v: v['pulse'][1],
+                                                                 lambda self, val: self.instr._integration_set_helper(type='pulse', time=val),
+                                                                 choices=ChoiceDevDep(self.integration_pulse_mode, dict(plc=ChoiceLimits(1, 100, int), time=ChoiceLimits(2e-6, 20e-3, float))),
+                                                                 doc=""" allowed values depends on integration_pulse_mode """)
 
         self.measurement_spot_en = MemoryDevice(True, choices=[True, False],
                                                 doc="""
@@ -979,7 +1138,7 @@ class agilent_SMU(visaInstrumentAsync):
     @cache_result
     def _get_enabled_state(self):
         "Returns the enabled state of each channels"
-        N = self._N_channels
+        N = self._N_slots
         ret = self.ask("*LRN? 0")
         state = [False]*N
         if ret == 'CL':
@@ -1037,7 +1196,7 @@ class agilent_SMU(visaInstrumentAsync):
     @cache_result
     def _get_filters(self):
         "Returns the filter enabled state of each channels"
-        N = self._N_channels
+        N = self._N_slots
         ret = self.ask("*LRN? 30")
         state = [False]*N
         if ret == 'FL0':
@@ -1057,7 +1216,7 @@ class agilent_SMU(visaInstrumentAsync):
                 if state[i-1] is not None:
                     raise RuntimeError(self.perror('Unexpected filter date (repeat)'))
                 state[i-1]  = True
-            for ch in self._valid_ch:
+            for ch in self._smu_slots:
                 i = ch-1
                 if state[i] is None:
                     raise RuntimeError(self.perror('Unexpected missing entry for _get_filters'))
@@ -1076,7 +1235,7 @@ class agilent_SMU(visaInstrumentAsync):
         vals = [types[i](v) for i,v in enumerate(vs)]
         return vals
 
-    def _get_values_helper(self, lrn_type, basename, types=[int], Nv_min=None):
+    def _get_values_helper(self, lrn_type, basename, types=[int], Nv_min=None, skip_empty=False):
         """ This parses entries like (for basename='AA', types=[float, int])
                 AA1,1.,3;AA2,5.,6;AA3...
             with the first integer after AA the ch num
@@ -1084,7 +1243,7 @@ class agilent_SMU(visaInstrumentAsync):
                 AA1,a1;BB1,b1;AA2,a2;BB2,b2 ...
             and returns result as [[a1,b1], [a1,b2], ...]
         """
-        Nch = self._N_channels
+        Nch = self._N_slots
         Nvalid_ch = self._Nvalid_ch
         if not isinstance(basename, (list, tuple)):
             basename = [basename]
@@ -1106,6 +1265,8 @@ class agilent_SMU(visaInstrumentAsync):
             Nv_min += 1
         ret = self.ask("*LRN? %i"%lrn_type)
         rs = ret.split(';')
+        if skip_empty:
+            rs = [r for r in rs if r != '']
         if len(rs) != Nvalid:
             raise RuntimeError(self.perror('Invalid number of entries for %i'%lrn_type))
         for r, b, off in zip(rs, basename, base_offsets):
@@ -1115,7 +1276,7 @@ class agilent_SMU(visaInstrumentAsync):
             if state[i] is not None:
                 raise RuntimeError(self.perror('Unexpected repeat entry for %i'%lrn_type))
             state[i] = vals[1] if one_val else vals[1:]
-        for ch in self._valid_ch:
+        for ch in self._smu_slots:
             i = ch-1
             b = i*Nbasename
             if None in state[b:b+Nbasename]:
@@ -1125,7 +1286,7 @@ class agilent_SMU(visaInstrumentAsync):
         return state
 
     def _only_valid_ch(self, list):
-        return [l for i,l in enumerate(list) if i+1 in self._valid_ch]
+        return [l for i,l in enumerate(list) if i+1 in self._smu_slots]
 
     def _apply_ch_changes(self, quant_ch, states):
         for i, state in enumerate(states):
@@ -1146,7 +1307,14 @@ class agilent_SMU(visaInstrumentAsync):
     @cache_result
     def _get_ad_converter_highres_en(self): # vs high_speed
         option_type = self.integration_type.choices
-        states = self._get_values_helper(55, 'AAD', option_type )
+        if self._isB1500:
+            # the second AAD is for pulse and is always 2
+            # Also the current firmware returns ;; between groups:
+            #  'AAD3,0;AAD3,2;;AAD4,0;AAD4,2;;AAD5,0;AAD5,2;;AAD6,0;AAD6,2;'
+            states = self._get_values_helper(55, ['AAD', 'AAD'], skip_empty=True)
+            states = [option_type(s[0][0]) if s[0] is not None else None for s in states]
+        else:
+            states = self._get_values_helper(55, 'AAD', option_type)
         return states
 
     @cache_result
@@ -1167,15 +1335,26 @@ class agilent_SMU(visaInstrumentAsync):
     def _get_avg_time_and_autozero(self):
         ret = self.ask("*LRN? 56")
         rs = ret.split(';')
-        if len(rs) != 3:
+        if self._isB1500:
+            N = 4
+            az = 3
+        else:
+            N = 3
+            az = 2
+            pulse = ['time', 0.]
+        if len(rs) != N:
             raise RuntimeError(self.perror('Invalid number of elemnts for lrn 56'))
         mode_type = self._integ_choices
-        high_speed = self._parse_block_helper(rs[0], 'AIT0,', [mode_type, int]) # mode(0=auto, 1=manual, 2=PLC), time
-        high_res = self._parse_block_helper(rs[1], 'AIT1,', [mode_type, int]) # mode(0=auto, 1=manual, 2=PLC), time
-        autozero_en = self._parse_block_helper(rs[2], 'AZ', [lambda s: bool(int(s))])
+        # TODO float for mode time otherwise int
+        high_speed = self._parse_block_helper(rs[0], 'AIT0,', [mode_type, float]) # mode(0=auto, 1=manual, 2=PLC), time
+        high_res = self._parse_block_helper(rs[1], 'AIT1,', [mode_type, float]) # mode(0=auto, 1=manual, 2=PLC), time
+        if self._isB1500:
+            pulse = self._parse_block_helper(rs[2], 'AIT2,', [mode_type, float])
+        autozero_en = self._parse_block_helper(rs[az], 'AZ', [lambda s: bool(int(s))])
         return dict(high_speed=high_speed,
                     high_res=high_res,
-                    autozero_en=autozero_en[0])
+                    autozero_en=autozero_en[0],
+                    pulse=pulse)
 
     @cache_result
     def _get_tn_av_cm_fmt_mm(self):
@@ -1188,7 +1367,7 @@ class agilent_SMU(visaInstrumentAsync):
         average_high_speed_adc = self._parse_block_helper(rs[1], 'AV', [int, int], Nv_min=1) # number, mode
         auto_cal_en = self._parse_block_helper(rs[2], 'CM', [lambda s: bool(int(s))])
         outfmt = self._parse_block_helper(rs[3], 'FMT', [int, int]) # format, mode
-        enabled = [False]*self._N_channels
+        enabled = [False]*self._N_slots
         if N == 5:
             mm_modes = {1:'single', 2:'staircase', 3:'pulsed spot', 4:'pulsed sweep', 5:'staircase pulsed bias',
                         9:'quasi-pulsed spot', 14:'linear search', 15:'binary search', 16:'stair'}
@@ -1239,6 +1418,8 @@ class agilent_SMU(visaInstrumentAsync):
             raise RuntimeError(self.perror('Invalid number of elements for lrn 33'))
         abort, end = self._parse_block_helper(rs[0], 'WM', [int, int])
         delays = self._parse_block_helper(rs[1], 'WT', [float]*5)
+        if any(delays[2:]):
+            raise RuntimeError('Did not get expected 0. for Sdelay, Tdelay, Mdelay')
         ret_dict = dict_improved(ending_value = {1:'start', 2:'end'}[end],
                         hold_time = delays[0],
                         delay_time = delays[1],
@@ -1256,8 +1437,8 @@ class agilent_SMU(visaInstrumentAsync):
                 ch = stair[0]
                 ret_dict['sweep_var'] = 'voltage'
                 ret_dict['active_range'] = stair[2]/10.
-            comp = None if len(stair) < 7 else stair[6]
-            power = None if len(stair) < 8 else stair[7]
+            comp = 'empty' if len(stair) < 7 else stair[6]
+            power = 'empty' if len(stair) < 8 else stair[7]
             mode_opt = {1:'linear', 2:'log', 3:'linear updown', 4:'log updown'}
             ret_dict.update(dict(sweep_ch = ch,
                                  mode = mode_opt[stair[1]],
@@ -1305,19 +1486,40 @@ class agilent_SMU(visaInstrumentAsync):
         #   like 'E5281B,0;E5281B,0;E5281B,0;E5281B,0;0,0;0,0;0,0;0,0'
         ret = self.ask('UNT?')
         rs = ret.split(';')
-        Nmax = len(rs) # should be 8 for E5270B mainframe
+        Nmax = len(rs) # should be 8 for E5270B mainframe, 10 for B1500A
         options = [r.split(',')for r in rs]
         options_en = [o[0] != '0' for o in options]
         options_dict = {}
         valid_ch = []
+        smu_slots = []
         N = 0
         for i, opt in enumerate(options):
             if options_en[i]:
                 N += 1
                 ch = i+1
                 valid_ch.append(ch)
-                options_dict[ch] = opt
-        return valid_ch, options_dict, Nmax
+                o = opt[0]
+                if o in ['E5280B', 'B1510A']:
+                    t = 'HPSMU'
+                elif o in ['E5281B', 'B1511A', 'B1511B']:
+                    t = 'MPSMU'
+                elif o in ['E5287A', 'B1517A']:
+                    t = 'HRSMU'
+                elif o in ['B1520A']:
+                    t = 'MFCMU'
+                elif o in ['B1514A']:
+                    t = 'MCSMU'
+                elif o in ['B1525A']:
+                    t = 'HVSPGU'
+                elif o in ['B1530A']:
+                    t = 'WGFMU'
+                else:
+                    t = 'UNKNOWN'
+                options_dict[ch] = (opt, t)
+                if t in ['HPSMU', 'MPSMU', 'HRSMU']:
+                    smu_slots.append(ch)
+            o = opt[0]
+        return valid_ch, options_dict, smu_slots, Nmax
 
 
 
