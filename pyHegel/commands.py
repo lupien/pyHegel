@@ -1684,10 +1684,12 @@ class Sequencer(object):
         which are the iteration and time of the start of the current operation, the last time of the previous operation and
          if this is the first call for this operation.
         If the sequence reaches past the last operation, it will return an 'end'
-        Do build the sequence, you can use:
-            Seq_Wait_I, Seq_Wait, Seq_Func, Seq_Funcs, Seq_End, Seq_Keep_Going
+
+        To build the sequence, you can use:
+            Seq_Wait_i, Seq_Wait, Seq_Func, Seq_Funcs, Seq_End, Seq_Keep_Going
+
         For example:
-         Sequencer(Seq_Wait_i(10), Seq_Func(set, magnet.field_target_T, 1), lambda p: get(magnet.ramping), Seq_Wait(20)
+         Sequencer( Seq_Wait_i(10), Seq_Func(set, magnet.field_target_T, 1), lambda p: get(magnet.ramping), Seq_Wait(20) )
         which will wait 10 iterations, then set the magnet to ramp to 1 T, then wait for the magnet to stop ramping and
         finally wait 20 seconds.
         """
