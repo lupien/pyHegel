@@ -39,7 +39,11 @@ class ProxyMethod(object):
 #   files: nati_dstp_basics.py, dstp.py and dstp_async.py
 
 def pack_bytes(byte_list):
-    return np.asarray(byte_list,dtype='uint8').tobytes()
+    try:
+        return np.asarray(byte_list,dtype='uint8').tobytes()
+    except AttributeError:
+        # For older python versions
+        return np.asarray(byte_list,dtype='uint8').tostring()
 
 array_type = pack_bytes([0, 8])
 composite_type = pack_bytes([1, 8])
