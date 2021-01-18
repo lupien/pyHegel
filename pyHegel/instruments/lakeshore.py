@@ -1911,6 +1911,13 @@ class lakeshore_625(visaInstrument):
             return {False:'ramping', True:'paused'}[oper.ramp_done]
         return pers # so either warming or cooling
 
+    def is_ramping(self):
+        """ Returns True when the magnet is ramping the field """
+        return self._get_states() in ['ramping']
+    def is_stable(self):
+        """ Returns True when the magnet is not ramping nor changing the heat switch """
+        return self._get_states() in ['paused']
+
     def _ramping_helper(self, stay_states, end_states=None, extra_wait=None):
         wait(0.2) # wait some time to allow previous change to affect the _get_states results.
         to = time.time()
