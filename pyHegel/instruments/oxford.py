@@ -419,6 +419,14 @@ class oxford_ips120_10(visaInstrument):
             return 'paused'
         return 'ramping'
 
+    def is_ramping(self):
+        """ Returns True when the magnet is ramping the field """
+        return self._get_states() in ['ramping']
+    def is_stable(self):
+        """ Returns True when the magnet is not ramping """
+        return self._get_states() in ['paused']
+
+
     def _ramping_helper(self, stay_states, end_states=None, extra_wait=None, isTesla=True):
         if isTesla:
             target = self.field_target_T
