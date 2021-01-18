@@ -75,13 +75,15 @@ class OxfordTimeoutError(OxfordError):
         down on the instrument """
 
 def _ramp_setdev_factory(isTesla):
-    def _ramp_setdev(self, val, return_persistent='auto', wait=None, quiet=True):
+    def _ramp_setdev(self, val, return_persistent='auto', wait=None, quiet=True, no_wait_end=False):
         """ Goes to the requested setpoint and then waits until it is reached.
             After the instrument says we have reached the setpoint, we wait for the
             duration set by ramp_wait_after (in s).
             return_persistent can be True (always), False (never) or 'auto' (the default)
                               which returns to state from start of ramp.
             wait can be used to set a wait time (in s) after the ramp. It overrides ramp_wait_after.
+            no_wait_end when True, will skip waiting for the ramp to finish and return immediately after
+                      starting the ramp. Useful for record sequence. This will not work when changing sign.
             When going to persistence it waits persistent_wait_before before cooling the switch.
 
             When using get, returns the magnet %s.
@@ -98,13 +100,15 @@ def _ramp_setdev_factory(isTesla):
             # Now change the field
             print_if('Ramping...')
             if return_persistent == True or (return_persistent == 'auto' and not prev_switch_en):
-                self._do_ramp(val, self.psh_wait_before.getcache(), isTesla=isTesla)
+                self._do_ramp(val, self.psh_wait_before.getcache(), isTesla=isTesla, no_wait_end=no_wait_end)
+                if no_wait_end:
+                    return
                 self.do_persistent(to_pers=True, quiet=quiet, extra_wait=wait, isTesla=isTesla)
             else:
-                self._do_ramp(val, wait, isTesla=isTesla)
+                self._do_ramp(val, wait, isTesla=isTesla, no_wait_end=no_wait_end)
         else: # no persistent switch installed
             print_if('Ramping...')
-            self._do_ramp(val, wait, isTesla=isTesla)
+            self._do_ramp(val, wait, isTesla=isTesla, no_wait_end=no_wait_end)
     extra = 'field' if isTesla else 'current'
     _ramp_setdev.__doc__ = _ramp_setdev.__doc__%extra
     return _ramp_setdev
@@ -539,7 +543,7 @@ class oxford_ips120_10(visaInstrument):
                     raise RuntimeError(self.perror('persistent switch is in a fault.'))
         return orig_switch_en
 
-    def _do_ramp(self, current_target, wait, isTesla=True):
+    def _do_ramp(self, current_target, wait, isTesla=True, no_wait_end=False):
         if current_target == 0:
             self.set_activity('to zero')
         else:
@@ -549,14 +553,17 @@ class oxford_ips120_10(visaInstrument):
             else:
                 self.current_target.set(current_target)
             self.set_activity('to setpoint')
+        if no_wait_end:
+            wait(0.2) # wait some time to allow previous change to affect the _get_states results.
+            return
         self._ramping_helper('ramping', 'paused', wait, isTesla=isTesla)
 
-    def _ramp_current_checkdev(self, val, return_persistent='auto', wait=None, quiet=True):
+    def _ramp_current_checkdev(self, val, return_persistent='auto', wait=None, quiet=True, no_wait_end=False):
         if return_persistent not in [True, False, 'auto']:
             raise ValueError(self.perror("Invalid return_persistent option. Should be True, False or 'auto'"))
         BaseDevice._checkdev(self.ramp_current, val)
 
-    def _ramp_field_T_checkdev(self, val, return_persistent='auto', wait=None, quiet=True):
+    def _ramp_field_T_checkdev(self, val, return_persistent='auto', wait=None, quiet=True, no_wait_end=False):
         if return_persistent not in [True, False, 'auto']:
             raise ValueError(self.perror("Invalid return_persistent option. Should be True, False or 'auto'"))
         BaseDevice._checkdev(self.ramp_field_T, val)
