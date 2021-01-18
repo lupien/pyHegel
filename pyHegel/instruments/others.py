@@ -579,7 +579,7 @@ class MagnetController_SMC(visaInstrument):
             if self.status.get().rampstate not in end_states:
                 raise RuntimeError(self.perror('The magnet state did not change to %s as expected'%end_states))
 
-    def _do_ramp(self, field_target, wait):
+    def _do_ramp(self, field_target, wait_time, no_wait_end=False):
         status = self.status.get()
         # chaning pause or target status takes 0.6 each and it is cumulative.
         # Therefore check if the change is needed before doing it.
@@ -598,24 +598,31 @@ class MagnetController_SMC(visaInstrument):
             if status.pause:
                 self.status.set(pause=False)
             self._last_state = 'ramp'
+        if no_wait_end:
+            wait(1) # give a chance for the state to change.
+            return
         # unknow state seems to be a possible transient between ramping and at_target.
         # I only see it once (when continuously reading status) immediately followed by 'at_target'
         # I don't always see it.
         # Since the end_states check is done after a second reading of status (and a possible wait)
         # we should never have to check for it but to be safe I add it anyway (my observations time was not infinite)
-        self._ramping_helper('ramping', ['at_target', 'unknown'], wait)
+        self._ramping_helper('ramping', ['at_target', 'unknown'], wait_time)
         # With a ramping rate of 0.00585 A/s  = 0.031 T/min
         # when going to zero, at_target shows up at about 3 mT and it takes about another 5 s to go to 0.
         # going to non-zero field (+0.05), at_target shows up at about 20 mT from target, and it takes another 15-20 s to become stable (0.0505 T)
 
-    def _ramp_T_checkdev(self, val, wait=None, quiet=True):
+    def _ramp_T_checkdev(self, val, wait=None, quiet=True, no_wait_end=False):
         BaseDevice._checkdev(self.ramp_T, val)
 
-    def _ramp_T_setdev(self, val, wait=None, quiet=True):
+    def _ramp_T_setdev(self, val, wait=None, quiet=True, no_wait_end=False):
         """ Goes to the requested setpoint and then waits until it is reached.
             After the instrument says we have reached the setpoint, we wait for the
             duration set by ramp_wait_after (in s).
             wait can be used to set a wait time (in s) after the ramp. It overrides ramp_wait_after.
+            no_wait_end when True, will skip waiting for the ramp to finish and return immediately after
+                      starting the ramp. Useful for record sequence. This will not work when changing sign.
+            When the field polarity of the target is different than the current one, it will first go to  0T,
+                     then wait 20s before going to the target.
             When using get, returns the magnet field in T.
         """
         def print_if(s):
@@ -633,7 +640,7 @@ class MagnetController_SMC(visaInstrument):
             self._do_ramp(0, 20.)
             self.operating_parameters.set(reverse = not reverse_en)
         print_if('Ramping...')
-        self._do_ramp(val, wait)
+        self._do_ramp(val, wait, no_wait_end)
 
     def _ramp_T_getdev(self):
         return self.field.get()
