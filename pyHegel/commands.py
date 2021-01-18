@@ -1819,6 +1819,8 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
                 vals, vals_full = _readall(devs, formats, i, output_full=True)
             if after is not None:
                 after_ret = _record_execafter(after, i, [tme]+vals, [tme]+vals_full, npoints)
+            else:
+                after_ret = True
             t.addPoint(tme, gsel(vals))
             if f:
                 writevec(f, [tme]+vals)
