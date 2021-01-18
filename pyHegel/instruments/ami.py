@@ -156,8 +156,8 @@ class AmericanMagnetics_model430(visaInstrument):
         self.ramp_rate_field_kG.choices.fmts_lims[0].choices['sec'].max = rmax*scalekG
         self.ramp_current.max = max_current
         self.ramp_current.min = min_current
-        self.ramp_field_T = ScalingDevice(self.ramp_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT)
-        self.ramp_field_kG = ScalingDevice(self.ramp_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG)
+        self.ramp_field_T = ScalingDevice(self.ramp_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT, doc="See ramp_current for options")
+        self.ramp_field_kG = ScalingDevice(self.ramp_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG, doc="See ramp_current for options")
         max_current = round(max_current+0.01, 1) # instruments returns a rounded value to one decimal. +0.01 is to deal for unknown of instrument rounding algorithm
         self.ramp_rate_current.choices.fmts_lims[1] = (1e-4, max_current)
         self.ramp_rate_field_T.choices.fmts_lims[1] = (1e-4*scaleT, max_current*scaleT)
@@ -437,27 +437,31 @@ class AmericanMagnetics_model430(visaInstrument):
                 self._ramping_helper('heating_persistent_switch', 'paused', extra_wait)
         return orig_switch_en
 
-    def _do_ramp(self, current_target, wait):
+    def _do_ramp(self, current_target, wait, no_wait_end=False):
         if current_target == 0:
             self.set_state('zero')
         else:
             self.set_state('pause')
             self.current_target.set(current_target)
             self.set_state('ramp')
+        if no_wait_end:
+            return
         self._ramping_helper(['zeroing', 'ramping'], ['at_zero', 'holding'], wait)
 
-    def _ramp_current_checkdev(self, val, return_persistent='auto', wait=None, quiet=True):
+    def _ramp_current_checkdev(self, val, return_persistent='auto', wait=None, quiet=True, no_wait_end=False):
         if return_persistent not in [True, False, 'auto']:
             raise ValueError(self.perror("Invalid return_persistent option. Should be True, False or 'auto'"))
         BaseDevice._checkdev(self.ramp_current, val)
 
-    def _ramp_current_setdev(self, val, return_persistent='auto', wait=None, quiet=True):
+    def _ramp_current_setdev(self, val, return_persistent='auto', wait=None, quiet=True, no_wait_end=False):
         """ Goes to the requested setpoint and then waits until it is reached.
             After the instrument says we have reached the setpoint, we wait for the
             duration set by ramp_wait_after (in s).
             return_persistent can be True (always), False (never) or 'auto' (the default)
                               which returns to state from start of ramp.
             wait can be used to set a wait time (in s) after the ramp. It overrides ramp_wait_after.
+            no_wait_end when True, will skip waiting for the ramp to finish and return immediately after
+                      starting the ramp. Useful for record sequence. This will not work when changing sign.
             When going to persistence it waits persistent_wait_before before cooling the switch.
 
             When using get, returns the magnet current.
@@ -474,13 +478,15 @@ class AmericanMagnetics_model430(visaInstrument):
             # Now change the field
             print_if('Ramping...')
             if return_persistent == True or (return_persistent == 'auto' and not prev_switch_en):
-                self._do_ramp(val, self.persistent_wait_before.getcache())
+                self._do_ramp(val, self.persistent_wait_before.getcache(), no_wait_end)
+                if no_wait_end:
+                    return
                 self.do_persistent(to_pers=True, quiet=quiet, extra_wait=wait)
             else:
-                self._do_ramp(val, wait)
+                self._do_ramp(val, wait, no_wait_end)
         else: # no persistent switch installed
             print_if('Ramping...')
-            self._do_ramp(val, wait)
+            self._do_ramp(val, wait, no_wait_end)
 
     def _ramp_current_getdev(self):
         return self.current_magnet.get()
