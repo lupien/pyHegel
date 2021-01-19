@@ -734,6 +734,8 @@ class agilent_SMU(visaInstrumentAsync):
             func = params.get('function', None)
             if func is None:
                 func = self.function.get(ch=ch)
+            else:
+                self.current_channel.set(ch)
             adjust_range(func)
             for k, dev in para_dict.items():
                 val = params.get(k)
