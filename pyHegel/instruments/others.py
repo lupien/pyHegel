@@ -524,12 +524,12 @@ class MagnetController_SMC(visaInstrument):
         d.pop('foo')
         return d
 
-    def is_ramping(self):
-        """ Returns True when the magnet is ramping the field """
+    def is_ramping(self, param_dict=None):
+        """ Returns True when the magnet is ramping the field. Can be used for the sequencer. """
         sts = self.status.get()
         return sts.rampstate in ['ramping'] and sts.error == 0
-    def is_stable(self):
-        """ Returns True when the magnet is not ramping """
+    def is_stable(self, param_dict=None):
+        """ Returns True when the magnet is not ramping. Can be used for the sequencer. """
         sts = self.status.get()
         return sts.rampstate in ['at_target'] and sts.error == 0
 

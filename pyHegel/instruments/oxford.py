@@ -423,11 +423,11 @@ class oxford_ips120_10(visaInstrument):
             return 'paused'
         return 'ramping'
 
-    def is_ramping(self):
-        """ Returns True when the magnet is ramping the field """
+    def is_ramping(self, param_dict=None):
+        """ Returns True when the magnet is ramping the field. Can be used for the sequencer. """
         return self._get_states() in ['ramping']
-    def is_stable(self):
-        """ Returns True when the magnet is not ramping """
+    def is_stable(self, param_dict=None):
+        """ Returns True when the magnet is not ramping. Can be used for the sequencer. """
         return self._get_states() in ['paused']
 
 

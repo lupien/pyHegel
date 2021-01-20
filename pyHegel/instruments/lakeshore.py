@@ -1911,11 +1911,11 @@ class lakeshore_625(visaInstrument):
             return {False:'ramping', True:'paused'}[oper.ramp_done]
         return pers # so either warming or cooling
 
-    def is_ramping(self):
-        """ Returns True when the magnet is ramping the field """
+    def is_ramping(self, param_dict=None):
+        """ Returns True when the magnet is ramping the field. Can be used for the sequencer. """
         return self._get_states() in ['ramping']
-    def is_stable(self):
-        """ Returns True when the magnet is not ramping nor changing the heat switch """
+    def is_stable(self, param_dict=None):
+        """ Returns True when the magnet is not ramping nor changing the heat switch. Can be used for the sequencer. """
         return self._get_states() in ['paused']
 
     def _ramping_helper(self, stay_states, end_states=None, extra_wait=None):

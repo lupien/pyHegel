@@ -349,11 +349,11 @@ class AmericanMagnetics_model430(visaInstrument):
         scale = self._coil_constant*10
         return self._ramp_current_field_conv(val, scale)
 
-    def is_ramping(self):
-        """ Returns True when the magnet is ramping the field """
+    def is_ramping(self, param_dict=None):
+        """ Returns True when the magnet is ramping the field. Can be used for the sequencer. """
         return self.state.get() in ['ramping', 'ramping_manual_up', 'ramping_manual_down', 'zeroing']
-    def is_stable(self):
-        """ Returns True when the magnet is not ramping nor changing the heat switch """
+    def is_stable(self, param_dict=None):
+        """ Returns True when the magnet is not ramping nor changing the heat switch. Can be used for the sequencer. """
         return self.state.get() in ['paused', 'at_zero', 'holding']
 
     def _ramping_helper(self, stay_states, end_states=None, extra_wait=None):
