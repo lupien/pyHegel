@@ -695,7 +695,7 @@ class agilent_SMU(visaInstrumentAsync):
         integrator for integration_type
         meas_range_comp is range_meas_use_compliance_en
         filter is output_filter_en
-        series is series_resistor_en
+        series_r is series_resistor_en
         meas_auto_type is not used when set_mode mode is set to 'stair'
         """
         para_dict = OrderedDict([('function', self.function),
@@ -709,7 +709,7 @@ class agilent_SMU(visaInstrumentAsync):
                                 ('Imeas_range', self.range_current_meas),
                                 ('meas_range_comp', self.range_meas_use_compliance_en),
                                 ('filter', self.output_filter_en),
-                                ('series_rv', self.series_resistor_en),
+                                ('series_r', self.series_resistor_en),
                                 ('meas_auto_type', self.meas_auto_type)])
         params = locals()
         def adjust_range(func):
