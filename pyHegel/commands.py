@@ -235,6 +235,7 @@ def reset_pyHegel():
     reload(instruments_registry)
     reload(instruments_base)
     reload(instruments.logical)
+    reload(sys.modules['pyHegel.ni_dstp'])
     reload(instruments)
     reload(gui_tools)
     reload(util)
