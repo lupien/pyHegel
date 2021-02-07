@@ -29,43 +29,150 @@ from ..instruments_base import BaseInstrument,\
                             wait, ProxyMethod
 from ..instruments_registry import register_instrument
 
-from ..ni_dstp import Dstp_Client, TimeStamp
+from ..ni_dstp import Dstp_Client, TimeStamp, DataNotPresent
 from collections import OrderedDict
+import time
 
 
-# TODO handle disconnections
+# We need to handle varying configuration
+# 1) The data server could be down then nothing will work (no connection possible)
+# 2) The server is up but the data is not present or is initialized to be 0.
+# 3) the server is up, data is present but not being updated (server keep alive works)
+# 4) the server is up and the data is updated.
+# 5) The data update was working but stops. The data should be uppdated every 0.5 s. So
+#     detect when no data is coming in the last 10 s?
+#     When no data comes in, return the previous one or an invalid value?
+# 6) The server stops (either nicelly or not). Use is_connection_ok() to check.
+
+# On open, help with default_room assignment
+# Allow to start without immediatelly establishing a connection.
+# Allow the user to decide if a failure is critical (exception) or to handle it by retrying in the future.
 
 @register_instrument('UdeS', 'flowmeters')
 class liquef_flow_meters(BaseInstrument):
     def __init__(self, default_room, *args, **kwargs):
+        """
+        default_room is the integer corresponding to the room to obtain the flow information.
+        allow_reconnect keyword can be True (default), 'delay' or False (any error produces an exception)
+          The delay option allow misconnection even during init while True requires a valid connection
+          during instrument creation.
+        you can use 0. Then list the options with get_rooms_list, and change it with the current_room device.
+        You can overide the address and variable names with keywords arguments default_address, default_variable.
+        """
         self._default_room = default_room
-        self._dstp = self._get_dstp()
-        self._last_data_time = 0.
+        self._dstp = None
+        self._last_data = None
+        self._variable_retry = 0
+        self._connect_last_fail_n = 0
+        self._connect_last_fail_time = 0
+        self._variable_opened = False
+        self._default_address = kwargs.pop('default_address', 'liquef.physique.usherbrooke.ca')
+        self._default_variable = kwargs.pop('default_variable', 'flowmeters')
+        self._allow_reconnect = kwargs.pop('allow_reconnect', True)
+        self._ni_quiet_del = kwargs.pop('_ni_quiet_del', True) # use this for debugging
         super(liquef_flow_meters, self).__init__(*args, **kwargs)
-    def _get_dstp(self):
-        dstp = Dstp_Client(address='liquef.physique.usherbrooke.ca', variable_path='flowmeters', max_buf_entries=1)
-        dstp.proto_open_var()
-        return dstp
-    def _reset_dstp(self):
-        if self._dstp is None:
+        self._get_dstp(init=True)
+
+    def _get_dstp_connection(self, init=False):
+        if self._dstp is not None and self._dstp.is_connection_ok():
+            return # we are good.
+        self.close(_internal=True)
+        self._variable_opened = False
+        self._variable_retry = 0
+        if self._allow_reconnect is False or (init and self._allow_reconnect is True):
+            self._dstp = Dstp_Client(address=self._default_address, variable_path=self._default_variable, max_buf_entries=1, quiet_del=self._ni_quiet_del)
+        else:
+            # first wait at least 2s between attempts, then wait at leas 4, then 8 until 1024 (17.1 min) and keep that
+            # spacing. We keep this spacing until we get the variable opened.
+            max_time = 2.**min(self._connect_last_fail_n, 10)
+            if time.time() - self._connect_last_fail_time < max_time:
+                return
             try:
-                self._dstp = self._get_dstp()
-                print 'Reconnected to NI dstp on liquef'
+                self._dstp = Dstp_Client(address=self._default_address, variable_path=self._default_variable, max_buf_entries=1, quiet_del=self._ni_quiet_del)
+            except Exception as e:
+                if self._connect_last_fail_n == 0:
+                    print self.perror("Failed to connect to %s server. Will keep trying."%self._default_address)
+                self._connect_last_fail_n += 1
+                self._connect_last_fail_time = time.time()
+                self._dstp = None
+    def _get_dstp_variable(self, init=False):
+        if self._variable_opened:
+            return
+        if self._dstp is None:
+            return
+        if self._allow_reconnect is False or (init and self._allow_reconnect is True):
+            self._dstp.proto_open_var()
+            self._variable_opened = True
+        else:
+            try:
+                self._dstp.proto_open_var()
+            except DataNotPresent:
+                self._variable_retry += 1
+                # The data is not present and we can't create it. We have to wait until somebody creates it.
+                if self._variable_retry == 1:
+                    print self.perror('The data is not yet available (waiting for it to created). Will keep trying.')
+                return
+            except Exception as e:
+                # something else went wrong (no permission, error writing to socket, no response)
+                # reset the connection but keep limited retries.
+                self.close(_internal=True)
+            else:
+                self._variable_opened = True
+                self._connect_last_fail_n = 0
+                self._connect_last_fail_time = 0
+                self._dstp.get_next_data() # to absorb the initial value which could be old.
+
+
+    def _get_dstp(self, init=False):
+        self._get_dstp_connection(init=init)
+        self._get_dstp_variable(init=init)
+    def close(self, _internal=False):
+        if self._dstp is not None:
+            if self._variable_opened:
+                try:
+                    self._dstp.proto_close_var()
+                except Exception as exc:
+                    if not _internal:
+                        print self.perror("Exception during close var: %s"%exc)
+                self._variable_opened = False
+                self._variable_retry = 0
+            try:
+                self._dstp.close(quiet=True)
             except Exception as exc:
-                print 'Unable to setup NI dstp communication to liquef. Exception: %s'%exc
-    def close(self):
-        self._dstp.proto_close_var()
-        self._dstp.close()
+                if not _internal:
+                    print self.perror("Exception during close: %s"%exc)
+            self._dstp = None
+        if not _internal:
+            # so that a next open forces an immediate reconnection attempt.
+            self._connect_last_fail_n = 0
+            self._connect_last_fail_time = 0
     def __del__(self):
         self.close()
         super(liquef_flow_meters, self).__del__()
     def get_last_data(self):
-        if self._dstp is not None:
+        self._get_dstp()
+        if self._variable_opened:
             ret =  self._dstp.get_next_data()
             if ret is not None:
-                if ret[0] != 'flowmeters':
+                if ret[0] != self._default_variable:
                     raise RuntimeError(self.perror('Unexpected data name.'))
-                self._last_data_time = ret[3]
+                # if data is invalid, return None
+                # It could be invalid if we are the first to connect to the server and we have
+                # the right to create the variable. It then contains 0 as the value.
+                try:
+                    if len(ret[1]) < 19:
+                        ret = None
+                except TypeError:
+                    ret = None
+                self._last_data = ret
+            else:
+                last = self._last_data
+                if last is not None:
+                    if time.time() - last[3] < 10:
+                        # we keep that last data as valid for 10s
+                        ret = last
+                    else:
+                        self._last_data = None
         else:
             ret = None
         return ret
@@ -106,3 +213,4 @@ class liquef_flow_meters(BaseInstrument):
         self.alias = self.flow
         # This needs to be last to complete creation
         super(liquef_flow_meters, self)._create_devs()
+
