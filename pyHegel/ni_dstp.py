@@ -515,26 +515,34 @@ def make_str(s):
     else:
         return s
 
+class DataNotPresent(RuntimeError):
+    pass
+
 class Dstp_Client(object):
-    def __init__(self, address, variable_path, max_buf_entries=100):
+    def __init__(self, address, variable_path, max_buf_entries=100, quiet_del=False):
         """ variable_path will be the default variable to open/close with
             the proto_open_var, proto_close_var, proto_write vars
             It is not open at object creation.
         """
+        self._quiet_del = quiet_del
         self.address = address
         self.variable_path = variable_path
+        self._is_variable_open = False
+        self._connect_done = False
+        self.s = None
         self.s = socket.create_connection((address, 3015), 1.)
         self._internal_seq = 1
+        self._thread = None
         self.proto_connect()
         self._read_buffer = queue.Queue(max_buf_entries)
         self._read_replies_buffer = queue.Queue()
         self._read_ack = [0]
+        self._read_lasttime = [0.]
         self._max_buf_entries = max_buf_entries
         self._thread_stop = [False]
         self._thread = threading.Thread(target=ProxyMethod(self._threaded_target))
         self._thread.daemon = True
         self._thread.start()
-        self._close_done = False
 
     def empty_replies(self):
         """ This empties the replies buffer and returns all the entries that were found.
@@ -560,6 +568,8 @@ class Dstp_Client(object):
             Otherwise returns: varname, data, attributes, timestamp
             The timestamp is the time the reading was performed.
         """
+        if not self._is_variable_open:
+            raise RuntimeError('You need to open a variable first. see proto_open_var')
         try:
             if timeout == 0.:
                 data = self._read_buffer.get_nowait()
@@ -582,6 +592,8 @@ class Dstp_Client(object):
         read_parse = ProxyMethod(self.read_parse)
         get_next_data = ProxyMethod(self.get_next_data)
         read_ack = self._read_ack
+        read_lasttime = self._read_lasttime
+        quiet_del = self._quiet_del
         while not thread_stop[0]:
             try:
                 data = read_parse()
@@ -590,6 +602,10 @@ class Dstp_Client(object):
                 if six.PY2:
                     sys.exc_clear()
                 continue
+            except Exception as exc:
+                if not quiet_del:
+                    print('Dstp_Client reading thread termination: %s'%exc)
+                break
             if d[0] == 10:
                 # received every 11 seconds ...
                 read_ack[0] += 1
@@ -600,22 +616,38 @@ class Dstp_Client(object):
                 read_buffer.put(data)
             else:
                 read_replies_buffer.put(data)
-        print('Thread stopped.')
+            read_lasttime[0] = time.time()
+        if not quiet_del:
+            print('Thread stopped.')
 
     def __del__(self):
-        print('deleting DataSocket (closing socket)')
+        if not self._quiet_del:
+            print('deleting DataSocket (closing socket)')
         try:
             self.close()
         except Exception as e:
             print('Error during del', e)
 
-    def close(self):
-        if self._close_done:
+    def is_connection_ok(self):
+        if not self._thread.isAlive():
+            return False
+        if time.time() - self._read_lasttime[0] > 60:
+            # we should be receiving keepalive packets. If not, the other computer is probably down
+            return False
+        return True
+
+    def close(self, quiet=False):
+        if self.s is None:
             return
-        self.proto_close()
-        self.s.shutdown(socket.SHUT_RDWR)
+        try:
+            # if we get an error during close (send fail) then shutdown will proabably fail too so just chain them in one try/except.
+            self.proto_close()
+            self.s.shutdown(socket.SHUT_RDWR)
+        except socket.error as exc:
+            if not quiet:
+                print('Error while closing proto: %s'%exc)
         self.s.close()
-        self._close_done = True
+        self.s = None
 
     def proto_connect(self):
         data_str = do_pack([1, 3]) # the 3 might be a protocol version?
@@ -623,6 +655,7 @@ class Dstp_Client(object):
         data_str = do_pack([2, 3])
         self.s.sendall(data_str)
         data, attrs, ts = self.read_parse()
+        self._connect_done = True
         if data != [9, 3]:
             raise RuntimeError('Connection did not get acknowledged.')
 
@@ -633,6 +666,9 @@ class Dstp_Client(object):
          However, the NI datasocket diagnostic program does not behave properly
          with the extra ones (does not add entries for subscriptions...)
         You should close the var before closing the connection.
+        Note that only one person is allowed to have write access at a time.
+        raise DataNotPresent when the variable is not present and we do not have
+           the permission to create it.
         """
         if var is None:
             var = self.variable_path
@@ -643,14 +679,31 @@ class Dstp_Client(object):
         data_str = do_pack([4, var, m])
         self.s.sendall(data_str)
         data, attrs, ts = self.get_next_reply()
-        if data == [56, var_s]:
+        if data == [56, var_s] or data == [51, var_s]:
+            rootmsg ='Unable to write (somebody else is writing to it?).'
+            if data[0] == 51:
+                rootmsg = 'Unable to write (we do not have permission to write).'
             if 'read' in mode:
                 data, attrs, ts = self.get_next_reply()
                 if data != [12, var_s, m]:
-                    raise RuntimeError('Unable to write (somebody else is writing to it?) and problem reading.')
-                raise RuntimeError('Unable to write (somebody else is writing to it?).')
+                    raise RuntimeError(rootmsg + ' Also reading not enabled (%s).'%data)
+                self._is_variable_open = True
+                raise RuntimeError(rootmsg + ' However reading is working.')
+            else: # write only
+                raise RuntimeError(rootmsg)
+        elif data == [52, var_s]:
+            if 'write' in mode:
+                data, attrs, ts = self.get_next_reply()
+                if data != [12, var_s, m]:
+                    raise RuntimeError('Unable to read (we do not have permission to read). Writing also not permitted (%s).'%data)
+                raise RuntimeError('Unable to read (we do not have permission to read). Writing is enabled.')
+            else: # pure read
+                raise RuntimeError('Unable to read (we do not have permission to read).')
+        elif data == [50, var_s]:
+            raise DataNotPresent('Unable to access (variable does not exist and we do not have the right to create it).')
         elif data != [12, var_s, m]:
             raise RuntimeError('Unexpected answer to open_var')
+        self._is_variable_open = True
 
     def proto_close_var(self, var=None):
         if var is None:
@@ -660,11 +713,15 @@ class Dstp_Client(object):
         self.s.sendall(data_str)
 
     def proto_close(self):
-        self._thread_stop[0] = True
-        if threading.current_thread() != self._thread:
-            self._thread.join()
+        if not self._connect_done:
+            return
+        if self._thread:
+            self._thread_stop[0] = True
+            if threading.current_thread() != self._thread:
+                self._thread.join()
         data_str = do_pack([3])
         self.s.sendall(data_str)
+        self._connect_done = False
 
     def proto_write(self, data, attributes={}, var=None):
         """
@@ -708,7 +765,15 @@ class Dstp_Client(object):
         """ read n bytes """
         data_str = b''
         while len(data_str) < n:
-            data_str += self.s.recv(n - len(data_str))
+            try:
+                new_s = self.s.recv(n - len(data_str))
+            except socket.error as exc:
+                if exc.errno == socket.EINTR:
+                    continue
+                raise
+            if len(new_s) == 0:
+                raise RuntimeError('Socket was closed. Receiving end if file.')
+            data_str += new_s
         return data_str
     def read_packet(self):
         data_str = self._read_n(4)
