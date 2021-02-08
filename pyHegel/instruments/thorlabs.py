@@ -1,32 +1,14 @@
 import struct
 from time import sleep
 
+import numpy
+
+from pyHegel.kbint_util import _delayed_signal_context_manager
 
 from pyHegel.instruments_base import visaInstrument, scpiDevice, ChoiceStrings, BaseDevice, ChoiceBase, \
     visaInstrumentAsync, ReadvalDev, decode_float64_avg, BaseInstrument, locked_calling
 from pyHegel.instruments_registry import register_instrument
 
-# Message id (non exhaustive)
-MGMSG_MOD_IDENTIFY = 0x0223
-MGMSG_MOD_SET_CHANENABLESTATE = 0x0210
-MGMSG_MOD_REQ_CHANENABLESTATE = 0x0211
-MGMSG_MOD_GET_CHANENABLESTATE = 0x0212
-MGMSG_HW_START_UPDATEMSGS = 0x0011
-MGMSG_HW_STOP_UPDATEMSGS = 0x0012
-MGMSG_HW_REQ_INFO = 0x0005  # Sent to request hardware information from the controller
-MGMSG_HW_GET_INFO = 0x0006
-MGMSG_RACK_REQ_BAYUSED = 0x0060  # Sent to determine whether the specified bay in the controller is occupied.
-MGMSG_RACK_GET_BAYUSED = 0x0061
-
-MGMSG_MOT_MOVE_HOME = 0x0443  # Sent to start a home move sequence on the specified motor channel (in accordance with the home parameters above).
-MGMSG_MOT_MOVE_HOMED = 0x0444  # No response on initial message, but upon completion of home sequence controller sends a "homing completed" message
-
-MGMSG_MOT_MOVE_RELATIVE = 0x0448
-MGMSG_MOT_MOVE_COMPLETED = 0x0464
-MGMSG_MOT_MOVE_ABSOLUTE = 0x0453
-
-MGMSG_MOT_MOVE_STOP = 0x0465  # Sent to stop any type of motor move (relative, absolute, homing or move at velocity) on the specified motor channel.
-MGMSG_MOT_MOVE_STOPPED = 0x0466
 # Source/dest id:
 HOST = 0x01
 MOTHER_BOARD = 0x11
@@ -177,12 +159,11 @@ class thorlabs_power_meter(visaInstrumentAsync):
         super(thorlabs_power_meter, self)._create_devs()
 
 
-
-
 def encodeAPT(id, param1=0, param2=0, dest_byte=GENERIC_USB, source_byte=HOST, data=None):
     if data:
+        dest_data = dest_byte | 0x80
         data_length = len(data)
-        return struct.pack('<HHcc{0:d}s'.format(data_length), id, data_length, chr(dest_byte), chr(source_byte),data)
+        return struct.pack('<HHcc{0:d}s'.format(data_length), id, data_length, chr(dest_data), chr(source_byte), data)
     else:
         return struct.pack('<Hcccc', id, chr(param1), chr(param2), chr(dest_byte), chr(source_byte))
 
@@ -190,8 +171,10 @@ def encodeAPT(id, param1=0, param2=0, dest_byte=GENERIC_USB, source_byte=HOST, d
 def decodeAPT(message):
     return message
 
+
 class APTDevice(BaseDevice):
-    def __init__(self,setstr=None, reqstr=None, getstr=None, get_fmt=None, autoinit=True, choices=None, doc='', **kwarg):
+    def __init__(self, setstr=None, reqstr=None, getstr=None, get_fmt=None, autoinit=True, choices=None, doc='',
+                 **kwarg):
         if setstr is None and reqstr is None:
             raise ValueError, 'At least one of setstr or reqstr needs to be specified'
         BaseDevice.__init__(self, doc=doc, autoinit=autoinit, choices=choices, get_has_check=True, **kwarg)
@@ -199,34 +182,66 @@ class APTDevice(BaseDevice):
         self.get_fmt = get_fmt
 
     def _getdev(self, **kwarg):
-
         question = self._getdev_p
         data = self.instr.ask(question)
-
         ret = struct.unpack(self.get_fmt, data)
 
         return ret[2]
+
 
 # th = instruments.ThorlabsKDC101('ASRL3::INSTR', skip_id_test=True, baud_rate=115200, write_termination='')
 @register_instrument('Thorlabs', 'KDC101', alias='KDC101 Rotation stage')
 class ThorlabsKDC101(visaInstrument):
 
+    #TODO: handle the "end of move" messages. Either disable them or implement a class than handles multiple responses in the buffer
+    def idn(self):
+        rep = self.ask(encodeAPT(0x0005))
+        # Bytes from 24 to 84 are for internal use only
+        part_a = struct.unpack('l8sH4s', rep[6:24])
+        part_b = struct.unpack('3H', rep[84::])
+        return part_a, part_b
 
-    def do_set_Position(self, pos):
-        num = int(pos * 1920)
-        byte1 = num % 256
-        byte2 = int(num / 256) % 256
-        byte3 = int(num / 256 / 256) % 256
-        byte4 = int(num / 256 / 256 / 256) % 256
-        str = '\x53\x04\x06\x00\x80\x01\x01\x00' + chr(byte1) + chr(byte2) + chr(byte3) + chr(byte4)
-        self.instr.write(str)
+    def read(self, raw=False, count=None, chunk_size=None):
+        # First we try to read the header, if the dest byte is 0x01 (HOST), no data packet to follow, if 0x81 (HOST logic OR'd with 0x80 )
+        header = super(ThorlabsKDC101, self).read(count=6)
+        if header[4] == HOST:
+            return header
+        elif header[4] == HOST | 0x80:
+            count, = struct.unpack('H', header[2:4])
+            return header + super(ThorlabsKDC101, self).read(count=count)
 
-    def move(self, n_incr):
-        data = struct.pack('<Hi', 1, int(n_incr))
+    def deg_to_inc(self, deg):
+        #Depend on the stages, auto-detection?
+        return int(numpy.around(1919.6418578623391*deg))
+    def inc_to_deg(self, inc):
+        return inc/1919.6418578623391
+
+
+    def move_rel(self, angle):
+        data = struct.pack('<Hi', 1, int(self.deg_to_inc(angle)))
         message = encodeAPT(0x0448, data=data)
         self.write(message)
 
-    def stop(self, immediate = False):
+    #Fonction a utiliser pour le "set angle"
+    def move_abs(self, angle):
+        data = struct.pack('<Hi', 1, int(self.deg_to_inc(angle)))
+        message = encodeAPT(0x0453, data=data)
+        self.write(message)
+
+    def move_jog(self, direction = 'fwrd'):
+        if direction == 'rev':
+            dire = 0x02
+        else:
+            dire = 0x01
+        message = encodeAPT(0x046A, param1=1, param2=dire)
+        self.write(message)
+
+    def wait_for_move_completed(self, timeout = 60):
+        pass
+
+    def is_moving(self):
+        pass
+    def stop(self, immediate=False):
         if immediate:
             stop_mode = 0x01
         else:
@@ -237,6 +252,8 @@ class ThorlabsKDC101(visaInstrument):
     def go_home(self):
         data = encodeAPT(0x0443, 1, 0)
         self.write(data, termination='')
+
+
 
     def identify(self):
         data = encodeAPT(0x0223, 0, 0)
