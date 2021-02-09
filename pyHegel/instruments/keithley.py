@@ -25,11 +25,13 @@ from __future__ import absolute_import
 
 import numpy as np
 import time
+import string
+from collections import OrderedDict
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceBase, ChoiceLimits, ChoiceStrings, ChoiceDevDep,\
-                            locked_calling, visa_wrap, _decode_block_auto
+                            locked_calling, visa_wrap, _decode_block_auto, ChoiceSimpleMap
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 #hex(1510) = 0x05E6
@@ -686,7 +688,6 @@ class keithley_2450_smu(visaInstrumentAsync):
 
     #TODO implement inteligent set level like for yokogawa.
     def _create_devs(self):
-        # This needs to be last to complete creation
         self.route_terminals = scpiDevice('ROUTe:TERMinals', choices=ChoiceStrings('FRONt', 'REAR'))
         self.output_en = scpiDevice('OUTPut', str_type=bool)
         self.interlock_ok = scpiDevice(getstr='OUTPut:INTerlock:TRIPped?', str_type=bool)
@@ -732,7 +733,7 @@ class keithley_2450_smu(visaInstrumentAsync):
                  In all cases measurement sense is set to 2 wires
                  -himpedance: the output relay disconnects the load
                  -normal: Voltage src set to 0V, current limit to 10% of current range
-                 -zero:  Voltage src set to 0V, autorange off, current limit kept the same or 10% of gull scale whichever is greate
+                 -zero:  Voltage src set to 0V, autorange off, current limit kept the same or 10% of full scale whichever is greater
                  -guard: Current src set to 0A, voltage limit to 10% of current range
             """)
         self.src_delay = srcDevOption('SOURce:{mode}:DELay', str_type=float, min=0, max=4, setget=True, doc='Extra time in seconds (after settling) between changing source and reading measurement. Changing it disables auto delay.')
@@ -846,6 +847,7 @@ class keithley_2450_smu(visaInstrumentAsync):
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         #self.alias = self.readval
+        # This needs to be last to complete creation
         super(type(self),self)._create_devs()
 
     def _src_level_getdev(self, mode=None):
@@ -974,3 +976,506 @@ class keithley_2450_smu(visaInstrumentAsync):
 #             with readback and autozero: 4.17s, 1*60 rdgs, 14.4 rdgs/s
 #             with autozero: 5.13s, 1*60 rdgs, 11.7 rdgs/s
 #        Result, the 2s delay is after the first measurement is completed
+
+#######################################################
+##    Keithley 2400 series
+#######################################################
+
+class _meas_en_type(object):
+    conv = {True:'ON', False:'OFF'}
+    def __call__(self, from_str):
+        return bool(int(from_str))
+    def tostr(self, data):
+        return self.conv[data]
+meas_en_type = _meas_en_type()
+
+#@register_instrument('KEITHLEY INSTRUMENTS INC.', 'MODEL 2410', 'C34 Sep 21 2016 15:30:00/A02  /H/J')
+#@register_instrument('KEITHLEY INSTRUMENTS INC.', 'MODEL 2400', 'C14   Feb  9 1999 15:20:42/A02  /F/F')
+@register_instrument('KEITHLEY INSTRUMENTS INC.', 'MODEL 2410', alias='2410 SMU', skip_add=True)
+@register_instrument('KEITHLEY INSTRUMENTS INC.', 'MODEL 2400', alias='2400 SMU')
+class keithley_2400_smu(visaInstrumentAsync):
+    """\
+    This controls the keithley 2400 or 2410 SourceMeter source mesure unit.
+    Important devices:
+     output_en
+     src_level
+     compliance
+     readval  same as initiating a measurement, waiting then fetch
+     fetch
+     meas_autozero_en
+     meas_en_current, meas_en_voltage, meas_en_resistance
+     src_protection_level
+    Useful method:
+     set_long_avg  To setup average time.
+     show_long_avg To see the current averaging settings.
+     abort
+     reset
+     meas_autozero_now
+     get_error
+    """
+    def __init__(self, *args, **kwargs):
+        super(keithley_2400_smu, self).__init__(*args, **kwargs)
+        self._trig_data = dict(mode='basic', last_block='', count=1, inner_count=1, delay=0, buffer='') # mode can be basic or trig
+
+    def init(self, full=False):
+        # This empties the instrument buffers
+        self._dev_clear()
+        self.write('FORMat:BORDer SWAPped') # other option is NORMal
+        self.write('FUNCtion:CONCurrent ON')
+        self.write('FORMat:ELEMents VOLTage,CURRent,RESistance,STATus')
+        super(keithley_2400_smu, self).init(full=full)
+
+    def abort(self):
+        self.write('ABORt')
+
+    def reset(self):
+        """ Reset the instrument to power on configuration """
+        self.write('*RST')
+
+    @locked_calling
+    def _current_config(self, dev_obj=None, options={}):
+        opts = self._conf_helper('output_en', 'route_terminals')
+        conf = self.conf()
+        opts += ['conf=%s'%conf]
+        opts += self._conf_helper('line_freq', 'four_wire_en', 'meas_filter_en', 'meas_filter_type', 'meas_filter_count', 'meas_nplc',
+                                  'meas_relative_en', 'meas_relative_offset', 'meas_relative_source', 'meas_resistance_mode',
+                                  'meas_resistance_offset_comp_en', 'trace_en', 'src_delay_auto_en', 'src_delay')
+        if not self._is_old_firmware:
+            opts += self._conf_helper('compliance_range_sync_en', 'meas_range_current_holdoff_en', 'meas_range_current_holdoff_delay', 'meas_autozero_cache_en')
+        return opts+self._conf_helper(options)
+
+    def _long_avg_helper(self):
+        # update mode first, so others instruction apply correctly
+        meas_mode = self.meas_mode.get()
+        meas_mode_ch = self.meas_mode.choices
+        src_mode = self.src_mode.get()
+        src_mode_ch = self.src_mode.choices
+        if meas_mode in meas_mode_ch[['voltage', 'voltage:dc', 'resistance']] and src_mode in src_mode_ch[['voltage']]:
+            same = True
+        elif meas_mode in meas_mode_ch[['current', 'current:dc']] and src_mode in src_mode_ch[['current']]:
+            same = True
+        else:
+            same = False
+        return same
+
+    @locked_calling
+    def set_long_avg(self, time=None, nplc=None, quiet=False):
+        """\
+        If times is not given, return the same as show_long_avg.
+        For time less than 10 nplc (167 ms on 60 Hz) or with time None and nplc given, the filter is disabled.
+          nplc overrides a provided time. time is rounded to the closest full period. nplc allows fractionnal period.
+        For time longer than 10 nplc, will use nplc and round the closes time possible.
+        If nplc is not given, will use 1 for time < 1s, and 6 otherwise (on 60 Hz, 5 on 100 Hz for 0.1s).
+        """
+        if time is None and nplc is None:
+            return self.show_long_avg(quiet=quiet)
+        freq = self.line_freq.getcache()
+        period = 1./freq
+        if time is not None and nplc is not None:
+            one_time = nplc*period
+            nplc_val = nplc
+            count = max(1, round(time/one_time))
+        elif time is not None: # nplc is None
+            if time <= period*10:
+                nplc_val = max(1, round(time/period))
+                count = 1
+            else:
+                if time < 1.:
+                    nplc_val = 1.
+                else:
+                    nplc_val = 6. if freq ==  60. else 5.
+                one_time = nplc_val*period
+                count = max(1, int(round(time/one_time)))
+        else: # time is None, nplc is given
+            nplc_val = nplc
+            count = 1
+        if count == 1:
+            if not quiet:
+                print "Filter disabled"
+            self.meas_filter_en.set(False)
+            self.meas_nplc.set(nplc_val)
+        else:
+            if not quiet:
+                print "Filter enabled"
+            self.meas_filter_en.set(True)
+            self.meas_filter_type.set('repeat')
+            self.meas_filter_count.set(count)
+            self.meas_nplc.set(nplc_val)
+
+    @locked_calling
+    def show_long_avg(self, quiet=False):
+        nplc = self.meas_nplc.get()
+        freq = self.line_freq.getcache()
+        period = 1./freq
+        one_val = nplc*period
+        filter_en = self.meas_filter_en.get()
+        if filter_en:
+            filter_count = self.meas_filter_count.get()
+            filter_type = self.meas_filter_type.get()
+            if filter_type.lower() == 'moving':
+                if not quiet:
+                    print 'WARNING: Filter is of moving type. It should probably be in repeat.'
+            else:
+                if not quiet:
+                    print 'Repeat filter enabled (count is %i)'%filter_count
+            val = one_val*filter_count
+        else:
+            if not quiet:
+                print 'Filter disabled.'
+            val = one_val
+        return val
+
+    def clear_system(self):
+        """ Clears event log, including front panel
+        """
+        self.write('SYSTem:CLEar')
+    def meas_autozero_now(self):
+        self.write('SYSTem:AZERo:STATe ONCE')
+    def meas_autozero_cache_reset(self):
+        self.write('SYSTem:AZERo:CACHing:RESet')
+    def meas_autozero_cache_refresh(self):
+        self.write('SYSTem:AZERo:CACHing:REFResh')
+    def meas_relative_acquire(self):
+        self.write('CALC2:NULL:ACQuire')
+
+    @locked_calling
+    def meas_relative_acquire_now(self, mode=None):
+        if mode is not None:
+            self.meas_mode.set(mode)
+        mode = self.meas_mode.get()
+        self.write('{mode}:RELative:ACQuire'.format(mode=mode))
+    def data_clear(self):
+        """ This clears data.
+        """
+        self.write('TRACe:CLEar')
+    def _fetch_helper(self, voltage=None, current=None, resistance=None, relative=None):
+        if voltage is None:
+            voltage = self.meas_en_voltage.getcache()
+        if current is None:
+            current = self.meas_en_current.getcache()
+        if resistance is None:
+            resistance = self.meas_en_resistance.getcache()
+        if voltage is None:
+            voltage = self.meas_en_voltage.getcache()
+        if voltage is None:
+            voltage = self.meas_en_voltage.getcache()
+        any_fetch = voltage or current or resistance
+        if not (any_fetch or relative):
+            raise ValueError(self.perror("fetch requires at least one of voltage, current, resistance or relative"))
+        return voltage, current, resistance, relative, any_fetch
+
+    def _fetch_getformat(self, voltage=None, current=None, resistance=None, relative=None, status=False, **kwarg):
+        voltage, current, resistance, relative, any_fetch = self._fetch_helper(voltage, current, resistance, relative)
+        multi = []
+        if voltage:
+            multi.append('volt')
+        if current:
+            multi.append('current')
+        if resistance:
+            multi.append('res')
+        if relative:
+            multi.append('rel')
+        if status:
+            multi.append('stat')
+        fmt = self.fetch._format
+        fmt.update(multi=multi)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+
+    def _fetch_getdev(self, voltage=None, current=None, resistance=None, relative=None, status=False):
+        """\
+        options (all boolean):
+            volt: to read volt. When None it is auto enabled depending on cached meas_en_voltage
+            current: to read current. When None it is auto enabled depending on cached meas_en_current
+            resistance: to read resistance. When None it is auto enabled depending on cached meas_en_resistance
+            relative: to read the relative value. When None it is auto enabled depending on cached meas_relative_en
+            status: to read the status. False by default.
+            The status is a bit field with the various bit representing:
+                 bit  0 (     1): Measurement range overflow
+                 bit  1 (     2): Filter enabled
+                 bit  2 (     4): Front terminales selected
+                 bit  3 (     8): In real compliance (for source)
+                 bit  4 (    16): Over voltage protection reached
+                 bit  5 (    32): Math (calc1) expression enabled
+                 bit  6 (    64): Null (relative) enabled
+                 bit  7 (   128): Limit (calc2) test enabled
+                 bit  8,9,19,20,21: Limit results (256, 512, 524288, 1048576, 2097152)
+                 bit 10 (  1024): Auto Ohms enabled
+                 bit 11 (  2048): Voltage measure enabled
+                 bit 12 (  4096): Current measure enabled
+                 bit 13 (  8192): Resistance measure enabled
+                 bit 14 ( 16384): Voltage source used
+                 bit 15 ( 32768): Current source used
+                 bit 16 ( 65536): In range compliance (for measurement)
+                 bit 17 (131072): Resistance offset compensation enabled
+                 bit 18 (262144): Contact check failure
+                 bit 22 (4194304): Remote sense enabled
+                 bit 23 (8388608): In pulse mode
+        """
+        voltage, current, resistance, relative, any_fetch = self._fetch_helper(voltage, current, resistance, relative)
+        if any_fetch or status:
+            v_raw = self.ask('FETCh?')
+            v = _decode_block_auto(v_raw)
+            # Because of elements selection in init, the data is voltage, current, resistance, status
+            volt, cur, res, stat = v
+        data = []
+        if voltage:
+            data.append(volt)
+        if current:
+            data.append(cur)
+        if resistance:
+            data.append(res)
+        if relative:
+            vr = self.data_fetch_relative_last.get()
+            data.append(vr[0])
+        if status:
+            data.append(stat)
+        return data
+
+    def conf(self, function=None, level=None, range=None, compliance=None, prot_volt_limit=None,
+             Vmeas=None, Imeas=None, Rmeas=None, Vmeas_range=None, Imeas_range=None, autozero=None,
+             avg_time=None, output_off_mode=None, delay=None, delay_auto_en=None):
+        """\
+           When called without any values (all are None), it shows the current setting.
+           When called we some values, only the ones that are not None are changed.
+           For the range (source). Use 0 to enable autorange or a value to fix it.
+           Use 0 for the Vmeas_range or Imeas_range to enable autorange. Use a negative value to set the autorange lower limit.
+            Use a positive value for the fix manual range. Note that the ranges are limited (upper) to the compliance range,
+            which is set by the compliance value.
+            The measurement range for the source signal is also fixed to the source range.
+        """
+        para_dict = OrderedDict([('function', self.src_mode),
+                                ('range', None),
+                                ('level', self.src_level),
+                                ('compliance', self.compliance),
+                                ('prot_volt_limit', self.src_protection_level),
+                                ('Vmeas', self.meas_en_voltage),
+                                ('Imeas', self.meas_en_current),
+                                ('Rmeas', self.meas_en_resistance),
+                                ('autozero', self.meas_autozero_en),
+                                ('Vmeas_range', None),
+                                ('Imeas_range', None),
+                                ('avg_time', None),
+                                ('output_off_mode', self.output_off_mode),
+                                ('delay', self.src_delay),
+                                ('delay_auto_en', self.src_delay_auto_en)])
+        params = locals()
+        meas_mode = dict(Vmeas_range='voltage', Imeas_range='current')
+        if all(params.get(k) is None for k in para_dict):
+            result_dict = {}
+            orig = self.meas_mode.get()
+            for k, dev in para_dict.items():
+                if dev is None:
+                    if k == 'avg_time':
+                        data = self.show_long_avg(quiet=True)
+                    elif k == 'range':
+                        # source
+                        if self.src_range_auto_en.get():
+                            data = 0
+                        else:
+                            data = self.src_range.get()
+                    else:
+                        # Vmeas or Imeas range
+                        self.meas_mode.set(meas_mode[k])
+                        if self.meas_autorange_en.get():
+                            data = -self.meas_autorange_lower_limit.get()
+                        else:
+                            data = self.meas_range.get()
+                else:
+                    data = dev.get()
+                result_dict[k] = data
+            self.meas_mode.set(orig)
+            return result_dict
+        else:
+            orig = self.meas_mode.get()
+            for k, dev in para_dict.items():
+                val = params.get(k)
+                if val is not None:
+                    if dev is None:
+                        if k == 'avg_time':
+                            self.set_long_avg(val, quiet=True)
+                        elif k == 'range':
+                            # source
+                            if val == 0:
+                                self.src_range_auto_en.set(True)
+                            else:
+                                self.src_range.set(val)
+                        else:
+                            # Vmeas or Imeas range
+                            self.meas_mode.set(meas_mode[k])
+                            if val == 0:
+                                self.meas_autorange_en.set(True)
+                            elif val<0:
+                                self.meas_autorange_lower_limit.set(-val)
+                                self.meas_autorange_en.set(True)
+                            else:
+                                self.meas_range.set(val)
+                    else:
+                        dev.set(val)
+            self.meas_mode.set(orig)
+
+    def _create_devs(self):
+        idn_split = self.idn_split()
+        is_2410 = idn_split['model'].endswith('2410')
+        firmware = idn_split['firmware']
+        # Not sure when to make to cut. 26 is the oldest firmware release note I could find.
+        is_old_firm = firmware.startswith('C') and int(firmware[1:3]) < 26
+        self._is_old_firmware = is_old_firm
+        self._is_2410 = is_2410
+        self.route_terminals = scpiDevice('ROUTe:TERMinals', choices=ChoiceStrings('FRONt', 'REAR'))
+        self.output_en = scpiDevice('OUTPut', str_type=bool)
+        self.line_freq = scpiDevice(getstr='SYSTem:LFRequency?', str_type=float)
+        self.guard_mode = scpiDevice('SYSTem:GUARd', choices=ChoiceStrings('OHMS', 'CABLe'))
+        src_mode_opt = ChoiceStrings('CURRent', 'VOLTage')
+        self.src_mode = scpiDevice('SOURce:FUNCtion', choices=src_mode_opt, autoinit=20)
+        meas_mode_opt = ChoiceStrings('CURRent', 'CURRent:DC', 'VOLTage', 'VOLTage:DC', 'RESistance', quotes=True)
+        meas_volt = meas_mode_opt[['VOLTage', 'VOLTage:DC']]
+        meas_curr = meas_mode_opt[['CURRent', 'CURRent:DC']]
+        #self.meas_mode = scpiDevice('FUNCtion', choices=meas_mode_opt, autoinit=20)
+        self.meas_mode = MemoryDevice('current')
+        def measDevOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mode=self.meas_mode)
+            app = kwarg.pop('options_apply', ['mode'])
+            options_conv = kwarg.pop('options_conv', {}).copy()
+            options_conv.update(dict(mode=lambda val, conv_val: val))
+            kwarg.update(options=options, options_apply=app, options_conv=options_conv)
+            return scpiDevice(*arg, **kwarg)
+        def srcDevOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mode=self.src_mode)
+            app = kwarg.pop('options_apply', ['mode'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        limit_conv_d = {src_mode_opt[['current']]:'voltage', src_mode_opt[['voltage']]:'current'}
+        def limit_conv(val, conv_val):
+            for k, v in limit_conv_d.iteritems():
+                if val in k:
+                    return v
+            raise KeyError('Unable to find key in limit_conv')
+        #limit_conv = lambda val, conv_val: limit_conv_d[val]
+        def srcLimitDevOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mode=self.src_mode)
+            app = kwarg.pop('options_apply', ['mode'])
+            options_conv = kwarg.pop('options_conv', {}).copy()
+            options_conv.update(dict(mode=limit_conv))
+            kwarg.update(options=options, options_apply=app, options_conv=options_conv)
+            return scpiDevice(*arg, **kwarg)
+        self.output_off_mode = scpiDevice('OUTPut:SMODe', choices=ChoiceStrings('NORMal', 'HIMpedance', 'ZERO', 'GUARd', 'GUARd2'),
+            doc="""\
+                 These options select the state of the output when ouput is disabled.
+                 In all cases measurement sense is set to 2 wires
+                 -himpedance: the output relay disconnects the load
+                 -normal: Voltage src set to 0V, current compliance to 0.5% full scale of current range
+                 -zero:  Voltage src set to 0V, autorange off, current comliance kept the same or 0.5% of full scale whichever is greater.
+                         Measurements are performed.
+                 -guard: Current src set to 0A, voltage compliance to .5% of full scale range
+                 -guard2: only for C34 firmware. To remove output spikes in certain environments.
+               """)
+        self.src_delay = scpiDevice('SOURce:DELay', str_type=float, min=0, max=999.9999, setget=True, doc='Extra time in seconds (after settling) between changing source and reading measurement. Changing it disables auto delay.')
+        self.src_delay_auto_en = scpiDevice('SOURce:DELay:AUTO', str_type=bool)
+        self._devwrap('src_level', setget=True)
+        # limits obtained from tests on instrument.
+        if is_2410:
+            vmin = 0.2e-3
+            vlim = 1100
+        else:
+            vmin = 20e-3
+            vlim = 210
+        limit_choices = ChoiceDevDep(self.src_mode,{ src_mode_opt[['voltage']]:ChoiceLimits(1e-9, 1.05), src_mode_opt[['current']]:ChoiceLimits(vmin, vlim)})
+        self.compliance = srcLimitDevOption('SENSe:{mode}:PROTection', str_type=float, choices=limit_choices, setget=True)
+        self.compliance_tripped = srcLimitDevOption(getstr='SENSe:{mode}:PROTection:TRIPped?', str_type=bool)
+        if not is_old_firm:
+            # RSYNchronize is not present on my old 2400 model.
+            self.compliance_range_sync_en = srcLimitDevOption('SENSe:{mode}:PROTection:RSYNchronize', str_type=bool)
+        if is_2410:
+            protection_choices = [20, 40, 100, 200, 300, 400, 500, 1100]
+        else:
+            protection_choices = [20, 40, 60, 80, 100, 120, 160, 210]
+        self.src_protection_level =  scpiDevice('SOURce:VOLTage:PROTection', str_type=float, choices=protection_choices)
+        src_range_choices = ChoiceDevDep(self.src_mode, {src_mode_opt[['CURRent']]:ChoiceLimits(-1, 1), src_mode_opt[['voltage']]:ChoiceLimits(-vlim, vlim)})
+        self.src_range = srcDevOption('SOURce:{mode}:RANGe', str_type=float, choices=src_range_choices, setget=True)
+        self.src_range_auto_en = srcDevOption('SOURce:{mode}:RANGe:AUTO', str_type=bool)
+
+        self.meas_en_voltage = scpiDevice('FUNCtion:{val} "voltage"', 'FUNCtion:STATe? "voltage"', str_type=meas_en_type)
+        self.meas_en_current = scpiDevice('FUNCtion:{val} "current"', 'FUNCtion:STATe? "current"', str_type=meas_en_type)
+        self.meas_en_resistance = scpiDevice('FUNCtion:{val} "resistance"', 'FUNCtion:STATe? "resistance"', str_type=meas_en_type)
+        self.meas_filter_count = scpiDevice('AVERage:COUNt', str_type=int, min=1, max=100)
+        self.meas_filter_type = scpiDevice('AVERage:TCONtrol',  choices=ChoiceStrings('REPeat', 'MOVing'),
+                                           doc="""\
+                                                  repeat averaging returns one value for every meas_avg_count taken.
+                                                  moving averaging returns meas_avg_count for every meas_avg_count taken.
+                                                                            the value is the average of at most (could be less if data is not available) meas_avg_count.
+                                                                            So the first result in the buffer had no averaging on it.
+                                               """)
+        self.meas_filter_en = scpiDevice('AVERage', str_type=bool)
+        self.meas_autozero_en = scpiDevice('SYSTem:AZERo:STATe', str_type=bool, doc='Note that this triples the time for the measurement (zero+ref+sample). See also the meas_autozero_now method')
+        if not is_old_firm:
+            # my old 2400 does not have SYSTem:AZERo:CACHing
+            self.meas_autozero_cache_en = scpiDevice('SYSTem:AZERo:CACHing', str_type=bool, doc='Use this with autozero disabled. See meas_autozero_cache_reset and meas_autozero_cache_refresh')
+        # This is global, affects all measurents.
+        self.meas_nplc = scpiDevice('VOLTage:NPLCycles', str_type=float, min=0.01, max=10, setget=True)
+        self.meas_resistance_offset_comp_en = scpiDevice('RESistance:OCOMpensated', str_type=bool)
+        self.meas_resistance_mode = scpiDevice('RESistance:MODE', choices=ChoiceStrings('MANual', 'AUTO'))
+        self.meas_autorange_en = measDevOption('{mode}:RANGe:AUTO', str_type=bool)
+        range_choices = ChoiceDevDep(self.meas_mode, {meas_curr:ChoiceLimits(1e-6, 1.05), meas_volt:ChoiceLimits(.2, vlim), meas_mode_opt[['resistance']]:ChoiceLimits(2, 200e6)})
+        self.meas_autorange_lower_limit = measDevOption('{mode}:RANGe:AUTO:LLIMit', str_type=float, choices=range_choices, setget=True)
+        self.meas_autorange_upper_limit = measDevOption('{mode}:RANGe:AUTO:ULIMit', str_type=float, choices=range_choices, setget=True,
+                                                        doc="upper limit can only be changed for a resistance measurement.")
+        self.meas_range = measDevOption('{mode}:RANGe', str_type=float, choices=range_choices, setget=True)
+        if not is_old_firm:
+            # my old 2400 does not have CURRent:RANGe:HOLDoff
+            self.meas_range_current_holdoff_en = scpiDevice('CURRent:RANGe:HOLDoff', str_type=bool)
+            self.meas_range_current_holdoff_delay = scpiDevice('CURRent:RANGe:HOLDoff:DELay', str_type=float, min=0, max=999.9999)
+
+        self.meas_relative_source = scpiDevice('CALC2:FEED', choices=ChoiceStrings('CALC1', 'VOLTage', 'CURRent', 'RESistance'))
+        self.meas_relative_en = scpiDevice('CALC2:NULL:STATe', str_type=bool)
+        self.meas_relative_offset = scpiDevice('CALC2:NULL:OFFSet', str_type=float)
+        self.four_wire_en = scpiDevice('SYSTEM:RSENse', str_type=bool)
+        self.data_fetch_relative_last = scpiDevice(getstr='CALCulate2:DATA:LATest?', str_type=_decode_block_auto, trig=True, autoinit=False)
+
+        self.data_fetch_mean = scpiDevice(getstr='CALCulate3:FORMat MEAN;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+        self.data_fetch_std = scpiDevice(getstr='CALCulate3:FORMat SDEViation;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+        self.data_fetch_max = scpiDevice(getstr='CALCulate3:FORMat MAXimum;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+        self.data_fetch_min = scpiDevice(getstr='CALCulate3:FORMat MINimum;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+        self.data_fetch_p2p = scpiDevice(getstr='CALCulate3:FORMat PKPK;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+
+        self.trace_feed = scpiDevice('TRACe:FEED', choices=ChoiceStrings('SENS1', 'CALC1', 'CALC2'))
+        self.trace_npoints_storable = scpiDevice('TRACe:POINts', str_type=int, setget=True, min=1, max=2500)
+        self.trace_npoints =  scpiDevice(getstr='TRACe:POINts:ACTUal?', str_type=int)
+        self.trace_en = scpiDevice('TRACe:FEED:CONTrol', choices=ChoiceSimpleMap(dict(NEXT=True, NEV=False), filter=string.upper))
+        self.trace_data = scpiDevice(getstr='TRACe:DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+
+        self._devwrap('fetch', autoinit=False, trig=True)
+        self.readval = ReadvalDev(self.fetch)
+        self.alias = self.readval
+        # This needs to be last to complete creation
+        super(keithley_2400_smu, self)._create_devs()
+
+    def _src_level_getdev(self, mode=None):
+        if mode is not None:
+            self.src_mode.set(mode)
+        mode = self.src_mode.getcache()
+        return float(self.ask('SOURce:{mode}?'.format(mode=mode)))
+    def  _src_level_checkdev(self, val, mode=None):
+        if mode is not None:
+            self.src_mode.set(mode)
+        mode = self.src_mode.getcache()
+        autorange = self.src_range_auto_en.getcache()
+        K = 1.05
+        if autorange:
+            if mode in self.src_mode.choices[['voltage']]:
+                if self._is_2410:
+                    rnge = 1000.
+                    K = 1.1
+                else:
+                    rnge = 200.
+            else:
+                rnge = 1.
+        else:
+            rnge = self.src_range.getcache()
+        if abs(val) > rnge*K:
+            raise ValueError, self.perror('level is outside current range')
+    def _src_level_setdev(self, val, mode=None):
+        mode = self.src_mode.getcache()
+        self.write('SOURce:{mode} {val!r}'.format(mode=mode, val=val))
