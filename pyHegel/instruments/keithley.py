@@ -1238,8 +1238,8 @@ class keithley_2400_smu(visaInstrumentAsync):
            When called without any values (all are None), it shows the current setting.
            When called we some values, only the ones that are not None are changed.
            For the range (source). Use 0 to enable autorange or a value to fix it.
-           Use 0 for the Vmeas_range or Imeas_range to enable autorange. Use a negative value to set the autorange lower limit.
-            Use a positive value for the fix manual range. Note that the ranges are limited (upper) to the compliance range,
+           Use 0 for the Vmeas_range or Imeas_range to enable autorange. Use a positive value to set the autorange lower limit.
+            Use a negative value for the fix manual range. Note that the ranges are limited (upper) to the compliance range,
             which is set by the compliance value.
             The measurement range for the source signal is also fixed to the source range.
         """
@@ -1277,9 +1277,9 @@ class keithley_2400_smu(visaInstrumentAsync):
                         # Vmeas or Imeas range
                         self.meas_mode.set(meas_mode[k])
                         if self.meas_autorange_en.get():
-                            data = -self.meas_autorange_lower_limit.get()
+                            data = self.meas_autorange_lower_limit.get()
                         else:
-                            data = self.meas_range.get()
+                            data = -self.meas_range.get()
                 else:
                     data = dev.get()
                 result_dict[k] = data
@@ -1304,11 +1304,11 @@ class keithley_2400_smu(visaInstrumentAsync):
                             self.meas_mode.set(meas_mode[k])
                             if val == 0:
                                 self.meas_autorange_en.set(True)
-                            elif val<0:
-                                self.meas_autorange_lower_limit.set(-val)
+                            elif val > 0:
+                                self.meas_autorange_lower_limit.set(val)
                                 self.meas_autorange_en.set(True)
                             else:
-                                self.meas_range.set(val)
+                                self.meas_range.set(-val)
                     else:
                         dev.set(val)
             self.meas_mode.set(orig)
