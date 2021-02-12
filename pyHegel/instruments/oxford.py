@@ -571,10 +571,12 @@ class oxford_ips120_10(visaInstrument):
     _ramp_current_setdev = _ramp_setdev_factory(False)
     _ramp_field_T_setdev = _ramp_setdev_factory(True)
 
-    def _ramp_current_getdev(self):
+    def _ramp_current_getdev(self, return_persistent='auto', wait=None, quiet=True, no_wait_end=False):
+        # All the options are there to absorb the parameters on setget.
         return self.current_magnet.get()
 
-    def _ramp_field_T_getdev(self):
+    def _ramp_field_T_getdev(self, return_persistent='auto', wait=None, quiet=True, no_wait_end=False):
+        # All the options are there to absorb the parameters on setget.
         return self.field_T.get()
 
     def _status_getdev(self, full=False):
