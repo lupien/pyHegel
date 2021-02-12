@@ -532,6 +532,9 @@ class Trace(TraceBase):
             self.draw()
             return
         if self.first_update:
+            # some older toolbar initialized the array of views to 0,1 which caused error with time conversion when hitting home.
+            # some empty it now.
+            self.toolbar.update() # this resets the views
             self.do_resize(draw=False)
             ndim = self.ys.shape[1]
             offset = self.offset
