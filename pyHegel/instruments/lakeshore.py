@@ -1894,8 +1894,8 @@ class lakeshore_625(visaInstrument):
         self.ramp_rate_field_kG.choices.choices['s'].max = rmax*scalekG
         self.ramp_current.max = max_current
         self.ramp_current.min = min_current
-        self.ramp_field_T = ScalingDevice(self.ramp_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT)
-        self.ramp_field_kG = ScalingDevice(self.ramp_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG)
+        self.ramp_field_T = ScalingDevice(self.ramp_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT, doc='Same options as ramp_current')
+        self.ramp_field_kG = ScalingDevice(self.ramp_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG, doc='Same optiosn as ramp_current')
         self.alias = self.field_T
         self._create_devs_helper() # to get logical devices return proper name (not name_not_found)
 
@@ -2038,7 +2038,8 @@ class lakeshore_625(visaInstrument):
             print_if('Ramping...')
             self._do_ramp(val, wait, no_wait_end)
 
-    def _ramp_current_getdev(self):
+    def _ramp_current_getdev(self, return_persistent='auto', wait=None, quiet=True, no_wait_end=False):
+        # All the options are there to absorb the parameters on setget.
         return self.current_magnet.get()
 
     def _create_devs(self):
