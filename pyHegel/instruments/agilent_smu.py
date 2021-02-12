@@ -43,12 +43,12 @@ from ..instruments_registry import register_instrument, register_usb_name, regis
 ##    Agilent E5270B mainframe with E5281B precision medium power SMU modules
 #######################################################
 
-# decorator to cache values for 100 ms
+# decorator to cache values for 1s
 def cache_result(func):
     def wrapped_func(self, *args, **kwargs):
         last, cache, prev_args, prev_kwargs = self._wrapped_cached_results.get(func, (None, None, None, None))
         now = time.time()
-        if last is None or now - last > 0.1 or args != prev_args or kwargs != prev_kwargs:
+        if last is None or now - last > 1. or args != prev_args or kwargs != prev_kwargs:
             #print 'Updating cache'
             cache = func(self, *args, **kwargs)
             self._wrapped_cached_results[func] = (now, cache, args, kwargs)
@@ -76,28 +76,31 @@ class MemoryDevice_update(MemoryDevice):
         if nch is not None:
             val = self.getcache(local=True)
             self._internal_vals = [val]*nch
-    def _ch_helper(self, ch=None):
+    def _ch_helper(self, ch=None, slot=None):
         args = ()
         if self._nch is not None:
-            ch = self.instr._ch_helper(ch)
+            if slot is not None:
+                ch = slot
+            else:
+                ch = self.instr._ch_helper(ch)
             args += (ch, )
         elif ch is not None:
             raise ValueError(self.perror('You cannnot specify a channel for this device.'))
         return ch, args
-    def _getdev(self, ch=None):
-        ch, args = self._ch_helper(ch)
+    def _getdev(self, ch=None, slot=None):
+        ch, args = self._ch_helper(ch, slot)
         if ch is None:
             return super(MemoryDevice_update, self)._getdev(self)
         return self._internal_vals[ch-1]
-    def _setdev(self, val, ch=None):
+    def _setdev(self, val, ch=None, slot=None):
         ch, args = self._ch_helper(None) # Channel already changed in check
         if ch is not None:
             self._internal_vals[ch-1] = val
         super(MemoryDevice_update, self)._setdev(val)
         if self._update_func is not None:
             self._update_func(*args)
-    def _checkdev(self, val, ch=None):
-        ch, args = self._ch_helper(ch)
+    def _checkdev(self, val, ch=None, slot=None):
+        ch, args = self._ch_helper(ch, slot)
         super(MemoryDevice_update, self)._checkdev(val)
 
 def func_or_proxy(func):
@@ -172,15 +175,23 @@ class agilent_SMU(visaInstrumentAsync):
     B1500A (Semiconductor Device Analyzer) mainframe.
     Useful devices:
         readval
-        fetch
         level
         compliance
+        measV, measI    These migth be a little faster than readval for a single measurement,
+                        but could fail with a timeout (so only use them for very quick measurements,
+                        or increase the timeout (see the set_timeout attribute).
+    There is a fetch device but it will not work on its own. Use readval or fetch with async
+    (but since readval with async does the same, you should always use readval here.)
     To configure the instrument, look at the methods:
         conf_general
         conf_integration
         conf_ch
         set_mode
         conf_staircase
+    Other useful method:
+        empty_buffer   Use it to clear the buffer when stopping a reading.
+                       Otherwise the next request will return previous (and wrong)
+                       answers.
     Note: The B1500A needs to have the EasyExpert Start button running for
           remote GPIB to work. Do not start the application.
     """
@@ -200,7 +211,11 @@ class agilent_SMU(visaInstrumentAsync):
                 raise ValueError('Invalid smu_channel_map: repeated key or value.')
         super(agilent_SMU, self).__init__(*args, **kwargs)
 
+    def empty_buffer(self):
+        self.write('BC')
+
     def init(self, full=False):
+        self.empty_buffer()
         self.write('FMT21')
         self.calibration_auto_en.set(False)
         #self.sendValueToOther('Auto Calibration Enable', False)
@@ -210,10 +225,60 @@ class agilent_SMU(visaInstrumentAsync):
         # self.clear() # SMU does not have *cls
         self.write('*sre 0') # disable trigger (we enable it only when needed)
         self._async_trigger_helper_string = None
+        self._async_trigger_n_read = None
+        self._async_trig_current_data = None
+        self._async_trigger_parsers = None
+
+    def _async_select(self, devs=[]):
+        # This is called during init of async mode.
+        self._async_detect_setup(reset=True)
+        for dev, kwarg in devs:
+            if dev in [self.fetch, self.readval]:
+                chs = kwarg.get('chs', None)
+                auto = kwarg.get('auto', 'all')
+                self._async_detect_setup(chs=chs, auto=auto)
+
+    def _async_detect_setup(self, chs=None, auto=None, reset=False):
+        if reset:
+            # make the default async_mode is 'wait' so that if
+            # _async_tocheck == 0, we just turn on wait.
+            # This could happen when using run_and_wait before anything is set
+            # Otherwise, getasync and readval both call async_select to setup
+            # the mode properly (_async_mode and_async_tocheck).
+            self._async_trigger_helper_string = ''
+            self._async_trigger_parsers = [] # list of (func, args, kwargs)
+            self._async_trigger_n_read = 0
+            return
+        n_read = self._async_trigger_n_read
+        async_string = self._async_trigger_helper_string
+        async_parsers = self._async_trigger_parsers
+        full_chs, auto, mode = self._fetch_opt_helper(chs, auto)
+        if mode != 'spot':
+            async_string += ';XE'
+            async_parsers.append((None, (), {}))
+            n_read += 1
+        else:
+            for ch, meas in full_chs:
+                if meas == 'v':
+                    is_voltage = True
+                    rng = self.range_voltage_meas
+                else:
+                    is_voltage = False
+                    rng = self.range_current_meas
+                quest, slot = self._measIV_helper_get_quest(is_voltage, ch, None, rng)
+                async_string += ';' + quest
+                async_parsers.append((self._measIV_helper_ret_val, (is_voltage, slot), {}))
+                n_read += 1
+        if len(async_string) >= 1:
+             # we skip the first ';'
+             async_string = async_string[1:]
+        self._async_trigger_helper_string = async_string
+        self._async_trigger_n_read = n_read
+        self._async_trigger_parsers = async_parsers
 
     def _async_trigger_helper(self):
         async_string = self._async_trigger_helper_string
-        if async_string is None:
+        if async_string is None or async_string == '':
             return
         self._async_trig_current_data = None
         self.write(async_string)
@@ -231,32 +296,25 @@ class agilent_SMU(visaInstrumentAsync):
             # This cycle is not finished
             return ret
         # we got a trigger telling data is available. so read it, before we turn off triggering in cleanup
-        data = self.read()
+        data = [self.read() for i in range(self._async_trigger_n_read)]
         self._async_trig_current_data = data
         return ret
 
     @locked_calling
     def _async_trig(self):
-        async_string = self._async_trigger_helper_string
-        if async_string != '*cal?':
-            if self.measurement_spot_en.get():
-                async_string = None
-            else:
-                async_string = 'XE'
-                self.write('BC') # empty buffer
-                # Trigger on Set Ready. This generates an event which will need to be cleaned up.
-                # *opc? is used to make sure we waited long enough to see the event if it was to occur.
-                # Note that the event is not always detected by NI autopoll so this is why
-                # we wait and then empty the buffer of all/any status.
-                #   (see details in comment section below to class code.)
-                self.ask('*sre 16;*opc?')
-                # absorb all status bytes created.
-                #i=0
-                while self.read_status_byte()&0x40:
-#                    i += 1
-                    pass
-#                print 'skipped %i'%i
-            self._async_trigger_helper_string =  async_string
+        #self.empty_buffer()
+        # Trigger on Set Ready. This generates an event which will need to be cleaned up.
+        # *opc? is used to make sure we waited long enough to see the event if it was to occur.
+        # Note that the event is not always detected by NI autopoll so this is why
+        # we wait and then empty the buffer of all/any status.
+        #   (see details in comment section below to class code.)
+        self.ask('*sre 16;*opc?')
+        # absorb all status bytes created.
+        #i=0
+        while self.read_status_byte()&0x40:
+#            i += 1
+            pass
+#        print 'skipped %i'%i
         super(agilent_SMU, self)._async_trig()
 
     def _get_esr(self):
@@ -299,12 +357,15 @@ class agilent_SMU(visaInstrumentAsync):
     @locked_calling
     def perform_calibration(self):
         prev_str = self._async_trigger_helper_string
+        prev_n_read = self._async_trigger_n_read
         try:
             self._async_trigger_helper_string = '*cal?'
+            self._async_trigger_n_read = 1
             self.run_and_wait()
-            res = int(self._async_trig_current_data)
+            res = int(self._async_trig_current_data[0])
         finally:
             self._async_trigger_helper_string = prev_str
+            self._async_trigger_n_read = prev_n_read
             del self._async_trig_current_data
         if res != 0:
             raise RuntimeError(self.perror('Calibration failed (at least one module failed). Returned value is %i'%res))
@@ -390,11 +451,20 @@ class agilent_SMU(visaInstrumentAsync):
                      'i2' to read the current of channel 2.
         status when True, adds the status of every reading to the return value.
         xaxis when True and when getting stair data, will add the xaxis as a first column
+        To read status for smu, the bit field is:
+           bit 0 (  1): A/D converter overflowed.
+           bit 1 (  2): Oscillation or force saturation occurred.
+           bit 2 (  4): Another unit reached its compliance setting.
+           bit 3 (  8): This unit reached its compliance setting.
+           bit 4 ( 16): Target value was not found within the search range.
+           bit 5 ( 32): Search measurement was automatically stopped.
+           bit 6 ( 64): Invalid data is returned. D is not used.
+           bit 7 (128): EOD (End of Data).
         """
         full_chs, auto, mode = self._fetch_opt_helper(chs, auto)
         if mode != 'spot':
             try:
-                data = self._async_trig_current_data
+                data = self._async_trig_current_data.pop(0)
                 if mode == 'stair':
                     x_data = self._x_axis
             except AttributeError:
@@ -420,16 +490,13 @@ class agilent_SMU(visaInstrumentAsync):
         # The longest measurement time for TI/TV seems to be for PLC mode (100/50 or 100/60) so a max of 2s.
         # so just use ask? for short times and run_and_wait (note that it needs to behave properly under async.)
         ret = []
-        ch_orig = self.current_channel.get()
         for ch, meas in full_chs:
-            if meas == 'v':
-                val = self.measV.get(ch=ch)
-            else:
-                val = self.measI.get(ch=ch)
+            val_str = self._async_trig_current_data.pop(0)
+            func, args, kwargs = self._async_trigger_parsers.pop(0)
+            val = func(val_str, *args, **kwargs)
             ret.append(val)
             if status:
                 ret.append(self.meas_last_status.get())
-        self.current_channel.set(ch_orig)
         ret = np.array(ret)
         if status:
             ret.shape = (-1, 2)
@@ -588,8 +655,8 @@ class agilent_SMU(visaInstrumentAsync):
         fnc = self._get_function(ch)
         return fnc.active_Vrange
 
-    def _measIV_helper(self, voltage, ch, range, rgdev):
-        ch = self._ch_helper(ch) # this set ch for the next entries
+    def _measIV_helper_get_quest(self, voltage, ch, range, rgdev):
+        slot = self._ch_helper(ch) # this set ch for the next entries
         if range is None:
             if self.range_meas_use_compliance_en.get():
                 range = 'comp'
@@ -599,17 +666,27 @@ class agilent_SMU(visaInstrumentAsync):
             if not (range == 'comp' or range in rgdev.choices):
                 raise ValueError(self.perror('Invalid range selected'))
         quest = 'TV' if voltage else 'TI'
-        quest += '%i'%ch
+        quest += '%i'%slot
         if range != 'comp':
             quest += ',%s'%rgdev.choices.tostr(range)
-        result_str = self.ask(quest)
+        return quest, slot
+
+    def _measIV_helper_ret_val(self, result_str, voltage, slot):
+        if result_str is None:
+            # This is when we are in async mode.
+            result_str = self.read()
         value, channel, status, type = self._parse_data(result_str)
         if type is not None and type != {True:'V', False:'I'}[voltage]:
             raise RuntimeError(self.perror('Read back the wrong signal type'))
-        if channel is not None and channel != ch:
+        if channel is not None and channel != slot:
             raise RuntimeError(self.perror('Read back the wrong channel'))
-        self.meas_last_status.set(status)
+        self.meas_last_status.set(status, slot=slot)
         return value
+
+    def _measIV_helper(self, voltage, ch, range, rgdev):
+        quest, slot = self._measIV_helper_get_quest(voltage, ch, range, rgdev)
+        result_str = self.ask(quest)
+        return self._measIV_helper_ret_val(result_str, voltage, slot)
 
     def _measV_getdev(self, ch=None, range=None):
         """ This returns the spot measurement.
@@ -930,7 +1007,7 @@ class agilent_SMU(visaInstrumentAsync):
 
 
     def _create_devs(self):
-        self.write('BC') # make sure to empty output buffer
+        self.empty_buffer() # make sure to empty output buffer
         self._isB1500 = self.idn_split()['model'] in ['B1500A']
         valid_ch, options_dict, smu_slots, Nmax = self._get_unit_conf()
         #self._valid_ch = valid_ch
@@ -1128,7 +1205,7 @@ class agilent_SMU(visaInstrumentAsync):
         self._devwrap('active_range_current')
         self._devwrap('active_range_voltage')
         self._devwrap('measV', autoinit=False, trig=True)
-        self.meas_last_status = MemoryDevice_update(None, None, nch=Nmax)
+        self.meas_last_status = MemoryDevice_update(None, None, nch=Nmax, doc='See readval/fetch for the description of the bit field')
         self._devwrap('measI', autoinit=False, trig=True)
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
