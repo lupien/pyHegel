@@ -1321,7 +1321,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         for p in ports:
             self.current_phys_port.set(p)
             o = ['phys_port=%i'%p]
-            o += self._conf_helper('port_power_en', 'port_gain_control', 'port_impedance', 'port_attenuation', 'port_gain_control')
+            o += self._conf_helper('port_power_en', 'port_power_level_dBm', 'port_gain_control', 'port_impedance', 'port_attenuation', 'port_gain_control')
             o += self._conf_helper('port_power_permant_on_en')
             o += self._conf_helper('calc_deembed_single_end_en', 'calc_embed_single_end_en')
             o += self._conf_helper('elec_delay_loss_fixture_compensation_en', 'elec_delay_time', 'elec_delay_length', 'elec_delay_dielectric_constant')
