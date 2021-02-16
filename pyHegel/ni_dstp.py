@@ -586,6 +586,13 @@ class Dstp_Client(object):
         return data
 
     def _threaded_target(self):
+        quiet_del = self._quiet_del
+        if not quiet_del:
+            # It seems that on some versions of anaconda on windows (at least python 2.7.16)
+            # If I don't print something now, it will produce an
+            #   WindowsError: [Error 6] Descripteur non valide
+            # later at the end (on the print Thread stopped.)
+            print('Thread started.')
         read_buffer = self._read_buffer
         read_replies_buffer = self._read_replies_buffer
         thread_stop = self._thread_stop
@@ -593,7 +600,6 @@ class Dstp_Client(object):
         get_next_data = ProxyMethod(self.get_next_data)
         read_ack = self._read_ack
         read_lasttime = self._read_lasttime
-        quiet_del = self._quiet_del
         while not thread_stop[0]:
             try:
                 data = read_parse()
@@ -772,7 +778,7 @@ class Dstp_Client(object):
                     continue
                 raise
             if len(new_s) == 0:
-                raise RuntimeError('Socket was closed. Receiving end if file.')
+                raise RuntimeError('Socket was closed. Receiving end of file.')
             data_str += new_s
         return data_str
     def read_packet(self):
