@@ -1,12 +1,11 @@
 import struct
-from time import sleep
-
 import numpy
+from pyvisa.constants import VI_ERROR_TMO
 
-from pyHegel.kbint_util import _delayed_signal_context_manager
-
+from pyHegel import instruments
+import time
 from pyHegel.instruments_base import visaInstrument, scpiDevice, ChoiceStrings, BaseDevice, ChoiceBase, \
-    visaInstrumentAsync, ReadvalDev, decode_float64_avg, BaseInstrument, locked_calling
+    visaInstrumentAsync, ReadvalDev, decode_float64_avg, BaseInstrument, locked_calling, wait
 from pyHegel.instruments_registry import register_instrument
 
 # Source/dest id:
@@ -182,7 +181,8 @@ class APTDevice(BaseDevice):
         self.get_fmt = get_fmt
 
     def _getdev(self, **kwarg):
-        question = self._getdev_p
+        id = self._getdev_p
+        question = id + "\x01\x00\x50\x01"
         data = self.instr.ask(question)
         ret = struct.unpack(self.get_fmt, data)
 
@@ -193,13 +193,54 @@ class APTDevice(BaseDevice):
 @register_instrument('Thorlabs', 'KDC101', alias='KDC101 Rotation stage')
 class ThorlabsKDC101(visaInstrument):
 
-    #TODO: handle the "end of move" messages. Either disable them or implement a class than handles multiple responses in the buffer
+    def __init__(self, *arg, **kwarg):
+        super(ThorlabsKDC101, self).__init__(*arg, **kwarg)
+        self.suspend_endofmove_msgs()
+        #self.resume_endofmove_msgs()
+
     def idn(self):
         rep = self.ask(encodeAPT(0x0005))
         # Bytes from 24 to 84 are for internal use only
         part_a = struct.unpack('l8sH4s', rep[6:24])
         part_b = struct.unpack('3H', rep[84::])
         return part_a, part_b
+
+    def write(self, val, termination=''):
+        # some checks to prevent the controller from being bricked
+        if ord(val[4]) != GENERIC_USB and ord(val[4]) != GENERIC_USB | 0x80:
+            raise Exception("Not a valid APT command!")
+        super(ThorlabsKDC101, self).write(val)
+
+    def wait_for_endofmove(self, timeout_ms=60000):
+        time_0 = time.time()
+        new_time = time_0
+        flag = False
+        while(new_time-time_0 < timeout_ms/1000):
+            bytes = self.ask_status_bytes()
+            data, = struct.unpack('I', bytes)
+            is_mov_fwd = bool(data & 0x00000010)
+            is_mov_rev = bool(data & 0x00000020)
+            if not is_mov_fwd and not is_mov_rev:
+                flag = True
+                break
+            wait(0.2)
+            new_time = time.time()
+
+
+        #old_timeout = self.visa.timeout
+        #self.visa.timeout = timeout_ms
+        #try:
+        #    resp = self.read()
+        #except VI_ERROR_TMO:
+        #    raise
+        #self.visa.timeout = old_timeout
+
+    def ask_status_bytes(self):
+        message = encodeAPT(0x0429)
+        self.write(message)
+        res = self.read()
+        return res[8::]
+
 
     def read(self, raw=False, count=None, chunk_size=None):
         # First we try to read the header, if the dest byte is 0x01 (HOST), no data packet to follow, if 0x81 (HOST logic OR'd with 0x80 )
@@ -210,25 +251,35 @@ class ThorlabsKDC101(visaInstrument):
             count, = struct.unpack('H', header[2:4])
             return header + super(ThorlabsKDC101, self).read(count=count)
 
-    def deg_to_inc(self, deg):
-        #Depend on the stages, auto-detection?
-        return int(numpy.around(1919.6418578623391*deg))
-    def inc_to_deg(self, inc):
-        return inc/1919.6418578623391
+    def suspend_endofmove_msgs(self):
+        message = encodeAPT(0x046B)
+        self.write(message)
 
+    def resume_endofmove_msgs(self):
+        message = encodeAPT(0x046C)
+        self.write(message)
+
+    def deg_to_inc(self, deg):
+        # Depend on the stages, auto-detection?
+        return int(numpy.around(1919.6418578623391 * deg))
+
+    def inc_to_deg(self, inc):
+        return inc / 1919.6418578623391
 
     def move_rel(self, angle):
         data = struct.pack('<Hi', 1, int(self.deg_to_inc(angle)))
         message = encodeAPT(0x0448, data=data)
         self.write(message)
+        self.wait_for_endofmove()
 
-    #Fonction a utiliser pour le "set angle"
+    # Fonction a utiliser pour le "set angle"
     def move_abs(self, angle):
         data = struct.pack('<Hi', 1, int(self.deg_to_inc(angle)))
         message = encodeAPT(0x0453, data=data)
         self.write(message)
+        self.wait_for_endofmove()
 
-    def move_jog(self, direction = 'fwrd'):
+    def move_jog(self, direction='fwrd'):
         if direction == 'rev':
             dire = 0x02
         else:
@@ -236,11 +287,6 @@ class ThorlabsKDC101(visaInstrument):
         message = encodeAPT(0x046A, param1=1, param2=dire)
         self.write(message)
 
-    def wait_for_move_completed(self, timeout = 60):
-        pass
-
-    def is_moving(self):
-        pass
     def stop(self, immediate=False):
         if immediate:
             stop_mode = 0x01
@@ -252,8 +298,11 @@ class ThorlabsKDC101(visaInstrument):
     def go_home(self):
         data = encodeAPT(0x0443, 1, 0)
         self.write(data, termination='')
+        self.wait_for_endofmove()
 
-
+    def get_angle(self):
+        rep = self.ask(encodeAPT(0x0411, 1, 0))
+        return self.inc_to_deg(rep)
 
     def identify(self):
         data = encodeAPT(0x0223, 0, 0)
@@ -261,7 +310,14 @@ class ThorlabsKDC101(visaInstrument):
 
     def _create_devs(self):
 
-        self.pos_counter = APTDevice(reqstr="\x11\x04\x01\x00\x50\x01", get_fmt='6sHi', autoinit=False, trig=True)
-        self.enc_counter = APTDevice(reqstr="\x0A\x04\x01\x00\x50\x01", get_fmt='6sHi', autoinit=False, trig=True)
+        self.pos_counter = APTDevice(reqstr="\x11\x04", get_fmt='6sHi', autoinit=False, trig=True)
+        self.enc_counter = APTDevice(reqstr="\x0A\x04", get_fmt='6sHi', autoinit=False, trig=True)
+
+        def scaled_get():
+            return self.inc_to_deg(self.pos_counter.get())
+        self.angle = instruments.FunctionWrap(
+            setfunc=self.move_abs,
+            getfunc=scaled_get
+        )
 
         super(ThorlabsKDC101, self)._create_devs()
