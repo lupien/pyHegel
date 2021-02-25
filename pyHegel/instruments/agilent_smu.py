@@ -26,6 +26,7 @@ from __future__ import absolute_import
 import numpy as np
 import time
 import types
+import string
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
@@ -36,7 +37,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             decode_uint16_bin, _decode_block_base, decode_float64_2col,\
                             decode_complex128, sleep, locked_calling, visa_wrap, _encode_block,\
                             dict_improved, _general_check, _tostr_helper, ChoiceBase, ProxyMethod,\
-                            OrderedDict
+                            OrderedDict, _decode_block_auto, ChoiceSimpleMap
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 #######################################################
@@ -1698,3 +1699,466 @@ class agilent_SMU(visaInstrumentAsync):
 #   using it. The safest, after *sre 16 (which does create the event, sometimes),
 #   is to wait a little to make sure the instruments did trigger it (I use *OPC?)
 #   and then empty the buffer.
+
+
+#######################################################
+##    Agilent B2900 series
+#######################################################
+
+class _meas_en_type(object):
+    conv = {True:'ON', False:'OFF'}
+    def __call__(self, from_str):
+        return bool(int(from_str))
+    def tostr(self, data):
+        return self.conv[data]
+meas_en_type = _meas_en_type()
+
+#@register_instrument('Agilent Technologies', 'B2912A', '2.0.1225.1717')
+@register_instrument('Agilent Technologies', 'B2912A', usb_vendor_product=[0x0957, 0x8E18])
+class agilent_B2900_smu(visaInstrumentAsync):
+    """\
+    This controls the agilent B2900 series source mesure unit (SMU).
+    Important devices:
+     output_en
+     src_level
+     compliance
+     readval  same as initiating a measurement, waiting then fetch
+     fetch
+     meas_en_current, meas_en_voltage, meas_en_resistance
+    Useful method:
+     conf_ch
+     abort
+     reset
+     get_error
+    """
+    def init(self, full=False):
+        # This empties the instrument buffers
+        self._dev_clear()
+        self.write('FORMat:BORDer SWAPped') # other option is NORMal.
+        self.write('FORMat ASCii') # other option is REAL,32 or REAL,64
+        self.write('FORMat:ELEMents:SENSe VOLTage,CURRent,RESistance,STATus,SOURce')
+        super(agilent_B2900_smu, self).init(full=full)
+
+    def abort(self):
+        self.write('ABORt')
+
+    def reset(self):
+        """ Reset the instrument to power on configuration """
+        self.write('*RST')
+
+    def _async_trigger_helper(self):
+        # hardcode both channles for now
+        self.write('INItiate:ACQuire (@1,2);*OPC')
+
+    @locked_calling
+    def set_time(self, set_time=False):
+        """ Reads the time from the instrument or set it from the computer value """
+        if set_time:
+            now = time.localtime()
+            self.write('SYSTem:DATE %i,%i,%i'%(now.tm_year, now.tm_mon, now.tm_mday))
+            self.write('SYSTem:TIME %i,%i,%i'%(now.tm_hour, now.tm_min, now.tm_sec))
+        else:
+            date_str = self.ask('SYSTem:DATE?')
+            time_str = self.ask('SYSTem:TIME?')
+            date = map(float, date_str.split(','))
+            timed = map(float, time_str.split(','))
+            return '%i-%02i-%02i %02i:%02i:%02f '%tuple(date+timed)
+
+    @locked_calling
+    def _current_config(self, dev_obj=None, options={}):
+        opts = self._conf_helper('output_en')
+        conf_ch = self.conf_ch()
+        opts += ['conf_ch=%s'%conf_ch]
+        opts += self._conf_helper('line_freq', 'interlock_not_ok')
+        return opts+self._conf_helper(options)
+
+    def data_clear(self):
+        """ This clears data.
+        """
+        self.write('TRACe:CLEar')
+    def _fetch_helper(self, voltage=None, current=None, resistance=None, relative=None):
+        if voltage is None:
+            voltage = self.meas_en_voltage.getcache()
+        if current is None:
+            current = self.meas_en_current.getcache()
+        if resistance is None:
+            resistance = self.meas_en_resistance.getcache()
+        if voltage is None:
+            voltage = self.meas_en_voltage.getcache()
+        if voltage is None:
+            voltage = self.meas_en_voltage.getcache()
+        any_fetch = voltage or current or resistance
+        if not (any_fetch or relative):
+            raise ValueError(self.perror("fetch requires at least one of voltage, current, resistance or relative"))
+        return voltage, current, resistance, relative, any_fetch
+
+    def _fetch_getformat(self, voltage=None, current=None, resistance=None, relative=None, status=False, **kwarg):
+#        voltage, current, resistance, relative, any_fetch = self._fetch_helper(voltage, current, resistance, relative)
+#        multi = []
+#        if voltage:
+#            multi.append('volt')
+#        if current:
+#            multi.append('current')
+#        if resistance:
+#            multi.append('res')
+#        if relative:
+#            multi.append('rel')
+#        if status:
+#            multi.append('stat')
+        fmt = self.fetch._format
+#        multi = map(lambda x: x+'1', multi) + map(lambda x: x+'2', multi)
+        fmt.update(multi=['i1', 'v1', 'i2', 'v2'])
+        return BaseDevice.getformat(self.fetch, **kwarg)
+
+    def _fetch_getdev(self, voltage=None, current=None, resistance=None, relative=None, status=False):
+        """\
+        options (all boolean):
+            volt: to read volt. When None it is auto enabled depending on cached meas_en_voltage
+            current: to read current. When None it is auto enabled depending on cached meas_en_current
+            resistance: to read resistance. When None it is auto enabled depending on cached meas_en_resistance
+            relative: to read the relative value. When None it is auto enabled depending on cached meas_relative_en
+            status: to read the status. False by default.
+            The status is a bit field with the various bit representing:
+                 bit  0 (     1): Measurement range overflow
+                 bit  1 (     2): Filter enabled
+                 bit  2 (     4): Front terminales selected
+                 bit  3 (     8): In real compliance (for source)
+                 bit  4 (    16): Over voltage protection reached
+                 bit  5 (    32): Math (calc1) expression enabled
+                 bit  6 (    64): Null (relative) enabled
+                 bit  7 (   128): Limit (calc2) test enabled
+                 bit  8,9,19,20,21: Limit results (256, 512, 524288, 1048576, 2097152)
+                 bit 10 (  1024): Auto Ohms enabled
+                 bit 11 (  2048): Voltage measure enabled
+                 bit 12 (  4096): Current measure enabled
+                 bit 13 (  8192): Resistance measure enabled
+                 bit 14 ( 16384): Voltage source used
+                 bit 15 ( 32768): Current source used
+                 bit 16 ( 65536): In range compliance (for measurement)
+                 bit 17 (131072): Resistance offset compensation enabled
+                 bit 18 (262144): Contact check failure
+                 bit 22 (4194304): Remote sense enabled
+                 bit 23 (8388608): In pulse mode
+        """
+#        voltage, current, resistance, relative, any_fetch = self._fetch_helper(voltage, current, resistance, relative)
+#        if any_fetch or status:
+        v_raw = self.ask('FETCh? (@1,2)')
+        v = _decode_block_auto(v_raw)
+        # Because of elements selection in init, the data is voltage, current, resistance, status
+        volt1, cur1, res1, stat1, src1, volt2, cur2, res2, stat2, src2 = v
+        return [cur1, volt1, cur2, volt2]
+        data = v
+        return data
+        if voltage:
+            data.extend([volt1, volt2])
+        if current:
+            data.extend([cur1, cur2])
+        if resistance:
+            data.extend(res)
+        if relative:
+            vr = self.data_fetch_relative_last.get()
+            data.append(vr[0])
+        if status:
+            data.append(stat)
+        return data
+
+    def conf_ch(self, ch=None, function=None, level=None, range=None, compliance=None,
+             output_en=None, output_high_capacitance_mode_en=None, output_low_conf=None, output_off_mode=None,
+             output_protection_en=None, output_filter_auto_en=None, output_filter_freq=None, output_filter_en=None,
+             sense_remote_en=None,
+             Vmeas=None, Imeas=None, Rmeas=None, Vmeas_range=None, Imeas_range=None, Rmeas_range=None,
+             Vmeas_autorange_mode=None, Imeas_autorange_mode=None, Vmeas_autorange_threshold=None, Imeas_autorange_threshold=None,
+             filter_auto_en=None, filter_aperture=None, filter_nplc=None,
+             meas_resistance_mode=None, meas_resistance_offset_comp_en=None,
+             output_auto_on_en=None, output_auto_off_en=None):
+        """\
+           When call with no parameters, returns all channels settings,
+           When called with only one ch selected, only returns its settings.
+           Otherwise only the ones that are not None are changed.
+           For the range (source). Use 0 to enable autorange or a value to fix it.
+           Use 0 for the Vmeas_range or Imeas_range to enable autorange. Use a positive value to set the autorange lower limit.
+            Use a negative value for the fix manual range. Note that the ranges are limited (upper) to the compliance range,
+            which is set by the compliance value.
+        """
+        para_dict = OrderedDict([('meas_resistance_mode', self.src_mode),
+                                ('function', self.src_mode),
+                                ('range', None),
+                                ('level', self.src_level),
+                                ('compliance', self.compliance),
+                                ('Vmeas', self.meas_en_voltage),
+                                ('Imeas', self.meas_en_current),
+                                ('Rmeas', self.meas_en_resistance),
+                                ('Vmeas_range', (None, 'voltage')),
+                                ('Imeas_range', (None, 'current')),
+                                ('Rmeas_range', (None, 'res')),
+                                ('Vmeas_autorange_mode', (self.meas_autorange_mode, 'voltage')),
+                                ('Imeas_autorange_mode', (self.meas_autorange_mode, 'current')),
+                                ('Vmeas_autorange_threshold', (self.meas_autorange_threshold, 'voltage')),
+                                ('Imeas_autorange_threshold', (self.meas_autorange_threshold, 'current')),
+                                ('filter_auto_en',self. meas_filter_auto_en),
+                                ('filter_aperture', self.meas_filter_aperture),
+                                ('filter_nplc', self.meas_filter_nplc),
+                                ('output_en', self.output_en),
+                                ('output_high_capacitance_mode_en', self.output_high_capacitance_mode_en),
+                                ('output_low_conf', self.output_low_conf),
+                                ('output_off_mode', self.output_off_mode),
+                                ('output_protection_en', self.output_protection_en),
+                                ('output_filter_auto_en', self.output_filter_auto_en),
+                                ('output_filter_freq', self.output_filter_freq),
+                                ('output_filter_en', self.output_filter_en),
+                                ('output_auto_on_en', self.output_auto_on_en),
+                                ('output_auto_off_en', self.output_auto_off_en),
+                                ('meas_resistance_offset_comp_en', self.meas_resistance_offset_comp_en),
+                                ('sense_remote_en', self.sense_remote_en)])
+        # Add None as third element if not there
+        for k, v in para_dict.items():
+            if not isinstance(v, tuple):
+                para_dict[k] = (v, None)
+        params = locals()
+        if all(params.get(k) is None for k in para_dict):
+            if ch is None:
+                ch = self._valid_ch
+            if not isinstance(ch, (list, tuple)):
+                ch = [ch]
+            result_dict = {}
+            orig_meas_mode = self.meas_mode.get()
+            orig_ch = self.current_channel.get()
+            for c in ch:
+                result_c_dict = {}
+                func = self.src_mode.get(ch=c) # we set channel here and update mode as necessary
+                for k, (dev, meas_mode) in para_dict.items():
+                    if meas_mode is not None:
+                        self.meas_mode.set(meas_mode)
+                    if dev is None:
+                        if k == 'range':
+                            # source
+                            if self.src_range_auto_en.get():
+                                data = 0
+                            else:
+                                data = self.src_range.get()
+                        else:
+                            # Vmeas or Imeas range
+                            if self.meas_autorange_en.get():
+                                data = self.meas_autorange_lower_limit.get()
+                            else:
+                                data = -self.meas_range.get()
+                    else:
+                        data = dev.get()
+                    result_c_dict[k] = data
+                result_dict[c] = result_c_dict
+            self.current_channel.set(orig_ch)
+            self.meas_mode.set(orig_meas_mode)
+            return result_dict
+        else:
+            orig_meas_mode = self.meas_mode.get()
+            func = params.get('function', None)
+            if func is None:
+                func = self.function.get(ch=ch)
+            else:
+                self.current_channel.set(ch)
+            for k, (dev, meas_mode) in para_dict.items():
+                val = params.get(k)
+                if val is not None:
+                    if meas_mode is not None:
+                        self.meas_mode.set(meas_mode)
+                    if dev is None:
+                        if k == 'range':
+                            # source
+                            if val == 0:
+                                self.src_range_auto_en.set(True)
+                            else:
+                                self.src_range.set(val)
+                        else:
+                            # Vmeas or Imeas range
+                            if val == 0:
+                                self.meas_autorange_en.set(True)
+                            elif val > 0:
+                                self.meas_autorange_lower_limit.set(val)
+                                self.meas_autorange_en.set(True)
+                            else:
+                                self.meas_range.set(-val)
+                    else:
+                        dev.set(val)
+            self.meas_mode.set(orig_meas_mode)
+
+    def _create_devs(self):
+        idn_split = self.idn_split()
+        model = idn_split['model'] # Something like B2912A
+        is_2ch = model[4] == '2'
+        is_b291x = model[3] == '1'
+        min_V = 0.1e-6 if is_b291x else 1e-6
+        min_I = 0.01e-12 if is_b291x else 1e-12
+        max_V = 210
+        max_I = 3.03
+        self._max_limits = dict(max_V=max_V, max_I=max_I)
+        ch_choice = [1, 2] if is_2ch else [1]
+        self._valid_ch = ch_choice
+        self.current_channel = MemoryDevice(1, choices=ch_choice)
+        curr_range = [100e-9, 1e-6, 10e-6, 100e-6, 1e-3, 10e-3, 100e-3, 1., 1.5, 3., 10.]
+        volt_range = [0.2, 2., 20., 200.]
+        res_range = [2., 20., 200., 2e3, 20e3, 200e3, 2e6, 20e6, 200e6]
+        if is_b291x:
+            curr_range = [10e-9] + curr_range
+        def chOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_channel)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.output_en = chOption('OUTPut{ch}', str_type=bool)
+        self.interlock_not_ok = scpiDevice(getstr='SYSTEM:INTerlock:TRIPped?', str_type=bool)
+        self.output_filter_auto_en = chOption('OUTPut{ch}:FILTer:AUTO', str_type=bool)
+        self.output_filter_freq = chOption('OUTPut{ch}:FILTer:FREQuency', str_type=float, min=31.830, max=31.831e3, doc='this is 1/2*pi*tc see output_filter_tc')
+        self.output_filter_tc = chOption('OUTPut{ch}:FILTer:TCONstant', str_type=float, min=5e-6, max=5e-3, doc='this is 1/2*pi*freq see output_filter_freq')
+        self.output_filter_en = chOption('OUTPut{ch}:FILTer', str_type=bool)
+        self.output_high_capacitance_mode_en = chOption('OUTPut{ch}:HCAPacitance', str_type=bool)
+        self.output_auto_on_en = chOption('OUTPut{ch}:ON:AUTO', str_type=bool)
+        self.output_auto_off_en = chOption('OUTPut{ch}:OFF:AUTO', str_type=bool)
+        self.output_low_conf = chOption('OUTPut{ch}:LOW', choices=ChoiceStrings('FLOat', 'GROund'), doc="The output must be off before changing this.")
+        self.output_off_mode = chOption('OUTPut{ch}:OFF:MODE', choices=ChoiceStrings('ZERO', 'HIZ', 'NORMal'), doc="""\
+                                        normal: output relay open (func=volt, level=0, compliance=100e-6)
+                                        hiz: output relay open (func=kept, level<40 V or <100 mA)
+                                        zero: output relay closed (func=volt, level=0, compliance=100e-6)
+                                        """)
+        self.output_protection_en = chOption('OUTPut{ch}:PROTection', str_type=bool, doc='When enabled, this turns off the output upon reaching compliance. It uses option "normal" of output_off_mode')
+        self.line_freq = scpiDevice(getstr='SYSTem:LFRequency?', str_type=float)
+        src_mode_opt = ChoiceStrings('CURRent', 'VOLTage')
+        self.src_mode = chOption('SOURce{ch}:FUNCtion:MODE', choices=src_mode_opt, autoinit=20)
+        self.src_shape = chOption('SOURce{ch}:FUNCtion:SHAPe', choices=ChoiceStrings('PULSe', 'DC'))
+        meas_mode_opt = ChoiceStrings('CURRent', 'CURRent:DC', 'VOLTage', 'VOLTage:DC', 'RESistance', quotes=True)
+        meas_mode_opt_nores = meas_mode_opt[['VOLTage', 'VOLTage:DC', 'CURRent', 'CURRent:DC']]
+        meas_volt = meas_mode_opt[['VOLTage', 'VOLTage:DC']]
+        meas_curr = meas_mode_opt[['CURRent', 'CURRent:DC']]
+        #self.meas_mode = scpiDevice('FUNCtion', choices=meas_mode_opt, autoinit=20)
+        self.meas_mode = MemoryDevice('current')
+        def measDevOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mode=self.meas_mode)
+            app = kwarg.pop('options_apply', ['ch', 'mode'])
+            options_conv = kwarg.pop('options_conv', {}).copy()
+            options_conv.update(dict(mode=lambda val, conv_val: val))
+            kwarg.update(options=options, options_apply=app, options_conv=options_conv)
+            return chOption(*arg, **kwarg)
+        def measDevOptionLim(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mode=self.meas_mode)
+            app = kwarg.pop('options_apply', ['ch', 'mode'])
+            options_conv = kwarg.pop('options_conv', {}).copy()
+            options_lim =  kwarg.pop('options_lim', {}).copy()
+            options_lim.update(mode=meas_mode_opt_nores)
+            options_conv.update(dict(mode=lambda val, conv_val: val))
+            kwarg.update(options=options, options_apply=app, options_conv=options_conv, options_lim=options_lim)
+            return chOption(*arg, **kwarg)
+        def srcDevOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mode=self.src_mode)
+            app = kwarg.pop('options_apply', ['mode', 'ch'])
+            kwarg.update(options=options, options_apply=app)
+            return chOption(*arg, **kwarg)
+        limit_conv_d = {src_mode_opt[['current']]:'voltage', src_mode_opt[['voltage']]:'current'}
+        def limit_conv(val, conv_val):
+            for k, v in limit_conv_d.iteritems():
+                if val in k:
+                    return v
+            raise KeyError('Unable to find key in limit_conv')
+        #limit_conv = lambda val, conv_val: limit_conv_d[val]
+        def srcLimitDevOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mode=self.src_mode)
+            app = kwarg.pop('options_apply', ['ch, ''mode'])
+            options_conv = kwarg.pop('options_conv', {}).copy()
+            options_conv.update(dict(mode=limit_conv))
+            kwarg.update(options=options, options_apply=app, options_conv=options_conv)
+            return chOption(*arg, **kwarg)
+        self._devwrap('src_level', setget=True)
+        limit_choices = ChoiceDevDep(self.src_mode,{ src_mode_opt[['voltage']]:ChoiceLimits(min_I, max_I), src_mode_opt[['current']]:ChoiceLimits(min_V, max_V)})
+        self.compliance = srcLimitDevOption('SENSe{ch}:{mode}:PROTection', str_type=float, choices=limit_choices, setget=True)
+        self.compliance_tripped = srcLimitDevOption(getstr='SENSe{ch}:{mode}:PROTection:TRIPped?', str_type=bool)
+        src_range_choices = ChoiceDevDep(self.src_mode, {src_mode_opt[['CURRent']]:curr_range, src_mode_opt[['voltage']]:volt_range})
+        self.src_range = srcDevOption('SOURce{ch}:{mode}:RANGe', str_type=float, choices=src_range_choices, setget=True)
+        self.src_range_auto_lower_limit = srcDevOption('SOURce{ch}:{mode}:RANGe', str_type=float, choices=src_range_choices, setget=True)
+        self.src_range_auto_en = srcDevOption('SOURce{ch}:{mode}:RANGe:AUTO', str_type=bool)
+
+        self.meas_en_voltage = chOption('SENSe{ch}:FUNCtion:{val} "voltage"', 'SENSe{ch}:FUNCtion:STATe? "voltage"', str_type=meas_en_type)
+        self.meas_en_current = chOption('SENSe{ch}:FUNCtion:{val} "current"', 'SENSe{ch}:FUNCtion:STATe? "current"', str_type=meas_en_type)
+        self.meas_en_resistance = chOption('SENSe{ch}:FUNCtion:{val} "resistance"', 'SENSe{ch}:FUNCtion:STATe? "resistance"', str_type=meas_en_type)
+        # apperture and nplc applies to current and volt measurement
+        self.meas_filter_auto_en = chOption('SENSe{ch}:CURRent:APERture:AUTO', str_type=bool)
+        self.meas_filter_aperture = chOption('SENSe{ch}:CURRent:APERture', str_type=float, min=8e-6, max=2, setget=True)
+        # The actual limits depend on the line frequency (50 or 60 Hz)
+        self.meas_filter_nplc = chOption('SENSe{ch}:CURRent:NPLCycles', str_type=float, min=4e-4, max=120, setget=True)
+        self.meas_resistance_offset_comp_en = chOption('SENSe{ch}:RESistance:OCOMpensated', str_type=bool)
+        self.meas_resistance_mode = chOption('SENSe{ch}:RESistance:MODE', choices=ChoiceStrings('MANual', 'AUTO'))
+        self.meas_autorange_en = measDevOption('SENSe{ch}:{mode}:RANGe:AUTO', str_type=bool)
+        range_choices = ChoiceDevDep(self.meas_mode, {meas_curr:curr_range, meas_volt:volt_range, meas_mode_opt[['resistance']]:res_range})
+        self.meas_autorange_lower_limit = measDevOption('SENSe{ch}:{mode}:RANGe:AUTO:LLIMit', str_type=float, choices=range_choices, setget=True)
+        self.meas_autorange_upper_limit = measDevOption('SENSe{ch}:{mode}:RANGe:AUTO:ULIMit', str_type=float, choices=range_choices, setget=True,
+                                                        doc="upper limit can only be changed for a resistance measurement.")
+        self.meas_autorange_mode = measDevOptionLim('SENSe{ch}:{mode}:RANGe:AUTO:MODE', choices=ChoiceStrings('NORMal', 'RESolution', 'SPEed'))
+        self.meas_autorange_threshold = measDevOptionLim('SENSe{ch}:{mode}:RANGe:AUTO:THReshold', str_type=float, min=11, max=100.)
+        self.meas_range = measDevOption('SENSe{ch}:{mode}:RANGe', str_type=float, choices=range_choices, setget=True)
+
+        self.sense_remote_en = chOption('SENSe{ch}:REMote', str_type=bool)
+
+        self.snap_png = scpiDevice(getstr='HCOPy:SDUMp:FORMat PNG;DATA?', raw=True, str_type=_decode_block_base, autoinit=False)
+        self.snap_png._format['bin']='.png'
+
+        # TODO: implement various wait time, sweeps
+        #       calc (offset and math)
+        #       trace data and stats
+#
+#        self.data_fetch_relative_last = scpiDevice(getstr='CALCulate2:DATA:LATest?', str_type=_decode_block_auto, trig=True, autoinit=False)
+#
+#        self.data_fetch_mean = scpiDevice(getstr='CALCulate3:FORMat MEAN;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+#        self.data_fetch_std = scpiDevice(getstr='CALCulate3:FORMat SDEViation;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+#        self.data_fetch_max = scpiDevice(getstr='CALCulate3:FORMat MAXimum;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+#        self.data_fetch_min = scpiDevice(getstr='CALCulate3:FORMat MINimum;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+#        self.data_fetch_p2p = scpiDevice(getstr='CALCulate3:FORMat PKPK;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+#
+#        self.trace_feed = scpiDevice('TRACe:FEED', choices=ChoiceStrings('SENS1', 'CALC1', 'CALC2'))
+#        self.trace_npoints_storable = scpiDevice('TRACe:POINts', str_type=int, setget=True, min=1, max=2500)
+#        self.trace_npoints =  scpiDevice(getstr='TRACe:POINts:ACTUal?', str_type=int)
+#        self.trace_en = scpiDevice('TRACe:FEED:CONTrol', choices=ChoiceSimpleMap(dict(NEXT=True, NEV=False), filter=string.upper))
+#        self.trace_data = scpiDevice(getstr='TRACe:DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+
+        self._devwrap('fetch', autoinit=False, trig=True)
+        self.readval = ReadvalDev(self.fetch)
+        self.alias = self.readval
+        # This needs to be last to complete creation
+        super(agilent_B2900_smu, self)._create_devs()
+
+    def _src_level_getdev(self, ch=None, mode=None):
+        if ch is not None:
+            self.current_channel.set(ch)
+        ch = self.current_channel.get()
+        if mode is not None:
+            self.src_mode.set(mode)
+        mode = self.src_mode.getcache()
+        return float(self.ask('SOURce{ch}:{mode}?'.format(ch=ch, mode=mode)))
+    def  _src_level_checkdev(self, val, ch=None, mode=None):
+        if ch is not None:
+            self.current_channel.set(ch)
+        ch = self.current_channel.get()
+        if mode is not None:
+            self.src_mode.set(mode)
+        mode = self.src_mode.getcache()
+        autorange = self.src_range_auto_en.getcache()
+        K = 1.05
+        if autorange:
+            if mode in self.src_mode.choices[['voltage']]:
+                rnge = self._max_limits['max_V']
+            else:
+                rnge = self._max_limits['max_I']
+            K = 1.
+        else:
+            rnge = self.src_range.getcache()
+            if rnge in [1.5, 3., 10.]:
+                K = 1.
+                rnge = {1.5:1.515, 3.:3.03, 10:10.5}
+        if abs(val) > rnge*K:
+            raise ValueError, self.perror('level is outside current range')
+    def _src_level_setdev(self, val, ch=None, mode=None):
+        # these were set by checkdev.
+        mode = self.src_mode.getcache()
+        ch = self.current_channel.get()
+        self.write('SOURce{ch}:{mode} {val!r}'.format(ch=ch, mode=mode, val=val))
