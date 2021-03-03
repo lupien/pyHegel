@@ -488,7 +488,7 @@ class AmericanMagnetics_model430(visaInstrument):
             print_if('Ramping...')
             self._do_ramp(val, wait, no_wait_end)
 
-    def _ramp_current_getdev(self):
+    def _ramp_current_getdev(self, return_persistent='auto', wait=None, quiet=True, no_wait_end=False):
         return self.current_magnet.get()
 
     def _create_devs(self):
