@@ -193,6 +193,7 @@ class agilent_SMU(visaInstrumentAsync):
         empty_buffer   Use it to clear the buffer when stopping a reading.
                        Otherwise the next request will return previous (and wrong)
                        answers.
+        abort
     Note: The B1500A needs to have the EasyExpert Start button running for
           remote GPIB to work. Do not start the application.
     """
@@ -218,6 +219,10 @@ class agilent_SMU(visaInstrumentAsync):
     def init(self, full=False):
         self.empty_buffer()
         self.write('FMT21')
+        if self._isB1500:
+            # for parallel measurments also on spot, stairs (MM 1, 2), Not necessary for MM 16 (multi stairs, the one I use)
+            # Read back the value with *LRN? 110
+            self.write('PAD 1')
         self.calibration_auto_en.set(False)
         #self.sendValueToOther('Auto Calibration Enable', False)
           # Calibration is performed every 30 min after all outputs are off.
@@ -335,6 +340,13 @@ class agilent_SMU(visaInstrumentAsync):
             errm = ['%i: %s'%(e, self.ask('EMG? %i'%e)) for e in errn]
             errm = ', '.join(errm)
         return errm
+
+    def abort(self):
+        """\
+        Call this to stop an internal sweep.
+        It might be good to also call the empty_buffer method.
+        """
+        self.write('AB')
 
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
