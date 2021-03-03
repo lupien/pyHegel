@@ -543,7 +543,7 @@ class oxford_ips120_10(visaInstrument):
                     raise RuntimeError(self.perror('persistent switch is in a fault.'))
         return orig_switch_en
 
-    def _do_ramp(self, current_target, wait, isTesla=True, no_wait_end=False):
+    def _do_ramp(self, current_target, wait_time, isTesla=True, no_wait_end=False):
         if current_target == 0:
             self.set_activity('to zero')
         else:
@@ -556,7 +556,7 @@ class oxford_ips120_10(visaInstrument):
         if no_wait_end:
             wait(0.2) # wait some time to allow previous change to affect the _get_states results.
             return
-        self._ramping_helper('ramping', 'paused', wait, isTesla=isTesla)
+        self._ramping_helper('ramping', 'paused', wait_time, isTesla=isTesla)
 
     def _ramp_current_checkdev(self, val, return_persistent='auto', wait=None, quiet=True, no_wait_end=False):
         if return_persistent not in [True, False, 'auto']:
