@@ -1690,7 +1690,7 @@ class Sequencer(object):
             Seq_Wait_i, Seq_Wait, Seq_Func, Seq_Funcs, Seq_End, Seq_Keep_Going
 
         For example:
-         Sequencer( Seq_Wait_i(10), Seq_Func(set, magnet.field_target_T, 1), lambda p: get(magnet.ramping), Seq_Wait(20) )
+         Sequencer( Seq_Wait_i(10), Seq_Func(set, magnet.field_target_T, 1), magnet.is_stable, Seq_Wait(20) )
         which will wait 10 iterations, then set the magnet to ramp to 1 T, then wait for the magnet to stop ramping and
         finally wait 20 seconds.
         """
