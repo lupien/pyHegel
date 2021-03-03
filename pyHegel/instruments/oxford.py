@@ -159,8 +159,7 @@ class oxford_ips120_10(visaInstrument):
         psh_wait_before is the value to wait after ramping before going into persistent mode
             automatically.
         Set the isobus, when multiple instruments are connected together.
-        When connecting with GPIB, the primary instrument (with gpib) always has address
-        isobus address.
+        When connecting with GPIB, the primary instrument (with gpib) always has isobus address 0.
         allow_local_override when True (default) commands that require control to be set at remote
                  to work, will set the control to remote if needed. Otherwise an exception is raised.
         """
