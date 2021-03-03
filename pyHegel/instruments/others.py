@@ -642,7 +642,7 @@ class MagnetController_SMC(visaInstrument):
         print_if('Ramping...')
         self._do_ramp(val, wait, no_wait_end)
 
-    def _ramp_T_getdev(self):
+    def _ramp_T_getdev(self, wait=None, quiet=True, no_wait_end=False):
         return self.field.get()
 
     def _create_devs(self):
