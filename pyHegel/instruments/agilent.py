@@ -1172,9 +1172,11 @@ class agilent_rf_Attenuator(visaInstrument):
 ##    Agilent infiniiVision Scopes
 #######################################################
 
+#@register_instrument('AGILENT TECHNOLOGIES', 'MSO-X 3054A', '02.37.2014052001', usb_vendor_product=[0x0957, 0x17a2])
 #@register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 2024A', '01.10.2011031600', usb_vendor_product=[0x0957, 0x1796])
 #@register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 3054A', '01.10.2011031600', usb_vendor_product=[0x0957, 0x17a2])
-@register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 2024A', usb_vendor_product=[0x0957, 0x1796])
+@register_instrument('AGILENT TECHNOLOGIES', 'MSO-X 3054A', usb_vendor_product=[0x0957, 0x1796], skip_add=True)
+@register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 2024A', usb_vendor_product=[0x0957, 0x1796], skip_add=True)
 @register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 3054A', usb_vendor_product=[0x0957, 0x17a2])
 class infiniiVision_3000(visaInstrumentAsync):
     """
@@ -1202,8 +1204,18 @@ class infiniiVision_3000(visaInstrumentAsync):
         #self.write(':DIGitize;*OPC')
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
-        # TODO:  improve this
-        return self._conf_helper('source', 'points_mode', 'preamble', options)
+        orig_src = self.source.getcache()
+        orig_ch = self.current_channel.get()
+        opts = []
+        for ch in self.find_all_active_channels():
+            mode = self.points_mode.get(src='Channel%i'%ch)
+            preamble = self.preamble.get()
+            opts += ['ch%i=%r'%(ch, dict(mode=mode, preamble=preamble))]
+        self.current_channel.set(orig_ch)
+        self.source.set(orig_src)
+        opts += self._conf_helper('timebase_mode', 'timebase_pos', 'timebase_range', 'timebase_reference', 'timebase_scale',
+                                 'waveform_count', 'acq_type', 'acq_mode', 'average_count', 'acq_samplerate', 'acq_npoints')
+        return opts + self._conf_helper(options)
     def clear_dev(self):
         self.visa.instr.clear()
     def setup_trig_detection(self):
@@ -1317,10 +1329,17 @@ class infiniiVision_3000(visaInstrumentAsync):
           # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
           #  type (Normal, peak, average, HRes), #points, #avg, xincr, xorg, xref, yincr, yorg, yref
           #  xconv = xorg+x*xincr, yconv= (y-yref)*yincr + yorg
-        self.points = scpiDevice(':WAVeform:POINts', str_type=int) # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
-        self.points_mode = scpiDevice(':WAVeform:POINts:MODE', choices=ChoiceStrings('NORMal', 'MAXimum', 'RAW'))
-        self.preamble = scpiDevice(getstr=':waveform:PREamble?', choices=ChoiceMultiple(['format', 'type', 'points', 'count', 'xinc', 'xorig', 'xref', 'yinc', 'yorig', 'yref'],[int, int, int, int, float, float, int, float, float, int]))
-        self.waveform_count = scpiDevice(getstr=':WAVeform:COUNt?', str_type=int)
+        self.source = scpiDevice(':WAVeform:SOURce', choices=ChoiceStrings('CHANnel1', 'CHANnel2', 'CHANnel3', 'CHANnel4'), doc='This is the source channel for the waveform devices (points*, preamble, waveform_count)')
+        def devSrcOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(src=self.source)
+            app = kwarg.pop('options_apply', ['src'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.points = devSrcOption(':WAVeform:POINts', str_type=int) # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
+        self.points_mode = devSrcOption(':WAVeform:POINts:MODE', choices=ChoiceStrings('NORMal', 'MAXimum', 'RAW'))
+        self.preamble = devSrcOption(getstr=':waveform:PREamble?', choices=ChoiceMultiple(['format', 'type', 'points', 'count', 'xinc', 'xorig', 'xref', 'yinc', 'yorig', 'yref'],[int, int, int, int, float, float, int, float, float, int]))
+        self.waveform_count = devSrcOption(getstr=':WAVeform:COUNt?', str_type=int)
         self.acq_type = scpiDevice(':ACQuire:TYPE', choices=ChoiceStrings('NORMal', 'AVERage', 'HRESolution', 'PEAK'))
         self.acq_mode= scpiDevice(':ACQuire:MODE', choices=ChoiceStrings('RTIM', 'SEGM'))
         self.average_count = scpiDevice(':ACQuire:COUNt', str_type=int, min=2, max=65536)
@@ -1334,7 +1353,6 @@ class infiniiVision_3000(visaInstrumentAsync):
             app = kwarg.pop('options_apply', ['ch'])
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
-        self.source = scpiDevice(':WAVeform:SOURce', choices=ChoiceStrings('CHANnel1', 'CHANnel2', 'CHANnel3', 'CHANnel4'))
         self.channel_display = devChannelOption('CHANnel{ch}:DISPlay', str_type=bool)
         self.timebase_mode= scpiDevice(':TIMebase:MODE', choices=ChoiceStrings('MAIN', 'WINDow', 'XY', 'ROLL'))
         self.timebase_pos= scpiDevice(':TIMebase:POSition', str_type=float) # in seconds from trigger to display ref
