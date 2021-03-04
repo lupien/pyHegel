@@ -586,7 +586,8 @@ class oxford_ips120_10(visaInstrument):
         full set to True, adds polarity information (which is not normally required)
         """
         ret = self.ask('X')
-        parse = re.match(r'^X(\d)(\d)A(\d)C(\d)H(\d)M(\d)(\d)P(\d)(\d)$', ret)
+        # I have seen a rare double X in the response. That is why it ix X+
+        parse = re.match(r'^X+(\d)(\d)A(\d)C(\d)H(\d)M(\d)(\d)P(\d)(\d)$', ret)
         if parse is None:
             raise RuntimeError('Invalid return value for status')
         Xm, Xn, A, C, H, Mm, Mn, Pm, Pn = [int(p) for p in parse.groups()]
