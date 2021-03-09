@@ -3526,12 +3526,13 @@ class visaInstrument(BaseInstrument):
         serial = self.visa.get_visa_attribute(visa_wrap.constants.VI_ATTR_USB_SERIAL_NUM)
         return (vendor, product, serial)
     @locked_calling
-    def factory_reset(self):
+    def reset_poweron(self):
         """
         This returns the instrument to a known state.
         Use CAREFULLY!
         """
         self.write('*RST')
+        self.init(True)
         self.force_get()
     @locked_calling
     def clear(self):
