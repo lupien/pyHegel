@@ -1028,9 +1028,11 @@ class keithley_2400_smu(visaInstrumentAsync):
     def abort(self):
         self.write('ABORt')
 
+    @locked_calling
     def reset(self):
         """ Reset the instrument to power on configuration """
         self.write('*RST')
+        self.init(True)
 
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
