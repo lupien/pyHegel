@@ -1750,15 +1750,48 @@ class agilent_B2900_smu(visaInstrumentAsync):
         super(agilent_B2900_smu, self).init(full=full)
 
     def abort(self):
-        self.write('ABORt')
+        chs = ','.join(map(str, self._valid_ch))
+        self.write('ABORt (@2%s)'%chs)
 
+    @locked_calling
     def reset(self):
         """ Reset the instrument to power on configuration """
         self.write('*RST')
+        self.init(True)
+        self._enabled_chs_cache_reset()
+
+    def _set_async_trigger_helper_string(self, chs=None):
+        if chs is None:
+            chs = self._valid_ch
+        # make a clean ordered list (without repeats)
+        chs = sorted(list(set(chs)))
+        ch_string = ','.join(map(str, chs))
+        self._async_trigger_helper_string = 'INItiate:ACQuire (@{});*OPC'.format(ch_string)
+
+    def _async_select(self, devs=[]):
+        # This is called during init of async mode.
+        self._async_detect_setup(reset=True)
+        for dev, kwarg in devs:
+            if dev in [self.fetch, self.readval]:
+                chs = kwarg.get('chs', None)
+                auto = kwarg.get('auto', 'all')
+                status = kwarg.get('status', False)
+                self._async_detect_setup(chs=chs, auto=auto, status=status)
+
+    def _async_detect_setup(self, chs=None, auto=None, status=None, reset=False):
+        if reset:
+            # default to triggering everything
+            self._set_async_trigger_helper_string()
+            self._async_trigger_list = []
+            return
+        trigger_list = self._async_trigger_list
+        full_chs, chs_en = self._fetch_opt_helper(chs, auto, status)
+        trigger_list += chs_en
+        self._set_async_trigger_helper_string(trigger_list)
 
     def _async_trigger_helper(self):
-        # hardcode both channles for now
-        self.write('INItiate:ACQuire (@1,2);*OPC')
+        async_string = self._async_trigger_helper_string
+        self.write(async_string)
 
     @locked_calling
     def set_time(self, set_time=False):
@@ -1786,91 +1819,122 @@ class agilent_B2900_smu(visaInstrumentAsync):
         """ This clears data.
         """
         self.write('TRACe:CLEar')
-    def _fetch_helper(self, voltage=None, current=None, resistance=None, relative=None):
-        if voltage is None:
-            voltage = self.meas_en_voltage.getcache()
-        if current is None:
-            current = self.meas_en_current.getcache()
-        if resistance is None:
-            resistance = self.meas_en_resistance.getcache()
-        if voltage is None:
-            voltage = self.meas_en_voltage.getcache()
-        if voltage is None:
-            voltage = self.meas_en_voltage.getcache()
-        any_fetch = voltage or current or resistance
-        if not (any_fetch or relative):
-            raise ValueError(self.perror("fetch requires at least one of voltage, current, resistance or relative"))
-        return voltage, current, resistance, relative, any_fetch
 
-    def _fetch_getformat(self, voltage=None, current=None, resistance=None, relative=None, status=False, **kwarg):
-#        voltage, current, resistance, relative, any_fetch = self._fetch_helper(voltage, current, resistance, relative)
-#        multi = []
-#        if voltage:
-#            multi.append('volt')
-#        if current:
-#            multi.append('current')
-#        if resistance:
-#            multi.append('res')
-#        if relative:
-#            multi.append('rel')
-#        if status:
-#            multi.append('stat')
+    def _fetch_opt_helper(self, chs=None, auto='all', status=False):
+        auto = auto.lower()
+        if auto not in ['all', 'i', 'v', 'force', 'compliance']:
+            raise ValueError(self.perror("Invalid auto setting"))
+        if chs is None:
+            chs = self.enabled_chs()
+            if len(chs) == 0:
+                raise RuntimeError(self.perror('All channels are off so cannot fetch.'))
+        if not isinstance(chs, (list, tuple, np.ndarray)):
+            chs = [chs]
+        full_chs = []
+        conv_force = dict(voltage='v', current='i')
+        conv_compl = dict(voltage='i', current='v')
+        orig_ch = self.current_channel.get()
+        for ch in chs:
+            if isinstance(ch, basestring):
+                meas = ch[0].lower()
+                c = int(ch[1:])
+                if meas not in ['v', 'i', 'r', 's', 'f']:
+                    raise ValueError(self.perror("Invalid measurement requested, should be 'i', 'v', 'r', 's' or 'f'"))
+                if c not in self._valid_ch:
+                    raise ValueError(self.perror('Invalid channel requested'))
+                full_chs.append([c, meas])
+            else:
+                if ch not in self._valid_ch:
+                    raise ValueError(self.perror('Invalid channel requested'))
+                if auto in ['force', 'compliance']:
+                    func = self.src_mode.get(ch=ch)
+                    if auto == 'force':
+                        func = conv_force[func]
+                    else:
+                        func = conv_compl[func]
+                    full_chs.append([ch, func])
+                else:
+                    if auto in ['all', 'i']:
+                        full_chs.append([ch, 'i'])
+                    if auto in ['all', 'v']:
+                        full_chs.append([ch, 'v'])
+                    if status:
+                        full_chs.append([ch, 's'])
+        self.current_channel.set(orig_ch)
+        chs_en = sorted(list(set(c for c,f in full_chs)))
+        return full_chs, chs_en
+
+    def _fetch_getformat(self,  **kwarg):
+        chs = kwarg.get('chs', None)
+        auto = kwarg.get('auto', 'all')
+        status = kwarg.get('status', False)
+        full_chs, chs_en = self._fetch_opt_helper(chs, auto, status)
+        multi = []
+        graph = []
+        for i, (c, m) in enumerate(full_chs):
+            base = '%s%i'%(m, c)
+            multi.append(base)
+            if m != 's': # exclude status from graph
+                graph.append(i)
         fmt = self.fetch._format
-#        multi = map(lambda x: x+'1', multi) + map(lambda x: x+'2', multi)
-        fmt.update(multi=['i1', 'v1', 'i2', 'v2'])
+        fmt.update(multi=multi, graph=graph)
         return BaseDevice.getformat(self.fetch, **kwarg)
 
-    def _fetch_getdev(self, voltage=None, current=None, resistance=None, relative=None, status=False):
-        """\
-        options (all boolean):
-            volt: to read volt. When None it is auto enabled depending on cached meas_en_voltage
-            current: to read current. When None it is auto enabled depending on cached meas_en_current
-            resistance: to read resistance. When None it is auto enabled depending on cached meas_en_resistance
-            relative: to read the relative value. When None it is auto enabled depending on cached meas_relative_en
-            status: to read the status. False by default.
-            The status is a bit field with the various bit representing:
-                 bit  0 (     1): Measurement range overflow
-                 bit  1 (     2): Filter enabled
-                 bit  2 (     4): Front terminales selected
-                 bit  3 (     8): In real compliance (for source)
-                 bit  4 (    16): Over voltage protection reached
-                 bit  5 (    32): Math (calc1) expression enabled
-                 bit  6 (    64): Null (relative) enabled
-                 bit  7 (   128): Limit (calc2) test enabled
-                 bit  8,9,19,20,21: Limit results (256, 512, 524288, 1048576, 2097152)
-                 bit 10 (  1024): Auto Ohms enabled
-                 bit 11 (  2048): Voltage measure enabled
-                 bit 12 (  4096): Current measure enabled
-                 bit 13 (  8192): Resistance measure enabled
-                 bit 14 ( 16384): Voltage source used
-                 bit 15 ( 32768): Current source used
-                 bit 16 ( 65536): In range compliance (for measurement)
-                 bit 17 (131072): Resistance offset compensation enabled
-                 bit 18 (262144): Contact check failure
-                 bit 22 (4194304): Remote sense enabled
-                 bit 23 (8388608): In pulse mode
+    def _fetch_getdev(self, chs=None, auto='all', status=False, xaxis=True):
         """
-#        voltage, current, resistance, relative, any_fetch = self._fetch_helper(voltage, current, resistance, relative)
-#        if any_fetch or status:
+        auto can be: 'all' (both I and V), 'I' or 'V' to get just one,
+                     'force'/'compliance' to get the force value (source) or
+                       the compliance value
+        auto is used when chs is None (all enabled channels)
+           or chs is a list of channel numbers.
+        Otherwise, chs can also use strings like 'v1' to read the voltage of channel 1
+                     'i2' to read the current of channel 2,
+                     'r1' to read the resistance of ch1,
+                     's1' to read the status of ch1.
+                     'f1' to read the force value of ch1
+        status when True, adds the status of every channel reading to the return value with auto
+            The status is a bit field with the various bit representing:
+                 bit  0 (     1): Voltage source(0) or current source(1)
+                 bit  1 (     2): Compliance condition
+                 bit  2 (     4): Compliance condition
+                 bit  3 (     8): Over voltage condition
+                 bit  4 (    16): Over current condition
+                 bit  5 (    32): High temperature condition
+                 bit 6-12:  Unused
+                 bit 13 (  8192): Measurement range overflow
+                 bit 14 ( 16384): Offset compensation enable condition
+                 bit 15: Unused
+                 bit 16-20: Composite limit test result (0-31)
+            Note thhe bit 1 and 2 both represent the compliance having reached its limit.
+            Both bits can be 1 (therefore decimal of 6). And it only applies to the measured channel.
+            The unused bit might record the measurement range but it is not described in the documentation.
+        """
+        full_chs, chs_en = self._fetch_opt_helper(chs, auto, status)
+        # I always read all
         v_raw = self.ask('FETCh? (@1,2)')
         v = _decode_block_auto(v_raw)
-        # Because of elements selection in init, the data is voltage, current, resistance, status
-        volt1, cur1, res1, stat1, src1, volt2, cur2, res2, stat2, src2 = v
-        return [cur1, volt1, cur2, volt2]
-        data = v
+        v.shape = (-1,5)
+        sel = dict(v=0, i=1, r=2, s=3, f=4)
+        # Because of elements selection in init, the data is voltage, current, resistance, status, source
+        data = []
+        for c, m in full_chs:
+            data.append(v[c-1, sel[m]])
         return data
-        if voltage:
-            data.extend([volt1, volt2])
-        if current:
-            data.extend([cur1, cur2])
-        if resistance:
-            data.extend(res)
-        if relative:
-            vr = self.data_fetch_relative_last.get()
-            data.append(vr[0])
-        if status:
-            data.append(stat)
-        return data
+
+    def _enabled_chs_cache_reset(self, val=None, dev_obj=None, **kwargs):
+        self._enabled_chs_cache = None
+
+    def enabled_chs(self):
+        v = self._enabled_chs_cache
+        if v is not None:
+            data, last_time = v
+            if time.time() - last_time < 1:
+                return data
+        orig_ch = self.current_channel.get()
+        chs = [c for c in self._valid_ch if self.output_en.get(ch=c)]
+        self.current_channel.set(orig_ch)
+        self._enabled_chs_cache = chs, time.time()
+        return chs
 
     def conf_ch(self, ch=None, function=None, level=None, range=None, compliance=None,
              output_en=None, output_high_capacitance_mode_en=None, output_low_conf=None, output_off_mode=None,
@@ -2003,6 +2067,8 @@ class agilent_B2900_smu(visaInstrumentAsync):
         self._max_limits = dict(max_V=max_V, max_I=max_I)
         ch_choice = [1, 2] if is_2ch else [1]
         self._valid_ch = ch_choice
+        self._enabled_chs_cache_reset()
+        self._set_async_trigger_helper_string()
         self.current_channel = MemoryDevice(1, choices=ch_choice)
         curr_range = [100e-9, 1e-6, 10e-6, 100e-6, 1e-3, 10e-3, 100e-3, 1., 1.5, 3., 10.]
         volt_range = [0.2, 2., 20., 200.]
@@ -2015,7 +2081,7 @@ class agilent_B2900_smu(visaInstrumentAsync):
             app = kwarg.pop('options_apply', ['ch'])
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
-        self.output_en = chOption('OUTPut{ch}', str_type=bool)
+        self.output_en = chOption('OUTPut{ch}', str_type=bool, extra_set_after_func=ProxyMethod(self._enabled_chs_cache_reset))
         self.interlock_not_ok = scpiDevice(getstr='SYSTEM:INTerlock:TRIPped?', str_type=bool)
         self.output_filter_auto_en = chOption('OUTPut{ch}:FILTer:AUTO', str_type=bool)
         self.output_filter_freq = chOption('OUTPut{ch}:FILTer:FREQuency', str_type=float, min=31.830, max=31.831e3, doc='this is 1/2*pi*tc see output_filter_tc')
@@ -2172,3 +2238,21 @@ class agilent_B2900_smu(visaInstrumentAsync):
         mode = self.src_mode.getcache()
         ch = self.current_channel.get()
         self.write('SOURce{ch}:{mode} {val!r}'.format(ch=ch, mode=mode, val=val))
+
+# Trace allows caluclating stats (avg, stderr). It needs to be reset between inits (if the number of trace:points is larger than
+#    what is to be acquired)
+# The enable lists (stairs is similar):
+# set the source mode volt:mode list
+# set the list of points list:volt
+# the acq and tran trigger should have the same number of points as the list length
+# start the acquisition with init:all
+# read with fetch:arr
+# can play with the timing with trig:acq:delay, trig:tran:delay
+# and sense:wait, sense:wait:auto (and gain and offset)
+# and the same for source.
+# playing with arm (count) does not seem to be useful (except to repeat the inner)
+# if the arm*trigger count is larger than the list of value, it is repeated (it cycles through the values again)
+# if the count for acq is larger that tran, it just keeps using the last tran values for the other acq.
+# It is not clear how the wait and delay interact. And how trigger source like timer would interact with them.
+# With a short timer of .1 s and a delay of 0.3 s, the readings are taken at .3, .4, .5 ... and are not
+# necessarily matched to the source changes.
