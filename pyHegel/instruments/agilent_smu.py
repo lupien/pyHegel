@@ -194,6 +194,7 @@ class agilent_SMU(visaInstrumentAsync):
                        Otherwise the next request will return previous (and wrong)
                        answers.
         abort
+        reset          To return the instrument to the power on condition
     Note: The B1500A needs to have the EasyExpert Start button running for
           remote GPIB to work. Do not start the application.
     """
@@ -365,7 +366,7 @@ class agilent_SMU(visaInstrumentAsync):
     @locked_calling
     def reset(self):
         self.write('*rst')
-        self.init()
+        self.init(True)
 
     @locked_calling
     def perform_calibration(self):
@@ -499,9 +500,6 @@ class agilent_SMU(visaInstrumentAsync):
                     ret = np.concatenate([x_data[:, None], ret], axis=1)
                 ret = ret.T
             return ret
-        # TODO, do run and wait for long TI/TV?
-        # The longest measurement time for TI/TV seems to be for PLC mode (100/50 or 100/60) so a max of 2s.
-        # so just use ask? for short times and run_and_wait (note that it needs to behave properly under async.)
         ret = []
         for ch, meas in full_chs:
             val_str = self._async_trig_current_data.pop(0)
