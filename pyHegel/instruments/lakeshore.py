@@ -1008,7 +1008,7 @@ class lakeshore_340(visaInstrument):
         self.pid = devLoopOption('PID {loop},{val}', 'PID? {loop}',
                                  choices=ChoiceMultiple(['P', 'I', 'D'], float))
         self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in %
-        self.sp = devLoopOption(setstr='SETP {loop},{val}', getstr='SETP? {loop}', str_type=float)
+        self.sp = devLoopOption(setstr='SETP {loop},{val}', getstr='SETP? {loop}', str_type=float_fix6)
         self._devwrap('enabled_list')
         self._devwrap('fetch', autoinit=False)
         self.alias = self.fetch
