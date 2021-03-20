@@ -2373,8 +2373,6 @@ class agilent_B2900_smu(visaInstrumentAsync):
         else:
             raise ValueError('Invalid mode.')
         self.current_channel.set(orig_ch)
-        # TODO deal with reading the results
-        #      deal with trigger_mode variable.
 
     def _create_devs(self):
         idn_split = self.idn_split()
@@ -2426,7 +2424,6 @@ class agilent_B2900_smu(visaInstrumentAsync):
         meas_mode_opt_nores = meas_mode_opt[['VOLTage', 'VOLTage:DC', 'CURRent', 'CURRent:DC']]
         meas_volt = meas_mode_opt[['VOLTage', 'VOLTage:DC']]
         meas_curr = meas_mode_opt[['CURRent', 'CURRent:DC']]
-        #self.meas_mode = scpiDevice('FUNCtion', choices=meas_mode_opt, autoinit=20)
         self.meas_mode = MemoryDevice('current')
         def measDevOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
@@ -2458,7 +2455,6 @@ class agilent_B2900_smu(visaInstrumentAsync):
                 if val in k:
                     return v
             raise KeyError('Unable to find key in limit_conv')
-        #limit_conv = lambda val, conv_val: limit_conv_d[val]
         def srcLimitDevOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(func=self.src_function)
@@ -2475,8 +2471,8 @@ class agilent_B2900_smu(visaInstrumentAsync):
         self.src_range = srcDevOption('SOURce{ch}:{func}:RANGe', str_type=float, choices=src_range_choices, setget=True)
         self.src_range_auto_lower_limit = srcDevOption('SOURce{ch}:{func}:RANGe:AUTO:LLIMit', str_type=float, choices=src_range_choices, setget=True)
         self.src_range_auto_en = srcDevOption('SOURce{ch}:{func}:RANGe:AUTO', str_type=bool)
-        # This is not present on my device. It probably showed up at a later firmware update.
-        #self.output_transient_speed = srcDevOption('SOURce{ch}:TRANsient:SPEed', choices=ChoiceStrings('NORMal', 'FAST'))
+        # This is not present on my device. It did not show up in the newer firmware. Error in manual?
+        #self.output_transient_speed = srcDevOption('SOURce{ch}:{func}:TRANsient:SPEed', choices=ChoiceStrings('NORMal', 'FAST'))
         self.src_sweep_keep_last_en = chOption('SOURce{ch}:FUNCtion:TRIGgered:CONTinuous', str_type=bool)
         self.src_mode = srcDevOption('SOURce{ch}:{func}:MODE', choices=ChoiceStrings('SWEep', 'LIST', 'FIXed'))
 
