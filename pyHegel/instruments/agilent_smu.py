@@ -1723,7 +1723,9 @@ class _meas_en_type(object):
         return self.conv[data]
 meas_en_type = _meas_en_type()
 
+#@register_instrument('Keysight Technologies', 'B2912A', '3.4.2011.5100')
 #@register_instrument('Agilent Technologies', 'B2912A', '2.0.1225.1717')
+@register_instrument('Keysight Technologies', 'B2912A', skip_add=True)
 @register_instrument('Agilent Technologies', 'B2912A', usb_vendor_product=[0x0957, 0x8E18])
 class agilent_B2900_smu(visaInstrumentAsync):
     """\
@@ -1737,6 +1739,7 @@ class agilent_B2900_smu(visaInstrumentAsync):
      meas_en_current, meas_en_voltage, meas_en_resistance
     Useful method:
      conf_ch
+     conf_mode
      abort
      reset
      get_error
@@ -1746,7 +1749,20 @@ class agilent_B2900_smu(visaInstrumentAsync):
         self._dev_clear()
         self.write('FORMat:BORDer SWAPped') # other option is NORMal.
         self.write('FORMat ASCii') # other option is REAL,32 or REAL,64
-        self.write('FORMat:ELEMents:SENSe VOLTage,CURRent,RESistance,STATus,SOURce')
+        #self.write('FORMat:ELEMents:SENSe VOLTage,CURRent,RESistance,STATus,SOURce')
+        self.write('FORMat:ELEMents:SENSe VOLTage,CURRent,RESistance,TIME,STATus,SOURce')
+        self.write('SYSTem:GROup (@%s)'%(_encode_block(self._valid_ch, ',')))
+        self.write('TRACe1:FEED SENSe;:TRACe1:FEED:CONTrol NEVer;:TRACe1:TSTamp:FORMat ABSolute')
+        self.write('TRACe1:POINts MAX')
+        self.write('TRACe1:FEED:CONTrol NEXT')
+        self.write('SENSe1:RESistance:RANGe:AUTO:ULIMit DEF')
+        if 2 in self._valid_ch:
+            self.write('TRACe2:FEED SENSe;:TRACe2:FEED:CONTrol NEVer;:TRACe2:TSTamp:FORMat ABSolute')
+            self.write('TRACe2:POINts MAX')
+            self.write('TRACe2:FEED:CONTrol NEXT')
+            self.write('SENSe2:RESistance:RANGe:AUTO:ULIMit DEF')
+        self.conf_mode('spot')
+        self._set_async_trigger_helper_string()
         super(agilent_B2900_smu, self).init(full=full)
 
     def abort(self):
@@ -1765,8 +1781,9 @@ class agilent_B2900_smu(visaInstrumentAsync):
             chs = self._valid_ch
         # make a clean ordered list (without repeats)
         chs = sorted(list(set(chs)))
-        ch_string = ','.join(map(str, chs))
-        self._async_trigger_helper_string = 'INItiate:ACQuire (@{});*OPC'.format(ch_string)
+        ch_string = _encode_block(chs, ',')
+        mode = 'ACQuire' if self._trigger_mode[0] in ['spot', 'repeats'] else 'ALL'
+        self._async_trigger_helper_string = 'INItiate:{} (@{});*OPC'.format(mode, ch_string)
 
     def _async_select(self, devs=[]):
         # This is called during init of async mode.
@@ -1782,7 +1799,11 @@ class agilent_B2900_smu(visaInstrumentAsync):
         if reset:
             # default to triggering everything
             self._set_async_trigger_helper_string()
-            self._async_trigger_list = []
+            mode, en_chs = self._trigger_mode
+            if mode == 'stairs':
+                self._async_trigger_list = en_chs[:] # make a copy
+            else:
+                self._async_trigger_list = []
             return
         trigger_list = self._async_trigger_list
         full_chs, chs_en = self._fetch_opt_helper(chs, auto, status)
@@ -1790,6 +1811,21 @@ class agilent_B2900_smu(visaInstrumentAsync):
         self._set_async_trigger_helper_string(trigger_list)
 
     def _async_trigger_helper(self):
+        mode, en_chs = self._trigger_mode
+        if mode == 'stairs':
+            orig_ch = self.current_channel.get()
+            if 1 not in en_chs:
+                lvl = self.src_level.get(ch=1)
+                func = self.src_function.getcache()
+                self.write(':SOURce1:%s:TRIGgered %r'%(func, lvl))
+            if 2 in self._valid_ch and 2 not in en_chs:
+                lvl = self.src_level.get(ch=2)
+                func = self.src_function.getcache()
+                self.write(':SOURce2:%s:TRIGgered %r'%(func, lvl))
+            self.current_channel.set(orig_ch)
+            self.data_clear()
+        elif mode == 'repeats':
+            self.data_clear()
         async_string = self._async_trigger_helper_string
         self.write(async_string)
 
@@ -1811,16 +1847,24 @@ class agilent_B2900_smu(visaInstrumentAsync):
     def _current_config(self, dev_obj=None, options={}):
         opts = self._conf_helper('output_en')
         conf_ch = self.conf_ch()
+        conf_mode = self.conf_mode()
         opts += ['conf_ch=%s'%conf_ch]
+        opts += ['conf_mode=%s'%conf_mode]
         opts += self._conf_helper('line_freq', 'interlock_not_ok')
         return opts+self._conf_helper(options)
 
     def data_clear(self):
         """ This clears data.
         """
-        self.write('TRACe:CLEar')
+        self.write('TRACe1:FEED:CONTrol NEVer')
+        self.write('TRACe1:CLEar')
+        self.write('TRACe1:FEED:CONTrol NEXT')
+        if 2 in self._valid_ch:
+            self.write('TRACe2:FEED:CONTrol NEVer')
+            self.write('TRACe2:CLEar')
+            self.write('TRACe2:FEED:CONTrol NEXT')
 
-    def _fetch_opt_helper(self, chs=None, auto='all', status=False):
+    def _fetch_opt_helper(self, chs=None, auto='all', status=False, xaxis=True):
         auto = auto.lower()
         if auto not in ['all', 'i', 'v', 'force', 'compliance']:
             raise ValueError(self.perror("Invalid auto setting"))
@@ -1833,19 +1877,22 @@ class agilent_B2900_smu(visaInstrumentAsync):
         full_chs = []
         conv_force = dict(voltage='v', current='i')
         conv_compl = dict(voltage='i', current='v')
+        is_stairs = self._trigger_mode[0] == 'stairs'
         orig_ch = self.current_channel.get()
         for ch in chs:
             if isinstance(ch, basestring):
                 meas = ch[0].lower()
                 c = int(ch[1:])
-                if meas not in ['v', 'i', 'r', 's', 'f']:
-                    raise ValueError(self.perror("Invalid measurement requested, should be 'i', 'v', 'r', 's' or 'f'"))
+                if meas not in ['v', 'i', 'r', 's', 'f', 't']:
+                    raise ValueError(self.perror("Invalid measurement requested, should be 'i', 'v', 'r', 's', 't' or 'f'"))
                 if c not in self._valid_ch:
                     raise ValueError(self.perror('Invalid channel requested'))
                 full_chs.append([c, meas])
             else:
                 if ch not in self._valid_ch:
                     raise ValueError(self.perror('Invalid channel requested'))
+                if is_stairs and xaxis:
+                    full_chs.append([ch, 'f'])
                 if auto in ['force', 'compliance']:
                     func = self.src_mode.get(ch=ch)
                     if auto == 'force':
@@ -1868,7 +1915,9 @@ class agilent_B2900_smu(visaInstrumentAsync):
         chs = kwarg.get('chs', None)
         auto = kwarg.get('auto', 'all')
         status = kwarg.get('status', False)
-        full_chs, chs_en = self._fetch_opt_helper(chs, auto, status)
+        xaxis = kwarg.get('xaxis', True)
+        repeats_avg = kwarg.get('repeats_avg', True)
+        full_chs, chs_en = self._fetch_opt_helper(chs, auto, status, xaxis)
         multi = []
         graph = []
         for i, (c, m) in enumerate(full_chs):
@@ -1876,11 +1925,15 @@ class agilent_B2900_smu(visaInstrumentAsync):
             multi.append(base)
             if m != 's': # exclude status from graph
                 graph.append(i)
+        mode = self._trigger_mode[0]
+        if (mode == 'repeats' and not repeats_avg) or mode == 'stairs':
+            multi = tuple(multi)
+            graph = []
         fmt = self.fetch._format
         fmt.update(multi=multi, graph=graph)
         return BaseDevice.getformat(self.fetch, **kwarg)
 
-    def _fetch_getdev(self, chs=None, auto='all', status=False, xaxis=True):
+    def _fetch_getdev(self, chs=None, auto='all', status=False, xaxis=True, repeats_avg=True):
         """
         auto can be: 'all' (both I and V), 'I' or 'V' to get just one,
                      'force'/'compliance' to get the force value (source) or
@@ -1892,6 +1945,9 @@ class agilent_B2900_smu(visaInstrumentAsync):
                      'r1' to read the resistance of ch1,
                      's1' to read the status of ch1.
                      'f1' to read the force value of ch1
+                     't1' to read the time value of ch1
+        xaxis is used when mode is 'stairs' and then in the same condition as auto above (it adds the force column when True)
+        repeats_avg when True (default) will return the averaged data when in 'repeats' mode, otherwise all the data is returned
         status when True, adds the status of every channel reading to the return value with auto
             The status is a bit field with the various bit representing:
                  bit  0 (     1): Voltage source(0) or current source(1)
@@ -1909,17 +1965,57 @@ class agilent_B2900_smu(visaInstrumentAsync):
             Both bits can be 1 (therefore decimal of 6). And it only applies to the measured channel.
             The unused bit might record the measurement range but it is not described in the documentation.
         """
-        full_chs, chs_en = self._fetch_opt_helper(chs, auto, status)
-        # I always read all
-        v_raw = self.ask('FETCh? (@1,2)')
-        v = _decode_block_auto(v_raw)
-        v.shape = (-1,5)
-        sel = dict(v=0, i=1, r=2, s=3, f=4)
+        full_chs, chs_en = self._fetch_opt_helper(chs, auto, status, xaxis)
+        mode = self._trigger_mode[0]
+        if (mode == 'repeats' and not repeats_avg) or mode == 'stairs':
+            multi = True
+        else:
+            multi = False
+        if mode == 'repeats' and not multi:
+            orig_ch = self.current_channel.get()
+            # This only returns V, I, R, force
+            v1 = self.data_fetch_mean.get(ch=1)
+            if 2 in self._valid_ch:
+                v2 = self.data_fetch_mean.get(ch=2)
+            else:
+                v2 = v1
+            # when data is not triggered, it returns a single value
+            if len(v2) == 1:
+                v2 = v1
+            elif len(v1) == 1:
+                v1 = v2
+            self.current_channel.set(orig_ch)
+            nv = np.concatenate((v1,v2))
+            nv.shape = (2, 4)
+            v = np.zeros((2, 6))
+            v[:, :3] = nv[:, :3]
+            v[:, 5] = nv[:, 3]
+        else:
+            if self._trigger_mode[0] == 'spot':
+                fetch_base = 'FETCh?'
+            else:
+                fetch_base = 'FETCh:ARRay?'
+            # I always read all
+            if 2 in self._valid_ch:
+                v_raw = self.ask(fetch_base+' (@1,2)')
+            else:
+                v_raw = self.ask(fetch_base+' (@1)')
+            v = _decode_block_auto(v_raw)
+            if multi:
+                if 2 in self._valid_ch:
+                    v.shape = (-1, 2, 6)
+                else:
+                    v.shape = (-1, 1, 6)
+            else:
+                #v.shape = (-1,5)
+                v.shape = (-1,6)
+        #sel = dict(v=0, i=1, r=2, s=3, f=4)
+        sel = dict(v=0, i=1, r=2, t=3, s=4, f=5)
         # Because of elements selection in init, the data is voltage, current, resistance, status, source
         data = []
         for c, m in full_chs:
-            data.append(v[c-1, sel[m]])
-        return data
+            data.append(v[..., c-1, sel[m]])
+        return np.array(data)
 
     def _enabled_chs_cache_reset(self, val=None, dev_obj=None, **kwargs):
         self._enabled_chs_cache = None
@@ -1944,18 +2040,22 @@ class agilent_B2900_smu(visaInstrumentAsync):
              Vmeas_autorange_mode=None, Imeas_autorange_mode=None, Vmeas_autorange_threshold=None, Imeas_autorange_threshold=None,
              filter_auto_en=None, filter_aperture=None, filter_nplc=None,
              meas_resistance_mode=None, meas_resistance_offset_comp_en=None,
-             output_auto_on_en=None, output_auto_off_en=None):
+             output_auto_on_en=None, output_auto_off_en=None,
+             #output_transient_speed=None):
+             ):
         """\
            When call with no parameters, returns all channels settings,
            When called with only one ch selected, only returns its settings.
            Otherwise only the ones that are not None are changed.
-           For the range (source). Use 0 to enable autorange or a value to fix it.
-           Use 0 for the Vmeas_range or Imeas_range to enable autorange. Use a positive value to set the autorange lower limit.
+           Use 0 for the range, Vmeas_range or Imeas_range to enable default autorange.
+            Use a positive value to set the autorange lower limit.
             Use a negative value for the fix manual range. Note that the ranges are limited (upper) to the compliance range,
             which is set by the compliance value.
+            Not that the default autorange is not the full range for current (1e-6 vs 1e-7 or 1e-8)
+           Changing the range for the force channel will not have an effect (the force range will be used)
         """
-        para_dict = OrderedDict([('meas_resistance_mode', self.src_mode),
-                                ('function', self.src_mode),
+        para_dict = OrderedDict([('meas_resistance_mode', self.meas_resistance_mode),
+                                ('function', self.src_function),
                                 ('range', None),
                                 ('level', self.src_level),
                                 ('compliance', self.compliance),
@@ -1982,6 +2082,7 @@ class agilent_B2900_smu(visaInstrumentAsync):
                                 ('output_filter_en', self.output_filter_en),
                                 ('output_auto_on_en', self.output_auto_on_en),
                                 ('output_auto_off_en', self.output_auto_off_en),
+                                #('output_transient_speed', self.output_transient_speed),
                                 ('meas_resistance_offset_comp_en', self.meas_resistance_offset_comp_en),
                                 ('sense_remote_en', self.sense_remote_en)])
         # Add None as third element if not there
@@ -1992,7 +2093,9 @@ class agilent_B2900_smu(visaInstrumentAsync):
         if all(params.get(k) is None for k in para_dict):
             if ch is None:
                 ch = self._valid_ch
+            single_ch = None
             if not isinstance(ch, (list, tuple)):
+                single_ch = ch
                 ch = [ch]
             result_dict = {}
             orig_meas_mode = self.meas_mode.get()
@@ -2007,9 +2110,9 @@ class agilent_B2900_smu(visaInstrumentAsync):
                         if k == 'range':
                             # source
                             if self.src_range_auto_en.get():
-                                data = 0
+                                data = self.src_range_auto_lower_limit.get()
                             else:
-                                data = self.src_range.get()
+                                data = -self.src_range.get()
                         else:
                             # Vmeas or Imeas range
                             if self.meas_autorange_en.get():
@@ -2022,12 +2125,16 @@ class agilent_B2900_smu(visaInstrumentAsync):
                 result_dict[c] = result_c_dict
             self.current_channel.set(orig_ch)
             self.meas_mode.set(orig_meas_mode)
+            if single_ch is not None:
+                result_dict = result_dict[single_ch]
             return result_dict
         else:
             orig_meas_mode = self.meas_mode.get()
             func = params.get('function', None)
             if func is None:
-                func = self.function.get(ch=ch)
+                func = self.src_function.get(ch=ch)
+            elif ch is None:
+                ch = self.current_channel.get()
             else:
                 self.current_channel.set(ch)
             for k, (dev, meas_mode) in para_dict.items():
@@ -2035,16 +2142,26 @@ class agilent_B2900_smu(visaInstrumentAsync):
                 if val is not None:
                     if meas_mode is not None:
                         self.meas_mode.set(meas_mode)
+                    else:
+                        meas_mode = self.meas_mode.get()
                     if dev is None:
                         if k == 'range':
                             # source
                             if val == 0:
+                                # DEF is not the same as MIN for current ranges
+                                self.write('SOURCe{ch}:{func}:RANGe:AUTO:LLimit DEF'.format(ch=ch, func=func))
+                                self.src_range_auto_en.set(True)
+                            elif val > 0:
+                                self.src_range_auto_lower_limit.set(val)
                                 self.src_range_auto_en.set(True)
                             else:
-                                self.src_range.set(val)
+                                self.src_range_auto_en.set(False)
+                                self.src_range.set(-val)
                         else:
                             # Vmeas or Imeas range
                             if val == 0:
+                                # DEF is not the same as MIN for current ranges
+                                self.write('SENSe{ch}:{meas_mode}:RANGe:AUTO:LLimit DEF'.format(ch=ch, meas_mode=meas_mode))
                                 self.meas_autorange_en.set(True)
                             elif val > 0:
                                 self.meas_autorange_lower_limit.set(val)
@@ -2054,6 +2171,202 @@ class agilent_B2900_smu(visaInstrumentAsync):
                     else:
                         dev.set(val)
             self.meas_mode.set(orig_meas_mode)
+
+    @locked_calling
+    def conf_mode(self, mode=None, repeats=None, values1=None, values2=None, Mdelay1=None, Mdelay2=None,
+                  keep_last_en1=None, keep_last_en2=None,
+                  pulse_en1=None, pulse_en2=None,
+                  Pdelay1=None, Pdelay2=None, Pwidth1=None, Pwidth2=None):
+        """\
+        with mode not given, returns the current settings.
+        If it reports inconsistent parameters, just set them with this method to reset them.
+        mode can be 'spot', 'repeats', 'stairs'
+           'spot' is the default mode (readval only does one measurement)
+           'repeats' makes readval do repeats measurements. You need to also specify repeats number.
+           'stairs' changes the force at values1/values2 and does a measurement. You need to specify Mdelay, pulse_en.
+               values should be a list of values to set or the value 'keep' (which will keep the same value as the level
+               before the stairs is started.). You can only use 'keep' in a 2 channel instrument and for only one of the channels.
+               The channel with keep will not be triggerd if not needed.
+        Mdelay is the measurement delay,
+        Pdelay, Pwidth are the pulse delay and width when pulse_en is True
+        The source delay and wait are set to 0. The sense wait is also set to 0.
+        pulse_en is to enable pulse mode for the channel (only for stairs). When True, also set Pdelay and Pwidth
+
+        WARNING: not all the parameters are tested for validity. So you should check the parameters have changed
+        properly by calling conf_mode without parameters before starting a measurement.
+        """
+        # if changing delays for measurement only (repeats) in 2 ch mode, the delays should be the
+        # same otherwise the measurement are not started in parallel but are done one after the other.
+        # So to simplify things here: No delay for repeats (both set at 0.)
+        # This does not seem to be a problem when doing init:all
+        if mode is None:
+            orig_ch = self.current_channel.get()
+            def conv(val):
+                val = val.lower()
+                v = val.split(';')
+                return [f(i) for f,i in zip([str, str, int, int, int, float] + [str]*(len(v)-6), v)]
+            if conv(self.ask(':trig1:tran:source?;:trig1:acq:source?; :sense1:wait:auto?; :sense1:wait?; :source1:wait?; :trig1:tran:delay?')) != \
+                ['aint', 'aint', 0, 1, 0, 0.]:
+                    raise RuntimeError('Inconsistent parameters on instrument for ch1. They were probably changed by hand.')
+            if 2 in self._valid_ch:
+                if conv(self.ask(':trig2:tran:source?; :trig2:acq:source?; :sense2:wait:auto?; :sense2:wait?; :source2:wait?; :trig2:tran:delay?')) != \
+                    ['aint', 'aint', 0, 1, 0, 0.]:
+                        raise RuntimeError('Inconsistent parameters on instrument for ch1. They were probably changed by hand.')
+            md1 = self.src_mode.get(ch=1)
+            if 2 in self._valid_ch:
+                md2 = self.src_mode.get(ch=2)
+            paras = {}
+            mode, en_chs = self._trigger_mode
+            if mode in ['spot', 'repeats']:
+                # either 'spot' or repeat
+                if md1 != 'fixed':
+                    raise RuntimeError('Inconsistent src_mode on instrument for ch1.  It was probably changed by hand.')
+                N = int(self.ask('trig1:acq:count?'))
+                if 2 in self._valid_ch:
+                    if md1 != md2:
+                        raise RuntimeError('Inconsistent src_mode on instrument for ch2.  It was probably changed by hand.')
+                    N2 = int(self.ask('trig2:acq:count?'))
+                    if N != N2:
+                        raise RuntimeError('Inconsistent parameters on instrument for ch2 trig acq count. It was probably changed by hand.')
+                if N != 1:
+                    paras['mode'] = 'repeat'
+                    paras['repeats'] = N
+                else:
+                    paras['mode'] = 'spot'
+            else:
+                if (1 in en_chs and md1 != 'list') or (1 not in en_chs and md1 != 'fixed'):
+                    raise RuntimeError('Inconsistent src_mode on instrument for ch1.  It was probably changed by hand.')
+                paras['mode'] = 'stairs'
+                func1 = self.src_function.get(ch=1)
+                if md1 == 'fixed':
+                    vals1 = 'keep'
+                else:
+                    vals1 =  _decode_block_auto(self.ask('source1:list:%s?'%func1))
+                paras['values1'] = vals1
+                paras['Mdelay1'] = float(self.ask('trig1:acq:delay?'))
+                #paras['Mwait1'] = float(self.ask('sense1:wait:offset?'))
+                pulse1 = self.src_shape.get(ch=1).lower() == 'pulse'
+                paras['pulse_en1'] = pulse1
+                paras['keep_last_en1'] = self.src_sweep_keep_last_en.get()
+                if pulse1:
+                    paras['Pdelay1'] = self.pulse_delay.get()
+                    paras['Pwidth1'] = self.pulse_width.get()
+                if 2 in self._valid_ch:
+                    if (2 in en_chs and md2 != 'list') or (2 not in en_chs and md2 != 'fixed'):
+                        raise RuntimeError('Inconsistent src_mode on instrument for ch2.  It was probably changed by hand.')
+                    func2 = self.src_function.get(ch=2)
+                    if md2 == 'fixed':
+                        vals2 = 'keep'
+                    else:
+                        vals2 =_decode_block_auto(self.ask('source2:list:%s?'%func2))
+                    paras['values2'] = vals2
+                    paras['Mdelay2'] = float(self.ask('trig2:acq:delay?'))
+                    #paras['Mwait2'] = float(self.ask('sense2:wait:offset?'))
+                    pulse2 = self.src_shape.get(ch=2).lower() == 'pulse'
+                    paras['pulse_en2'] = pulse2
+                    paras['keep_last_en2'] = self.src_sweep_keep_last_en.get()
+                    if pulse2:
+                        paras['Pdelay2'] = self.pulse_delay.get()
+                        paras['Pwidth2'] = self.pulse_width.get()
+                    if vals1 != 'keep' and vals2 != 'keep' and len(vals1) != len(vals2):
+                        raise RuntimeError('Inconsistent source lists on instrument for ch2. It was probably changed by hand.')
+            self.current_channel.set(orig_ch)
+            return paras
+        self.write(':trig1:all:source aint')
+        self.write('sense1:wait:auto 0')
+        self.write('sense1:wait 1')
+        self.write('source1:wait 0')
+        self.write('trig1:tran:delay 0')
+        orig_ch = self.current_channel.get()
+        if 2 in self._valid_ch:
+            self.write(':trig2:all:source aint')
+            self.write('sense2:wait:auto 0')
+            self.write('sense2:wait 1')
+            self.write('source2:wait 0')
+            self.write('trig2:tran:delay 0')
+        if mode == 'spot':
+            self._trigger_mode = ('spot', [])
+            self.src_mode.set('fixed', ch=1)
+            self.write('trig1:acq:count 1')
+            self.write('trig1:acq:delay 0')
+            if 2 in self._valid_ch:
+                self.src_mode.set('fixed', ch=2)
+                self.write('trig2:acq:count 1')
+                self.write('trig2:acq:delay 0')
+        elif mode == 'repeats':
+            if repeats is None or repeats <1:
+                raise ValueError('You need to specify a valid repeats')
+            self._trigger_mode = ('repeats', [])
+            self.src_mode.set('fixed', ch=1)
+            self.write('trig1:acq:count %i'%repeats)
+            self.write('trig1:acq:delay 0')
+            if 2 in self._valid_ch:
+                self.src_mode.set('fixed', ch=2)
+                self.write(':trig2:acq:count %i'%repeats)
+                self.write('trig2:acq:delay 0')
+        elif mode == 'stairs':
+            enabled_chs = []
+            if values1 is None or Mdelay1 is None or pulse_en1 is None:
+                raise ValueError('You need to specify values1, Mdelay1, pulse_en1')
+            if isinstance(values1, (list, tuple, np.ndarray)):
+                N = len(values1)
+                enabled_chs.append(1)
+            elif values1 == 'keep':
+                if 2 not in self._valid_ch or not isinstance(values2, (list, tuple, np.ndarray)):
+                    raise ValueError("Invalid use of 'keep'. It cannot be use for both channels or for a single channel instrument.")
+                N = len(values2)
+            else:
+                raise ValueError('Incorrect type or value for values1')
+            shape = {False:'DC', True:'pulse'}
+            self.write('trig1:all:count %i'%N)
+            self.write('trig1:acq:delay %r'%Mdelay1)
+            self.write('trig1:tran:delay 0')
+            #self.write('sense1:wait:offset %r'%Mwait1)
+            self.src_shape.set(shape[pulse_en1], ch=1)
+            self.src_sweep_keep_last_en.set(keep_last_en1)
+            if pulse_en1:
+                if Pdelay1 is None or Pwidth1 is None:
+                    raise ValueError('You need to specify Pdelay1 and Pwidth1')
+                self.pulse_delay.set(Pdelay1)
+                self.pulse_width.set(Pwidth1)
+            func1 = self.src_function.get(ch=1)
+            if 1 in enabled_chs:
+                self.src_mode.set('list')
+                self.write('source1:list:%s %s'%(func1, _encode_block(values1, ',')))
+            else:
+                self.src_mode.set('fixed')
+            if 2 in self._valid_ch:
+                if values2 is None or Mdelay2 is None or pulse_en2 is None:
+                    raise ValueError('You need to specify values2, Mdelay2, pulse_en2')
+                if isinstance(values2, (list, tuple, np.ndarray)):
+                    if len(values2) != N:
+                        raise ValueError('Both values need to have the same number of elements')
+                    enabled_chs.append(2)
+                elif values2 == 'keep':
+                    pass
+                else:
+                    raise ValueError('Incorrect type or value for values2')
+                self.write('trig2:all:count %i'%N)
+                self.write('trig2:acq:delay %r'%Mdelay2)
+                self.write('trig2:tran:delay 0')
+                #self.write('sense2:wait:offset %r'%Mwait2)
+                self.src_shape.set(shape[pulse_en2], ch=2)
+                self.src_sweep_keep_last_en.set(keep_last_en2)
+                if pulse_en2:
+                    if Pdelay2 is None or Pwidth2 is None:
+                        raise ValueError('You need to specify Pdelay2 and Pwidth2')
+                    self.pulse_delay.set(Pdelay2)
+                    self.pulse_width.set(Pwidth2)
+                func2 = self.src_function.get(ch=2)
+                if 2 in enabled_chs:
+                    self.src_mode.set('list')
+                    self.write('source2:list:%s %s'%(func2, _encode_block(values2, ',')))
+                self._trigger_mode = ('stairs', enabled_chs)
+        else:
+            raise ValueError('Invalid mode.')
+        self.current_channel.set(orig_ch)
+        # TODO deal with reading the results
+        #      deal with trigger_mode variable.
 
     def _create_devs(self):
         idn_split = self.idn_split()
@@ -2068,13 +2381,13 @@ class agilent_B2900_smu(visaInstrumentAsync):
         ch_choice = [1, 2] if is_2ch else [1]
         self._valid_ch = ch_choice
         self._enabled_chs_cache_reset()
-        self._set_async_trigger_helper_string()
         self.current_channel = MemoryDevice(1, choices=ch_choice)
         curr_range = [100e-9, 1e-6, 10e-6, 100e-6, 1e-3, 10e-3, 100e-3, 1., 1.5, 3., 10.]
-        volt_range = [0.2, 2., 20., 200.]
-        res_range = [2., 20., 200., 2e3, 20e3, 200e3, 2e6, 20e6, 200e6]
+        volt_range = [0, 0.2, 2., 20., 200.]
+        res_range = [0, 2., 20., 200., 2e3, 20e3, 200e3, 2e6, 20e6, 200e6]
         if is_b291x:
             curr_range = [10e-9] + curr_range
+        curr_range = [0] + curr_range
         def chOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(ch=self.current_channel)
@@ -2098,8 +2411,8 @@ class agilent_B2900_smu(visaInstrumentAsync):
                                         """)
         self.output_protection_en = chOption('OUTPut{ch}:PROTection', str_type=bool, doc='When enabled, this turns off the output upon reaching compliance. It uses option "normal" of output_off_mode')
         self.line_freq = scpiDevice(getstr='SYSTem:LFRequency?', str_type=float)
-        src_mode_opt = ChoiceStrings('CURRent', 'VOLTage')
-        self.src_mode = chOption('SOURce{ch}:FUNCtion:MODE', choices=src_mode_opt, autoinit=20)
+        src_func_opt = ChoiceStrings('CURRent', 'VOLTage')
+        self.src_function = chOption('SOURce{ch}:FUNCtion:MODE', choices=src_func_opt, autoinit=20)
         self.src_shape = chOption('SOURce{ch}:FUNCtion:SHAPe', choices=ChoiceStrings('PULSe', 'DC'))
         meas_mode_opt = ChoiceStrings('CURRent', 'CURRent:DC', 'VOLTage', 'VOLTage:DC', 'RESistance', quotes=True)
         meas_mode_opt_nores = meas_mode_opt[['VOLTage', 'VOLTage:DC', 'CURRent', 'CURRent:DC']]
@@ -2127,11 +2440,11 @@ class agilent_B2900_smu(visaInstrumentAsync):
             return chOption(*arg, **kwarg)
         def srcDevOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
-            options.update(mode=self.src_mode)
-            app = kwarg.pop('options_apply', ['mode', 'ch'])
+            options.update(func=self.src_function)
+            app = kwarg.pop('options_apply', ['ch', 'func'])
             kwarg.update(options=options, options_apply=app)
             return chOption(*arg, **kwarg)
-        limit_conv_d = {src_mode_opt[['current']]:'voltage', src_mode_opt[['voltage']]:'current'}
+        limit_conv_d = {src_func_opt[['current']]:'voltage', src_func_opt[['voltage']]:'current'}
         def limit_conv(val, conv_val):
             for k, v in limit_conv_d.iteritems():
                 if val in k:
@@ -2140,20 +2453,24 @@ class agilent_B2900_smu(visaInstrumentAsync):
         #limit_conv = lambda val, conv_val: limit_conv_d[val]
         def srcLimitDevOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
-            options.update(mode=self.src_mode)
-            app = kwarg.pop('options_apply', ['ch, ''mode'])
+            options.update(func=self.src_function)
+            app = kwarg.pop('options_apply', ['ch', 'func'])
             options_conv = kwarg.pop('options_conv', {}).copy()
-            options_conv.update(dict(mode=limit_conv))
+            options_conv.update(dict(func=limit_conv))
             kwarg.update(options=options, options_apply=app, options_conv=options_conv)
             return chOption(*arg, **kwarg)
         self._devwrap('src_level', setget=True)
-        limit_choices = ChoiceDevDep(self.src_mode,{ src_mode_opt[['voltage']]:ChoiceLimits(min_I, max_I), src_mode_opt[['current']]:ChoiceLimits(min_V, max_V)})
-        self.compliance = srcLimitDevOption('SENSe{ch}:{mode}:PROTection', str_type=float, choices=limit_choices, setget=True)
-        self.compliance_tripped = srcLimitDevOption(getstr='SENSe{ch}:{mode}:PROTection:TRIPped?', str_type=bool)
-        src_range_choices = ChoiceDevDep(self.src_mode, {src_mode_opt[['CURRent']]:curr_range, src_mode_opt[['voltage']]:volt_range})
-        self.src_range = srcDevOption('SOURce{ch}:{mode}:RANGe', str_type=float, choices=src_range_choices, setget=True)
-        self.src_range_auto_lower_limit = srcDevOption('SOURce{ch}:{mode}:RANGe', str_type=float, choices=src_range_choices, setget=True)
-        self.src_range_auto_en = srcDevOption('SOURce{ch}:{mode}:RANGe:AUTO', str_type=bool)
+        limit_choices = ChoiceDevDep(self.src_function, {src_func_opt[['voltage']]:ChoiceLimits(min_I, max_I), src_func_opt[['current']]:ChoiceLimits(min_V, max_V)})
+        self.compliance = srcLimitDevOption('SENSe{ch}:{func}:PROTection', str_type=float, choices=limit_choices, setget=True)
+        self.compliance_tripped = srcLimitDevOption(getstr='SENSe{ch}:{func}:PROTection:TRIPped?', str_type=bool)
+        src_range_choices = ChoiceDevDep(self.src_function, {src_func_opt[['CURRent']]:curr_range, src_func_opt[['voltage']]:volt_range})
+        self.src_range = srcDevOption('SOURce{ch}:{func}:RANGe', str_type=float, choices=src_range_choices, setget=True)
+        self.src_range_auto_lower_limit = srcDevOption('SOURce{ch}:{func}:RANGe:AUTO:LLIMit', str_type=float, choices=src_range_choices, setget=True)
+        self.src_range_auto_en = srcDevOption('SOURce{ch}:{func}:RANGe:AUTO', str_type=bool)
+        # This is not present on my device. It probably showed up at a later firmware update.
+        #self.output_transient_speed = srcDevOption('SOURce{ch}:TRANsient:SPEed', choices=ChoiceStrings('NORMal', 'FAST'))
+        self.src_sweep_keep_last_en = chOption('SOURce{ch}:FUNCtion:TRIGgered:CONTinuous', str_type=bool)
+        self.src_mode = srcDevOption('SOURce{ch}:{func}:MODE', choices=ChoiceStrings('SWEep', 'LIST', 'FIXed'))
 
         self.meas_en_voltage = chOption('SENSe{ch}:FUNCtion:{val} "voltage"', 'SENSe{ch}:FUNCtion:STATe? "voltage"', str_type=meas_en_type)
         self.meas_en_current = chOption('SENSe{ch}:FUNCtion:{val} "current"', 'SENSe{ch}:FUNCtion:STATe? "current"', str_type=meas_en_type)
@@ -2174,26 +2491,24 @@ class agilent_B2900_smu(visaInstrumentAsync):
         self.meas_autorange_threshold = measDevOptionLim('SENSe{ch}:{mode}:RANGe:AUTO:THReshold', str_type=float, min=11, max=100.)
         self.meas_range = measDevOption('SENSe{ch}:{mode}:RANGe', str_type=float, choices=range_choices, setget=True)
 
+        self.pulse_delay = chOption('SOURce{ch}:PULSe:DELay', str_type=float, min=0, max=99999.9)
+        self.pulse_width = chOption('SOURce{ch}:PULSe:WIDTh', str_type=float, min=5e-5, max=100000)
+
         self.sense_remote_en = chOption('SENSe{ch}:REMote', str_type=bool)
 
         self.snap_png = scpiDevice(getstr='HCOPy:SDUMp:FORMat PNG;DATA?', raw=True, str_type=_decode_block_base, autoinit=False)
         self.snap_png._format['bin']='.png'
 
-        # TODO: implement various wait time, sweeps
-        #       calc (offset and math)
-        #       trace data and stats
-#
-#        self.data_fetch_relative_last = scpiDevice(getstr='CALCulate2:DATA:LATest?', str_type=_decode_block_auto, trig=True, autoinit=False)
-#
-#        self.data_fetch_mean = scpiDevice(getstr='CALCulate3:FORMat MEAN;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
-#        self.data_fetch_std = scpiDevice(getstr='CALCulate3:FORMat SDEViation;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
-#        self.data_fetch_max = scpiDevice(getstr='CALCulate3:FORMat MAXimum;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
-#        self.data_fetch_min = scpiDevice(getstr='CALCulate3:FORMat MINimum;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
-#        self.data_fetch_p2p = scpiDevice(getstr='CALCulate3:FORMat PKPK;DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
-#
+        # TODO: calc (offset and math)
+        # The stats only return V, I, R, force
+        self.data_fetch_mean = chOption(getstr=':TRACe{ch}:STATistic:FORMat MEAN;:TRACe{ch}:STATistic:DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+        self.data_fetch_std = chOption(getstr=':TRACe{ch}:STATistic:FORMat SDEV;:TRACe{ch}:STATistic:DATA?', str_type=_decode_block_auto, trig=True, autoinit=False, doc='The instrument does the equivalent of np.std(ddof=1)')
+        self.data_fetch_max = chOption(getstr=':TRACe{ch}:STATistic:FORMat MAX;:TRACe{ch}:STATistic:DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+        self.data_fetch_min = chOption(getstr=':TRACe{ch}:STATistic:FORMat MIN;:TRACe{ch}:STATistic:DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
+        self.data_fetch_p2p = chOption(getstr=':TRACe{ch}:STATistic:FORMat PKPK;:TRACe{ch}:STATistic:DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
 #        self.trace_feed = scpiDevice('TRACe:FEED', choices=ChoiceStrings('SENS1', 'CALC1', 'CALC2'))
 #        self.trace_npoints_storable = scpiDevice('TRACe:POINts', str_type=int, setget=True, min=1, max=2500)
-#        self.trace_npoints =  scpiDevice(getstr='TRACe:POINts:ACTUal?', str_type=int)
+        self.trace_npoints =  chOption(getstr='TRACe{ch}:POINts:ACTUal?', str_type=int)
 #        self.trace_en = scpiDevice('TRACe:FEED:CONTrol', choices=ChoiceSimpleMap(dict(NEXT=True, NEV=False), filter=string.upper))
 #        self.trace_data = scpiDevice(getstr='TRACe:DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
 
@@ -2203,25 +2518,25 @@ class agilent_B2900_smu(visaInstrumentAsync):
         # This needs to be last to complete creation
         super(agilent_B2900_smu, self)._create_devs()
 
-    def _src_level_getdev(self, ch=None, mode=None):
+    def _src_level_getdev(self, ch=None, func=None):
         if ch is not None:
             self.current_channel.set(ch)
         ch = self.current_channel.get()
-        if mode is not None:
-            self.src_mode.set(mode)
-        mode = self.src_mode.getcache()
-        return float(self.ask('SOURce{ch}:{mode}?'.format(ch=ch, mode=mode)))
-    def  _src_level_checkdev(self, val, ch=None, mode=None):
+        if func is not None:
+            self.src_function.set(func)
+        func = self.src_function.getcache()
+        return float(self.ask('SOURce{ch}:{func}?'.format(ch=ch, func=func)))
+    def  _src_level_checkdev(self, val, ch=None, func=None):
         if ch is not None:
             self.current_channel.set(ch)
         ch = self.current_channel.get()
-        if mode is not None:
-            self.src_mode.set(mode)
-        mode = self.src_mode.getcache()
+        if func is not None:
+            self.src_function.set(func)
+        func = self.src_function.getcache()
         autorange = self.src_range_auto_en.getcache()
         K = 1.05
         if autorange:
-            if mode in self.src_mode.choices[['voltage']]:
+            if func in self.src_function.choices[['voltage']]:
                 rnge = self._max_limits['max_V']
             else:
                 rnge = self._max_limits['max_I']
@@ -2233,11 +2548,11 @@ class agilent_B2900_smu(visaInstrumentAsync):
                 rnge = {1.5:1.515, 3.:3.03, 10:10.5}
         if abs(val) > rnge*K:
             raise ValueError, self.perror('level is outside current range')
-    def _src_level_setdev(self, val, ch=None, mode=None):
+    def _src_level_setdev(self, val, ch=None, func=None):
         # these were set by checkdev.
-        mode = self.src_mode.getcache()
+        func = self.src_function.getcache()
         ch = self.current_channel.get()
-        self.write('SOURce{ch}:{mode} {val!r}'.format(ch=ch, mode=mode, val=val))
+        self.write('SOURce{ch}:{func} {val!r}'.format(ch=ch, func=func, val=val))
 
 # Trace allows caluclating stats (avg, stderr). It needs to be reset between inits (if the number of trace:points is larger than
 #    what is to be acquired)
@@ -2256,3 +2571,9 @@ class agilent_B2900_smu(visaInstrumentAsync):
 # It is not clear how the wait and delay interact. And how trigger source like timer would interact with them.
 # With a short timer of .1 s and a delay of 0.3 s, the readings are taken at .3, .4, .5 ... and are not
 # necessarily matched to the source changes.
+# I think aint setups timers.
+# If timers are too short for the measurement, I think the measurement is truncated.
+# measurement can be in the midle of an output change. It averages the value over the measured interval.
+# Source wait works but is complicated in 2 channel modes. It adds time after a change before the next trans trigger can
+# can be sent.
+# Sense wait: I never saw it do anything.
