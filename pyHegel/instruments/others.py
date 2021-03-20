@@ -209,7 +209,8 @@ class colby_pdl_100a(visaInstrument):
 
 register_usb_name('Berkeley Nucleonics Corporation', 0x03EB)
 
-@register_instrument('Berkeley Nucleonics Corporation', 'MODEL 845', '0.4.35', usb_vendor_product=[0x03EB, 0xAFFF])
+#@register_instrument('Berkeley Nucleonics Corporation', 'MODEL 845', '0.4.35', usb_vendor_product=[0x03EB, 0xAFFF])
+@register_instrument('Berkeley Nucleonics Corporation', 'MODEL 845', usb_vendor_product=[0x03EB, 0xAFFF])
 class BNC_rf_845(visaInstrument):
     """
     This controls a BNC 845 signal generetor
