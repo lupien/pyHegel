@@ -810,20 +810,26 @@ class agilent_SMU(visaInstrumentAsync):
         if all(params.get(k) is None for k in para_dict):
             if ch is None:
                 ch = self._valid_ch
+            single_ch = None
             if not isinstance(ch, (list, tuple)):
+                single_ch = ch
                 ch = [ch]
             result_dict = {}
             for c in ch:
                 func = self.function.get(ch=c) # we set ch here
                 adjust_range(func)
                 result_dict[c] = {k:dev.get() for k, dev in para_dict.items()}
+            if single_ch is not None:
+                result_dict = result_dict[single_ch]
             return result_dict
         else:
             func = params.get('function', None)
             if func is None:
                 func = self.function.get(ch=ch)
-            else:
+            elif ch is not None:
                 self.current_channel.set(ch)
+            else:
+                ch = self.current_channel.get()
             adjust_range(func)
             for k, dev in para_dict.items():
                 val = params.get(k)
@@ -934,6 +940,8 @@ class agilent_SMU(visaInstrumentAsync):
         end_to can be 'start' or 'stop'
         mode can be 'linear', 'log', 'linear_updown', 'log_updown'
           updown makes it go from start to stop then from stop to start.
+        hold is extra wait delay for the first point.
+        delay is the wait between changing the force and starting the measurement.
         Icomp is the current compliance. None reuses the previous value. 'empty' will remove the setting.
         Pcomp is the power compliance. None reuses the previous value. 'empty' will remove the setting.
         """
