@@ -394,7 +394,8 @@ class agilent_SMU(visaInstrumentAsync):
         if auto not in ['all', 'i', 'v', 'force', 'compliance']:
             raise ValueError(self.perror("Invalid auto setting"))
         if chs is None:
-            chs = [self._slot2smu[i+1] for i,v in enumerate(self._get_enabled_state()) if v]
+            en_chs, en_chs2 = self._get_enabled_state()
+            chs = [self._slot2smu[i+1] for i,v in enumerate(en_chs) if v and i+1 in self._slot2smu]
             if len(chs) == 0:
                 raise RuntimeError(self.perror('All channels are off so cannot fetch.'))
         if not isinstance(chs, (list, tuple, np.ndarray)):
@@ -902,9 +903,9 @@ class agilent_SMU(visaInstrumentAsync):
         if any(c not in self._valid_ch for c in channels):
             raise ValueError(self.perror('Invalid channel selection'))
         if len(channels) == 0:
-            en_ch = self._get_enabled_state()
+            en_ch, en_ch2 = self._get_enabled_state()
             en_slots = [i+1 for i,v in enumerate(en_ch) if v]
-            channels =  [self._slot2smu[c] for c in en_slots]
+            channels =  [self._slot2smu[c] for c in en_slots if c in self._slot2smu]
             if len(channels) == 0:
                 raise RuntimeError(self.perror('All channels are disabled. You should enable at least one.'))
         slots = [self._smu2slot[c] for c in channels]
@@ -1238,15 +1239,26 @@ class agilent_SMU(visaInstrumentAsync):
         "Returns the enabled state of each channels"
         N = self._N_slots
         ret = self.ask("*LRN? 0")
-        state = [False]*N
+        state1 = [False]*N
+        state2 = [False]*N
         if ret == 'CL':
             pass
         elif ret.startswith('CN'):
             for i_s in ret[2:].split(','):
-                state[int(i_s)-1] = True
+                ch_i = int(i_s)
+                if ch_i > 100:
+                    ch = ch_i//100 - 1
+                    sub = ch_i % 100
+                    if sub not in [1, 2]:
+                        raise RuntimeError('Unexpected sub channel number')
+                    state = state1 if sub == 1 else state2
+                else:
+                    ch = ch_i - 1
+                    state = state1
+                state[ch] = True
         else:
             raise RuntimeError(self.perror('Unexpected format for get_enabled_state'))
-        return state
+        return state1, state2
 
     @cache_result
     def _get_function_cached(self, ch):
