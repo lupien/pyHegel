@@ -3691,7 +3691,8 @@ class visaInstrumentAsync(visaInstrument):
                 self.visa.disable_event(visa_wrap.constants.VI_EVENT_SERVICE_REQ,
                                         visa_wrap.constants.VI_QUEUE)
     def __del__(self):
-        if self._RQS_status != -1:
+        # Need to check if variable is present in case delete is called early in instance creation
+        if hasattr(self, '_RQS_status') and self._RQS_status != -1:
             # Not absolutely necessary, but lets be nice
             self.visa.disable_event(visa_wrap.constants.VI_ALL_ENABLED_EVENTS,
                                     visa_wrap.constants.VI_ALL_MECH)
