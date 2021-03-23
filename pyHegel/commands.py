@@ -2265,6 +2265,16 @@ def load_all_usb():
             else:
                 raise
 
+def _get_visa_idns_trapped(instr):
+    try:
+        idns = _get_visa_idns(instr)
+    except instruments_base.visa_wrap.VisaIOError as exc:
+        if exc.error_code == instruments_base.visa_wrap.constants.VI_ERROR_ALLOC:
+            idns = None
+        else:
+            raise
+    return idns
+
 def load_all_gpib(all_ids=True):
     """
      This will load all GPIB instruments found with find_all_instruments
@@ -2272,7 +2282,7 @@ def load_all_gpib(all_ids=True):
      defined with a full name (GPIB0::1...) or an integer but not an alias.
      all_ids: when True (default) communicates with all gpib devices to obtain their
               ids. When false, only communicates with devices having a possible
-              address match in local_config. However, the missing entry will
+              address match in local_config. However, the missing entry will be
               less descriptive (will not show the id).
     """
     def check(instr):
@@ -2290,8 +2300,12 @@ def load_all_gpib(all_ids=True):
                     if len(para[1]) >= 1 and check(para[1][0])}
     for instr in found_gpib:
         if all_ids:
-            idns = _get_visa_idns(instr)
-            id = (idns['vendor'], idns['model'], idns['firmware'])
+            idns = _get_visa_idns_trapped(instr)
+            if idns is not None:
+                id = (idns['vendor'], idns['model'], idns['firmware'])
+            else:
+                print '   Instrument not present (Keysight IO cache): %s'%instr
+                continue
         else:
             idns = None
         correct_addr = {name: para for name, para in gpib_instr.iteritems()
@@ -2299,8 +2313,12 @@ def load_all_gpib(all_ids=True):
         not_found = True
         if len(correct_addr):
             if not all_ids:
-                idns = _get_visa_idns(instr)
-                id = (idns['vendor'], idns['model'], idns['firmware'])
+                idns = _get_visa_idns_trapped(instr)
+                if idns is not None:
+                    id = (idns['vendor'], idns['model'], idns['firmware'])
+                else:
+                    print '   Instrument not present (Keysight IO cache): %s'%instr
+                    continue
             for name, para in correct_addr.iteritems():
                 if instruments_registry.check_instr_id(para[0], id):
                     load(name)
