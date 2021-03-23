@@ -2270,6 +2270,9 @@ def _get_visa_idns_trapped(instr):
         idns = _get_visa_idns(instr)
     except instruments_base.visa_wrap.VisaIOError as exc:
         if exc.error_code == instruments_base.visa_wrap.constants.VI_ERROR_ALLOC:
+            # GPIB card not present
+            idns = None
+        elif exc.error_code == instruments_base.visa_wrap.constants.VI_ERROR_RSRC_NFOUND:
             idns = None
         else:
             raise
@@ -2304,7 +2307,7 @@ def load_all_gpib(all_ids=True):
             if idns is not None:
                 id = (idns['vendor'], idns['model'], idns['firmware'])
             else:
-                print '   Instrument not present (Keysight IO cache): %s'%instr
+                print '  Instrument not present (Keysight IO cache): %s'%instr
                 continue
         else:
             idns = None
@@ -2317,7 +2320,7 @@ def load_all_gpib(all_ids=True):
                 if idns is not None:
                     id = (idns['vendor'], idns['model'], idns['firmware'])
                 else:
-                    print '   Instrument not present (Keysight IO cache): %s'%instr
+                    print '  Instrument not present (Keysight IO cache): %s'%instr
                     continue
             for name, para in correct_addr.iteritems():
                 if instruments_registry.check_instr_id(para[0], id):
