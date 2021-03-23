@@ -1286,7 +1286,9 @@ class BaseInstrument(object):
     alias = None
     # add _quiet_delete here in case we call __del__ before __init__ because of problem in subclass
     _quiet_delete = False
-    def __init__(self, quiet_delete=False):
+    _quiet_load = True
+    def __init__(self, quiet_delete=False, quiet_load=True):
+        self._quiet_load = quiet_load
         self._quiet_delete = quiet_delete
         self.header_val = None
         self._lock_instrument = Lock_Instruments()
@@ -1303,8 +1305,9 @@ class BaseInstrument(object):
         self._last_force = time.time()
         self._conf_helper_cache = None # this is filled by conf_helper (should be under a locked state to prevent troubles)
         self.init(full=True)
+        self._quiet_load = False
     def __del__(self):
-        if not self._quiet_delete:
+        if not (self._quiet_delete or self._quiet_load):
             print 'Destroying '+repr(self)
     def _async_select(self, devs):
         """ It receives a list of devices to help decide how to wait.
