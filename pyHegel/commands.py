@@ -2257,6 +2257,13 @@ def load_all_usb():
             else:
                 extra = ', instruments class=%s'%instr_class.__name__
             print '  Unknown instrument: %s (guess manuf=%s, model=%s%s)'%(usb, guess_manuf, guess_model, extra)
+        except instruments_base.visa_wrap.VisaIOError as exc:
+            if exc.error_code == instruments_base.visa_wrap.constants.VI_ERROR_NCIC:
+                guess_manuf = instruments_registry.find_usb_name(manuf)
+                guess_model = instruments_registry.find_usb_name(manuf, model)
+                print '  Instrument not present (Keysight IO cache): %s (guess manuf=%s, model=%s)'%(usb, guess_manuf, guess_model)
+            else:
+                raise
 
 def load_all_gpib(all_ids=True):
     """
