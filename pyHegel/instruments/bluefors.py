@@ -348,13 +348,20 @@ import os
 # The bluefors dilution fridges have a National Instrument DAQ card.
 # We can use that to identify which one it is.
 
+# usb vendor/product = 0x3923/0x717a or 14627/29050
 bluefors_serial = {'0158748E':'BF0312-03',
-                   '015873C4':'BF0312-02'}
+                   '015873C4':'BF0312-02',
+                   '017E7ABE':'BF0215-04',
+                   '0149FBE6':'BF1211-01',
+                   '01B88CCB':'BF0217-08',
+                   '01B88CB8':'BF0217-09',
+                   '01E9E2CA':'SO01147.0010'}
+
 def get_bluefors_sn():
     lst = get_all_usb() # defined below
     for v,p,s in lst:
         if v == 0x3923 and p == 0x717a:
-            return bluefors_serial.get(s, 'Unknown serial #')
+            return bluefors_serial.get(s, 'Unknown serial # (%s)'%s)
     return 'No fridge found'
 
 if os.name == 'nt':
