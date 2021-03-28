@@ -644,7 +644,8 @@ class oxford_ips120_10(visaInstrument):
             d.update(polarity_neg_desired=polarity_neg_desired, polarity_neg_magnet=polarity_neg_magnet,
                      polarity_neg_commanded=polarity_neg_commanded, contactors=contactors)
         ret = dict_improved(d)
-        self._last_abnormal_status.append((time.time(), ret))
+        if abnormal:
+            self._last_abnormal_status.append((time.time(), ret))
         return ret
 
     def _display_T_setdev(self, val):
