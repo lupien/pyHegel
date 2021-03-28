@@ -181,6 +181,7 @@ class oxford_ips120_10(visaInstrument):
         self._isobus_num = isobus
         self._allow_local_override = allow_local_override
         self._last_read_exception_timeout = False
+        self._last_abnormal_status = []
         #kwargs['skip_id_test'] = True
         kwargs['read_termination'] = '\r'
         kwargs['write_termination'] = '\r'
@@ -473,7 +474,7 @@ class oxford_ips120_10(visaInstrument):
                         wait(.1)
                         progress(prog_base.format(current=reading.get(), time=time.time()-to))
             if self._get_states() == 'quench':
-                raise RuntimeError(self.perror('The magnet QUENCHED!!! (or some other error, see get_error_status'))
+                raise RuntimeError(self.perror('The magnet QUENCHED!!! (or some other error, see get_error, status, and _last_abnormal_status'))
             if extra_wait:
                 wait(extra_wait, progress_base='Magnet wait')
         if end_states is not None:
@@ -508,7 +509,7 @@ class oxford_ips120_10(visaInstrument):
         if state in ['ramping']:
             raise RuntimeError(self.perror('Magnet is ramping. Stop that before changing the persistent state.'))
         if state in ['quench']:
-            raise RuntimeError(self.perror('The magnet QUENCHED!!! (or some other error, see get_error, status'))
+            raise RuntimeError(self.perror('The magnet QUENCHED!!! (or some other error, see get_error, status, and _last_abnormal_status'))
         orig_switch_en = status.pers_switch
         if orig_switch_en not in ['off @zero', 'on', 'off @field']:
             raise RuntimeError(self.perror('persistent switch is in a fault.'))
@@ -635,14 +636,16 @@ class oxford_ips120_10(visaInstrument):
                              pers_switch_installed=pers_switch_installed, activity=activity,
                              display_T=display_T, ramp_rate_slow=ramp_rate_slow, ramp=ramp,
                              remote=remote, locked=locked, autorundown=autorundown)
-        if full:
+        if full or abnormal:
             polarity_neg_desired = bool(Pm&4)
             polarity_neg_magnet = bool(Pm&2)
             polarity_neg_commanded = bool(Pm&1)
             contactors = ['xxx', 'negative closed', 'positive closed', 'both open', 'both closed'][Pn]
             d.update(polarity_neg_desired=polarity_neg_desired, polarity_neg_magnet=polarity_neg_magnet,
                      polarity_neg_commanded=polarity_neg_commanded, contactors=contactors)
-        return dict_improved(d)
+        ret = dict_improved(d)
+        self._last_abnormal_status.append((time.time(), ret))
+        return ret
 
     def _display_T_setdev(self, val):
         if val:
