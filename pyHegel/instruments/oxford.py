@@ -84,7 +84,7 @@ def _ramp_setdev_factory(isTesla):
             wait can be used to set a wait time (in s) after the ramp. It overrides ramp_wait_after.
             no_wait_end when True, will skip waiting for the ramp to finish and return immediately after
                       starting the ramp. Useful for record sequence. This will not work when changing sign.
-            When going to persistence it waits persistent_wait_before before cooling the switch.
+            When going to persistence it waits psh_wait_before before cooling the switch.
 
             When using get, returns the magnet %s.
         """
@@ -708,9 +708,9 @@ class oxford_ips120_10(visaInstrument):
         self._devwrap('ramp_rate_slow')
         self._devwrap('current_magnet')
         self._devwrap('field_T')
-        self.psh_wait_before = MemoryDevice(self._psh_wait_before, min=0, doc="The recommended minimum value is 60 s")
-        self.psh_time_cool = MemoryDevice(self._psh_time_cool, min=0, doc="The recommended minimum value is 15 s")
-        self.psh_time_heat = MemoryDevice(self._psh_time_heat, min=0, doc="The recommended minimum value is 15 s")
+        self.psh_wait_before = MemoryDevice(self._psh_wait_before, min=30, doc="The recommended minimum value is 60 s")
+        self.psh_time_cool = MemoryDevice(self._psh_time_cool, min=15, doc="The recommended minimum value is 15 s")
+        self.psh_time_heat = MemoryDevice(self._psh_time_heat, min=15, doc="The recommended minimum value is 15 s")
         self.ramp_wait_after = MemoryDevice(10., min=0.)
         self._devwrap('ramp_current', autoinit=False, setget=True)
         self._devwrap('ramp_field_T', autoinit=False, setget=True)
