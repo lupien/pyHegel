@@ -854,12 +854,12 @@ class EmptyChoice(ChoiceBase):
 
 @register_instrument('BlueFors', 'Temperature Controller')
 class bf_temperature_controller(BaseInstrument):
-    if not mqtt_loaded:
-        raise RuntimeError('Cannot use bf_temperature_controller because of missing paho.mqtt package. Can be installed with "pip install paho-mqtt"')
-    if not requests_loaded:
-        raise RuntimeError('Cannot use bf_temperature_controller because of missing requests package. Can be installed with "pip install requests"')
     _mqtt_connected = False
     def __init__(self, address, **kwargs):
+        if not mqtt_loaded:
+            raise RuntimeError('Cannot use bf_temperature_controller because of missing paho.mqtt package. Can be installed with "pip install paho-mqtt"')
+        if not requests_loaded:
+            raise RuntimeError('Cannot use bf_temperature_controller because of missing requests package. Can be installed with "pip install requests"')
         self._ip_address = address
         self._mqtt_subscriptions = {'channel/measurement/listen':'To do on connect',
                                     'heater/listen': 'To do on connect',
