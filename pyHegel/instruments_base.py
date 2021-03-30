@@ -1065,7 +1065,11 @@ class BaseDevice(object):
         try:
             _general_check(val, min, max, choices, lims, msg_src)
         except (ValueError, KeyError) as e:
-            new_message = self.perror(e.args[0])
+            # need to clean possible {} (from dict repr) because of format string function in perror
+            err = e.args[0]
+            err = err.replace('{', '{{')
+            err = err.replace('}', '}}')
+            new_message = self.perror(err)
             # new_message = self.perror(e.args[0],**e.args[1])
             if str_return:
                 return new_message
