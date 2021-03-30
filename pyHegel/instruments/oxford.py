@@ -141,6 +141,7 @@ class oxford_ips120_10(visaInstrument):
         hold (to pause the sweep)
         control_mode  (to put instrument in remote)
         clear_buffers
+        set_activity (can be used to clamp)
     It is recommended to lock the instrument in remote so a user will not make it go to local
     and break the sweep.
 
@@ -355,6 +356,11 @@ class oxford_ips120_10(visaInstrument):
             return 'No error.'
 
     def set_activity(self, act):
+        """\
+        possible activity: 'hold', 'to setpoint', 'to zero', 'clamp'
+        Be careful about using 'clamp' (power on state).
+        From clamp state, only 'hold' works.
+        """
         acts = {'hold':0, 'to setpoint':1, 'to zero':2, 'clamp':4}
         if act not in acts:
             raise ValueError('Invalid activity. Needs to be one of %s'%acts.keys())
