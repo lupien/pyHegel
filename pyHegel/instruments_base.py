@@ -2683,10 +2683,13 @@ class ChoiceIndex(ChoiceBase):
     are strings see ChoiceSimpleMap.
     option normalize when true rounds up the float values for better
     comparison. Use it with a list created from a calculation.
+    noconv, when True, will not convert the output to string (tostr, just picks the dict key or list index+offset)
+            do not use normalize in this case.
     """
-    def __init__(self, list_or_dict, offset=0, normalize=False):
+    def __init__(self, list_or_dict, offset=0, normalize=False, noconv=False):
         self._normalize = normalize
         self._list_or_dict = list_or_dict
+        self._noconv = noconv
         if isinstance(list_or_dict, np.ndarray):
             list_or_dict = list(list_or_dict)
         if isinstance(list_or_dict, list):
@@ -2726,7 +2729,11 @@ class ChoiceIndex(ChoiceBase):
     def tostr(self, input_choice):
         # this is called by dev._tostr to convert a choice to the format needed by instrument
         i = self.index(input_choice)
-        return str(self.keys[i])
+        val = self.keys[i]
+        if self._noconv:
+            return val
+        else:
+            return str(val)
     def __contains__(self, x):
         if self._normalize:
             x = self.normalize_N(x)
