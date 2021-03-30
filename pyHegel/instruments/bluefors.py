@@ -1450,7 +1450,7 @@ class bf_temperature_controller(BaseInstrument):
                                                           target_temperature=BfChoiceLimits(min=0), target_temperature_shown=BfChoiceLimits()),
                                                      readonly_fields=['relay_status', 'relay_mode']),
                                      doc='options max_power, control_algorithm_settings only apply for pid mode. power is only for manual mode.')
-        self.resources = BlueforsDevice(readonly=True, readcache='rsrcs')
+        self.resources = BlueforsDevice('system/resources', readonly=True, readcache='rsrcs')
         self.channel =  BlueforsDevice('channel', proto='post', readcache='chs', predev=('ch', 'channel_nr', self.current_ch), choices=
                                        Bf_Dict_Choices(dict(active=BfChoiceLimits(), calib_curve_nr=BfChoiceLimits(min=1, max=100),
                                                             coupled_heater_nr=BfChoiceLimits(min=0, max=4),
