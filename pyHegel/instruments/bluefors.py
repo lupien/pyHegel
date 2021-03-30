@@ -34,7 +34,7 @@ import copy
 from ..instruments_base import BaseInstrument, MemoryDevice,\
                              dict_improved, locked_calling, wait_on_event, FastEvent, wait,\
                              ProxyMethod, BaseDevice, ChoiceBase, KeyError_Choices, ChoiceLimits,\
-                             ChoiceSimpleMap,  ChoiceIndex
+                             ChoiceSimpleMap,  ChoiceIndex, Dict_SubDevice
 from ..instruments_registry import register_instrument
 _wait = wait
 
@@ -683,7 +683,13 @@ class Bf_Dict_Choices(ChoiceBase):
          missing values will be passed as is.
         """
         self.fields = fields
-        self.field_names = fields.keys()
+        field_names = []
+        fmts = []
+        for k, v in fields.items():
+            field_names.append(k)
+            fmts.append(v)
+        self.field_names = field_names
+        self.fmts_lims = fmts
         self.required = required
         self.readonly_fields = readonly_fields
     def __contains__(self, val_dict):
@@ -750,6 +756,7 @@ class BlueforsDevice(BaseDevice):
         if not readonly:
             self._setdev_p = True
         self._getdev_p = True
+        self.type = self.choices # needed by Dict_SubDevice
 
     def _get_docstring(self, added=''):
         added += """\
@@ -809,6 +816,8 @@ set/get options for this type of device:
     def _getdev(self, clean=True, **kwargs):
         kwargs, kwargs2check, ch = self._doprev(kwargs, in_get=True)
         if self._readcache:
+            if self.instr._mqtt_subscriptions[self._topic+'/listen'] != 'DONE':
+                raise RuntimeError(self.perror('Caches are not subscribed properly'))
             ret = self.instr._mqtt_listen_buffers[self._readcache]
             if ch is not None:
                 ret = ret[ch-1]
@@ -837,6 +846,11 @@ set/get options for this type of device:
             self._check_cache['set_kwarg'] = sk.copy()
             val = kwargs2check
         super(BlueforsDevice, self)._checkdev(val)
+
+class EmptyChoice(ChoiceBase):
+    def __init__(self, field_names=[]):
+        self.field_names = field_names
+        self.fmts_lims = [None] * len(field_names)
 
 @register_instrument('BlueFors', 'Temperature Controller')
 class bf_temperature_controller(BaseInstrument):
@@ -890,10 +904,11 @@ class bf_temperature_controller(BaseInstrument):
                 d[u'status'] = data['status']
                 ch = d['channel_nr']
                 self._mqtt_listen_buffers['chs'][ch-1] = d
-            today = datetime.datetime.today()
-            # get about one week worth, but since this is for UTC, extend it a little
-            start = (today - datetime.timedelta(days=8)).isoformat()
-            end = (today + datetime.timedelta(days=2)).isoformat()
+            #today = datetime.datetime.today()
+            today = datetime.datetime.utcnow()
+            # get about one 12 hrs worth of data.
+            start = (today - datetime.timedelta(hours=12)).isoformat()
+            end = (today + datetime.timedelta(seconds=5*60)).isoformat()
             for ch in range(1, 13):
                 result = dict(angle=90., magnitude=0., channel_nr=ch, datetime=u'2020-01-01T00:00:00.0', imz=0., rez=0.,
                               temperature=None, resistance=0., reactance=0., settings_nr=1, status=u'OK',
@@ -1079,12 +1094,30 @@ class bf_temperature_controller(BaseInstrument):
             wait_on_event(check)
         return ret.mid
 
+    def _websocket_helper(self, topic):
+        ws = self._websockets_cache.get(topic, None)
+        if ws is None:
+            if not websocket_loaded:
+                raise RuntimeError('Cannot use ws proto because of missing websocket package. Can be installed with "pip install websocket-client"')
+            ws = websocket.create_connection('ws://%s:5002/%s'%(self._ip_address, topic), timeout=10)
+            self._websockets_cache[topic] = ws
+        return ws
+
+    @locked_calling
     def ask(self, topic, unsub=True, proto='mqtt', **params):
         """ unsub when True, will unsubscribe after every call.
             probably nicer to the server, but will be slower
             proto can be get, post, mqtt, ws (for websocket)
         """
-        return self.write(topic, unsub, proto, _ask=True, **params)
+        if topic.endswith('/listen') and proto == 'ws':
+            ws = self._websocket_helper(topic)
+            ret = ws.recv()
+            result = json.loads(ret)
+            if result['status'] != 'OK':
+                raise RuntimeError('Bad reply: %s'%result)
+            return result
+        else:
+            return self.write(topic, unsub, proto, _ask=True, **params)
 
     @locked_calling
     def write(self, topic, unsub=True, proto='mqtt', _ask=False, **params):
@@ -1112,12 +1145,7 @@ class bf_temperature_controller(BaseInstrument):
                 raise RuntimeError('Bad post/get request (status=%s, message="%s")'%(req.status_code, req.text))
             result = req.json()
         elif proto == 'ws':
-            ws = self._websockets_cache.get(topic, None)
-            if ws is None:
-                if not websocket_loaded:
-                    raise RuntimeError('Cannot use ws proto because of missing websocket package. Can be installed with "pip install websocket-client"')
-                ws = websocket.create_connection('ws://%s:5002/%s'%(self._ip_address, topic), timeout=10)
-                self._websockets_cache[topic] = ws
+            ws = self._websocket_helper(topic)
             ws.send(json.dumps(params))
             ret = ws.recv()
             result = json.loads(ret)
@@ -1373,6 +1401,26 @@ class bf_temperature_controller(BaseInstrument):
             data.append(P)
         return data
 
+    def _heater_pid_getdev(self, outch=None):
+        """ on get returns the 3 values [P, I, D], on set accepts a dictionnary or keywords P, I and D. """
+        ret = self.heater.get(outch=outch)
+        pid = ret['control_algorithm_settings']
+        return dict_improved([('P', pid['proportional']), ('I', pid['integral']), ('D', pid['derivative'])])
+    def _heater_setcheck_helper(self, PID):
+        for k in PID:
+            if k not in ['P', 'I', 'D']:
+                raise ValueError(self.perror('Invalid parameter for heater_pid. Only P, I or D accepted.'))
+        d = {}
+        mapping = {'P':'proportional', 'I':'integral', 'D':'derivative'}
+        d = {mapping[k]:v for k,v in PID.items()}
+        return {'control_algorithm_settings': d}
+    def _heater_pid_checkdev(self, PID, outch=None):
+        val = self._heater_setcheck_helper(PID)
+        self.heater.check(val, outch=outch)
+    def _heater_pid_setdev(self, PID, outch=None):
+        val = self._heater_setcheck_helper(PID)
+        self.heater.set(val, outch=outch)
+
     def _create_devs(self):
         self.current_ch = MemoryDevice(1, min=1, max=12)
         self.current_outch = MemoryDevice(1, min=1, max=4)
@@ -1391,11 +1439,11 @@ class bf_temperature_controller(BaseInstrument):
                                       '10nA LR', '10nA HR', '31.6nA LR', '31.6nA HR', '100nA LR', '100nA HR', '316nA LR', '316nA HR',
                                       '1uA LR', '1uA HR', '3.16uA LR', '3.16uA HR', '10uA LR', '10uA HR', '50uA 64Hz', '150uA 64Hz']
         all_settings = BfChoiceIndex(current_list + ['50uA 64Hz', '150uA 64Hz'], offset=1)
-        self.measurement = BlueforsDevice(readonly=True, readcache='meas', predev=('ch', 'channel_nr', self.current_ch), choices=
+        self.measurement = BlueforsDevice('channel/measurement', readonly=True, readcache='meas', predev=('ch', 'channel_nr', self.current_ch), choices=
                                           Bf_Dict_Choices(dict(settings_nr=all_settings)))
         self.heater = BlueforsDevice('heater', proto='post', readcache='htrs', predev=('outch', 'heater_nr', self.current_outch), choices=
                                      Bf_Dict_Choices(dict(active=BfChoiceLimits(), control_algorithm=BfChoiceIndex(['default PID algorithm'], offset=1),
-                                                          control_algorithm_settigs=Bf_Dict_Choices(dict(proportional=BfChoiceLimits(min=0), integral=BfChoiceLimits(min=0), derivative=BfChoiceLimits(min=0))),
+                                                          control_algorithm_settings=Bf_Dict_Choices(dict(proportional=BfChoiceLimits(min=0), integral=BfChoiceLimits(min=0), derivative=BfChoiceLimits(min=0))),
                                                           max_power=BfChoiceLimits(min=0), name=BfChoiceLimits(), power=BfChoiceLimits(min=0),
                                                           pid_mode=BfChoiceIndex(['manual', 'pid']), relay_mode=relay_mode_ch, relay_status=relay_status_ch,
                                                           resistance=BfChoiceLimits(min=0), setpoint=BfChoiceLimits(min=0),
@@ -1413,9 +1461,22 @@ class bf_temperature_controller(BaseInstrument):
                                                             name=BfChoiceLimits(),
                                                             use_non_default_timeconstants=BfChoiceLimits(), wait_time=BfChoiceLimits(min=1), meas_time=BfChoiceLimits(min=5)),
                                                        readonly_fields=['coupled_heater_nr']))
+        self.heater_manual_power = Dict_SubDevice(self.heater, 'power', force_default='slave')
+        self.heater_en = Dict_SubDevice(self.heater, 'active', force_default='slave')
+        self.heater_setpoint = Dict_SubDevice(self.heater, 'setpoint', force_default='slave')
+        self.heater_max_power = Dict_SubDevice(self.heater, 'max_power', force_default='slave')
+        self.channel_exc_mode = Dict_SubDevice(self.channel, 'excitation_mode', force_default='slave')
+        self.channel_exc_vmax = Dict_SubDevice(self.channel, 'excitation_vmax_range', force_default='slave')
+        self.channel_exc_current = Dict_SubDevice(self.channel, 'excitation_current_range', force_default='slave')
+        self.channel_en = Dict_SubDevice(self.channel, 'active', force_default='slave')
         self._devwrap('enabled_chs')
         self._devwrap('enabled_outchs')
         self._devwrap('heater_relation')
+        self._devwrap('heater_pid', multi=['P', 'I', 'D'], allow_kw_as_dict=True, choices=EmptyChoice( ['P', 'I', 'D']))
+        self.heater_pid.type = self.heater_pid.choices # needed for Dict_SubDevice
+        self.heater_P = Dict_SubDevice(self.heater_pid, 'P', force_default='slave')
+        self.heater_I = Dict_SubDevice(self.heater_pid, 'I', force_default='slave')
+        self.heater_D = Dict_SubDevice(self.heater_pid, 'D', force_default='slave')
         self._devwrap('fetch')
         self.alias = self.fetch
         # This needs to be last to complete creation
