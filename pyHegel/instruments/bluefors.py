@@ -27,10 +27,21 @@ import socket
 import threading
 import time
 import weakref
+import numpy as np
+import datetime
+import copy
 
 from ..instruments_base import BaseInstrument, MemoryDevice,\
-                             dict_improved, locked_calling
+                             dict_improved, locked_calling, wait_on_event, FastEvent, wait,\
+                             ProxyMethod, BaseDevice, ChoiceBase, KeyError_Choices, ChoiceLimits,\
+                             ChoiceSimpleMap,  ChoiceIndex
 from ..instruments_registry import register_instrument
+_wait = wait
+
+#######################################################
+##    Bluefors Valve
+#######################################################
+
 
 #  the server has a timeout (initially 30s), so the connection is lost
 #  when no commands are sent after that interval.
@@ -619,3 +630,816 @@ else: # Not windows
         return res
 
     get_all_usb = get_all_usb_sysfs
+
+
+#######################################################
+##    Bluefors Temperature controller
+#######################################################
+
+# possible protocols:
+# - http get/post: are blocking but can reuse a socket
+# - websocket: need to open multiple connections to the various variables
+# - mqtt: can reuse the socket but is asynchronous. But others mqtt user can produce request which we will receive also
+
+import json
+import uuid
+import six
+if six.PY2:
+    import Queue as queue
+else:
+    import queue
+
+
+mqtt_loaded = None
+try:
+    import paho.mqtt.client
+except ImportError:
+    mqtt_loaded = False
+else:
+    mqtt_loaded = True
+
+requests_loaded = None
+try:
+    import requests
+except ImportError:
+    requests_loaded = False
+else:
+    requests_loaded = True
+
+websocket_loaded = None
+try:
+    import websocket
+except ImportError:
+    websocket_loaded = False
+else:
+    websocket_loaded = True
+
+class Bf_Dict_Choices(ChoiceBase):
+    def __init__(self, fields, required=[], readonly_fields=[]):
+        """
+        fields is a dictionnary of name:Choices
+        required is the list of fields that are required
+        Not all the field in the read from instrument dictionnary need to be in fields
+         missing values will be passed as is.
+        """
+        self.fields = fields
+        self.field_names = fields.keys()
+        self.required = required
+        self.readonly_fields = readonly_fields
+    def __contains__(self, val_dict):
+        for n in self.required:
+            if n not in val_dict:
+                raise KeyError('missing parameter: %s'%n)
+        for k, v in val_dict.items():
+            if k not in self.fields:
+                raise ValueError('invalid parameter %s'%k)
+            if k in self.readonly_fields:
+                raise ValueError('parameter %s not allowed in write requests'%k)
+            check = v in self.fields[k]
+            if not check:
+                return False
+        return True
+    def tostr(self, val):
+        # convert to instrument device value
+        ret = {}
+        for k, v in val.items():
+            if k in self.fields:
+                ret[k] = self.fields[k].tostr(v)
+            else:
+                # This is needed for heater_nr, channel_nr
+                ret[k] = v
+        return ret
+    def __call__(self, val):
+        # convert from instrument device value
+        ret = {}
+        for k, v in val.items():
+            if k in self.fields:
+                ret[k] = self.fields[k](v)
+            else:
+                ret[k] = v
+        return ret
+    def __repr__(self):
+        r = ''
+        first = True
+        for k, lims in self.fields.items():
+            if k in self.readonly_fields:
+                continue
+            if not first:
+                r += '\n'
+            first = False
+            r += 'key %s has limits %r'%(k, lims)
+        return r
+
+class BfChoiceLimits(ChoiceLimits):
+    def tostr(self, val):
+        return val
+    def __call__(self, val):
+        return val
+
+BfChoiceIndex = lambda *args, **kwargs: ChoiceIndex(*args, noconv=True, **kwargs)
+
+class BlueforsDevice(BaseDevice):
+    def __init__(self, topic=None, proto=None, readcache=None, readonly=False, predev=None, *args, **kwargs):
+        # predev when given is (para_name, mqtt_name, dev)
+        self._proto = proto
+        self._topic = topic
+        self._predev = predev
+        self._readcache = readcache
+        kwargs['allow_kw_as_dict'] = True
+        super(BlueforsDevice, self).__init__(*args, **kwargs)
+        if not readonly:
+            self._setdev_p = True
+        self._getdev_p = True
+
+    def _get_docstring(self, added=''):
+        added += """\
+set/get options for this type of device:
+    clean: when True (default) cleans up the return value of the status and datetime fields
+           and possible predev field
+"""
+        header_added = [False]
+        def add_header(added):
+            if not header_added[0]:
+                 added += '---------- Optional Parameters\n'
+                 header_added[0] = True
+            return added
+        if self._predev:
+            added = add_header(added)
+            para_name, mqtt_name, dev = self._predev
+            added += '{name}: has default value {val!r} with possible values between {min} and {max}\n'.format(name=para_name, val=dev, min=dev.min, max=dev.max)
+        if self._setdev_p and self.choices:
+            added = add_header(added)
+            added += repr(self.choices) + '\n'
+        return super(BlueforsDevice, self)._get_docstring(added=added)
+
+    def _doprev(self, kwargs, in_get=False):
+        predev = self._predev
+        if predev is None:
+            return kwargs, kwargs.copy(), None
+        para_name, mqtt_name, dev = predev
+        val = kwargs.pop(para_name, None)
+        if in_get and len(kwargs) != 0:
+                raise ValueError('Parameter invalid or not allowed in get: %s'%(kwargs.keys()))
+        if val is None:
+            val = dev.get()
+        else:
+            dev.set(val)
+        kwargs2check = kwargs.copy()
+        kwargs[mqtt_name] = val
+        return kwargs, kwargs2check, val
+
+    def _doclean(self, response):
+        response = copy.deepcopy(response)
+        response.pop('status')
+        response.pop('datetime')
+        if self._predev:
+            response.pop(self._predev[1], None)
+        if isinstance(self.choices, Bf_Dict_Choices):
+            response = self.choices(response)
+        return response
+
+    def _setdev(self, val, clean=True):
+        if isinstance(self.choices, Bf_Dict_Choices):
+            val = self.choices.tostr(val)
+        res = self.instr.write(self._topic+'/update', proto=self._proto, _ask=True, **val)
+        if clean:
+            res = self._doclean(res)
+        self._set_delayed_cache = res
+
+    def _getdev(self, clean=True, **kwargs):
+        kwargs, kwargs2check, ch = self._doprev(kwargs, in_get=True)
+        if self._readcache:
+            ret = self.instr._mqtt_listen_buffers[self._readcache]
+            if ch is not None:
+                ret = ret[ch-1]
+        else:
+            ret = self.instr.ask(self._topic, proto=self._proto, **kwargs)
+        if clean:
+            # this does a copy
+            ret = self._doclean(ret)
+        else:
+            # need to do a copy to prevent a user from changing our cache.
+            # need deepcopy because some ret have dict inside of dict.
+            ret = copy.deepcopy(ret)
+        return ret
+
+    def _checkdev(self, val, clean=True, **kwargs):
+        if self._predev is not None:
+            # need to remove predev for _checkdev (we already checked it.)
+            # val will contain all other paramters
+            val = val.copy()
+            val.update(kwargs)
+            val, kwargs2check, ch = self._doprev(val)
+            self._check_cache['val'] = val
+            self._check_cache['kw'] = val
+            sk = dict(clean=clean)
+            self._check_cache['kwarg'] = sk
+            self._check_cache['set_kwarg'] = sk.copy()
+            val = kwargs2check
+        super(BlueforsDevice, self)._checkdev(val)
+
+@register_instrument('BlueFors', 'Temperature Controller')
+class bf_temperature_controller(BaseInstrument):
+    if not mqtt_loaded:
+        raise RuntimeError('Cannot use bf_temperature_controller because of missing paho.mqtt package. Can be installed with "pip install paho-mqtt"')
+    if not requests_loaded:
+        raise RuntimeError('Cannot use bf_temperature_controller because of missing requests package. Can be installed with "pip install requests"')
+    _mqtt_connected = False
+    def __init__(self, address, **kwargs):
+        self._ip_address = address
+        self._mqtt_subscriptions = {'channel/measurement/listen':'To do on connect',
+                                    'heater/listen': 'To do on connect',
+                                    'system/resources/listen':'To do on connect',
+                                    'channel/listen':'To do on connect'}
+        self._mqtt_listen_buffers = dict(meas=[None]*12, htrs=[None]*4, rsrcs=None, chs=[None]*12, last_junk=None)
+        self._mqtt_hash_n = 0
+        self._mqtt_sender = unicode('pyHegel_' + uuid.uuid4().hex)
+        self._read_last_reply_buffer = queue.Queue(maxsize=1)
+        self._read_last_meas_buffer = queue.Queue(maxsize=1)
+        self._cals_map = None
+        self._mqtt_connect_status = None
+        self._mqtt_lock = threading.Lock()
+        self._mqtt_subs_event = FastEvent()
+        self._mqtt_unsubs_event = FastEvent()
+        mqtt = paho.mqtt.client.Client()
+        mqtt.on_message = ProxyMethod(self._mqtt_on_message)
+        mqtt.on_connect = ProxyMethod(self._mqtt_on_connect)
+        mqtt.on_subscribe = ProxyMethod(self._mqtt_on_subscribe)
+        mqtt.on_unsubscribe = ProxyMethod(self._mqtt_on_unsubscribe)
+        #mqtt.connect_async(address)
+        # force a connect. If the server does not exist we will known now.
+        mqtt.connect(address) # connect will finish when the loop is started.
+        mqtt.loop_start()
+        self._requests_session = requests.Session()
+        self._websockets_cache = dict()
+        self._mqtt_connected = True
+        self._mqtt = mqtt
+        super(bf_temperature_controller, self).__init__(**kwargs)
+
+    def init(self, full=False):
+        with self._mqtt_lock:
+            data = self.ask('heaters', proto='get')
+            for d in data['data']:
+                ch = d['heater_nr']
+                d[u'datetime'] = data['datetime']
+                d[u'status'] = data['status']
+                self._mqtt_listen_buffers['htrs'][ch-1] = d
+            data = self.ask('channels', proto='get')
+            for d in data['data']:
+                d[u'datetime'] = data['datetime']
+                d[u'status'] = data['status']
+                ch = d['channel_nr']
+                self._mqtt_listen_buffers['chs'][ch-1] = d
+            today = datetime.datetime.today()
+            # get about one week worth, but since this is for UTC, extend it a little
+            start = (today - datetime.timedelta(days=8)).isoformat()
+            end = (today + datetime.timedelta(days=2)).isoformat()
+            for ch in range(1, 13):
+                result = dict(angle=90., magnitude=0., channel_nr=ch, datetime=u'2020-01-01T00:00:00.0', imz=0., rez=0.,
+                              temperature=None, resistance=0., reactance=0., settings_nr=1, status=u'OK',
+                              status_flags=[], timestamp=1577836800.)
+                data = self.get_history_temp(ch=ch, start=start, end=end, raw=True)
+                for k, v in data['measurements'].items():
+                    if len(v):
+                        result[k] = v[-1]
+                self._mqtt_listen_buffers['meas'][ch-1] = result
+            self.current_ch.set(1)
+        all_cals = self.ask('calibration-curves/data', proto='post')
+        cals_map = {}
+        for d in all_cals['data']:
+            cals_map[d['calib_curve_nr']] = dict(serial = d['name'], model=d['sensor_model'])
+        self._cals_map = cals_map
+        super(bf_temperature_controller, self).init(full=full)
+
+    # locked_calling to protect _mqtt_subscriptions
+    def _mqtt_on_connect(self, client, userdata, flags, rc):
+        if rc == 3:
+            # Connection refused - server unavailable
+            self._mqtt_connect_status = 'Connection refused - server unavailable'
+            return
+        elif rc != 0:
+            # some other error
+            self._mqtt_connect_status = 'Connection error: %i'%rc
+            return
+        # no error, everything is fine. Could be here upon a reconnect.
+        with self._mqtt_lock:
+            for k in self._mqtt_subscriptions:
+                if self._mqtt_subscriptions[k] != 'del':
+                    self.subscribe(k, _in_connect=True)
+        self._mqtt_connect_status = 'Connected'
+
+    def _empty_buffer(self, buf):
+        # call with lock acquired
+        while not buf.empty():
+            buf.get()
+    def _get_buffer(self, buf):
+        ret = [None]
+        def getit(timeout=0.):
+            local_ret = ret
+            if timeout==0.:
+                func = buf.get_nowait
+            else:
+                func = lambda : buf.get(timeout=timeout)
+            try:
+                local_ret[0] = func()
+                return True
+            except queue.Empty:
+                return False
+        wait_on_event(getit)
+        return ret[0]
+
+    def _mqtt_on_message(self, client, userdata, message):
+        topic = message.topic
+        payload = json.loads(message.payload)
+        if 'hash' in payload and 'sender' in payload:
+            mid = unicode(self._mqtt_hash_n)
+            if payload['hash'] != mid or payload['sender'] != self._mqtt_sender:
+                return
+            else:
+                with self._mqtt_lock:
+                    self._empty_buffer(self._read_last_reply_buffer)
+                    self._read_last_reply_buffer.put(payload)
+        elif topic == 'channel/measurement/listen':
+            ch = payload['channel_nr']
+            with self._mqtt_lock:
+                self._mqtt_listen_buffers['meas'][ch-1] = payload
+                self._empty_buffer(self._read_last_meas_buffer)
+                self._read_last_meas_buffer.put(payload)
+        elif topic == 'system/resources/listen':
+            with self._mqtt_lock:
+                self._mqtt_listen_buffers['rsrcs'] = payload
+        elif topic == 'heater/listen':
+            ch = payload['heater_nr']
+            with self._mqtt_lock:
+                self._mqtt_listen_buffers['htrs'][ch-1] = payload
+        elif topic == 'channel/listen':
+            ch = payload['channel_nr']
+            with self._mqtt_lock:
+                self._mqtt_listen_buffers['chs'][ch-1] = payload
+        else:
+            with self._mqtt_lock:
+                self._mqtt_listen_buffers['last_junk'] = (topic, payload)
+
+
+    def _mqtt_on_subscribe(self, client, userdata, mid, granted_qos):
+        with self._mqtt_lock:
+            for k, v in self._mqtt_subscriptions.items():
+                if v == mid:
+                    self._mqtt_subscriptions[k] = 'DONE'
+                    self._mqtt_subs_event.set()
+
+    def _mqtt_on_unsubscribe(self, client, userdata, mid):
+        with self._mqtt_lock:
+            for k, v in self._mqtt_subscriptions.items():
+                if v == mid:
+                    self._mqtt_subscriptions[k] = 'del'
+                    self._mqtt_unsubs_event.set()
+
+    @locked_calling
+    def subscribe(self, topic, wait=True, _in_connect=False):
+        """\
+            subscribe to a topic.
+            wait=True will wait for the acknowledgement.
+            with wait=False, synchronisation between subscribe/unsubscribe and publish
+             could be lost
+        """
+        # multiple subscribe will be removed by a single unsusbscribe to the topic.
+        # but we protect against that anyway (it will be faster)
+        if _in_connect:
+            # already inside the lock
+            result, mid = self._mqtt.subscribe(topic)
+            self._mqtt_subscriptions[topic] = mid
+            return
+        pre_wait = False
+        with self._mqtt_lock:
+            if topic in self._mqtt_subscriptions:
+                state = self._mqtt_subscriptions[topic]
+                if state == 'DONE':
+                    return
+                elif wait:
+                    # probably here after a reconnect or a use of subscribe without wait
+                    # so we should wait
+                    pre_wait = True
+        if pre_wait:
+            def check(timeout):
+                if self._mqtt_subscriptions[topic] in ['DONE', 'del']:
+                    return True
+                else:
+                    _wait(timeout)
+                    return False
+            wait_on_event(check)
+            if self._mqtt_subscriptions[topic] == 'DONE':
+                return
+        with self._mqtt_lock:
+            self._mqtt_subs_event.clear()
+            result, mid = self._mqtt.subscribe(topic)
+            if result != 0:
+                raise RuntimeError('Unable to subscribe to "%s"'%topic)
+            self._mqtt_subscriptions[topic] = mid
+        if wait:
+            wait_on_event(self._mqtt_subs_event)
+
+    @locked_calling
+    def unsubscribe(self, topic, wait=True):
+        """\
+            unsubscribe to a topic.
+            wait=True will wait for the acknowledgement.
+            with wait=False, synchronisation between subscribe/unsubscribe and publish
+             could be lost
+        """
+        with self._mqtt_lock:
+            # save some time
+            if topic not in self._mqtt_subscriptions:
+                return
+            self._mqtt_unsubs_event.clear()
+            result, mid = self._mqtt.unsubscribe(topic)
+            if result != 0:
+                raise RuntimeError('Unable to unsubscribe to "%s"'%topic)
+            self._mqtt_subscriptions[topic] = mid
+        if wait:
+            wait_on_event(self._mqtt_subs_event)
+
+    def publish(self, topic, payload=None, wait=False):
+        """\
+            publish a payload to a topic.
+            wait=True will wait for the acknowledgement.
+            with wait=False, synchronisation between subscribe/unsubscribe and publish
+             could be lost
+        """
+        with self._mqtt_lock:
+            ret = self._mqtt.publish(topic, json.dumps(payload))
+        if wait:
+            #TODO implement Event handling insteat of check with wait
+            def check(timeout):
+                if ret.is_published:
+                    return True
+                else:
+                    _wait(timeout)
+                    return False
+            wait_on_event(check)
+        return ret.mid
+
+    def ask(self, topic, unsub=True, proto='mqtt', **params):
+        """ unsub when True, will unsubscribe after every call.
+            probably nicer to the server, but will be slower
+            proto can be get, post, mqtt, ws (for websocket)
+        """
+        return self.write(topic, unsub, proto, _ask=True, **params)
+
+    @locked_calling
+    def write(self, topic, unsub=True, proto='mqtt', _ask=False, **params):
+        """ unsub when True, will unsubscribe after every call.
+            probably nicer to the server, but will be slower
+            proto can be get, post, mqtt, ws (for websocket)
+        """
+        if proto == 'mqtt':
+            self.subscribe(topic+'/out')
+            with self._mqtt_lock:
+                params['sender'] = self._mqtt_sender
+                self._mqtt_hash_n += 1
+                params['hash'] = str(self._mqtt_hash_n)
+                self._empty_buffer(self._read_last_reply_buffer)
+            self.publish(topic+'/in', params)
+            result = self._get_buffer(self._read_last_reply_buffer)
+            if unsub:
+                self.unsubscribe(topic+'/out')
+            if result['status'] != 'OK':
+                raise RuntimeError('Bad reply: %s'%result)
+        elif proto in ['post', 'get']:
+            getpost = self._requests_session.get if proto == 'get' else self._requests_session.post
+            req = getpost('http://%s:5001/%s'%(self._ip_address, topic), timeout=10, json=params)
+            if not req.ok:
+                raise RuntimeError('Bad post/get request (status=%s, message="%s")'%(req.status_code, req.text))
+            result = req.json()
+        elif proto == 'ws':
+            ws = self._websockets_cache.get(topic, None)
+            if ws is None:
+                if not websocket_loaded:
+                    raise RuntimeError('Cannot use ws proto because of missing websocket package. Can be installed with "pip install websocket-client"')
+                ws = websocket.create_connection('ws://%s:5002/%s'%(self._ip_address, topic), timeout=10)
+                self._websockets_cache[topic] = ws
+            ws.send(json.dumps(params))
+            ret = ws.recv()
+            result = json.loads(ret)
+            if result['status'] != 'OK':
+                raise RuntimeError('Bad reply: %s'%result)
+        else:
+            raise ValueError('Invalid proto option.')
+
+        if _ask:
+            return result
+
+    @locked_calling
+    def _current_config(self, dev_obj=None, options={}):
+        opts = []
+        orig_ch = self.current_ch.get()
+        for ch in range(1, 9):
+            d = self.channel.get(ch=ch)
+            d['calib_curve'] = self._cals_map[d['calib_curve_nr']]
+            opts.append('ch%i=%r'%(ch, d))
+        self.current_ch.set(orig_ch)
+        orig_outch = self.current_outch.get()
+        for outch in range(1, 5):
+            opts.append('outch%i=%r'%(outch, self.heater.get(outch=outch)))
+        self.current_outch.set(orig_outch)
+        return opts+self._conf_helper('statemachine', options)
+    def __del__(self):
+        if self._mqtt_connected:
+            self.disconnect()
+        super(bf_temperature_controller, self).__del__()
+
+    @locked_calling
+    def disconnect(self):
+        self._requests_session.close()
+        self._mqtt.disconnect() # this sends the disconnect
+        self._mqtt.loop_stop()  # this will wait for the thread to stop
+        self._mqtt_connected = False
+        for k, ws in self._websockets_cache.items():
+            ws.close()
+        self._websockets_cache = []
+
+    def idn(self):
+        data = self.ask('system')
+        return "BlueFors,Temperature Controller,%s,%s"%(data['serial'], data['software_version'])
+
+    @locked_calling
+    def get_history_heater(self, start, end, outch=None, raw=False):
+        """\
+        Specifiy start/end as strings in the following format:
+            YYYY-MM-DD
+            YYYY-MM-DD HH:MM
+            YYYY-MM-DD HH:MM:SS
+            YYYY-MM-DDTHH:MM:SSZ
+        if raw is True returns the raw reply from the temperature controller,
+        otherwise returns an array of shape 3, n where the 3 columns are time, power, current
+        """
+        if outch is None:
+            outch = self.current_outch.get()
+        else:
+            self.current_outch.set(outch)
+        ret = self.ask('heater/historical-data', proto='post', heater_nr=outch, start_time=start, stop_time=end, fields=['power', 'current'])
+        if ret['over_limit']:
+            raise RuntimeError('Request was too large.')
+        if raw:
+            return ret
+        else:
+            meas = ret['measurements']
+            data = np.array([meas['timestamp'], meas['power'], meas['current']])
+            return data
+
+    @locked_calling
+    def get_history_temp(self, start, end, ch=None, raw=False, full=True):
+        """\
+        Specifiy start/end as strings in the following format:
+            YYYY-MM-DD
+            YYYY-MM-DD HH:MM
+            YYYY-MM-DD HH:MM:SS
+            YYYY-MM-DDTHH:MM:SSZ
+        if raw is True returns the raw reply from the temperature controller,
+        otherwise returns an array with columns: time, temperature, resistance, reactance, settings_nr
+        With full, the raw version will also include rez, imz, magnitude, angle, settings_nr
+        """
+        if ch is None:
+            ch = self.current_ch.get()
+        else:
+            self.current_ch.set(ch)
+        if raw and full:
+            # status_flags does not seem to be available (no error but no entry)
+            fields = ['temperature', 'resistance', 'reactance', 'rez', 'imz', 'magnitude', 'angle', 'settings_nr']
+        else:
+            fields = ['temperature', 'resistance', 'reactance', 'settings_nr']
+        ret = self.ask('channel/historical-data', proto='post', channel_nr=ch, start_time=start, stop_time=end, fields=fields)
+        if ret['over_limit']:
+            raise RuntimeError('Request was too large.')
+        if raw:
+            return ret
+        else:
+            meas = ret['measurements']
+            data = np.array([meas['timestamp'], meas['temperature'], meas['resistance'], meas['reactance'], meas['settings_nr']])
+            return data
+
+    @locked_calling
+    def get_calibration(self, curve_no, raw=False):
+        """\
+        if raw is True returns the raw reply from the temperature controller,
+        otherwise returns and dictionary with the data array having the columns: impedances, temperatures
+        """
+        if curve_no<1 or curve_no>100:
+            raise ValueError('curve_no needs to be from 1 to 100.')
+        ret = self.ask('calibration-curve', proto='post', calib_curve_nr=curve_no)
+        if raw:
+            return ret
+        else:
+            types = {-1:'Slot empty', 1:'RT curve', 2:'XT curve (8 Hz)', 3:'XT curve (64 Hz)'}
+            result = dict(name=ret['name'], sensor_model=ret['sensor_model'], type=types[ret['type']])
+            data = np.array([ret['impedances'], ret['temperatures']])
+            if len(data[0]) != len(data[1]) != ret['points']:
+                raise RuntimeError('Read the wrong number of points.')
+            result['data'] = data
+            return result
+
+    def _enabled_chs_getdev(self):
+        return [d['channel_nr'] for d in self._mqtt_listen_buffers['chs'] if d['active']]
+    def _enabled_outchs_getdev(self):
+        return [d['heater_nr'] for d in self._mqtt_listen_buffers['htrs'] if d['active'] and d['relay_mode']==d['relay_status']]
+
+    def _outch_helper(self, outch=None):
+        if outch is None:
+            outch = self.current_outch.get()
+        else:
+            self.current_outch.set(outch)
+        return outch
+
+    def _heater_relation_getdev(self, outch=None):
+        """ returns for heater outch, the temperature relation ch"""
+        outch = self._outch_helper(outch)
+        for i, d in enumerate(self._mqtt_listen_buffers['chs']):
+            if d['coupled_heater_nr'] == outch:
+                return i+1
+        return 0
+    def _heater_relation_checkdev(self, val, outch=None):
+        outch = self._outch_helper(outch)
+        if val<0 or val>12:
+            raise ValueError(self.perror('the relation channel needs to be in 0-12 range.'))
+    def _heater_relation_setdev(self, val, outch=None):
+        """ sets for heater outch, the temperature relation ch. Make it 0 to disable the relation."""
+        outch = self._outch_helper(outch)
+        prev_ch = self._heater_relation_getdev(outch)
+        self.write('channel/heater/update', proto='post', channel_nr=val, heater_nr=outch)
+        # now force update of channels
+        orig_ch = self.current_ch.get()
+        if prev_ch != 0:
+            self.channel.set(ch=prev_ch)
+        if val != 0:
+            self.channel.set(ch=val)
+        self.current_ch.set(orig_ch)
+
+    def _fetch_opt_helper(self, chs=None, outchs=None, temperature=True, resistance=True, reactance=True, settings=False, heater_power=False):
+        if temperature or resistance or reactance or settings:
+            if chs is None:
+                chs = self.enabled_chs.getcache()
+            if not isinstance(chs, (list, np.ndarray, tuple)):
+                chs = [chs]
+            for ch in chs:
+                if ch>12 or ch<1:
+                    raise ValueError(self.perror('Invalid chs in fetch (needs to be in range 1-12)'))
+        else:
+            chs = []
+        if heater_power:
+            if outchs is None:
+                outchs = self.enabled_outchs.getcache()
+            if not isinstance(outchs, (list, np.ndarray, tuple)):
+                outchs = [outchs]
+            for outch in outchs:
+                if outch>4 or outch<1:
+                    raise ValueError(self.perror('Invalid outchs in fetch (needs to be in range 1-4)'))
+        else:
+            outchs = []
+        return chs, outchs
+
+    def _fetch_getformat(self,  **kwarg):
+        chs = kwarg.get('chs', None)
+        outchs = kwarg.get('chs', None)
+        temperature = kwarg.get('temperature', True)
+        resistance = kwarg.get('resistance', True)
+        reactance = kwarg.get('reactance', True)
+        settings = kwarg.get('settings', False)
+        heater_power = kwarg.get('heater_power', False)
+        chs, outchs = self._fetch_opt_helper(chs, outchs, temperature, resistance, reactance, settings, heater_power)
+        multi = []
+        graph = []
+        i = 0
+        for ch in chs:
+            if temperature:
+                multi.append('ch%i_T'%ch)
+                graph.append(i)
+                i += 1
+            if resistance:
+                multi.append('ch%i_R'%ch)
+                i += 1
+            if reactance:
+                multi.append('ch%i_X'%ch)
+                i += 1
+            if settings:
+                multi.append('ch%i_Iexc'%ch)
+                multi.append('ch%i_HR'%ch)
+                i += 2
+        for outch in outchs:
+            if heater_power:
+                # this should always be True after _fetch_opt_helper
+                multi.append('outch%i_P'%outch)
+                graph.append(i)
+                i += 1
+        fmt = self.fetch._format
+        fmt.update(multi=multi, graph=graph)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+
+    def _fetch_getdev(self, chs=None, outchs=None, temperature=True, resistance=True, reactance=True, settings=False, heater_power=False):
+        """\
+        chs is the list of temperature channels to read. When None it will default to all active channels.
+        outchs is the list of heater outch to read (if heater_power is True). When None it will default to all powered
+               up channels (active and active relay condition).
+        temperature, resistance, reactance, settings, heater_power speicies what is shown for the selected channels.
+        when settings is selected, it adds 2 columns: current_excitation, HR
+          where HR will be 1 when in high resitance mode, otherwise it will be 0.
+        """
+        chs, outchs = self._fetch_opt_helper(chs, outchs, temperature, resistance, reactance, settings, heater_power)
+        data = []
+        def clean(data):
+            return 0 if data is None else data
+        for ch in chs:
+            d = self._mqtt_listen_buffers['meas'][ch-1]
+            if temperature:
+                data.append(clean(d['temperature']))
+            if resistance:
+                data.append(clean(d['resistance']))
+            if reactance:
+                data.append(clean(d['reactance']))
+            if settings:
+                st = d['settings_nr']-1
+                data.append(self._fetch_current_list[st])
+                data.append(self._fetch_current_HR_list[st])
+        for outch in outchs:
+            d = self._mqtt_listen_buffers['htrs'][outch-1]
+            if not d['active']:
+                P = 0.
+            elif d['relay_mode'] != d['relay_status']:
+                P = 0.
+            elif d['pid_mode'] == 0: #manual
+                P = d['power']
+            else:
+                # This does not work. There is no way to read the power except to use the historical data right now.
+                P = d['power']
+            data.append(P)
+        return data
+
+    def _create_devs(self):
+        self.current_ch = MemoryDevice(1, min=1, max=12)
+        self.current_outch = MemoryDevice(1, min=1, max=4)
+        self.statemachine = BlueforsDevice('statemachine', proto='post', choices=
+                                           Bf_Dict_Choices(dict(wait_time=BfChoiceLimits(min=1, max=100), meas_time=BfChoiceLimits(min=5, max=100))))
+        relay_mode_ch = BfChoiceIndex(['shorted', 'open'])
+        relay_status_ch = BfChoiceIndex(['shorted', 'open'])
+        self.relay = BlueforsDevice('heater/relay', proto='post', predev=('outch', 'heater_nr', self.current_outch), choices=
+                                    Bf_Dict_Choices(dict(relay_mode=relay_mode_ch, relay_status=relay_status_ch), readonly_fields=['relay_status']))
+        # The following 3 need to match
+        self._fetch_current_list = [100e-12, 100e-12, 316e-12, 316e-12, 1e-9, 1e-9, 3.16e-9, 3.16e-9, 10e-9, 10e-9,
+                                    31.6e-9, 31.6e-9, 100e-9, 100e-9, 316e-9, 316e-9, 1e-6, 1e-6,
+                                    3.16e-6, 3.16e-6, 10e-6, 10e-6, 50e-6, 150e-6]
+        self._fetch_current_HR_list = [0, 1] *10 + [0, 0]
+        current_list = ['100pA LR', '100pA HR', '316pA LR', '316pA HR', '1nA LR', '1nA HR', '3.16nA LR', '3.16nA HR',
+                                      '10nA LR', '10nA HR', '31.6nA LR', '31.6nA HR', '100nA LR', '100nA HR', '316nA LR', '316nA HR',
+                                      '1uA LR', '1uA HR', '3.16uA LR', '3.16uA HR', '10uA LR', '10uA HR', '50uA 64Hz', '150uA 64Hz']
+        all_settings = BfChoiceIndex(current_list + ['50uA 64Hz', '150uA 64Hz'], offset=1)
+        self.measurement = BlueforsDevice(readonly=True, readcache='meas', predev=('ch', 'channel_nr', self.current_ch), choices=
+                                          Bf_Dict_Choices(dict(settings_nr=all_settings)))
+        self.heater = BlueforsDevice('heater', proto='post', readcache='htrs', predev=('outch', 'heater_nr', self.current_outch), choices=
+                                     Bf_Dict_Choices(dict(active=BfChoiceLimits(), control_algorithm=BfChoiceIndex(['default PID algorithm'], offset=1),
+                                                          control_algorithm_settigs=Bf_Dict_Choices(dict(proportional=BfChoiceLimits(min=0), integral=BfChoiceLimits(min=0), derivative=BfChoiceLimits(min=0))),
+                                                          max_power=BfChoiceLimits(min=0), name=BfChoiceLimits(), power=BfChoiceLimits(min=0),
+                                                          pid_mode=BfChoiceIndex(['manual', 'pid']), relay_mode=relay_mode_ch, relay_status=relay_status_ch,
+                                                          resistance=BfChoiceLimits(min=0), setpoint=BfChoiceLimits(min=0),
+                                                          target_temperature=BfChoiceLimits(min=0), target_temperature_shown=BfChoiceLimits()),
+                                                     readonly_fields=['relay_status', 'relay_mode']),
+                                     doc='options max_power, control_algorithm_settings only apply for pid mode. power is only for manual mode.')
+        self.resources = BlueforsDevice(readonly=True, readcache='rsrcs')
+        self.channel =  BlueforsDevice('channel', proto='post', readcache='chs', predev=('ch', 'channel_nr', self.current_ch), choices=
+                                       Bf_Dict_Choices(dict(active=BfChoiceLimits(), calib_curve_nr=BfChoiceLimits(min=1, max=100),
+                                                            coupled_heater_nr=BfChoiceLimits(min=0, max=4),
+                                                            excitation_mode=BfChoiceIndex(['current', 'Vmax', 'CMN']),
+                                                            excitation_current_range=BfChoiceIndex(current_list, offset=1),
+                                                            excitation_vmax_range=ChoiceSimpleMap({1:'20uV', 2:'200uV'}),
+                                                            excitation_cmn_range=ChoiceSimpleMap({1:'50uA', 2:'150uA'}),
+                                                            name=BfChoiceLimits(),
+                                                            use_non_default_timeconstants=BfChoiceLimits(), wait_time=BfChoiceLimits(min=1), meas_time=BfChoiceLimits(min=5)),
+                                                       readonly_fields=['coupled_heater_nr']))
+        self._devwrap('enabled_chs')
+        self._devwrap('enabled_outchs')
+        self._devwrap('heater_relation')
+        self._devwrap('fetch')
+        self.alias = self.fetch
+        # This needs to be last to complete creation
+        super(bf_temperature_controller, self)._create_devs()
+
+# Note that for firmware tc-0.12.1-20210217-181217
+#   websocket, http get/post roundtrip is arounf 200 ms. For mqtt it is more like 400 ms for system/device
+#   http get for channel/measurement/latest is 13 ms.
+
+# Endpoints:
+#   system
+#   system/device
+#   system/network system/network/update system/network/listen
+#   system/reset/listen
+#   system/resources/listen
+#   statemachine statemachine/update statemachine/listen
+#   channels
+#   channel  channel/update  channel/listen
+#   channel/historical-data
+#   channel/measurement/listen
+#   channel/heater/update
+#   heaters
+#   heater  heater/update  heater/listen
+#   heater/relay  heater/relay/update  heater/relay/listen
+#   heater/historical-data
+#   calibration-curves  calibrationcurves/data/
+#   calibration-curve calibrationcurve/update/ calibrationcurve/remove calibration-curve/fileupload
