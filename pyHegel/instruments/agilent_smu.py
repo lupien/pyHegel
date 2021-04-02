@@ -118,7 +118,7 @@ class CommonDevice(BaseDevice):
     def __init__(self, subfunc, getfunc, setstr, *args, **kwargs):
         """
         Need subfunc (called as subfunc(); with not parameters) and cache reset after set.
-        getfunc is called as getfunc(subfunc(), ch) (ch is present only if ch_mode option is not None)
+        getfunc is called as getfunc(subfunc(), ch) (ch is present only if ch_mode option is True)
         ch_mode can be False(default) or True
         setstr is the string to set with the {val} and {ch} arguments properly placed.
                or it can be a function that will be called as setstr(self, val, ch) (again ch only present if required)
@@ -723,6 +723,62 @@ class agilent_SMU(visaInstrumentAsync):
         """
         return self._measIV_helper(voltage=False, ch=ch, range=range, rgdev=self.range_current_meas)
 
+    def _measZ_getdev(self, range=None):
+        """\
+            The returns the impedance (MFCMU) spot measurement.
+            It returns the 2 values selected by impedance_meas_mode.
+            range selects the range. If none it uses impedance_range
+        """
+        if range is None:
+            range = self.impedance_range.getcache()
+        cmu_slot = self._cmu_slot
+        base = 'TC %i,'%cmu_slot
+        if range == 0.:
+            ret = self.ask(base+'0')
+        else:
+            ret = self.ask(base+'0,%r'%range)
+        rets = ret.split(',')
+        value1, channel1, status1, type1 = self._parse_data(rets[0])
+        value2, channel2, status2, type2 = self._parse_data(rets[1])
+        if channel1 is not None and (channel1 != channel2 != cmu_slot):
+            raise RuntimeError(self.perror('Read back the wrong channel'))
+        return [value1, value2]
+
+    def _measZ_bias_getdev(self, range=None):
+        """\
+            The returns the impedance dc bias voltage (MFCMU) spot measurement.
+            range selects the range. If none it uses impedance_bias_meas_range
+        """
+        if range is None:
+            range = self.impedance_bias_meas_range.get()
+        cmu_slot = self._cmu_slot
+        base = 'TMDCV %i,'%cmu_slot
+        if range == 0.:
+            ret = self.ask(base+'0')
+        else:
+            ret = self.ask(base+'0,%r'%range)
+        value, channel, status, type = self._parse_data(ret)
+        if channel is not None and channel != cmu_slot:
+            raise RuntimeError(self.perror('Read back the wrong channel'))
+        return value
+
+    def _measZ_level_getdev(self, range=None):
+        """\
+            The returns the impedance ac level rms voltage (MFCMU) spot measurement.
+            range selects the range. If none it uses impedance_level_meas_range
+        """
+        if range is None:
+            range = self.impedance_level_meas_range.get()
+        cmu_slot = self._cmu_slot
+        base = 'TMACV %i,'%cmu_slot
+        if range == 0.:
+            ret = self.ask(base+'0')
+        else:
+            ret = self.ask(base+'0,%r'%range)
+        value, channel, status, type = self._parse_data(ret)
+        if channel is not None and channel != cmu_slot:
+            raise RuntimeError(self.perror('Read back the wrong channel'))
+        return value
 
     def _integration_set_helper(self, type='speed', mode=None, time=None):
         prev_result = self._get_avg_time_and_autozero()
@@ -750,6 +806,31 @@ class agilent_SMU(visaInstrumentAsync):
         else:
             base += ',%i'
         self.write(base%(mode_str, time))
+
+    def _impedance_avg_helper(self, mode=None, N=None):
+        prev_result = self._get_impedance_avg()
+        if mode == None:
+            mode = prev_result['mode']
+        cmd = 'ACT %s'%self.impedance_avg_mode.choices.tostr(mode)
+        # if N is not set, the instrument uses 2 for auto and 1 for plc. It does not return
+        #  to previous values
+        if N is not None:
+            cmd += ',%i'%N
+        self.write(cmd)
+
+    def _impedance_range_helper(self, range):
+        base = 'RC%i,'%self._cmu_slot
+        if range == 0.:
+            self.write(base+'0,0')
+        else:
+            self.write(base+'2,%i'%range)
+
+    def _impedance_en_helper(self, enable):
+        slot = self._cmu_slot
+        if enable:
+            self.write('CN %i'%slot)
+        else:
+            self.write('CL %i'%slot)
 
     def conf_general(self, autozero=None, remote_display=None, auto_calib=None):
         """\
@@ -1025,11 +1106,171 @@ class agilent_SMU(visaInstrumentAsync):
         conf.func = func
         self._calc_x_axis(conf)
 
+    def _check_cmu(self):
+        if self._cmu_slot is None:
+            raise RuntimeError("Your instrument does not have a MFCMU card. No impedance method will work.")
+        return self._cmu_slot
+
+    def conf_impedance_corr(self, short_en=None, open_en=None, load_en=None):
+        """\
+        without any parameters, returns the enable states of the impedance corrections.
+        otherwise changes the specified parameter.
+        To enable a correction, it first needs to be performed:
+         - enable the impedance_output, set the level, averaging ...
+         - if needed, select a different set of calibration frequencies (conf_impedance_corr_freq)
+         - if needed, adjust the calibration standards to be used (conf_impedance_corr_standards)
+         - perform the needed calibrations (do_impedance_correction)
+        You can also perform a phase correction (if the mode is manual with impedance_phase_adjust_now)
+        """
+        slot = self._check_cmu()
+        corr_map = dict(short_en=2, open_en=1, load_en=3)
+        if short_en is None and open_en is None and load_en is None:
+            ret = []
+            for k,i in corr_map.items():
+                v = self.ask('CORRST? %i,%i'%(slot, i))
+                res = bool(int(v))
+                ret.append((k, res))
+            return dict_improved(ret)
+        # We ask for a change
+        conv = lambda v: {True:'1', False:'0'}[bool(v)]
+        base = 'CORRST %i,{corr},{state}'%self._cmu_slot
+        for k, i in corr_map.items():
+            new_val = locals()[k]
+            if new_val is not None:
+                self.write(base.format(corr=i, state=conv(new_val)))
+
+    def _conf_impedance_corr_N(self):
+        ret = self.ask('CORRL? %i'%self._cmu_slot)
+        return int(ret)
+
+    def conf_impedance_corr_freq(self, freqs=None):
+        """ either returns the list of frequencies for the impedance correction or changes it.
+            freqs can be 'default' to use the standard list.
+            Setting the freqs will also disable the calibration.
+        """
+        slot = self._check_cmu()
+        if freqs is None:
+            base = 'CORRL? %i,'%slot
+            N = self._conf_impedance_corr_N()
+            ret = []
+            for i in range(1, N+1):
+                r = float(self.ask(base+'%i'%i))
+                ret.append(r)
+            return np.array(ret)
+        # We do the change
+        if freqs == 'default':
+            self.write('CLCORR %i,2'%slot)
+        else:
+            self.write('CLCORR %i,1'%slot)
+            for f in freqs:
+                self.write('CORRL %i,%r'%(slot, f))
+
+    def conf_impedance_corr_values(self, data=None):
+        u"""\
+            either returns the measured correction data or sets it.
+            The data is 2 2D array with shape (N, 7) where N is the number of frequencies
+            used and 7 are: freq (Hz), open_real (S), open_imag (S), short_real (Ω), short_imag(Ω),
+                            load_real (Ω), load_imag (Ω)
+            You don't need to change all the frequencies, but you need to provide the same ones
+                    as in conf_impedance_corr_freq
+        """
+        slot = self._check_cmu()
+        if data is None:
+            N = self._conf_impedance_corr_N()
+            ret = []
+            base = 'CORRDT? %i,'%slot
+            for i in range(1, N+1):
+                data_str = self.ask(base+'%i'%i)
+                d_s = data_str.split(',')
+                r = map(float, d_s)
+                ret.append(r)
+            return np.array(ret)
+        sh = data.shape
+        if len(sh) != 2 and sh[1] != 7:
+            raise ValueError('Wrong shape for the data')
+        base = 'CORRDT %i,'%slot
+        for d in data:
+            cmd = base + ','.join(map(repr, d))
+            self.write(cmd)
+
+    def conf_impedance_corr_standards(self, open=None, short=None, load=None):
+        """\
+            either returns the current standard (if none are specified) or
+            sets them (only the ones specified, the others are unchanged).
+            Changing the standards will disable any correction and clear the calib data.
+            open, short and load are each 2 values.
+            open is Cp (Farad), G (Siemen)
+            short and load are Ls (Henry), Rs (Ohm)
+            Instrument power on default is: open=[0,0], short=[0,0], load=[0,50]
+        """
+        slot = self._check_cmu()
+        if open is None and short is None and load is None:
+            base = 'DCORR? %i,'%slot
+            conv = lambda s: map(float, s.split(','))
+            open_d = conv(self.ask(base+'1'))
+            short_d = conv(self.ask(base+'2'))
+            load_d = conv(self.ask(base+'3'))
+            if open_d[0] != 100 or short_d[0] != 400 or load_d[0] != 400:
+                raise RuntimeError('Unexpected answers.')
+            if len(open_d) != len(short_d) != len(load_d) != 3:
+                raise RuntimeError('Unexpected answers (length).')
+            return dict_improved(short=short_d[1:], open=open_d[1:], load=load_d[1:])
+        else:
+            base = 'DCORR %i,'%slot
+            def set_std(std, hdr):
+                if std is not None:
+                    if len(std) != 2:
+                        raise ValueError('You need to have a list with 2 floats.')
+                    self.write(base+hdr+',%r,%r'%(float(std[0]), float(std[1])))
+            set_std(open, '1,100')
+            set_std(short, '2,400')
+            set_std(load, '3,400')
+
+    def do_impedance_correction(self, standard):
+        """ This performs the correction measurement selected by standard and enables it.
+            It is one of 'short', 'open', 'load'.
+            The standard needs to be connected before calling this method.
+            The impedance output needs to be enabled and the level selected.
+            You should also have selected your prefered averaging time.
+        """
+        slot = self._check_cmu()
+        std = dict(short=2, open=1, load=3)
+        if standard not in std:
+            raise ValueError('Invalid standard selected.')
+        ret = self.ask('CORR? %i,%i'%(slot, std[standard]))
+        result = int(ret)
+        if result == 0:
+            return
+        if result == 1:
+            raise RuntimeError('Correction data measurement failed (standard=%s)'%standard)
+        elif result == 2:
+            raise RuntimeError('Correction data measurement aborted (standard=%s)'%standard)
+        else:
+            raise RuntimeError('Correction data measurement unknown result (standard=%s, result=%i)'%(standard, result))
+
+    def impedance_phase_adjust_now(self, mode='perform'):
+        """ mode can be 'perform' or 'last' to reuse the last data and not perform a measurement """
+        slot = self._check_cmu()
+        mode_map = dict(perform=1, last=0)
+        if mode not in mode_map:
+            raise ValueError('Invalid mode selected.')
+        ret = self.ask('ADJ %i,%i'%(slot, mode_map[mode]))
+        result = int(ret)
+        if result == 0:
+            return
+        if result == 1:
+            raise RuntimeError('Phase compensation failed')
+        elif result == 2:
+            raise RuntimeError('Phase compensation was aborted')
+        elif result == 3:
+            raise RuntimeError('Phase compensation not performed')
+        else:
+            raise RuntimeError('Phase compensation unknown result (result=%i)'%(result))
 
     def _create_devs(self):
         self.empty_buffer() # make sure to empty output buffer
         self._isB1500 = self.idn_split()['model'] in ['B1500A']
-        valid_ch, options_dict, smu_slots, Nmax = self._get_unit_conf()
+        valid_ch, options_dict, smu_slots, cmu_slots, Nmax = self._get_unit_conf()
         #self._valid_ch = valid_ch
         #self._Nvalid_ch = len(valid_ch)
         self._valid_all_ch = valid_ch
@@ -1051,6 +1292,15 @@ class agilent_SMU(visaInstrumentAsync):
         self._Nvalid_ch = len(self._valid_ch)
         smu_chs = self._valid_ch
         smu_slots = self._smu2slot.items()
+        # now handle MFCMU presence
+        if len(cmu_slots) > 0:
+            if len(cmu_slots) > 1:
+                print 'Unexpected number of MFCMU cards. Will only enable the first one'
+            self._cmu_slot = cmu_slots[0]
+            cmu_present = True
+        else:
+            self._cmu_slots = None
+            cmu_present = False
 
         self.current_channel = MemoryDevice(smu_chs[0], choices=smu_chs)
         #v_range = ChoiceIndex({0:0., 5:0.5, 20:2., 50:5., 200:20., 400:40., 1000:100.})
@@ -1218,6 +1468,56 @@ class agilent_SMU(visaInstrumentAsync):
                                                 doc="""
                                                 With this False, you need to use set_mode
                                                 """)
+        if cmu_present:
+            meas_mode_ch = ChoiceIndex({1:'RX', 2:'GB', 10:'ZRad', 11:'ZDeg', 20:'YRad', 21:'YDeg',
+                                        100:'CpG', 101:'CpD', 102:'CpQ', 103:'CpRp',
+                                        200:'CsRs', 201:'CsD', 202:'CpQ',
+                                        300:'LpG', 301:'LpD', 302:'LpQ', 303:'LpRp',
+                                        400:'LsRs', 401:'LsD', 402:'LpQ'})
+            self.impedance_meas_mode = CommonDevice(self._get_impedance_meas_mode,
+                                                    lambda v: v[0],
+                                                    'IMP{val}',
+                                                    choices=meas_mode_ch,
+                                                    doc="""\
+                                                        the mode consist of the primary+secondary parameter to measure.
+                                                        R is for resistance (in Ohms)
+                                                        X is reactance (in Ohms)
+                                                        G is Conductance (in Siemens)
+                                                        B is susceptance (in Siemens)
+                                                        Rad/Deg are the phase in radians or degrees
+                                                        Cp/Cs is parallel/series capacitance (in Farads)
+                                                        Lp/Ls is parallel/series inductance (in Henrys)
+                                                        Rp/Rs is parallel/series resistance (in Ohms)
+                                                        D is dissipation factor
+                                                        Q is quality factor""")
+            self.impedance_bias = CommonDevice(self._get_impedance_exc, lambda v:v['bias'][0], 'DCV%i,{val}'%self._cmu_slot, type=float, min=-25, max=25, setget=True)
+            self.impedance_level = CommonDevice(self._get_impedance_exc, lambda v:v['level'][0], 'ACV%i,{val}'%self._cmu_slot, type=float, min=0, max=.25, setget=True, doc='In Vrms')
+            self.impedance_freq = CommonDevice(self._get_impedance_exc, lambda v:v['freq'][0], 'FC%i,{val}'%self._cmu_slot, type=float, min=1e3, max=5e6, setget=True)
+            self.impedance_avg_mode = CommonDevice(self._get_impedance_avg,
+                                                   lambda v: v['mode'],
+                                                   lambda self, v: self.instr._impedance_avg_helper(mode=v),
+                                                   choices=ChoiceIndex({0:'auto', 2:'plc'}))
+            self.impedance_avg_N = CommonDevice(self._get_impedance_avg,
+                                                   lambda v: v['N'],
+                                                   lambda self, v: self.instr._impedance_avg_helper(N=v),
+                                                   choices=ChoiceDevDep(self.impedance_avg_mode, dict(auto=ChoiceLimits(1, 1023, int), plc=ChoiceLimits(1, 100, int))))
+            self.impedance_data_monitor_bias_level_en =  CommonDevice(self._get_impedance_monitor, lambda v: v[0], 'LMN {val}', type=bool)
+            self.impedance_range = CommonDevice(self._get_impedance_range,
+                                                   lambda v: v['range'],
+                                                   lambda self, v: self.instr._impedance_range_helper(v),
+                                                   choices=[0., 50., 100., 300., 1e3, 3e3, 10e3, 30e3, 100e3, 300e3], setget=True,
+                                                   doc="0. is for auto range. Available ranges depend on frequency (higher f, lower the limit).")
+            self.impedance_phase_adjust_mode =  CommonDevice(self._get_impedance_phase_adj, lambda v: v[0], 'ADJ %i,{val}'%self._cmu_slot,
+                                                             choices=ChoiceIndex(['auto', 'manual', 'adaptive']), doc=
+                                                             "For manual mode, use the impedance_phase_adjust_now method. adaptive performs the phase adjust before all measurements.")
+            self.impedance_output_en =  CommonDevice(self._get_enabled_state,
+                                                     lambda v: v[0][self._cmu_slot-1],
+                                                     lambda self,v: self.instr._impedance_en_helper(v), type=bool)
+            self.impedance_bias_meas_range = MemoryDevice_ch(0., choices=[0., 8, 12, 25], doc="""0. is for auto range""")
+            self.impedance_level_meas_range = MemoryDevice_ch(0., choices=[0., 16e-3, 32e-3, 64e-3, 125e-3, 250e-3], doc="""0. is for auto range""")
+            self._devwrap('measZ', multi=['primary', 'secondary'], autoinit=False, trig=True)
+            self._devwrap('measZ_bias',  autoinit=False, trig=True)
+            self._devwrap('measZ_level', autoinit=False, trig=True)
 
         self._devwrap('function', choices=['voltage', 'current', 'disabled'])
         self._devwrap('level', setget=True)
@@ -1565,22 +1865,23 @@ class agilent_SMU(visaInstrumentAsync):
     def _parse_data(self, data_string):
         """ Automatically parses the data into value, channel, status, type """
         # FMT12 and FMT22 seem to be the same
-        if data_string[2] in 'VIT': # FMT1 or FMT5 (12 digits data), or FMT11 or FMT15 (13 digits data)
+        if data_string[2] in 'VIFZYCLRPDQXT': # FMT1 or FMT5 (12 digits data), or FMT11 or FMT15 (13 digits data)
             status = data_string[0] # W/E E is for last sweep step data for source,  N<G<S<T<C<V<X<F  (pulse is  N<T<C<V<X<G or S)
                 # N: No error, T: Another channel compliance, C: This channel Compliance, V: over range
                 # X: channel oscillating, G: search not found or over time on quasi-pulse, S: search stopped or quasi-pulse too slow
             status = self._status_letter_2_num[status]
             channel = data_string[1] # A-H = 1-8
-            type = data_string[2]  # V/I/T for Volt, Current, Time
+            type = data_string[2]  # V (volt) I (current) F (freq) Z (impedance Ohm) Y(admitance Siemens) C (capacitance) L(inductance)
+                                   # R (phase rad) P (phase deg) D (dissipation factor) Q (quality factor) X (sampling index) T(time)
             value = float(data_string[3:])
-        elif data_string[4] in 'VvIiTZz': # FMT21 or FMT25
+        elif data_string[4] in 'VvIifzZYCLRPDQXT': # FMT21 or FMT25
             if data_string.startswith('  '):
                 status = 128 if data_string[2] == 'E' else 0 # W/E E is for last sweep step data for source
             else:
                 status = int(data_string[:3]) # Status, 1=A/D overflow(V), 2:some unit oscillating(X), 4: Another unit reached compliance(T), 8: This unit reached compliance(C)
                 # 16: Target not found (G), 32: Search stopped (S), 64: Invalid data (), 128: End of data
             channel = data_string[3] # A-H = 1-8, V=GNDU, Z=extra or TSQ or invalid
-            type = data_string[4] # V/v/I/i/T/Z/z is Volt/Volt source/Current/Current source/Time/Invalid/Invalid
+            type = data_string[4] # V/v/I/i/f/z is Volt/Volt source/Current/Current source/frequency/invalid + ZYCLRPDQXT like above
             value = float(data_string[5:])
         else: # FMT2 (12 digits), FMT12 or FMT22 (13 digits)
             status = 0
@@ -1602,6 +1903,7 @@ class agilent_SMU(visaInstrumentAsync):
         options_dict = {}
         valid_ch = []
         smu_slots = []
+        cmu_slots = []
         N = 0
         for i, opt in enumerate(options):
             if options_en[i]:
@@ -1628,9 +1930,57 @@ class agilent_SMU(visaInstrumentAsync):
                 options_dict[ch] = (opt, t)
                 if t in ['HPSMU', 'MPSMU', 'HRSMU']:
                     smu_slots.append(ch)
+                elif t in ['MFCMU']:
+                    cmu_slots.append(ch)
             o = opt[0]
-        return valid_ch, options_dict, smu_slots, Nmax
+        return valid_ch, options_dict, smu_slots, cmu_slots, Nmax
 
+    @cache_result
+    def _get_impedance_exc(self):
+        ret = self.ask("*LRN? 7")
+        rs = ret.split(';')
+        if len(rs) != 3:
+            raise RuntimeError(self.perror('Invalid number of elemnts for lrn 7'))
+        imp_slot = self._cmu_slot
+        bias = self._parse_block_helper(rs[0], 'DCV%i,'%imp_slot, [float])
+        level = self._parse_block_helper(rs[1], 'ACV%i,'%imp_slot, [float])
+        freq = self._parse_block_helper(rs[2], 'FC%i,'%imp_slot, [float])
+        return dict(bias=bias, level=level, freq=freq)
+
+    @cache_result
+    def _get_impedance_meas_mode(self):
+        ret = self.ask("*LRN? 70")
+        choices =  self.impedance_meas_mode.choices
+        mode = self._parse_block_helper(ret, 'IMP', [choices])
+        return mode
+
+    @cache_result
+    def _get_impedance_monitor(self):
+        ret = self.ask("*LRN? 71")
+        monitor = self._parse_block_helper(ret, 'LMN', [lambda s: bool(int(s))])
+        return monitor
+
+    @cache_result
+    def _get_impedance_avg(self):
+        ret = self.ask("*LRN? 72")
+        choices =  self.impedance_avg_mode.choices
+        rs = self._parse_block_helper(ret, 'ACT', [choices, int])
+        return dict(mode=rs[0], N=rs[1])
+
+    @cache_result
+    def _get_impedance_range(self):
+        ret = self.ask("*LRN? 73")
+        imp_slot = self._cmu_slot
+        rs = self._parse_block_helper(ret, 'RC%i,'%imp_slot, [int, int])
+        return dict(mode=rs[0], range=rs[1])
+
+    @cache_result
+    def _get_impedance_phase_adj(self):
+        ret = self.ask("*LRN? 90")
+        imp_slot = self._cmu_slot
+        choices =  self.impedance_phase_adjust_mode.choices
+        rs = self._parse_block_helper(ret, 'ADJ%i,'%imp_slot, [choices])
+        return rs
 
 
 # When switching from DI to DV, The compliance is required
