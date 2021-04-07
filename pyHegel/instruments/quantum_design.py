@@ -24,6 +24,7 @@
 from __future__ import absolute_import
 
 import os.path
+import sys
 
 from ..instruments_base import BaseInstrument, BaseDevice,\
                             MemoryDevice, locked_calling,\
@@ -31,6 +32,7 @@ from ..instruments_base import BaseInstrument, BaseDevice,\
 
 from ..instruments_registry import register_instrument
 
+QDInstrument_LabVIEW_dir = r"C:\QDInstrument_LabVIEW"
 clr = None
 Int32 = None
 Int64 = None
@@ -57,12 +59,8 @@ def _delayed_imports():
         except ImportError as exc:
             raise RuntimeError('Unable to import windows clr/System: %s'%exc)
         try:
-#            _datatranslation_dir = r'C:\Program Files (x86)\Data Translation\DotNet\OLClassLib\Framework 2.0 Assemblies'
-#            if not os.path.isdir(_datatranslation_dir):
-#                # Version 6.1.0 has a slightly different directory name:
-#                _datatranslation_dir += ' (32-bit)'
-#            if _datatranslation_dir not in sys.path:
-#                sys.path.append(_datatranslation_dir)
+            if QDInstrument_LabVIEW_dir not in sys.path:
+                sys.path.append(QDInstrument_LabVIEW_dir)
             clr.AddReference('QDInstrument')
             import QuantumDesign.QDInstrument as QDInstrument
             from QuantumDesign.QDInstrument import QDInstrumentBase, QDInstrumentFactory
@@ -72,7 +70,8 @@ def _delayed_imports():
         except ImportError as exc:
             raise RuntimeError(
                 "Unable to load QuantumDesign Module (QDInstrument.dll). Make sure pythonnet and "
-                "QDInstrument.dll is installed and unblocked: %s"%exc)
+                "QDInstrument.dll is installed and unblocked: %s\n"%exc +
+                "The dll should be in the same directory as this module or in %s"%QDInstrument_LabVIEW_dir)
         _delayed_imports_done = True
 
 @register_instrument('Quantum Design', 'PPMS')
@@ -221,8 +220,8 @@ class QuantumDesign_PPMS(BaseInstrument):
         speed = self.position_speed.get()
         mode = getattr(QDInstrumentBase.PositionMode, mode)
         ret = self._qdinst.SetPosition(axis, val, speed, mode)
-        if ret != 0:
-            raise RuntimeError('position set failed: %i'%ret)
+#        if ret != 0:
+#            raise RuntimeError('position set failed: %i'%ret)
 
     def _position_getdev(self, axis=None, mode=None, speed=None):
         # mode, speed are present because of setget
@@ -230,8 +229,8 @@ class QuantumDesign_PPMS(BaseInstrument):
             axis = self.current_pos_axis.get()
         ret = self._qdinst.GetPosition(axis, 0., 0) # temperature and status byref
         result, pos, status = ret
-        if result != 0:
-            raise RuntimeError('position get failed: %i'%result)
+#        if result != 0:
+#            raise RuntimeError('position get failed: %i'%result)
         status_s = self._pos_status[status]
         self.position_last_status.set(status_s)
         return pos
@@ -335,9 +334,25 @@ class QuantumDesign_PPMS(BaseInstrument):
         self.field_last_status = MemoryDevice('not initialized', doc='This is updated when getting field')
         self.temp_last_status = MemoryDevice('not initialized', doc='This is updated when getting temp')
         self.position_last_status = MemoryDevice('not initialized', doc='This is updated when getting position')
-        self._devwrap('field', setget=True, min=-16e4, max=16e4, doc='Units are Oe, rate is Oe/s')
-        self._devwrap('temp', setget=True, min=1.7, max=402.)
-        self._devwrap('position', setget=True, autoinit=False)
+        self._devwrap('field', setget=True, min=-16e4, max=16e4, doc="""\
+                      Units are Oe
+                      Options:
+                          rate      in Oe/s (defaults to field_rate)
+                          approach  one of {}, defaults to current_field_approach
+                          mode      one of {}, defaults to current_field_mode
+                      """.format(self.current_field_approach.choices, self.current_field_mode.choices))
+        self._devwrap('temp', setget=True, min=1.7, max=402., doc="""\
+                      Units are K
+                      Options:
+                          rate      in K/min (defaults to temp_rate)
+                          approach  one of {}, defaults to current_temp_approach
+                      """.format(self.current_field_approach.choices))
+        self._devwrap('position', setget=True, autoinit=False, doc="""\
+                      Options:
+                          axis      defaults to current_pos_axis
+                          speed      (defaults to position_speed)
+                          mode  one of {}, defaults to current_pos_mode
+                      """.format(self.current_pos_mode.choices))
         self._devwrap('chamber', setget=True, choices=self._chamber_cmds)
         self._devwrap('field_ramp', setget=True, autoinit=False)
         self._devwrap('temp_ramp', setget=True, autoinit=False)
