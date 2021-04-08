@@ -116,7 +116,7 @@ class QuantumDesign_PPMS(BaseInstrument):
 
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
-        extra = ['AssemblyVersion=%r'%_assembly_Version, 'address=%r'%self._qd_address,
+        extra = ['AssemblyVersion=%r'%_assembly_Version, 'address=%r'%(self._qd_address,),
                  'qd_type=%s'%self._qd_type]
         base = self._conf_helper('temp', 'field', 'chamber', 'position', options)
         return extra+base
