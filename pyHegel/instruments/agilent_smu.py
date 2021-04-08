@@ -181,6 +181,7 @@ class agilent_SMU(visaInstrumentAsync):
         measV, measI    These migth be a little faster than readval for a single measurement,
                         but could fail with a timeout (so only use them for very quick measurements,
                         or increase the timeout (see the set_timeout attribute).
+        measZ           when an MFCMU board is installed.
     There is a fetch device but it will not work on its own. Use readval or fetch with async
     (but since readval with async does the same, you should always use readval here.)
     To configure the instrument, look at the methods:
@@ -189,6 +190,8 @@ class agilent_SMU(visaInstrumentAsync):
         conf_ch
         set_mode
         conf_staircase
+        conf_impedance      when an MFCMU board is installed
+        conf_impedance_corr when an MFCMU board is installed, to perform a calibration.
     Other useful method:
         empty_buffer   Use it to clear the buffer when stopping a reading.
                        Otherwise the next request will return previous (and wrong)
@@ -356,6 +359,9 @@ class agilent_SMU(visaInstrumentAsync):
         opts += ['conf_general=%s'%conf_gen]
         opts += ['conf_ch=%s'%self.conf_ch()]
         opts += ['conf_integration=%s'%self.conf_integration()]
+        if self._cmu_slot is not None:
+            opts += ['conf_impedance=%s'%self.conf_impedance(),
+                     'conf_impedance_corr=%s'%self.conf_impedance_corr()]
         if not conf_gen['measurement_spot_en']:
             opts += ['set_mode=%s'%self.set_mode()]
         return opts+self._conf_helper(options)
@@ -648,7 +654,8 @@ class agilent_SMU(visaInstrumentAsync):
         ret = ret[3:]
         ret = ret.split(',')
         conv = {'00':'output off', '01':'force voltage', '02':'force positive current', '03':'force negative current',
-                '11':'compliance voltage', '12':'compliance positive current', '13':'compliance negative current'}
+                '11':'compliance voltage', '12':'compliance positive current', '13':'compliance negative current',
+                '20':'oscillating', '40':'applying DC', '41':'unknown mfcmu state', '51':'null loop unbalanced', '52':'IV amplifier saturation'}
         return [conv[s] for s in ret]
 
     def _active_range_current_getdev(self, ch=None):
@@ -727,7 +734,8 @@ class agilent_SMU(visaInstrumentAsync):
         """\
             The returns the impedance (MFCMU) spot measurement.
             It returns the 2 values selected by impedance_meas_mode.
-            range selects the range. If none it uses impedance_range
+            range selects the range. If None it uses impedance_range.
+            The status is saved in measZ_last_status.
         """
         if range is None:
             range = self.impedance_range.getcache()
@@ -740,6 +748,7 @@ class agilent_SMU(visaInstrumentAsync):
         rets = ret.split(',')
         value1, channel1, status1, type1 = self._parse_data(rets[0])
         value2, channel2, status2, type2 = self._parse_data(rets[1])
+        self.measZ_last_status.set([status1, status2])
         if channel1 is not None and (channel1 != channel2 != cmu_slot):
             raise RuntimeError(self.perror('Read back the wrong channel'))
         return [value1, value2]
@@ -748,6 +757,7 @@ class agilent_SMU(visaInstrumentAsync):
         """\
             The returns the impedance dc bias voltage (MFCMU) spot measurement.
             range selects the range. If none it uses impedance_bias_meas_range
+            The status is saved in measZ_bias_last_status.
         """
         if range is None:
             range = self.impedance_bias_meas_range.get()
@@ -758,6 +768,7 @@ class agilent_SMU(visaInstrumentAsync):
         else:
             ret = self.ask(base+'0,%r'%range)
         value, channel, status, type = self._parse_data(ret)
+        self.measZ_bias_last_status.set(status)
         if channel is not None and channel != cmu_slot:
             raise RuntimeError(self.perror('Read back the wrong channel'))
         return value
@@ -766,6 +777,7 @@ class agilent_SMU(visaInstrumentAsync):
         """\
             The returns the impedance ac level rms voltage (MFCMU) spot measurement.
             range selects the range. If none it uses impedance_level_meas_range
+            The status is saved in measZ_level_last_status.
         """
         if range is None:
             range = self.impedance_level_meas_range.get()
@@ -776,6 +788,7 @@ class agilent_SMU(visaInstrumentAsync):
         else:
             ret = self.ask(base+'0,%r'%range)
         value, channel, status, type = self._parse_data(ret)
+        self.measZ_level_last_status.set(status)
         if channel is not None and channel != cmu_slot:
             raise RuntimeError(self.perror('Read back the wrong channel'))
         return value
@@ -1110,6 +1123,34 @@ class agilent_SMU(visaInstrumentAsync):
         if self._cmu_slot is None:
             raise RuntimeError("Your instrument does not have a MFCMU card. No impedance method will work.")
         return self._cmu_slot
+
+    def conf_impedance(self, output_en=None, level=None, freq=None, bias=None, meas_mode=None, phase_adjust_mode=None,
+                       avg_mode=None, avg_N=None, range=None, level_meas_range=None, bias_meas_range=None):
+        """\
+        without any parameters, returns the enable states of the impedance corrections.
+        otherwise changes the specified parameter.
+        """
+        slot = self._check_cmu()
+        para_dict = OrderedDict([('output_en', self.impedance_output_en),
+                                ('level', self.impedance_level),
+                                ('freq', self.impedance_freq),
+                                ('bias', self.impedance_bias),
+                                ('meas_mode', self.impedance_meas_mode),
+                                ('phase_adjust_mode', self.impedance_phase_adjust_mode),
+                                ('avg_mode', self.impedance_avg_mode),
+                                ('avg_N', self.impedance_avg_N),
+                                ('range', self.impedance_range),
+                                ('level_meas_range', self.impedance_level_meas_range),
+                                ('bias_meas_range', self.impedance_bias_meas_range)])
+        params = locals()
+        if all(params.get(k) is None for k in para_dict):
+            result_dict = {k:dev.get() for k, dev in para_dict.items()}
+            return result_dict
+        else:
+            for k, dev in para_dict.items():
+                val = params.get(k)
+                if val is not None:
+                    dev.set(val)
 
     def conf_impedance_corr(self, short_en=None, open_en=None, load_en=None):
         """\
@@ -1501,7 +1542,8 @@ class agilent_SMU(visaInstrumentAsync):
                                                    lambda v: v['N'],
                                                    lambda self, v: self.instr._impedance_avg_helper(N=v),
                                                    choices=ChoiceDevDep(self.impedance_avg_mode, dict(auto=ChoiceLimits(1, 1023, int), plc=ChoiceLimits(1, 100, int))))
-            self.impedance_data_monitor_bias_level_en =  CommonDevice(self._get_impedance_monitor, lambda v: v[0], 'LMN {val}', type=bool)
+            self.impedance_data_monitor_bias_level_en =  CommonDevice(self._get_impedance_monitor, lambda v: v[0], 'LMN {val}', type=bool,
+                                                                      doc='This is for internal sweeps.')
             self.impedance_range = CommonDevice(self._get_impedance_range,
                                                    lambda v: v['range'],
                                                    lambda self, v: self.instr._impedance_range_helper(v),
@@ -1515,6 +1557,19 @@ class agilent_SMU(visaInstrumentAsync):
                                                      lambda self,v: self.instr._impedance_en_helper(v), type=bool)
             self.impedance_bias_meas_range = MemoryDevice_ch(0., choices=[0., 8, 12, 25], doc="""0. is for auto range""")
             self.impedance_level_meas_range = MemoryDevice_ch(0., choices=[0., 16e-3, 32e-3, 64e-3, 125e-3, 250e-3], doc="""0. is for auto range""")
+            self.measZ_last_status = MemoryDevice([0,0], multi=['prim_status', 'sec_status'], doc="""\
+                To read status for cmu, the bit field is:
+                   bit 0 (  1): A/D converter overflowed.
+                   bit 1 (  2): CMU is in the NULL loop unbalance condition.
+                   bit 2 (  4): CMU is in the IV amplifier saturation condition.
+                   bit 3 (  8): not assigned.
+                   bit 4 ( 16): not assigned.
+                   bit 5 ( 32): not assigned.
+                   bit 6 ( 64): Invalid data is returned. D is not used.
+                   bit 7 (128): EOD (End of Data).
+                """)
+            self.measZ_bias_last_status = MemoryDevice(0, doc='see measZ_last_status for bit field description')
+            self.measZ_level_last_status = MemoryDevice(0, doc='see measZ_last_status for bit field description')
             self._devwrap('measZ', multi=['primary', 'secondary'], autoinit=False, trig=True)
             self._devwrap('measZ_bias',  autoinit=False, trig=True)
             self._devwrap('measZ_level', autoinit=False, trig=True)
@@ -1755,7 +1810,6 @@ class agilent_SMU(visaInstrumentAsync):
         if len(rs) != N:
             raise RuntimeError(self.perror('Invalid number of elemnts for lrn 56'))
         mode_type = self._integ_choices
-        # TODO float for mode time otherwise int
         high_speed = self._parse_block_helper(rs[0], 'AIT0,', [mode_type, float]) # mode(0=auto, 1=manual, 2=PLC), time
         high_res = self._parse_block_helper(rs[1], 'AIT1,', [mode_type, float]) # mode(0=auto, 1=manual, 2=PLC), time
         if self._isB1500:
@@ -1937,11 +1991,14 @@ class agilent_SMU(visaInstrumentAsync):
 
     @cache_result
     def _get_impedance_exc(self):
+        imp_slot = self._cmu_slot
         ret = self.ask("*LRN? 7")
         rs = ret.split(';')
+        if len(rs) == 1 and rs[0] == 'CL%i'%imp_slot:
+                # we are off
+                return dict(bias=[0.], level=[0.], freq=[1e3])
         if len(rs) != 3:
-            raise RuntimeError(self.perror('Invalid number of elemnts for lrn 7'))
-        imp_slot = self._cmu_slot
+            raise RuntimeError(self.perror('Invalid number of elemnts for lrn %i'%imp_slot))
         bias = self._parse_block_helper(rs[0], 'DCV%i,'%imp_slot, [float])
         level = self._parse_block_helper(rs[1], 'ACV%i,'%imp_slot, [float])
         freq = self._parse_block_helper(rs[2], 'FC%i,'%imp_slot, [float])
