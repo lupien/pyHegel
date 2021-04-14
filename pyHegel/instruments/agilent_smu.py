@@ -198,6 +198,8 @@ class agilent_SMU(visaInstrumentAsync):
                        answers.
         abort
         reset          To return the instrument to the power on condition
+        perform_calibration
+        do_impedance_correction
     Note: The B1500A needs to have the EasyExpert Start button running for
           remote GPIB to work. Do not start the application.
     """
@@ -256,7 +258,7 @@ class agilent_SMU(visaInstrumentAsync):
             # Otherwise, getasync and readval both call async_select to setup
             # the mode properly (_async_mode and_async_tocheck).
             self._async_trigger_helper_string = ''
-            self._async_trigger_parsers = [] # list of (func, args, kwargs)
+            self._async_trigger_parsers = [] # list of (func, args, kwargs, last_status)
             self._async_trigger_n_read = 0
             return
         n_read = self._async_trigger_n_read
@@ -272,12 +274,24 @@ class agilent_SMU(visaInstrumentAsync):
                 if meas == 'v':
                     is_voltage = True
                     rng = self.range_voltage_meas
-                else:
+                    quest, slot = self._measIV_helper_get_quest(is_voltage, ch, None, rng)
+                    last_status = self.meas_last_status
+                    parser = self._measIV_helper_ret_val
+                elif meas == 'i':
                     is_voltage = False
                     rng = self.range_current_meas
-                quest, slot = self._measIV_helper_get_quest(is_voltage, ch, None, rng)
+                    quest, slot = self._measIV_helper_get_quest(is_voltage, ch, None, rng)
+                    last_status = self.meas_last_status
+                    parser = self._measIV_helper_ret_val
+                else:
+                    quest, slot = self._measZ_helper_get_quest(None, ch)
+                    last_status = dict(Z=self.measZ_last_status,
+                                      bias=self.measZ_bias_last_status,
+                                      level=self.measZ_level_last_status)[ch]
+                    is_voltage = ch
+                    parser = self._measZ_helper_ret_val
                 async_string += ';' + quest
-                async_parsers.append((self._measIV_helper_ret_val, (is_voltage, slot), {}))
+                async_parsers.append((parser, (is_voltage, slot), {}, last_status))
                 n_read += 1
         if len(async_string) >= 1:
              # we skip the first ';'
@@ -375,18 +389,23 @@ class agilent_SMU(visaInstrumentAsync):
         self.init(True)
 
     @locked_calling
-    def perform_calibration(self):
+    def _call_and_wait(self, cmd):
         prev_str = self._async_trigger_helper_string
         prev_n_read = self._async_trigger_n_read
         try:
-            self._async_trigger_helper_string = '*cal?'
+            self._async_trigger_helper_string = cmd
             self._async_trigger_n_read = 1
             self.run_and_wait()
-            res = int(self._async_trig_current_data[0])
+            res = self._async_trig_current_data
         finally:
             self._async_trigger_helper_string = prev_str
             self._async_trigger_n_read = prev_n_read
             del self._async_trig_current_data
+        return res
+
+    def perform_calibration(self):
+        ret = self._call_and_wait('*cal?')
+        res = int(ret[0])
         if res != 0:
             raise RuntimeError(self.perror('Calibration failed (at least one module failed). Returned value is %i'%res))
 
@@ -402,6 +421,9 @@ class agilent_SMU(visaInstrumentAsync):
         if chs is None:
             en_chs, en_chs2 = self._get_enabled_state()
             chs = [self._slot2smu[i+1] for i,v in enumerate(en_chs) if v and i+1 in self._slot2smu]
+            cmu_slot = self._cmu_slot
+            if cmu_slot is not None and en_chs[cmu_slot-1]:
+                chs += ['c']
             if len(chs) == 0:
                 raise RuntimeError(self.perror('All channels are off so cannot fetch.'))
         if not isinstance(chs, (list, tuple, np.ndarray)):
@@ -409,15 +431,29 @@ class agilent_SMU(visaInstrumentAsync):
         full_chs = []
         conv_force = dict(voltage='v', current='i')
         conv_compl = dict(voltage='i', current='v')
+        conv_z = dict(z='Z', l='level', b='bias')
         for ch in chs:
             if isinstance(ch, basestring):
                 meas = ch[0].lower()
-                c = int(ch[1:])
-                if meas not in ['v', 'i']:
-                    raise ValueError(self.perror("Invalid measurement requested, should be 'i' or 'v'"))
-                if c not in self._valid_ch:
-                    raise ValueError(self.perror('Invalid channel requested'))
-                full_chs.append([c, meas])
+                if meas == 'c':
+                    # handle CMU
+                    if len(ch) == 1:
+                        full_chs.append(['Z', 'c'])
+                    else:
+                        if len(ch)>2:
+                            raise ValueError(self.perror("Invalid ch specification starting with 'c'"))
+                        c = ch[1].lower()
+                        if c not in conv_z:
+                            raise ValueError(self.perror("Invalid ch specification with 'c' should add only 'z', 'l' or 'b'"))
+                        full_chs.append([conv_z[c], 'c'])
+                else:
+                    # handle SMU
+                    c = int(ch[1:])
+                    if meas not in ['v', 'i']:
+                        raise ValueError(self.perror("Invalid measurement requested, should be 'i' or 'v'"))
+                    if c not in self._valid_ch:
+                        raise ValueError(self.perror('Invalid channel requested'))
+                    full_chs.append([c, meas])
             else:
                 if ch not in self._valid_ch:
                     raise ValueError(self.perror('Invalid channel requested'))
@@ -443,14 +479,30 @@ class agilent_SMU(visaInstrumentAsync):
         full_chs, auto, mode = self._fetch_opt_helper(chs, auto)
         multi = []
         graph = []
-        for i, (c, m) in enumerate(full_chs):
-            base = '%s%i'%(m, c)
+        i=0
+        for c, m in full_chs:
+            if m == 'c' and c == 'Z':
+                base = 'cmu_Z_'
+                if status:
+                    multi.extend([base+'prim', base+'prim_stat', base+'sec', base+'sec_stat'])
+                    graph.extend([i, i+2])
+                    i += 4
+                else:
+                    graph.extend([i, i+1])
+                    multi.extend([base+'prim', base+'sec'])
+                    i += 2
+                continue
+            elif m == 'c':
+                base = 'cmu_%s'%c
+            else:
+                base = '%s%i'%(m, c)
+            graph.append(i)
+            i += 1
             if status:
                 multi.extend([base, base+'_stat'])
-                graph.append(2*i)
+                i += 1
             else:
                 multi.append(base)
-                graph.append(i)
         if mode == 'stair':
             graph = []
             if xaxis:
@@ -467,9 +519,10 @@ class agilent_SMU(visaInstrumentAsync):
                      'force'/'compliance' to get the force value (source) or
                        the compliance value
         auto is used when chs is None (all enabled channels)
-           or chs is a list of channel numbers.
+           or chs is a list of channel numbers, or 'c' which means the cmu Z meas.
         Otherwise, chs can also use strings like 'v1' to read the voltage of channel 1
                      'i2' to read the current of channel 2.
+                     'cz', 'cl', 'cb' to read the z, level or bias of Z cmu.
         status when True, adds the status of every reading to the return value.
         xaxis when True and when getting stair data, will add the xaxis as a first column
         To read status for smu, the bit field is:
@@ -481,8 +534,11 @@ class agilent_SMU(visaInstrumentAsync):
            bit 5 ( 32): Search measurement was automatically stopped.
            bit 6 ( 64): Invalid data is returned. D is not used.
            bit 7 (128): EOD (End of Data).
+        For Z status description see measZ_last_status
         """
         full_chs, auto, mode = self._fetch_opt_helper(chs, auto)
+        if self._async_trig_current_data is None or self._async_trig_current_data == []:
+            raise RuntimeError(self.perror('No data is available, use readval.'))
         if mode != 'spot':
             try:
                 data = self._async_trig_current_data.pop(0)
@@ -508,13 +564,24 @@ class agilent_SMU(visaInstrumentAsync):
                 ret = ret.T
             return ret
         ret = []
+        def ret_append(val):
+            # measZ returns a list of 2 values.
+            if isinstance(val, list):
+                ret.extend(val)
+            else:
+                ret.append(val)
         for ch, meas in full_chs:
             val_str = self._async_trig_current_data.pop(0)
-            func, args, kwargs = self._async_trigger_parsers.pop(0)
+            func, args, kwargs, last_status = self._async_trigger_parsers.pop(0)
             val = func(val_str, *args, **kwargs)
-            ret.append(val)
             if status:
-                ret.append(self.meas_last_status.get())
+                stat = last_status.get()
+                if isinstance(val, list):
+                    # this is for measZ
+                    val = [val[0], stat[0], val[1], stat[1]]
+                else:
+                    val = [val, stat]
+            ret_append(val)
         ret = np.array(ret)
         if status:
             ret.shape = (-1, 2)
@@ -730,6 +797,54 @@ class agilent_SMU(visaInstrumentAsync):
         """
         return self._measIV_helper(voltage=False, ch=ch, range=range, rgdev=self.range_current_meas)
 
+    def _measZ_helper_get_quest(self, range, mode):
+        """ mode is either Z, bias or level """
+        cmu_slot = self._cmu_slot
+        if mode is 'Z':
+            if range is None:
+                range = self.impedance_range.getcache()
+            base = 'TC %i,'%cmu_slot
+        elif mode == 'bias':
+            if range is None:
+                range = self.impedance_bias_meas_range.get()
+            base = 'TMDCV %i,'%cmu_slot
+        elif mode == 'level':
+            if range is None:
+                range = self.impedance_level_meas_range.get()
+            base = 'TMACV %i,'%cmu_slot
+        else:
+            raise ValueError('Invalid mode in _measZ_helper_get_quest')
+        if range == 0.:
+            quest = base + '0'
+        else:
+            quest = base + '0,%r'%range
+        return quest, cmu_slot
+
+    def _measZ_helper_ret_val(self, result_str, mode, cmu_slot):
+        """ mode is either Z, bias or level """
+        if mode is 'Z':
+            rets = result_str.split(',')
+            value1, channel1, status1, type1 = self._parse_data(rets[0])
+            value2, channel2, status2, type2 = self._parse_data(rets[1])
+            last_status = self.measZ_last_status
+            status = [status1, status2]
+            channel = channel1
+            if channel1 is not None and channel1 != channel2:
+                raise RuntimeError(self.perror('Read back the wrong channel'))
+            value = [value1, value2]
+        elif mode == 'bias':
+            value, channel, status, type = self._parse_data(result_str)
+            last_status = self.measZ_bias_last_status
+        elif mode == 'level':
+            value, channel, status, type = self._parse_data(result_str)
+            last_status = self.measZ_level_last_status
+        else:
+            raise ValueError('Invalid mode in _measZ_helper_get_quest')
+        if channel is not None and channel != cmu_slot:
+            raise RuntimeError(self.perror('Read back the wrong channel'))
+        last_status.set(status)
+        return value
+
     def _measZ_getdev(self, range=None):
         """\
             The returns the impedance (MFCMU) spot measurement.
@@ -737,21 +852,9 @@ class agilent_SMU(visaInstrumentAsync):
             range selects the range. If None it uses impedance_range.
             The status is saved in measZ_last_status.
         """
-        if range is None:
-            range = self.impedance_range.getcache()
-        cmu_slot = self._cmu_slot
-        base = 'TC %i,'%cmu_slot
-        if range == 0.:
-            ret = self.ask(base+'0')
-        else:
-            ret = self.ask(base+'0,%r'%range)
-        rets = ret.split(',')
-        value1, channel1, status1, type1 = self._parse_data(rets[0])
-        value2, channel2, status2, type2 = self._parse_data(rets[1])
-        self.measZ_last_status.set([status1, status2])
-        if channel1 is not None and (channel1 != channel2 != cmu_slot):
-            raise RuntimeError(self.perror('Read back the wrong channel'))
-        return [value1, value2]
+        quest, cmu_slot = self._measZ_helper_get_quest(range, 'Z')
+        result_str = self.ask(quest)
+        return self._measZ_helper_ret_val(result_str, cmu_slot, 'Z')
 
     def _measZ_bias_getdev(self, range=None):
         """\
@@ -759,19 +862,9 @@ class agilent_SMU(visaInstrumentAsync):
             range selects the range. If none it uses impedance_bias_meas_range
             The status is saved in measZ_bias_last_status.
         """
-        if range is None:
-            range = self.impedance_bias_meas_range.get()
-        cmu_slot = self._cmu_slot
-        base = 'TMDCV %i,'%cmu_slot
-        if range == 0.:
-            ret = self.ask(base+'0')
-        else:
-            ret = self.ask(base+'0,%r'%range)
-        value, channel, status, type = self._parse_data(ret)
-        self.measZ_bias_last_status.set(status)
-        if channel is not None and channel != cmu_slot:
-            raise RuntimeError(self.perror('Read back the wrong channel'))
-        return value
+        quest, cmu_slot = self._measZ_helper_get_quest(range, 'bias')
+        result_str = self.ask(quest)
+        return self._measZ_helper_ret_val(result_str, cmu_slot, 'bias')
 
     def _measZ_level_getdev(self, range=None):
         """\
@@ -779,19 +872,9 @@ class agilent_SMU(visaInstrumentAsync):
             range selects the range. If none it uses impedance_level_meas_range
             The status is saved in measZ_level_last_status.
         """
-        if range is None:
-            range = self.impedance_level_meas_range.get()
-        cmu_slot = self._cmu_slot
-        base = 'TMACV %i,'%cmu_slot
-        if range == 0.:
-            ret = self.ask(base+'0')
-        else:
-            ret = self.ask(base+'0,%r'%range)
-        value, channel, status, type = self._parse_data(ret)
-        self.measZ_level_last_status.set(status)
-        if channel is not None and channel != cmu_slot:
-            raise RuntimeError(self.perror('Read back the wrong channel'))
-        return value
+        quest, cmu_slot = self._measZ_helper_get_quest(range, 'level')
+        result_str = self.ask(quest)
+        return self._measZ_helper_ret_val(result_str, cmu_slot, 'level')
 
     def _integration_set_helper(self, type='speed', mode=None, time=None):
         prev_result = self._get_avg_time_and_autozero()
@@ -1278,8 +1361,8 @@ class agilent_SMU(visaInstrumentAsync):
         std = dict(short=2, open=1, load=3)
         if standard not in std:
             raise ValueError('Invalid standard selected.')
-        ret = self.ask('CORR? %i,%i'%(slot, std[standard]))
-        result = int(ret)
+        ret = self._call_and_wait('CORR? %i,%i'%(slot, std[standard]))
+        result = int(ret[0])
         if result == 0:
             return
         if result == 1:
@@ -1290,13 +1373,21 @@ class agilent_SMU(visaInstrumentAsync):
             raise RuntimeError('Correction data measurement unknown result (standard=%s, result=%i)'%(standard, result))
 
     def impedance_phase_adjust_now(self, mode='perform'):
-        """ mode can be 'perform' or 'last' to reuse the last data and not perform a measurement """
+        """\
+            mode can be 'perform' or 'last' to reuse the last data and not perform a measurement.
+            It will change the frequency and level.
+            It will take abou 30s.
+            You need to undo the connections (keeping Lc,Lp together, also Hc,Hp together).
+            It applies a signal in Lc and measures the delay in Lp (normally Lp is virtual ground.)
+        """
         slot = self._check_cmu()
         mode_map = dict(perform=1, last=0)
         if mode not in mode_map:
             raise ValueError('Invalid mode selected.')
-        ret = self.ask('ADJ %i,%i'%(slot, mode_map[mode]))
-        result = int(ret)
+        if mode == 'perform':
+            print 'Wait for phase adjust. It will take about 30s...'
+        ret = self._call_and_wait('ADJ? %i,%i'%(slot, mode_map[mode]))
+        result = int(ret[0])
         if result == 0:
             return
         if result == 1:
@@ -1915,7 +2006,7 @@ class agilent_SMU(visaInstrumentAsync):
             ret_dict['sweep_var'] = None
         return ret_dict
 
-    _status_letter_2_num = dict(N=0, T=4, C=8, V=1, X=2, G=16, S=32)
+    _status_letter_2_num = dict(N=0, T=4, C=8, V=1, X=2, G=16, S=32, F=2, U=2, D=4)
     def _parse_data(self, data_string):
         """ Automatically parses the data into value, channel, status, type """
         # FMT12 and FMT22 seem to be the same
