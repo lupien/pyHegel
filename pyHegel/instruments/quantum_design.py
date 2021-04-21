@@ -314,10 +314,10 @@ class QuantumDesign_PPMS(BaseInstrument):
         result, val = ret
         return val
 
-    def field_is_stable(self):
+    def field_is_stable(self, param_dict=None):
         return self._wait_condition(field=True)
 
-    def temp_is_stable(self):
+    def temp_is_stable(self, param_dict=None):
         return self._wait_condition(temp=True)
 
     def _create_devs(self):
