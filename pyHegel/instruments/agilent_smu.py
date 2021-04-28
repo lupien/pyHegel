@@ -720,9 +720,10 @@ class agilent_SMU(visaInstrumentAsync):
             raise RuntimeError(self.perror('Problem reading the status'))
         ret = ret[3:]
         ret = ret.split(',')
+        # 41 status obtain form keysigth support
         conv = {'00':'output off', '01':'force voltage', '02':'force positive current', '03':'force negative current',
                 '11':'compliance voltage', '12':'compliance positive current', '13':'compliance negative current',
-                '20':'oscillating', '40':'applying DC', '41':'unknown mfcmu state', '51':'null loop unbalanced', '52':'IV amplifier saturation'}
+                '20':'oscillating', '40':'applying DC', '41':'connect output and cmu DC bias force', '51':'null loop unbalanced', '52':'IV amplifier saturation'}
         return [conv[s] for s in ret]
 
     def _active_range_current_getdev(self, ch=None):
