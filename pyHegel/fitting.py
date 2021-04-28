@@ -320,7 +320,9 @@ def _adjust_merge(padj, p0, adj):
     return p0
 
 def _complex2real(z, reshape_real=True):
-    conv = lambda z, t: z.view(t).reshape(z.shape + (2,))
+    # contiguous is required by view when changing type.
+    # It can be non contiguous if a selector skips data.
+    conv = lambda z, t: np.ascontiguousarray(z).view(t).reshape(z.shape + (2,))
     if np.iscomplexobj(z):
         if z.ndim == 0:
             z = z.reshape((1,))
