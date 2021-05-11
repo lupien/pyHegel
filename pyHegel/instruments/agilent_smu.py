@@ -27,6 +27,7 @@ import numpy as np
 import time
 import types
 import string
+import weakref
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
@@ -1644,8 +1645,9 @@ class agilent_SMU(visaInstrumentAsync):
             self.impedance_phase_adjust_mode =  CommonDevice(self._get_impedance_phase_adj, lambda v: v[0], 'ADJ %i,{val}'%self._cmu_slot,
                                                              choices=ChoiceIndex(['auto', 'manual', 'adaptive']), doc=
                                                              "For manual mode, use the impedance_phase_adjust_now method. adaptive performs the phase adjust before all measurements.")
+            weak_self = weakref.proxy(self)
             self.impedance_output_en =  CommonDevice(self._get_enabled_state,
-                                                     lambda v: v[0][self._cmu_slot-1],
+                                                     lambda v: v[0][weak_self._cmu_slot-1],
                                                      lambda self,v: self.instr._impedance_en_helper(v), type=bool)
             self.impedance_bias_meas_range = MemoryDevice_ch(0., choices=[0., 8, 12, 25], doc="""0. is for auto range""")
             self.impedance_level_meas_range = MemoryDevice_ch(0., choices=[0., 16e-3, 32e-3, 64e-3, 125e-3, 250e-3], doc="""0. is for auto range""")
@@ -1679,7 +1681,7 @@ class agilent_SMU(visaInstrumentAsync):
         self.alias = self.readval
 
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(agilent_SMU, self)._create_devs()
 
     @cache_result
     def _get_enabled_state(self):
