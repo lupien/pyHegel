@@ -1432,7 +1432,7 @@ class agilent_SMU(visaInstrumentAsync):
             self._cmu_slot = cmu_slots[0]
             cmu_present = True
         else:
-            self._cmu_slots = None
+            self._cmu_slot = None
             cmu_present = False
 
         self.current_channel = MemoryDevice(smu_chs[0], choices=smu_chs)
