@@ -1402,6 +1402,14 @@ class agilent_SMU(visaInstrumentAsync):
             raise RuntimeError('Phase compensation unknown result (result=%i)'%(result))
 
     def _create_devs(self):
+        # This check is to wait if the B1500 instrument has been recently powered up.
+        # Because it will perform some test or calibration and we will fail on the empty_buffer call.
+        first_check = True
+        while self.read_status_byte() & 0x10 != 16:
+            if first_check:
+                print 'The instrument is not ready. It could be executing a command or doing a calibration or self-test.\n  PLEASE WAIT'
+                first_check = False
+            sleep(1)
         self.empty_buffer() # make sure to empty output buffer
         self._isB1500 = self.idn_split()['model'] in ['B1500A']
         valid_ch, options_dict, smu_slots, cmu_slots, Nmax = self._get_unit_conf()
