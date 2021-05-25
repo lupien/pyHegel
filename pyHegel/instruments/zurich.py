@@ -453,7 +453,7 @@ class zurich_UHF(BaseInstrument):
             extra += ['auxout_%i=[%s]'%(c, ','.join(xx).replace('auxouts_',''))]
         self.current_auxouts.set(aux_ch_orig)
 
-        base = self._conf_helper('async_delay', 'async_wait', 'current_demod', 'current_osc', 'current_sigins', 'current_sigouts',
+        base = self._conf_helper('async_wait', 'current_demod', 'current_osc', 'current_sigins', 'current_sigouts',
                                  'osc_freq', 'sigins_en', 'sigins_ac_en', 'sigins_50ohm_en',
                                  'sigins_range', 'sigins_scaling', 'sigins_aa_bw_en',
                                  'sigouts_en', 'sigouts_offset', 'sigouts_range', 'sigouts_ampl_Vp', 'sigouts_50ohm_en',
