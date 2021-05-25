@@ -101,7 +101,7 @@ class sr830_lia(visaInstrument):
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         #base = ['async_delay=%r'%self.async_delay]
-        return self._conf_helper('async_delay','async_wait', 'freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
+        return self._conf_helper('async_wait', 'freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
                                  'sync_filter', 'reserve_mode',
                                  'offset_expand_x', 'offset_expand_y', 'offset_expand_r',
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf',
@@ -387,7 +387,7 @@ class sr865_lia(visaInstrument):
             info = dict(expand=expand, offset_en=offset_en, offset_prct=offset_prct, ratio_en=ratio_en)
             ch_info.append('ch%s=%r'%(c, info))
         self.outch_sel.set(origsel)
-        base = self._conf_helper('async_delay','async_wait', 'freq', 'freq_internal', 'freq_external',
+        base = self._conf_helper('async_wait', 'freq', 'freq_internal', 'freq_external',
                                  'freq_detection', 'reference_trigger', 'reference_impedance', 'reference_mode',
                                  'src_level', 'src_offset', 'src_offset_mode',
                                  'input_range', 'input_conf', 'input_ground_en', 'input_dc_coupled_en',
