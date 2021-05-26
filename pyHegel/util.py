@@ -604,7 +604,7 @@ def _blueforsTlog_Conv(data, time_data, channels, logdir):
         outvec.append((Rfile%c, str_pref%R))
     return dirname, outvec
 
-def blueforsTlog(data, time_data, channels=[1,2,5,6], logdir='C:/BlueFors/Log-files',
+def blueforsTlog(data, time_data, channels=[1,2,5,6], logdir='C:/BlueFors/Logs',
                  sort_exist=True, cleanup=True):
     """
     From a vector of data and time_data (obtained from a py hegel record for example),
@@ -785,7 +785,7 @@ def _read_bluefors_select(start_date, stop_date=None):
         date += datetime.timedelta(days=1)
     return dirs
 
-def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:/BlueFors/Log-files', merge_if_possible=True):
+def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:/BlueFors/Logs', merge_if_possible=True):
     """
     Reads and combines the data files for temperature channels selected.
     It looks for the files under date directories under logdir.
@@ -1003,7 +1003,7 @@ def _filename_build_check(file_base, logdir, dirname, quiet=False, missing_ok=Tr
         return None
     return filename
 
-def read_bluefors_all(start_date, stop_date=None, logdir='C:/BlueFors/Log-files', flow=True, gauges=True, channels=False, missing_ok=True, quiet=False):
+def read_bluefors_all(start_date, stop_date=None, logdir='C:/BlueFors/Logs', flow=True, gauges=True, channels=False, missing_ok=True, quiet=False):
     """
     Reads bluefors log for flow, gauges and channels depending on the boolean values.
     Returns the arrays read in the order flow, gauges, channels. For emptry flow, gauges, returns None.
