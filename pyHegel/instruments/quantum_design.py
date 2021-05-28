@@ -120,7 +120,10 @@ class QuantumDesign_PPMS(BaseInstrument):
 
     def close(self):
         """ This closes the connection """
-        self._qdinst.Release()
+        if self._qd_address is None:
+            self._qdinst.Release()
+        else:
+            self._qdinst.Client.Close()
 
     def idn(self):
         return 'Quantum Design,%s,no_serial,no_firmware'%self._qd_type
