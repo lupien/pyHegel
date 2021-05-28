@@ -111,6 +111,17 @@ class QuantumDesign_PPMS(BaseInstrument):
         self._pos_status = make_dict(QDInstrumentBase.PositionStatus)
         super(QuantumDesign_PPMS, self).__init__(**kwargs)
 
+    def __del__(self):
+        try:
+            self.close()
+        except:
+            pass
+        super(QuantumDesign_PPMS, self).__del__()
+
+    def close(self):
+        """ This closes the connection """
+        self._qdinst.Release()
+
     def idn(self):
         return 'Quantum Design,%s,no_serial,no_firmware'%self._qd_type
 
@@ -310,6 +321,39 @@ class QuantumDesign_PPMS(BaseInstrument):
         return self.temp.get()
 
     def get_ppms_item(self, index, fast=True):
+        """\
+        fast, when True (which is the default) returns the current value. When False
+          it will fetch an updated value before returning.
+        The index is 0-29, 32-61, 64-93.
+        You can look at the Log PPMS data Utilities within MultiVu for the index number.
+        For example 66 is the helium level on the Advanced items tab.
+        The Standard items tab is for 0-29 (Note that MultiVu as reordered them).
+        Diagnostic items is 32-61, Advanced items is 64-93.
+        For standard items, the order is the one as seen in the gpib documentation manual.
+           0: status
+           1: Temps
+           2: Field
+           3: Position
+           4-11: User Bridge #1 - 4 Res, Exc
+           12: Sig in 1
+           13: Sig in 2
+           14: Difital in - Aux, Ext
+           15-18: User Driver 1,2 Current, Power
+           19: Pressure
+           20-29: User mapped item
+        """
+        # This will produce a GPIB call on MultiVu (it is extended vs what the manual explains.)
+        #   The call is GETDAT? ind, fast, Page, 0
+        #   where ind, page are 2**index, 0 for index <32
+        #                       2**(index-32), 1 for 32<index<64
+        #                       2**(index-64), 2 for 32<index<64
+        # and the gpib reply is ret_index, timestamp, data
+        # when the data is available, otherwise
+        #         ret_index, timestamp
+        # where ret_index is ind + ret_base if data is available or just ret_base.
+        #  ret_base is 0 for page=0, 2**30 for page=1 and 2**31 for page=2.
+        if index < 0 or index > 93 or index in [30, 31, 62, 63]:
+            raise ValueError('Invalid index')
         ret = self._qdinst.GetPPMSItem(index, 0., fast)
         result, val = ret
         return val
