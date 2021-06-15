@@ -568,6 +568,39 @@ class agilent_rf_PSG(visaInstrument):
             self.mod_pulse_en = scpiDevice(':PULM:STATe', str_type=bool)
             self.mod_pulse_period = scpiDevice(':PULM:INTernal:PERiod', str_type=float, min=10e-9, max = 42, setget=True, doc="Pulse period in s.")
             self.mod_pulse_width = scpiDevice(':PULM:INTernal:PWIDth', str_type=float, min=10e-9, max = 42-20e-9, setget=True, doc="Pulse width duration in s.")
+        self.status_power = scpiDevice(getstr='STATus:QUEStionable:POWer:CONDition?', str_type=int, doc="""\
+            bit 0 (1): Reverse protection tripped
+                1 (2): Unleveled
+                2 (4): IQ mod Overdrive
+                3 (8): lowband detector fault
+            """)
+        self.status_freq = scpiDevice(getstr='STATus:QUEStionable:FREQuency:CONDition?', str_type=int, doc="""\
+            bit 0 (1): Synth unlocked
+                1 (2): 10 MHz ref unlocked
+                2 (4): 1 GHz ref unlocked
+                3 (8): baseband unlocked
+                5 (32): Sampler loop unlocked
+                6 (64): YO loop unlocked
+            """)
+        self.status_mod = scpiDevice(getstr='STATus:QUEStionable:MODulation:CONDition?', str_type=int, doc="""\
+            bit 0 (1): Modulation 1 undermod
+                1 (2): Modulation 1 overmod
+                2 (4): Modulation 2 undermod
+                3 (8): Modulation 2 overmod
+                4 (16): Modulation uncalibrated
+            """, autoinit=False)
+        self.status_cal = scpiDevice(getstr='STATus:QUEStionable:CALibration:CONDition?', str_type=int, doc=u"""\
+            bit 0 (1): I/Q calibration failure
+                1 (2): DCFM/DCΦM Zero Failure
+            """, autoinit=False)
+        self.status_base = scpiDevice(getstr='STATus:QUEStionable:CONDition?', str_type=int, doc="""\
+            bit 3 (8):  power summary bit
+                4 (16): oven cold
+                5 (32): frequency summary bit
+                7 (128): modulation summary bit
+                8 (256): calibration summary bit
+                9 (512): Self test error
+            """)
         self.alias = self.freq_cw
         # This needs to be last to complete creation
         super(agilent_rf_PSG,self)._create_devs()
