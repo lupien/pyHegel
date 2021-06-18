@@ -589,11 +589,11 @@ class agilent_rf_PSG(visaInstrument):
                 2 (4): Modulation 2 undermod
                 3 (8): Modulation 2 overmod
                 4 (16): Modulation uncalibrated
-            """, autoinit=False)
+            """)
         self.status_cal = scpiDevice(getstr='STATus:QUEStionable:CALibration:CONDition?', str_type=int, doc=u"""\
             bit 0 (1): I/Q calibration failure
                 1 (2): DCFM/DCΦM Zero Failure
-            """, autoinit=False)
+            """)
         self.status_base = scpiDevice(getstr='STATus:QUEStionable:CONDition?', str_type=int, doc="""\
             bit 3 (8):  power summary bit
                 4 (16): oven cold
