@@ -494,7 +494,8 @@ class agilent_rf_PSG(visaInstrument):
                                  'attenuation_db', 'attenuation_auto_en', 'amp_flatness_corr_en',
                                  'output_blanking_en', 'output_blanking_auto_en',
                                  'freq_mode', 'freq_cw', 'freq_start', 'freq_stop',
-                                 'freq_multiplier', 'freq_offset', 'freq_offset_en', 'freq_reference', 'freq_reference_en')
+                                 'freq_multiplier', 'freq_offset', 'freq_offset_en', 'freq_reference', 'freq_reference_en',
+                                 'status_freq', 'status_power', 'status_base', 'status_mod', 'status_cal')
         if self._installed_mod:
             gen += self._conf_helper('phase', 'mod_en', 'mod_am_en', 'mod_fm_en', 'mod_phase_en',
                                  'mod_am_freq', 'mod_am_shape', 'mod_am_depth', 'mod_am_noise_type')
