@@ -426,6 +426,7 @@ def _retry_wait(func, timeout, delay=0.01, progress_base='Wait', progress_timed=
     """
     this calls func() and stops when the return value is True
     or timeout seconds have passed.
+    With a negative timeout, the timeout duration is not shown in the progress message.
     delay is the sleep duration between attempts.
     progress_base is prefix when using status line (for timeout >= 1s)
                   when set to None, status line update is disabled.
@@ -434,12 +435,19 @@ def _retry_wait(func, timeout, delay=0.01, progress_base='Wait', progress_timed=
        to make sure to update the graphics.
     """
     ret = False
+    no_timeout_prog = False
+    if timeout < 0:
+        timeout = -timeout
+        no_timeout_prog = True
     dummy = (timeout < 1.) or (progress_base is None)
     with mainStatusLine.new(priority=100, timed=progress_timed, dummy=dummy) as progress:
         to = time.time()
         endtime = to + timeout
         if progress_base is not None:
-            progress_base = progress_base + ' %.1f/{:.1f}'.format(timeout)
+            if no_timeout_prog:
+                progress_base = progress_base + ' %.1f'
+            else:
+                progress_base = progress_base + ' %.1f/{:.1f}'.format(timeout)
         while True:
             ret = func()
             if ret:
