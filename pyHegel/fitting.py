@@ -577,6 +577,8 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, sel=None, fig=None, skip=False,
                see plotResult
     On return the active axis is the main one.
     """
+    x = np.asarray(x)
+    y = np.asarray(y)
     if fig:
         fig=plt.figure(fig)
     else:
@@ -632,10 +634,14 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, sel=None, fig=None, skip=False,
     if sel is not None:
         xsel = x[sel]
         ysel = y[sel]
-        if yerr is not None and np.asarray(yerr).size > 1:
-            yerrsel = yerr[sel]
+        if yerr is not None:
+            yerr_arr = np.asarray(yerr)
+            if yerr_arr.size > 1:
+                yerrsel = yerr_arr[sel]
+            else:
+               yerrsel = yerr
         else:
-            yerrsel = yerr
+           yerrsel = yerr
         _errorbar(ax1, x, y, yerr=yerr, fmt='.', label='_nolegend_', color=col_unsel_data)
     else:
         xsel = x
