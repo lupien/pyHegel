@@ -26,6 +26,7 @@ from __future__ import absolute_import
 import numpy as np
 import scipy
 import os.path
+import string
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
@@ -33,9 +34,9 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             quoted_string, quoted_list, quoted_dict, ChoiceLimits,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDev, ChoiceDevSwitch, ChoiceIndex,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
-                            decode_uint16_bin, _decode_block_base, decode_float64_2col,\
+                            decode_uint16_bin, _decode_block_base, _decode_block_auto, decode_float64_2col,\
                             decode_complex128, sleep, locked_calling, visa_wrap, _encode_block,\
-                            ChoiceSimple
+                            ChoiceSimple, _retry_wait, Block_Codec, ChoiceSimpleMap
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 register_usb_name('Agilent Technologies', 0x0957)
@@ -1379,7 +1380,165 @@ class infiniiVision_3000(visaInstrumentAsync):
 # The usb, is registered with the alias so the previous and next line makes all possible combinations.
 #@register_instrument('Agilent Technologies', 'N9030A', 'A.26.10', usb_vendor_product=[0x2A8D, 0x0D0B], alias='N9030A PXA', skip_add=True)
 @register_instrument('Agilent Technologies', 'N9030A', usb_vendor_product=[0x0957, 0x0D0B], alias='N9030A PXA')
-class agilent_EXA(visaInstrumentAsync):
+class agilent_EXA(visaInstrument):
+    """
+    This is a factory function that calls the proper classe, either
+      agilent_EXA_mode_SA
+    or
+     agilent_EXA_mode_noise_figure
+    with mode parameter at default of 'auto', it will select upon the current instrument mode.
+    Otherwise use one of 'SA' or 'NF'
+    """
+    def __new__(cls, *args, **kwargs):
+        mode = kwargs.pop('mode', 'auto')
+        instance = super(agilent_EXA, cls).__new__(cls, *args, **kwargs)
+        instance.__init__(*args, **kwargs)
+        if mode != 'auto':
+            instance.instrument_mode.set(mode)
+        actual_mode = instance.instrument_mode.get()
+        kwargs['skip_id_test'] = True
+        if actual_mode == 'sa':
+            use_cls = agilent_EXA_mode_SA
+        elif actual_mode == 'nfig':
+            use_cls = agilent_EXA_mode_noise_figure
+        else:
+            raise NotImplementedError('The EXA/PXA requested mode (%s) is not implemented'%mode)
+        return use_cls(*args, **kwargs)
+
+    def _create_devs(self):
+        ql = quoted_list(sep=', ')
+        instrument_mode_list = ql(self.ask(':INSTrument:CATalog?'))
+        # the list is name number, make it only name
+        instrument_mode_list = [i.split(' ')[0] for i in instrument_mode_list]
+        self.instrument_mode = scpiDevice(':INSTrument', choices=ChoiceStrings(*instrument_mode_list))
+        # This needs to be last to complete creation
+        super(agilent_EXA, self)._create_devs()
+
+class agilent_EXA_mode_base(visaInstrumentAsync):
+    def init(self, full=False):
+        self.Ro = 50
+        self.write(':format REAL,64')
+        self.write(':format:border swap')
+        super(agilent_EXA_mode_base, self).init(full=full)
+    @locked_calling
+    def _async_trig(self):
+        self.cont_trigger.set(False)
+        super(agilent_EXA_mode_base, self)._async_trig()
+    def abort(self):
+        self.write('ABORt')
+    def restart_averaging(self):
+        command = ':AVERage:CLEar'
+        self.write(command)
+    def user_reset(self):
+        self.write('SYSTem:PRESet:USER')
+    @locked_calling
+    def do_alignememt(self, mode='all'):
+        # could add external_mixer
+        """ mode should be one of 'all', 'not_RF', 'only_RF'. 'expired'
+            Returns True upon success.
+        """
+        if mode not in ['all', 'not_RF', 'only_RF', 'expired']: # , 'external_mixer']:
+            raise ValueError('Invalid alignement mode')
+        cmd = dict(all=':CALibration:ALL?',
+                   not_RF=':CALibration:NRF?',
+                   only_RF=':CALibration:RF?',
+                   expired=':CALibration:EXPired?',
+                   external_mixer=':CALibration:EMIXer?')[mode]
+        self.write(cmd)
+        _retry_wait(lambda: self.read_status_byte()&0x10,
+                    -10*60, delay=.1, progress_base='Alignemnt wait')
+        # let's assume the instrument output buffer is empty
+        #while not self.read_status_byte()&0x10: # MAV (Message available)
+        #    sleep(.5)
+        if int(self.read()) == 0:
+            return True
+        # returns is 1 when there is a failure.
+        return False
+    def status_operation(self):
+        oper = int(self.ask(':STATus:OPERation:CONDition?'))
+        chk_bit = lambda bitn: bool((oper>>bitn)&1)
+        res = {}
+        res.update(calibrating=chk_bit(0), settling=chk_bit(1), sweeping=chk_bit(3), measuring=chk_bit(4),
+                   wait_trig=chk_bit(5), wait_arm=chk_bit(6), paused=chk_bit(8), src_sweeping=chk_bit(9),
+                   dc_coupled=chk_bit(10), src_wait_trig=chk_bit(12))
+        res.update(all=oper)
+        return res
+
+    @locked_calling
+    def status_questionable(self, latched=False):
+        """
+        If latched is True, The latched values are read and they are also reset.
+        """
+        if latched:
+            term = ':EVENt?'
+        else:
+            term = ':CONDition?'
+        res = {}
+        chk_bit = lambda val, bitn: bool((val>>bitn)&1)
+        cal_needed = int(self.ask('STATus:QUEStionable:CALibration:EXTended:NEEDed'+term))
+        cal_skipped = int(self.ask('STATus:QUEStionable:CALibration:SKIPped'+term))
+        cal_fail = int(self.ask('STATus:QUEStionable:CALibration:EXTended:FAILure'+term))
+        cal = int(self.ask('STATus:QUEStionable:CALibration'+term))
+        freq = int(self.ask('STATus:QUEStionable:FREQuency'+term))
+        integ_signal = int(self.ask('STATus:QUEStionable:INTegrity:SIGNal'+term))
+        integ_uncal = int(self.ask('STATus:QUEStionable:INTegrity:UNCalibrated'+term))
+        integ = int(self.ask('STATus:QUEStionable:INTegrity'+term))
+        power = int(self.ask('STATus:QUEStionable:POWer'+term))
+        temp = int(self.ask('STATus:QUEStionable:TEMPerature'+term))
+        res.update(temp_all=temp, temp_oven_cold=chk_bit(temp, 0))
+        res.update(power_all=power, power_RPP_tripped=chk_bit(power, 0),
+                   power_src_unlevel=chk_bit(power, 1),
+                   power_src_LO_unlevel=chk_bit(power, 2),
+                   power_LO_unlevel=chk_bit(power, 3))
+        res.update(freq_all=freq)
+        res.update(integ_all=integ, integ_signal=integ_signal, integ_uncal=integ_uncal)
+        res.update(cal_all=cal, cal_needed=cal_needed, cal_failed=cal_fail, cal_skipped=cal_skipped)
+        failed = cal_fail or cal&0xfc
+        res.update(cal_rf_skipped=chk_bit(cal_skipped, 0),
+                   cal_align_rf_needed=chk_bit(cal, 12),
+                   cal_align_all_needed=chk_bit(cal, 14), cal_some_fail=failed)
+        return res
+
+    def _current_config_base_helper(self):
+        base_pre = self._conf_helper('instrument_mode', 'meas_mode', 'cont_trigger', 'calibration_auto', 'calibration_auto_mode',
+                                     'ext_ref', 'ext_ref_mode', 'input_coupling')
+        base_post = self._conf_helper('output_analog', 'auxif_sel', 'installed_options', 'installed_options_appmode')
+        base_post += ['status_operation=%r'%self.status_operation(), 'status_questionable=%r'%self.status_questionable()]
+        return base_pre, base_post
+
+    def _create_devs_pre(self):
+        # call this in subclass at start of _create_devs
+        self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
+        self.installed_options_appmode = scpiDevice(getstr=':SYSTem:APPLication:OPTion?', str_type=quoted_string())
+        ql = quoted_list(sep=', ')
+        instrument_mode_list = ql(self.ask(':INSTrument:CATalog?'))
+        # the list is name number, make it only name
+        instrument_mode_list = [i.split(' ')[0] for i in instrument_mode_list]
+        self.instrument_mode = scpiDevice(':INSTrument', choices=ChoiceStrings(*instrument_mode_list))
+        # This list depends on instrument mode: These are measurement type
+        self.meas_mode_list = scpiDevice(getstr=':CONFigure:CATalog?', str_type=ql)
+        # From the list: SAN=SANalyzer
+        self.meas_mode = scpiDevice(':CONFigure:{val}:NDEFault', ':CONFigure?')
+        return
+    def _create_devs(self):
+        self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
+        self.calibration_auto = scpiDevice(':CALibration:AUTO', choices=ChoiceStrings('ON', 'PARTial', 'OFF'))
+        self.calibration_auto_mode = scpiDevice(':CALibration:AUTO:MODE', choices=ChoiceStrings('ALL', 'NRF'))
+        self.output_analog = scpiDevice(':OUTPut:ANALog', choices=ChoiceStrings('OFF', 'SVIDeo', 'LOGVideo', 'LINVideo', 'DAUDio'))
+        self.auxif_sel = scpiDevice(':OUTPut:AUX', choices=ChoiceStrings('SIF', 'OFF')) # others could be AIF and LOGVideo if options are installed
+        self.ext_ref = scpiDevice(getstr=':ROSCillator:SOURce?', str_type=str)
+        self.ext_ref_mode = scpiDevice(':ROSCillator:SOURce:TYPE', choices=ChoiceStrings('INTernal', 'EXTernal', 'SENSe'))
+        self.input_coupling = scpiDevice(':INPut:COUPling', choices=ChoiceStrings('AC', 'DC'))
+
+        #following http://www.mathworks.com/matlabcentral/fileexchange/30791-taking-a-screenshot-of-an-agilent-signal-analyzer-over-a-tcpip-connection
+        #note that because of *OPC?, the returned string is 1;#....
+        self.snap_png = scpiDevice(getstr=r':MMEMory:STORe:SCReen "C:\TEMP\SCREEN.PNG";*OPC?;:MMEMory:DATA? "C:\TEMP\SCREEN.PNG"',
+                                   raw=True, str_type=lambda x:_decode_block_base(x[2:]), autoinit=False)
+        self.snap_png._format['bin']='.png'
+        # This needs to be last to complete creation
+        super(agilent_EXA_mode_base, self)._create_devs()
+
+class agilent_EXA_mode_SA(agilent_EXA_mode_base):
     """
     To use this instrument, the most useful devices are probably:
         fetch, readval
@@ -1399,17 +1558,6 @@ class agilent_EXA(visaInstrumentAsync):
     fetch_base includes the correct x scale. It can be different from the currently active
     x scale when not updating. x-scales are affected by freq offset.
     """
-    def init(self, full=False):
-        self.Ro = 50
-        self.write(':format REAL,64')
-        self.write(':format:border swap')
-        super(agilent_EXA, self).init(full=full)
-    @locked_calling
-    def _async_trig(self):
-        self.cont_trigger.set(False)
-        super(agilent_EXA, self)._async_trig()
-    def abort(self):
-        self.write('ABORt')
     def _current_config_trace_helper(self, traces=None):
         # traces needs to be a list or None
         just_one = False
@@ -1444,15 +1592,16 @@ class agilent_EXA(visaInstrumentAsync):
         if options.has_key('mkr'):
             self.current_mkr.set(options['mkr'])
         extra = []
-        base_conf = self._conf_helper('instrument_mode', 'meas_mode', 'attenuation_db', 'attenuation_auto', 'y_unit', 'uW_path_bypass',
-                                 'auxif_sel', 'preamp_en', 'preamp_band', 'cont_trigger',
-                                 'freq_span', 'freq_start', 'freq_center', 'freq_stop', 'freq_offset', 'input_coupling',
-                                 'gain_correction_db', 'ext_ref', 'ext_ref_mode', 'sweep_time', 'sweep_time_auto',
+        base_pre, base_post = self._current_config_base_helper()
+        base_conf = self._conf_helper('attenuation_db', 'attenuation_auto', 'y_unit', 'uW_path_bypass',
+                                 'preamp_en', 'preamp_band',
+                                 'freq_span', 'freq_start', 'freq_center', 'freq_stop', 'freq_offset',
+                                 'gain_correction_db', 'sweep_time', 'sweep_time_auto',
                                  'sweep_time_rule', 'sweep_time_rule_auto', 'sweep_type', 'sweep_type_auto', 'sweep_type_rule',
                                  'sweep_type_rule_auto', 'sweep_fft_width', 'sweep_fft_width_auto', 'sweep_npoints',
                                  'bw_res', 'bw_res_auto', 'bw_video', 'bw_video_auto', 'bw_video_auto_ratio', 'bw_video_auto_ratio_auto',
                                  'bw_res_span', 'bw_res_span_auto', 'bw_res_shape', 'bw_res_gaussian_type', 'noise_eq_bw',
-                                 'average_count', 'average_type', 'average_type_auto', options)
+                                 'average_en', 'average_count', 'average_type', 'average_type_auto', options)
         # trace
         if dev_obj in [self.readval, self.fetch]:
             traces_opt = self._fetch_traces_helper(options.get('traces'), options.get('updating'))
@@ -1468,7 +1617,7 @@ class agilent_EXA(visaInstrumentAsync):
             old_trace = self.current_trace.get()
             extra += self._current_config_trace_helper(self.marker_trace.getcache())
             self.current_trace.set(old_trace)
-        return extra+base_conf
+        return base_pre+extra+base_conf+base_post
     def _noise_eq_bw_getdev(self):
         """
         Using the bw_res and bw_res_shape this estimates the bandwith
@@ -1671,9 +1820,6 @@ class agilent_EXA(visaInstrumentAsync):
         if ret.shape[0]==1:
             ret=ret[0]
         return ret
-    def restart_averaging(self):
-        command = ':AVERage:CLEar'
-        self.write(command)
     def peak_search(self, mkr=None, next=False):
         """
         next can be True (same as finding next)
@@ -1716,34 +1862,21 @@ class agilent_EXA(visaInstrumentAsync):
         npts = self.sweep_npoints.get()
         return np.linspace(start+offset, stop+offset, npts)
     def _create_devs(self):
-        self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
-        ql = quoted_list(sep=', ')
-        instrument_mode_list = ql(self.ask(':INSTrument:CATalog?'))
-        # the list is name number, make it only name
-        instrument_mode_list = [i.split(' ')[0] for i in instrument_mode_list]
-        self.instrument_mode = scpiDevice(':INSTrument', choices=ChoiceStrings(*instrument_mode_list))
-        # This list depends on instrument mode: These are measurement type
-        self.meas_mode_list = scpiDevice(getstr=':CONFigure:CATalog?', str_type=ql)
-        # From the list: SAN=SANalyzer
-        self.meas_mode = scpiDevice(':CONFigure:{val}:NDEFault', ':CONFigure?')
-        self.attenuation_db = scpiDevice(':POWer:ATTenuation', str_type=float)
+        self._create_devs_pre()
+        self.attenuation_db = scpiDevice(':POWer:ATTenuation', str_type=float, setget=True)
         self.attenuation_auto = scpiDevice(':POWer:ATTenuation:AUTO', str_type=bool)
+        self.correction_impedance = scpiDevice('CORRection:IMPedance', str_type=float, choices=[50, 75])
         self.y_unit = scpiDevice('UNIT:POWer', choices=ChoiceStrings('DBM', 'DBMV', 'DBMA', 'DBUV', 'DBUA', 'DBUVM', 'DBUAM', 'DBPT', 'DBG', 'V', 'W', 'A'))
         self.uW_path_bypass = scpiDevice(':POWer:MW:PATH', choices=ChoiceStrings('STD', 'LNPath', 'MPBypass', 'FULL'))
-        self.auxif_sel = scpiDevice(':OUTPut:AUX', choices=ChoiceStrings('SIF', 'OFF')) # others could be AIF and LOGVideo if options are installed
         self.preamp_en = scpiDevice(':POWer:GAIN', str_type=bool)
         self.preamp_band = scpiDevice(':POWer:GAIN:BAND', choices=ChoiceStrings('LOW', 'FULL'))
-        self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
         minfreq = float(self.ask(':FREQ:START? min'))
         maxfreq = float(self.ask(':FREQ:STOP? max'))
         self.freq_start = scpiDevice(':FREQuency:STARt', str_type=float, min=minfreq, max=maxfreq-10.)
         self.freq_center = scpiDevice(':FREQuency:CENTer', str_type=float, min=minfreq, max=maxfreq)
         self.freq_stop = scpiDevice(':FREQuency:STOP', str_type=float, min=minfreq, max=maxfreq)
         self.freq_offset = scpiDevice(':FREQuency:OFFset', str_type=float, min=-500e-9, max=500e9)
-        self.input_coupling = scpiDevice(':INPut:COUPling', choices=ChoiceStrings('AC', 'DC'))
         self.gain_correction_db = scpiDevice(':CORREction:SA:GAIN', str_type=float)
-        self.ext_ref = scpiDevice(getstr=':ROSCillator:SOURce?', str_type=str)
-        self.ext_ref_mode = scpiDevice(':ROSCillator:SOURce:TYPE', choices=ChoiceStrings('INTernal', 'EXTernal', 'SENSe'))
         self.sweep_time = scpiDevice(':SWEep:TIME', str_type=float, min=1e-6, max=6000) # in sweep: 1ms-4000s, in zero span: 1us-6000s
         self.sweep_time_auto = scpiDevice(':SWEep:TIME:AUTO', str_type=bool)
         self.sweep_time_rule = scpiDevice(':SWEep:TIME:AUTO:RULes', choices=ChoiceStrings('NORMal', 'ACCuracy', 'SRESponse'))
@@ -1775,6 +1908,7 @@ class agilent_EXA(visaInstrumentAsync):
         self.average_count = scpiDevice(':AVERage:COUNt',str_type=int, min=1, max=10000)
         self.average_type = scpiDevice(':AVERage:TYPE', choices=ChoiceStrings('RMS', 'LOG', 'SCALar'))
         self.average_type_auto = scpiDevice(':AVERage:TYPE:AUTO', str_type=bool)
+        self.average_en = scpiDevice(':AVERage', str_type=bool)
         self.freq_span = scpiDevice(':FREQuency:SPAN', str_type=float, min=0, doc='You can select 0 span, otherwise minimum span is 10 Hz')
         # Trace dependent
         self.current_trace = MemoryDevice(1, min=1, max=6)
@@ -1818,20 +1952,18 @@ class agilent_EXA(visaInstrumentAsync):
         self.marker_function_band_right = devMkrOption(':CALCulate:MARKer{mkr}:FUNCtion:BAND:RIGHt', str_type=float, min=0)
         self.peak_search_continuous = devMkrOption(':CALCulate:MARKer{mkr}:CPSearch', str_type=bool)
 
+        self.noise_source_type = scpiDevice(':SOURce:NOISe:TYPE', choices=ChoiceStrings('NORMal', 'SNS'))
+        self.noise_source_en = scpiDevice(':SOURce:NOISe', str_type=bool)
+        self.noise_source_sns_attached = scpiDevice(getstr='SOURce:NOISe:SNS:ATTached?', str_type=bool)
+
         # initial hack for list sweep measurement
         self.fetch_list = scpiDevice(getstr=':FETCh:LIST?', str_type=decode_float64, autoinit=False, trig=True)
-
-        #following http://www.mathworks.com/matlabcentral/fileexchange/30791-taking-a-screenshot-of-an-agilent-signal-analyzer-over-a-tcpip-connection
-        #note that because of *OPC?, the returned string is 1;#....
-        self.snap_png = scpiDevice(getstr=r':MMEMory:STORe:SCReen "C:\TEMP\SCREEN.PNG";*OPC?;:MMEMory:DATA? "C:\TEMP\SCREEN.PNG"',
-                                   raw=True, str_type=lambda x:_decode_block_base(x[2:]), autoinit=False)
-        self.snap_png._format['bin']='.png'
 
         self._devwrap('noise_eq_bw', autoinit=.5) # This should be initialized after the devices it depends on (if it uses getcache)
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(agilent_EXA_mode_SA, self)._create_devs()
 # status byte stuff
 # There is a bunch of register groups:
 #  :status:operation
@@ -1839,6 +1971,364 @@ class agilent_EXA(visaInstrumentAsync):
 #  :status:questionable:power
 #  :status:questionable:frequency
 # ALSO see comments below agilent_PNAL
+
+
+class agilent_EXA_mode_noise_figure(agilent_EXA_mode_base):
+    """
+    To use this instrument, the most useful devices are probably:
+        readval
+        marker_x, marker_y
+        snap_png
+    Some commands are available:
+        abort
+        do_user_cal
+        conf_enr
+    The marker devices require a selected mkr
+    see current_mkr
+    They are both memory device on the computer. They are not changeable from
+    the hardware itself.
+
+    Note that there is a fetch device. However, if data is currently being taken, it will wait
+      for a fully new set of data before returning. It could therefore timeout. You can use it
+      when you are sure the sweep will be fast or is terminated. Otherwise use readval.
+    """
+    def init(self, full=False):
+        # When this is on, marker_y returns 2 values (nfigure, gain) instead of the attached graph.
+        self.write(':CALCulate:MARKer:COMPatible OFF')
+        super(agilent_EXA_mode_noise_figure, self).init(full=full)
+    def _async_trigger_helper(self):
+        self.write('INITiate:NFIGure;*OPC') # this assume trig_src is immediate for agilent multi
+    def _current_config_trace_helper(self, traces=None):
+        # traces needs to be a list or None
+        just_one = False
+        if not isinstance(traces, (list)):
+            just_one = True
+            traces = [traces]
+        trace_conf = ['current_trace', 'trace_type', 'trace_updating', 'trace_displaying',
+                                      'trace_detector', 'trace_detector_auto']
+        ret = []
+        for t in traces:
+            if t is not None:
+                self.current_trace.set(t)
+            tret = []
+            for n in trace_conf:
+                # follows _conf_helper
+                val = _repr_or_string(getattr(self, n).getcache())
+                tret.append(val)
+            if ret == []:
+                ret = tret
+            else:
+                ret = [old+', '+new for old, new in zip(ret, tret)]
+        if just_one:
+            ret = [n+'='+v for n, v in zip(trace_conf, ret)]
+        else:
+            ret = [n+'=['+v+']' for n, v in zip(trace_conf, ret)]
+        return ret
+
+    @locked_calling
+    def _current_config(self, dev_obj=None, options={}):
+        extra = []
+        base_pre, base_post = self._current_config_base_helper()
+        base_conf = self._conf_helper('attenuation_db', 'preamp_en', 'preamp_auto_en', 'freq_mode')
+        freq_mode = self.freq_mode.getcache()
+        freq_mode_ch = self.freq_mode.choices
+        if freq_mode in freq_mode_ch[['swept']]:
+            base_conf += self._conf_helper('freq_span', 'freq_start', 'freq_center', 'freq_stop', 'sweep_npoints')
+        elif freq_mode in freq_mode_ch[['fixed']]:
+            base_conf += self._conf_helper('freq_fixed')
+        base_conf += self._conf_helper('meas_time_auto', 'meas_time',
+                                 'bw_res',  'bw_res_auto', 'average_en', 'average_count')
+        base_conf += self._conf_helper('corr_enr_mode', 'corr_enr_common_table_en', 'corr_enr_pref',
+                                       'corr_enr_sns_autoload_en' , 'corr_enr_src_state', 'corr_enr_sns_attached',
+                                       'corr_tcold_mode', 'corr_tcold_user', 'corr_tcold_use_sns_en')
+        if self.corr_enr_mode.getcache() in self.corr_enr_mode.choices[['spot']]:
+            base_conf += self._conf_helper('corr_enr_spot_mode', 'corr_enr_spot_db', 'corr_enr_spot_thot')
+        else:
+            base_conf += self._conf_helper('corr_enr_id_meas',  'corr_enr_serial_meas', 'corr_enr_id_cal', 'corr_enr_serial_cal')
+        base_conf += self._conf_helper('cal_en', 'cal_type', 'cal_user_min_attenuation', 'cal_user_max_attenuation',
+                                       'cal_status',
+                                       'noise_source_settling',
+                                       'loss_before_mode', 'loss_before_dB', 'loss_before_temp',
+                                       'loss_after_mode', 'loss_after_dB', 'loss_after_temp',
+                                       'trace1_detector', 'trace2_detector')
+
+        # marker dependent
+        if dev_obj in [self.marker_x, self.marker_y]:
+            orig_mrk = self.current_mkr.get()
+            if options.has_key('mkr'):
+                self.current_mkr.set(options['mkr'])
+            extra = self._conf_helper('current_mkr', 'marker_mode', 'marker_x', 'marker_y', 'marker_ref', 'marker_trace',
+                                      'peak_search_continuous')
+            self.current_mkr.set(orig_mrk)
+        return base_pre+extra+base_conf+base_post + self._conf_helper(options)
+
+    def _fetch_getformat(self, **kwarg):
+        xaxis = kwarg.get('xaxis', True)
+        traces = kwarg.get('traces', None)
+        traces, fixed = self._fetch_traces_helper(traces)
+        if xaxis and not fixed:
+            multi = ['freq(Hz)']
+        else:
+            multi = []
+        for t in traces:
+            multi.append(t)
+        fmt = self.fetch._format
+        if not fixed:
+            multi = tuple(multi)
+            graph = []
+        else:
+            graph = range(len(traces))
+        fmt.update(multi=multi, graph=graph, xaxis=xaxis)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+    def _fetch_traces_helper(self, traces):
+        if isinstance(traces, (tuple, list)):
+            pass
+        elif traces is not None:
+            traces = [traces]
+        else: # traces is None
+            trace2local = {'NFIGure':'nfigure', 'NFACtor':'nfactor', 'GAIN':'gain', 'YFACtor':'yfactor', 'TEFFective':'teff', 'PHOT':'phot', 'PCOLd':'pcold'}
+            ch = self.trace1_detector.choices
+            def conv(trace):
+                for k, v in trace2local.items():
+                    if trace in ch[[k]]:
+                        return v
+            traces = [conv(self.trace1_detector.getcache()), conv(self.trace2_detector.getcache())]
+        for t in traces:
+            if t not in ['tcold', 'nfigure', 'nfactor', 'gain', 'teff',
+                         'phot', 'pcold',
+                         'nfigure_uncorr', 'nfactor_uncorr', 'yfactor', 'teff_uncorr',
+                         'phot_uncorr', 'pcold_uncorr']:
+                raise ValueError(self.perror('Invalid traces option'))
+        if self.freq_mode.getcache() in self.freq_mode.choices[['fixed']]:
+            fixed = True
+        else:
+            fixed = False
+        return traces, fixed
+    def _fetch_getdev(self, traces=None, xaxis=True):
+        """
+         Available options: traces, updating, unit, xaxis
+           -traces:  can be a single value or a list of values.
+                     Possible values are:
+                         'tcold', 'nfigure', 'nfactor', 'gain', 'teff',
+                         'phot', 'pcold',
+                         'nfigure_uncorr', 'nfactor_uncorr', 'yfactor', 'teff_uncorr',
+                         'phot_uncorr', 'pcold_uncorr'
+                    The units are either linear (for nfactor), dB, or K
+                        (for phot/pcold it is dB from –173.88 dBm/Hz)
+                    nfactor is the linear version of nfigure (which is in dB)
+                    teff is the noise temperature.
+                    When it is None (default), it will select the displayed traces format.
+            -xaxis:  when True(default), the first column of data is the xaxis
+                    This does not apply to freq_mode fixed
+        """
+        traces, fixed = self._fetch_traces_helper(traces)
+        base = 'FETCh:NFIGure:'
+        # could also use this. It always returns a single value (the last one for sweep or list).
+        # For fixed mode, the non-scalar request also returns a single value
+        #base = 'FETCh:NFIGure:SCALar:'
+        tables = {'tcold': 'TCOLd',
+                  'nfigure': 'CORRected:NFIGure',
+                  'nfactor': 'CORRected:NFACtor',
+                  'gain': 'CORRected:GAIN',
+                  'teff': 'CORRected:TEFFective',
+                  'phot': 'CORRected:PHOT',
+                  'pcold': 'CORRected:PCOLd',
+                  'nfigure_uncorr': 'UNCorrected:NFIGure',
+                  'nfactor_uncorr': 'UNCorrected:NFACtor',
+                  'yfactor': 'UNCorrected:YFACtor',
+                  'teff_uncorr': 'UNCorrected:TEFFective',
+                  'phot_uncorr': 'UNCorrected:PHOT',
+                  'pcold_uncorr': 'UNCorrected:PCOLd'
+                }
+        if xaxis and not fixed:
+            ret = [self.get_xscale()]
+        else:
+            ret = []
+        for trace in traces:
+            quest = base + tables[trace] + '?'
+            res = self.ask(quest, raw=True)
+            ret.append(_decode_block_auto(res))
+        ret = np.asarray(ret)
+        if fixed:
+            ret = ret.ravel()
+        if ret.shape[0]==1:
+            ret=ret[0]
+        return ret
+    def peak_search(self, mkr=None, next=False):
+        """
+        next can be True (same as finding next)
+           'left'  to find the left
+           'right' to find the next peak to the right
+        """
+        if mkr is None:
+            mkr = self.current_mkr.getcache()
+        if mkr<1 or mkr>4:
+            raise ValueError, self.perror('mkr need to be between 1 and 4')
+        if next not in [False, True, 'left', 'right']:
+            raise ValueError('Invalid next value')
+        if next == True:
+            next = ':NEXT'
+        elif next:
+            next = ':'+next
+        else:
+            next = ''
+        self.write('CALCulate:NFIGure:MARKer{mkr}:MAXimum'.format(mkr=mkr)+next)
+    @locked_calling
+    def get_xscale(self):
+        """
+        Returns the currently active x scale.
+        This scale can be recalculated but produces the same values (within floating
+        point errors) as the instrument.
+        """
+        mode = self.freq_mode.get()
+        if mode == 'swept':
+            start = self.freq_start.get()
+            stop = self.freq_stop.get()
+            npts = self.sweep_npoints.get()
+            x = np.linspace(start, stop, npts)
+        elif mode == 'list':
+            x = self.freq_list.get()
+        else: # mode  == 'fixed'
+            x = np.array([self.freq_fixed.get()])
+        return x
+
+    def set_corr_tcold_from_sns(self):
+        self.write('NFIGure:CORRection:TCOLd:USER:SET')
+
+    @locked_calling
+    def do_user_cal(self, min=None, max=None):
+        """ Do a calibration. If selected, min and max will change the calibration attenuation min, max.
+            Before doing the calibration, connect the noise source for calibration.
+            You should also have loaded the enr table.
+        """
+        if min is not None:
+            self.cal_user_min_attenuation.set(min)
+        if max is not None:
+            self.cal_user_min_attenuation.set(max)
+        self.write('NFIGure:CALibration:INITiate; *OPC?')
+        _retry_wait(lambda: self.read_status_byte()&0x10,
+                    -10*60, delay=.1, progress_base='Calibration wait')
+        self.read()
+
+    @locked_calling
+    def conf_enr(self, meas_id=None, meas_serial=None, meas_data=None, cal_id=None, cal_serial=None, cal_data=None):
+        """\
+            With no parameters, return the current config.
+            with only the meas entry set, enable corr_enr_common_table_en
+            The data should be an array of 2xN, where N is from 2 to 501.
+        """
+        if meas_id is meas_serial is meas_data is cal_id is cal_serial is cal_data is None:
+            data = _decode_block_auto(self.ask('NFIGure:CORRection:ENR:MEASurement:TABLe:DATA?'))
+            data.shape = (-1, 2)
+            res = dict(meas_id=self.corr_enr_id_meas.get(),
+                       meas_serial=self.corr_enr_serial_meas.get(),
+                       meas_data=data.T)
+            if not self.corr_enr_common_table_en.get():
+                data = _decode_block_auto(self.ask('NFIGure:CORRection:ENR:CALibration:TABLe:DATA?'))
+                data.shape = (-1, 2)
+                res2 = dict(cal_id=self.corr_enr_id_cal.get(),
+                           cal_serial=self.corr_enr_serial_cal.get(),
+                           cal_data=data.T)
+                res.update(res2)
+            return res
+        if cal_data is None:
+            self.corr_enr_common_table_en.set(True)
+        else:
+            self.corr_enr_common_table_en.set(False)
+        if meas_id is not None:
+            self.corr_enr_id_meas.set(meas_id)
+        if meas_serial is not None:
+            self.corr_enr_serial_meas.set(meas_serial)
+        if cal_id is not None:
+            self.corr_enr_id_cal.set(cal_id)
+        if cal_serial is not None:
+            self.corr_enr_serial_cal.set(cal_serial)
+        if meas_data is not None:
+            self.write('NFIGure:CORRection:ENR:MEASurement:TABLe:DATA {}'.format(_encode_block(meas_data.T.ravel(), sep=',')))
+        if cal_data is not None:
+            self.write('NFIGure:CORRection:ENR:CALibration:TABLe:DATA {}'.format(_encode_block(cal_data.T.ravel(), sep=',')))
+
+    def do_preselector_optimize(self):
+        self.write('NFIGure:PRESelector:OPTimize;*OPC?')
+        _retry_wait(lambda: self.read_status_byte()&0x10,
+                    -10*60, delay=.1, progress_base='Preselector optimization wait')
+        self.read()
+
+    def _create_devs(self):
+        self._create_devs_pre()
+        self.attenuation_db = scpiDevice(':NFIGure:POWer:ATTenuation', str_type=float, setget=True)
+        self.preamp_en = scpiDevice(':NFIGure:POWer:GAIN', str_type=bool)
+        self.preamp_auto_en = scpiDevice(':NFIGure:POWer:GAIN:AUTO', str_type=bool)
+        self.freq_mode = scpiDevice('NFIGure:FREQuency:MODE', choices=ChoiceStrings('SWEPt', 'FIXed', 'LIST'))
+        self.freq_start = scpiDevice('NFIGure:FREQuency:STARt', str_type=float)
+        self.freq_center = scpiDevice('NFIGure:FREQuency:CENTer', str_type=float)
+        self.freq_span = scpiDevice('NFIGure:FREQuency:SPAN', str_type=float, min=0, doc='You can select 0 span, otherwise minimum span is 10 Hz')
+        self.freq_stop = scpiDevice('NFIGure:FREQuency:STOP', str_type=float)
+        self.freq_fixed = scpiDevice('NFIGure:FREQuency:FIXed', str_type=float)
+        self.freq_list = scpiDevice('NFIGure:FREQuency:LIST:DATA', str_type=Block_Codec(sep=','))
+        self.meas_time = scpiDevice('NFIGure:SWEep:TIME', str_type=float, min=1e-6, max=6000) # in sweep: 1ms-4000s, in zero span: 1us-6000s
+        self.meas_time_auto = scpiDevice('NFIGure:SWEep:TIME:AUTO', str_type=bool)
+        self.sweep_npoints = scpiDevice('NFIGure:SWEep:POINts', str_type=int, min=2, max=501)
+        self.bw_res = scpiDevice('NFIGure:BANDwidth', str_type=float, min=1, max=8e6, setget=True)
+        self.bw_res_auto = scpiDevice('NFIGure:BANDwidth:AUTO', str_type=bool)
+        self.average_count = scpiDevice('NFIGure:AVERage:COUNt',str_type=int, min=1, max=10000)
+        self.average_en = scpiDevice('NFIGure:AVERage', str_type=bool)
+        self.corr_enr_mode = scpiDevice('NFIGure:CORRection:ENR:MODE', choices=ChoiceStrings('TABLe', 'SPOT'))
+        self.corr_enr_common_table_en = scpiDevice('NFIGure:CORRection:ENR:COMMon', str_type=bool)
+        self.corr_enr_id_meas = scpiDevice('NFIGure:CORRection:ENR:MEASurement:TABLe:ID:DATA', str_type=quoted_string())
+        self.corr_enr_id_cal = scpiDevice('NFIGure:CORRection:ENR:CALibration:TABLe:ID:DATA', str_type=quoted_string())
+        self.corr_enr_serial_meas = scpiDevice('NFIGure:CORRection:ENR:MEASurement:TABLe:SERial:DATA', str_type=quoted_string())
+        self.corr_enr_serial_cal = scpiDevice('NFIGure:CORRection:ENR:CALibration:TABLe:SERial:DATA', str_type=quoted_string())
+        self.corr_enr_pref = scpiDevice('NFIGure:CORRection:ENR:PREFerence', choices=ChoiceStrings('NORMal', 'SNS'))
+        self.corr_enr_sns_autoload_en = scpiDevice('NFIGure:CORRection:ENR:AUTO', str_type=bool)
+        self.corr_enr_src_state = scpiDevice('SOURce:NFIGure:NOISe:STATe', choices=ChoiceStrings('NORMal', 'ON', 'OFF'))
+        self.corr_enr_sns_attached = scpiDevice(getstr='NFIGure:CORRection:ENR:SNS:ATTached?', str_type=bool)
+        self.corr_enr_spot_mode = scpiDevice('NFIGure:CORRection:SPOT:MODE', choices=ChoiceStrings('ENR', 'THOT'))
+        self.corr_enr_spot_db = scpiDevice('NFIGure:CORRection:ENR:SPOT', str_type=float, min=-17, max=50)
+        self.corr_enr_spot_thot = scpiDevice('NFIGure:CORRection:ENR:THOT', str_type=float, min=0, max=29650000)
+        self.corr_tcold_mode = scpiDevice('NFIGure:CORRection:TCOLd', choices=ChoiceStrings('USER', 'DEFault'), doc='Default is 296.50 K')
+        self.corr_tcold_user = scpiDevice('NFIGure:CORRection:TCOLd:USER:VALue', str_type=float, min=0, max=29650000)
+        self.corr_tcold_use_sns_en = scpiDevice('NFIGure:CORRection:TCOLd:SNS', str_type=bool)
+        self.cal_en = scpiDevice('NFIGure:CALibration:STATe', str_type=bool)
+        self.cal_type = scpiDevice('NFIGure:CALibration:TYPE', choices=ChoiceStrings('USER', 'INTernal'))
+        self.cal_user_min_attenuation = scpiDevice('NFIGure:CALibration:USER:ATTenuation:MINimum', str_type=float, min=0, max=40)
+        self.cal_user_max_attenuation = scpiDevice('NFIGure:CALibration:USER:ATTenuation:MAXimum', str_type=float, min=0, max=40)
+        self.cal_status = scpiDevice(getstr='NFIG:CAL:COND?', doc='Returns either CAL, UNCAL, INTERPCAL or INTCAL for fully calibrated, not calibrated, interpolated calibration or internal calibration.')
+        self.noise_source_settling = scpiDevice('NFIGure:NSSTime', str_type=float, min=0, max=5.)
+        self.loss_before_mode = scpiDevice('NFIGure:CORRection:LOSS:BEFore:MODE', choices=ChoiceStrings('OFF', 'FIXed', 'TABLe'))
+        self.loss_before_dB = scpiDevice('NFIGure:CORRection:LOSS:BEFore:VALue', str_type=float, min=-100, max=100)
+        self.loss_before_table = scpiDevice(':NFIGure:CORRection:LOSS:BEFore:TABLe:DATA', str_type=Block_Codec(sep=','), autoinit=False, doc='The data is an array of freq1, loss1, freq2, loss2, ....')
+        self.loss_before_temp = scpiDevice('NFIGure:CORRection:TEMPerature:BEFore', str_type=float, min=0, max=29650000)
+        self.loss_after_mode = scpiDevice('NFIGure:CORRection:LOSS:AFTer:MODE', choices=ChoiceStrings('OFF', 'FIXed', 'TABLe'))
+        self.loss_after_dB = scpiDevice('NFIGure:CORRection:LOSS:AFTer:VALue', str_type=float, min=-100, max=100)
+        self.loss_after_table = scpiDevice('NFIGure:CORRection:LOSS:AFTer:TABLe:DATA', str_type=Block_Codec(sep=','), autoinit=False, doc='The data is an array of freq1, loss1, freq2, loss2, ....')
+        self.loss_after_temp = scpiDevice('NFIGure:CORRection:TEMPerature:AFTer', str_type=float, min=0, max=29650000)
+
+        trace_ch = ChoiceStrings('NFIGure', 'NFACtor', 'GAIN', 'YFACtor', 'TEFFective', 'PHOT', 'PCOLd')
+        self.trace1_detector = scpiDevice(':DISPlay:NFIGure:DATA:TRACe1', choices=trace_ch)
+        self.trace2_detector = scpiDevice(':DISPlay:NFIGure:DATA:TRACe2', choices=trace_ch)
+        # marker dependent
+        self.current_mkr = MemoryDevice(1, min=1, max=4)
+        def devMkrOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mkr=self.current_mkr)
+            app = kwarg.pop('options_apply', ['mkr'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.marker_mode = devMkrOption(':CALCulate:NFIGure:MARKer{mkr}:MODE', choices=ChoiceStrings('POSition', 'DELTa', 'OFF'))
+        self.marker_x = devMkrOption(':CALCulate:NFIGure:MARKer{mkr}:X', str_type=float, trig=True)
+        self.marker_y = devMkrOption(':CALCulate:NFIGure:MARKer{mkr}:Y', str_type=float, trig=True)
+        self.marker_ref = devMkrOption(':CALCulate:NFIGure:MARKer{mkr}:REFerence', str_type=int, min=1, max=4)
+        self.marker_trace = devMkrOption(':CALCulate:NFIGure:MARKer{mkr}:TRACe', choices=ChoiceSimpleMap(dict(TRAC1=1, TRAC2=2), filter=string.upper))
+        self.peak_search_continuous = devMkrOption('CALCulate:NFIGure:MARKer{mkr}:CPEak', str_type=bool)
+        self.peak_search_type = scpiDevice(':CALCulate:NFIGure:MARKer:SEARch:TYPE', choices=ChoiceStrings('MINimum', 'MAXimum', 'PTPeak'))
+        self.marker_coupled_en = scpiDevice(':CALCulate:NFIGure:MARKer:COUPle', str_type=bool)
+
+        self._devwrap('fetch', autoinit=False, trig=True)
+        self.readval = ReadvalDev(self.fetch)
+        self.alias = self.readval
+        # This needs to be last to complete creation
+        super(agilent_EXA_mode_noise_figure, self)._create_devs()
 
 
 #######################################################
