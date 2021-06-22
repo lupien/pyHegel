@@ -644,7 +644,7 @@ class agilent_SMU(visaInstrumentAsync):
                         fnc.compliance_val = 0.1 # V
             fnc.mode = val
             self._set_level_comp(ch, fnc)
-            self._reset_wrapped_cache(self._get_function_cached)
+        self._reset_wrapped_cache(self._get_enabled_state)
     def _function_checkdev(self, val, ch=None, compliance=None):
         ch = self._ch_helper(ch)
         BaseDevice._checkdev(self.function, val)
@@ -663,7 +663,6 @@ class agilent_SMU(visaInstrumentAsync):
         ch = self._ch_helper(None) # Channel already changed in check
         fnc = self._get_function_cached(ch)
         self._set_level_comp(ch, fnc, level=val)
-        self._reset_wrapped_cache(self._get_function_cached)
     def _level_checkdev(self, val, ch=None):
         ch = self._ch_helper(ch)
         fnc = self._get_function_cached(ch)
@@ -680,7 +679,6 @@ class agilent_SMU(visaInstrumentAsync):
         ch = self._ch_helper(None) # Channel already changed in check
         fnc = self._get_function_cached(ch)
         self._set_level_comp(ch, fnc, comp=val)
-        self._reset_wrapped_cache(self._get_function_cached)
     def _compliance_checkdev(self, val, ch=None):
         ch = self._ch_helper(ch)
         fnc = self._get_function_cached(ch)
@@ -705,6 +703,7 @@ class agilent_SMU(visaInstrumentAsync):
         root = dict(voltage='DV', current='DI')[mode]
         #  Use %.7e since instruments chop the resolution instead of rounding it (we get 99.99 instead of 100 sometimes)
         self.write(root+"%i,%s,%.7e,%.7e,%s,%s"%(ch, sRange, level, comp, sCompPolarity, sCompRange))
+        self._reset_wrapped_cache(self._get_function_cached)
 
     def _conv_range(self, signal='current'):
         if signal == 'current':
@@ -856,7 +855,7 @@ class agilent_SMU(visaInstrumentAsync):
         """
         quest, cmu_slot = self._measZ_helper_get_quest(range, 'Z')
         result_str = self.ask(quest)
-        return self._measZ_helper_ret_val(result_str, cmu_slot, 'Z')
+        return self._measZ_helper_ret_val(result_str, 'Z', cmu_slot)
 
     def _measZ_bias_getdev(self, range=None):
         """\
@@ -866,7 +865,7 @@ class agilent_SMU(visaInstrumentAsync):
         """
         quest, cmu_slot = self._measZ_helper_get_quest(range, 'bias')
         result_str = self.ask(quest)
-        return self._measZ_helper_ret_val(result_str, cmu_slot, 'bias')
+        return self._measZ_helper_ret_val(result_str, 'bias', cmu_slot)
 
     def _measZ_level_getdev(self, range=None):
         """\
@@ -876,7 +875,7 @@ class agilent_SMU(visaInstrumentAsync):
         """
         quest, cmu_slot = self._measZ_helper_get_quest(range, 'level')
         result_str = self.ask(quest)
-        return self._measZ_helper_ret_val(result_str, cmu_slot, 'level')
+        return self._measZ_helper_ret_val(result_str, 'level', cmu_slot)
 
     def _integration_set_helper(self, type='speed', mode=None, time=None):
         prev_result = self._get_avg_time_and_autozero()
@@ -1089,6 +1088,7 @@ class agilent_SMU(visaInstrumentAsync):
                 raise RuntimeError(self.perror('All channels are disabled. You should enable at least one.'))
         slots = [self._smu2slot[c] for c in channels]
         self.write('MM %i,%s'%(valid_modes[meas_mode], ','.join(map(str, slots))))
+        self._reset_wrapped_cache(self._get_tn_av_cm_fmt_mm)
         N_kwargs = len(kwargs)
         if meas_mode == 'stair' and N_kwargs > 0:
             self.conf_staircase(**kwargs)
@@ -1201,6 +1201,7 @@ class agilent_SMU(visaInstrumentAsync):
         self.write(base_str)
         self.write('WT %.7e,%.7e'%(conf.hold, conf.delay))
         self.write('WM 1,%i'%end_to_ch[conf.end_to])
+        self._reset_wrapped_cache(self._get_staircase_settings)
         conf.func = func
         self._calc_x_axis(conf)
 
@@ -1542,7 +1543,7 @@ class agilent_SMU(visaInstrumentAsync):
                                                See also range_meas_use_compliance_en. When that is enabled it will override this range on spot measurement
                                                and instead use the compliance range.
                                                This does not apply on the force channel. Measurement then use the force range.""")
-        self.range_meas_use_compliance_en = MemoryDevice_update(None, False, choices=[True, False], nch=Nmax)
+        self.range_meas_use_compliance_en = MemoryDevice_update(None, False, choices=[True, False], nch=Nmax, doc="It is a MemoryDevice (so cannot be read from instrument.)")
 
         self.remote_display_en = CommonDevice(self._get_display_settings,
                                               lambda v: v['remote_dsp_en'],
@@ -1608,7 +1609,7 @@ class agilent_SMU(visaInstrumentAsync):
 
         self.measurement_spot_en = MemoryDevice(True, choices=[True, False],
                                                 doc="""
-                                                With this False, you need to use set_mode
+                                                With this False, you need to use set_mode. It is a MemoryDevice (so cannot be read from instrument.)
                                                 """)
         if cmu_present:
             meas_mode_ch = ChoiceIndex({1:'RX', 2:'GB', 10:'ZRad', 11:'ZDeg', 20:'YRad', 21:'YDeg',
@@ -1657,8 +1658,8 @@ class agilent_SMU(visaInstrumentAsync):
             self.impedance_output_en =  CommonDevice(self._get_enabled_state,
                                                      lambda v: v[0][weak_self._cmu_slot-1],
                                                      lambda self,v: self.instr._impedance_en_helper(v), type=bool)
-            self.impedance_bias_meas_range = MemoryDevice_ch(0., choices=[0., 8, 12, 25], doc="""0. is for auto range""")
-            self.impedance_level_meas_range = MemoryDevice_ch(0., choices=[0., 16e-3, 32e-3, 64e-3, 125e-3, 250e-3], doc="""0. is for auto range""")
+            self.impedance_bias_meas_range = MemoryDevice(0., choices=[0., 8, 12, 25], doc="""0. is for auto range. It is a MemoryDevice (so cannot be read from instrument.)""")
+            self.impedance_level_meas_range = MemoryDevice(0., choices=[0., 16e-3, 32e-3, 64e-3, 125e-3, 250e-3], doc="""0. is for auto range. It is a MemoryDevice (so cannot be read from instrument.)""")
             self.measZ_last_status = MemoryDevice([0,0], multi=['prim_status', 'sec_status'], doc="""\
                 To read status for cmu, the bit field is:
                    bit 0 (  1): A/D converter overflowed.
