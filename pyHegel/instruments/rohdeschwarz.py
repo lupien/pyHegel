@@ -1013,6 +1013,17 @@ class rs_rto_scope(visaInstrumentAsync):
         self.generator_noise_level_vpp = Gen(getstr='WGENerator{ch}:MODulation:NLABsolute?', str_type=float)
         # TODO: calculate(mathematics), cursor?, fft
         #  Digital, PatternGen
+        self.current_math_channel = MemoryDevice(initval=1, choices=[1, 2, 3, 4])
+        def MathChannel(*args, **kwargs):
+            options = kwargs.pop('options', {}).copy()
+            options.update(mch=self.current_math_channel)
+            app = kwargs.pop('options_apply', ['mch'])
+            kwargs.update(options=options, options_apply=app)
+            return scpiDevice(*args, **kwargs)
+        self.fetch_calc = MathChannel(getstr='format real,32; CALCulate:MATH{mch}:DATA?', str_type=decode_float32, trig=True, autoinit=False, multi=tuple(['data']))
+        self.fetch_calc_header = MathChannel(getstr='CALCulate:MATH{mch}:DATA:HEADer?',
+                choices=ChoiceMultiple(['x_start', 'x_stop', 'n_sample', 'n_sample_per_interval'],
+                [float, float, int, int]), autoinit=False)
 
         self.roll_auto_en = scpiDevice('TIMebase:ROLL:ENABle', choices=ChoiceSimpleMap(dict(AUTO=True, OFF=False), filter=string.upper))
         self.roll_auto_time = scpiDevice('TIMebase:ROLL:MTIMe', str_type=float, setget=True, auto_min_max=True)
