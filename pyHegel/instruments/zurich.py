@@ -50,7 +50,7 @@ from ..instruments_base import BaseInstrument,\
                             sleep, locked_calling, ProxyMethod, _retry_wait, _repr_or_string
 from ..instruments_base import ChoiceIndex as _ChoiceIndex
 from ..instruments_registry import register_instrument
-from .logical import FunctionDevice
+from .logical import FunctionDevice, ScalingDevice
 from scipy.special import gamma
 
 def _get_zi_python_version(dev=None, host='localhost', port=8004):
@@ -450,14 +450,37 @@ class zurich_UHF(BaseInstrument):
             self.current_auxouts.set(c)
             xx =self._conf_helper('auxouts_output_sel', 'auxouts_demod_sel', 'auxouts_preoffset', 'auxouts_scale', 'auxouts_offset',
                                   'auxouts_limit_lower', 'auxouts_limit_upper', 'auxouts_value')
-            extra += ['auxout_%i=[%s]'%(c, ','.join(xx).replace('auxouts_',''))]
+            extra += ['auxouts_%i=[%s]'%(c, ','.join(xx).replace('auxouts_',''))]
         self.current_auxouts.set(aux_ch_orig)
 
-        base = self._conf_helper('async_wait', 'current_demod', 'current_osc', 'current_sigins', 'current_sigouts',
-                                 'osc_freq', 'sigins_en', 'sigins_ac_en', 'sigins_50ohm_en',
-                                 'sigins_range', 'sigins_scaling', 'sigins_aa_bw_en',
-                                 'sigouts_en', 'sigouts_offset', 'sigouts_range', 'sigouts_ampl_Vp', 'sigouts_50ohm_en',
-                                 'sigouts_autorange_en', 'sigouts_output_clipped', options)
+        orig_osc_ch = self.current_osc.get()
+        data = []
+        base = []
+        for c in self.current_osc.choices:
+            data.append(self.osc_freq.get(ch=c))
+        self.current_osc.set(orig_osc_ch)
+        base += ['osc_freq=%r'%data]
+        orig_out_ch = self.current_sigouts.get()
+        orig_out_demod = self.current_sigouts_demod.get()
+        for c in self.current_sigouts.choices:
+            self.current_sigouts.set(c)
+            xx = self._conf_helper('sigouts_en', 'sigouts_offset', 'sigouts_range', 'sigouts_50ohm_en',
+                                 'sigouts_autorange_en', 'sigouts_output_clipped')
+            data = []
+            for d in self.current_sigouts_demod.choices.choices[c]:
+                data.append(self.sigouts_ampl_Vp.get(demod=d))
+            xx.append('sigouts_ampl_Vp=%r'%data)
+            base +=  ['sigouts_%i=[%s]'%(c, ','.join(xx).replace('sigouts_',''))]
+        self.current_sigouts.set(orig_out_ch)
+        self.current_sigouts_demod.set(orig_out_demod)
+        orig_in_ch = self.current_sigins.get()
+        for c in self.current_sigins.choices:
+            self.current_sigins.set(c)
+            xx = self._conf_helper('sigins_en', 'sigins_ac_en', 'sigins_50ohm_en', 'sigins_range',
+                                   'sigins_scaling', 'sigins_aa_bw_en', 'sigins_diff_mode')
+            base +=  ['sigins_%i=[%s]'%(c, ','.join(xx).replace('sigins_',''))]
+        self.current_sigins.set(orig_in_ch)
+        base += self._conf_helper('async_wait', 'current_demod', 'current_osc', 'current_sigins', 'current_sigouts', options)
         return extra+base
     def _conv_command(self, comm):
         """
@@ -674,6 +697,13 @@ class zurich_UHF(BaseInstrument):
             return ret.values()[0]
         else:
             raise ValueError, 'Invalid value for t=%r'%t
+    def zi_help(self, path):
+        """\
+        Shows the zi help. The path can contain wildcards. It will show the help for all sub paths.
+        You could use something like: '/{dev}/sigins'
+        """
+        path = self._conv_command(path)
+        self._zi_daq.help(path)
     def timestamp_to_s(self, timestamp):
         """
         Using a timestamp from the instrument, returns
@@ -698,9 +728,7 @@ class zurich_UHF(BaseInstrument):
         system_devtype = self.ask('/{dev}/features/devtype', settings_only=False)[0]
         system_serial = self.ask('/{dev}/features/serial', settings_only=False)[0]
         #system_code = self.ask('/{dev}/features/code')[0] # not available in vs 13.10, in 14.02, 14.08 it returns an empty dict after a long timeout. It is a write only node.
-        system_options = self.ask('/{dev}/features/options', settings_only=False)[0].split('\n')
-        if system_options[-1] == '' and len(system_options) > 1:
-            system_options = system_options[:-1]
+        system_options = self.system_options
         system_options = ','.join(system_options)
         #system_analog_board_rev = self.ask('/{dev}/system/analogboardrevision')[0]
         #system_digital_board_rev = self.ask('/{dev}/system/digitalboardrevision')[0]
@@ -785,11 +813,14 @@ class zurich_UHF(BaseInstrument):
                     If you really want the measured frequency, add it to vals
                     in sweep mode (it is not necessarily the sweep variable)
             -vals:  is a list of strings of elements to return.
-                    The strings can be 'auxin0', 'auxin1', 'dio', 'frequency'
-                    'phase', 'timestamp', 'trigger', 'x', 'y'
-                    'r', 'deg' for lia mode. Defauts to ['x', 'y']
-                       Note that 'phase' is not the angle from x,y (use deg for that)
-                       but instead is the phase of the ref at the point in time
+                    For lia mode it can be:
+                       'auxin0', 'auxin1', 'dio', 'frequency'
+                       'phase', 'timestamp', 'trigger', 'x', 'y'
+                      which are the same as demod_data, but in addition can be:
+                        'r', 'deg'.
+                      Defaults to ['x', 'y']
+                        Note that 'phase' (here for lia) is not the angle from x,y (use deg for that)
+                        but instead is the phase of the ref at the point in time
                     For sweep mode defaults to ['x', 'y', 'r' ,'phase'] and the available strings are:
                       'auxin0', 'auxin0pwr', 'auxin0stddev',
                       'auxin1', 'auxin1pwr', 'auxin1stddev',
@@ -803,7 +834,7 @@ class zurich_UHF(BaseInstrument):
                       'phase', 'phasepwr', 'phasestddev',
                     where endings for any of x, y, r, phase, auxin0/1, frequency
                      the base name, here x, is the avg: sum_i x_i/N
-                                         xp           : sum_i (x_i**2)/N
+                                         xpwr         : sum_i (x_i**2)/N
                                          xstddev      : sqrt((1/(N-1)) sum_i (x_i - x)**2)
                                          xstddev is nan if count < 2.
                                            N is the average count number
@@ -885,13 +916,25 @@ class zurich_UHF(BaseInstrument):
             ret=ret[0]
         return ret
     def _create_devs(self):
+        system_options = self.ask('/{dev}/features/options', settings_only=False)[0].split('\n')
+        if system_options[-1] == '' and len(system_options) > 1:
+            system_options = system_options[:-1]
+        if 'MF' in system_options:
+            mf_present = True
+        else:
+            mf_present = False
+        self.system_options = system_options
         self.clockbase = ziDev(getstr='clockbase', str_type=float)
         self.fpga_core_temp = ziDev(getstr='stats/physical/fpga/temp', str_type=float)
         self.calib_required = ziDev(getstr='system/calib/required', str_type=bool)
         #self.mac_addr = ziDev('system/nics/0/mac/{rpt_i}', input_repeat=range(6), str_type=int)
         self.mac_addr = ziDev('system/nics/0/mac')
         self.current_demod = MemoryDevice(0, choices=range(8))
-        self.current_osc = MemoryDevice(0, choices=range(2))
+        if mf_present:
+            osc_choices = range(8)
+        else:
+            osc_choices = range(2)
+        self.current_osc = MemoryDevice(0, choices=osc_choices)
         self.current_sigins = MemoryDevice(0, choices=range(2))
         self.current_sigouts = MemoryDevice(0, choices=range(2))
         self.current_auxouts = MemoryDevice(0, choices=range(4))
@@ -914,7 +957,10 @@ class zurich_UHF(BaseInstrument):
         # demod_sinc_en did not do anything before 14.08. In 14.02 in made UHF crash. Now it works
         self.demod_sinc_en = ziDev_ch_demod('demods/{ch}/sinc', str_type=bool)
         self.demod_bypass_en = ziDev_ch_demod('demods/{ch}/bypass', str_type=bool, doc="Don't know what this does.")
-        self.demod_osc_src = ziDev_ch_demod(getstr='demods/{ch}/oscselect', str_type=int, choices=[0,1])
+        if mf_present:
+            self.demod_osc_src = ziDev_ch_demod('demods/{ch}/oscselect', str_type=int, choices=osc_choices)
+        else:
+            self.demod_osc_src = ziDev_ch_demod(getstr='demods/{ch}/oscselect', str_type=int, choices=osc_choices)
         self.demod_adc_src = ziDev_ch_demod('demods/{ch}/adcselect', str_type=int, choices=range(13))
         self.demod_rate = ziDev_ch_demod('demods/{ch}/rate', str_type=float, setget=True, doc="""
             The rate are power of 2 fractions of the base sampling rate.
@@ -936,6 +982,7 @@ class zurich_UHF(BaseInstrument):
         self.sigins_50ohm_en = ziDev_ch_sigins('sigins/{ch}/imp50', str_type=bool)
         self.sigins_aa_bw_en = ziDev_ch_sigins('sigins/{ch}/bw', str_type=bool, doc='Enables the antialiasing 600 MHz filer. It is 900 MHz when disabled.') # doc from web interface debug entry
         self.sigins_en = ziDev_ch_sigins('sigins/{ch}/on', str_type=bool)
+        self.sigins_diff_mode = ziDev_ch_sigins('sigins/{ch}/diff', choices=ChoiceIndex(['off', 'inverted', 'in1-2', 'in2-1']), input_type='int')
         self.sigins_max = ziDev_ch_sigins(getstr='sigins/{ch}/max', str_type=float)
         self.sigins_min = ziDev_ch_sigins(getstr='sigins/{ch}/min', str_type=float)
         self.sigins_scaling = ziDev_ch_sigins('sigins/{ch}/scaling', str_type=float)
@@ -951,32 +998,44 @@ class zurich_UHF(BaseInstrument):
         #     (syncfallings/3 and /7, syncrisings/3 and /7 have been removed in 14.08)
         #   Without the multi-frequency (MF) option signal output 1 (2) is connected to demod3 (7) see Juerg 22012014
         # Here I implement a general way to select sigouts ch and the demod ch.
-        # However, since on my system U don't have multi-frequency, I make the demod parameter invisible (using _demod)
-        # and I override the value so ch=0 gives demod 3 and ch=1 gives demod 7, always.
-        # Because of the override, current_sigouts_demod is not kept up to date, however that values
+        # Without MF: Because of the override, current_sigouts_demod is not kept up to date, however that values
         # ends up never to be used.
-        # To later implement multi-frequency should mostly invovle removing the override
-        # making demod visible (remove _) and adjusting out_demod
-        out_demod = ChoiceDevDep(self.current_sigouts, {0:[3], 1:[7]})
-        self.current_sigouts_demod = MemoryDevice(3, choices=out_demod)
-        # using _demod make it invisible in help
+        if mf_present:
+            all_ch = range(8)
+            out_demod_def = 0
+            out_demod = ChoiceDevDep(self.current_sigouts, {0:all_ch, 1:all_ch})
+            demod_name = 'demod'
+            demod_lim = all_ch
+        else:
+            out_demod = ChoiceDevDep(self.current_sigouts, {0:[3], 1:[7]})
+            out_demod_def = 3
+            # using _demod make it invisible in help
+            demod_name = '_demod'
+            demod_lim = (0,7)
+        self.current_sigouts_demod = MemoryDevice(out_demod_def, choices=out_demod)
         def ziDev_ch_demod_sigouts(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             #options.update(_demod=self.current_sigouts_demod)
-            options.update(_demod=self.current_sigouts_demod)
-            app = kwarg.pop('options_apply', ['ch', '_demod'])
+            options[demod_name] = self.current_sigouts_demod
+            app = kwarg.pop('options_apply', ['ch', demod_name])
             options_conv = kwarg.pop('options_conv', {}).copy()
-            def demod_override(base_val, conv_val):
-                index = self.current_sigouts.getcache()
-                return [3, 7][index]
-            options_conv.update(_demod=demod_override)
+            if not mf_present:
+                def demod_override(base_val, conv_val):
+                    index = self.current_sigouts.getcache()
+                    return [3, 7][index]
+                options_conv[demod_name] = demod_override
             options_lim = kwarg.pop('options_lim', {}).copy()
             # We need to prevent the use of the device check until the apply because
             # otherwise it will be checked before ch is changed (on which it depends)
-            options_lim.update(_demod=(0,7)) #This prevents the use of the device check until the apply
+            options_lim[demod_name] = demod_lim #This prevents the use of the device check until the apply
             kwarg.update(options=options, options_apply=app, options_conv=options_conv, options_lim=options_lim)
             return ziDev_ch_sigouts(*arg, **kwarg)
-        self.sigouts_ampl_Vp = ziDev_ch_demod_sigouts('sigouts/{ch}/amplitudes/{_demod}', str_type=float, doc='Amplitude A of sin wave (it goes from -A to +A without an offset')
+        self.sigouts_ampl_Vp = ziDev_ch_demod_sigouts('sigouts/{ch}/amplitudes/{%s}'%demod_name, str_type=float, setget=True,
+                                                      doc='Amplitude A of sine wave (it goes from -A to +A without an offset')
+        self.sigouts_ampl_Vrms = ScalingDevice(self.sigouts_ampl_Vp, 1./np.sqrt(2), quiet_del=True, only_val=True,
+                                               doc='Amplitude in Volt RMS. It is Vp/sqrt(2). See sigouts_ampl_Vp for options. ')
+        if mf_present:
+            self.sigouts_ampl_en = ziDev_ch_demod_sigouts('sigouts/{ch}/enables/{%s}'%demod_name, str_type=bool)
         self.sigouts_50ohm_en = ziDev_ch_sigins('sigouts/{ch}/imp50', str_type=bool)
         # TODO: triggers, SYSTEM(/EXTCLK), EXTREFS, status stats
         #       conn, inputpwas, outputpwas
