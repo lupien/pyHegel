@@ -32,7 +32,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceMultiple, ChoiceIndex, make_choice_list,\
                             ChoiceDevDep, ChoiceLimits,\
                             decode_float64, _decode_block_base, visa_wrap, locked_calling,\
-                            wait, resource_info, ProxyMethod
+                            wait, resource_info, ProxyMethod, float_as_fixed
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -1112,6 +1112,12 @@ class sr780_analyzer(visaInstrumentAsync):
 ##    Stanford Research DC205 Precision DC Voltage Source
 #######################################################
 
+# The regular float sometimes caused a
+#  Parameter buffer overflow
+# error.
+float_fix8 = float_as_fixed('%.8f')
+
+
 #@register_instrument('Stanford_Research_Systems', 'DC205', 'ver1.80')
 @register_instrument('Stanford_Research_Systems', 'DC205', alias='DC205 Precision Voltage Source')
 class sr_dc205(visaInstrument):
@@ -1234,18 +1240,18 @@ class sr_dc205(visaInstrument):
         self.range = scpiDevice('RNGE', choices=ranges, extra_check_func=extra_check_output_en)
         self.remote_sense_en = scpiDevice('SENS', str_type=bool)
         self.output_en =  scpiDevice('SOUT', str_type=bool)
-        level_choices = ChoiceDevDep(self.range, {1.: ChoiceLimits(-1.01, 1.01, str_type=float),
-                                                  10: ChoiceLimits(-10.1, 10.1, str_type=float),
-                                                  100:ChoiceLimits(-101., 101., str_type=float)})
+        level_choices = ChoiceDevDep(self.range, {1.: ChoiceLimits(-1.01, 1.01, str_type=float_fix8),
+                                                  10: ChoiceLimits(-10.1, 10.1, str_type=float_fix8),
+                                                  100:ChoiceLimits(-101., 101., str_type=float_fix8)})
         self.level = scpiDevice('VOLT', choices=level_choices, setget=True)
         self.is_overloaded = scpiDevice(getstr='OVLD?', str_type=bool)
         self.is_interlocked = scpiDevice(getstr='ILOC?', str_type=bool)
         self.is_overloaded_in_past = scpiDevice(getstr='DCEV? 0', str_type=bool)
 
         self.scan_range = scpiDevice('SCAR', choices=ranges)
-        self.scan_start = scpiDevice('SCAB', str_type=float, setget=True)
-        self.scan_stop = scpiDevice('SCAE', str_type=float, setget=True)
-        self.scan_time = scpiDevice('SCAT', str_type=float, setget=True, min=0.1, max=9999.9)
+        self.scan_start = scpiDevice('SCAB', str_type=float_fix8, setget=True)
+        self.scan_stop = scpiDevice('SCAE', str_type=float_fix8, setget=True)
+        self.scan_time = scpiDevice('SCAT', str_type=float_fix8, setget=True, min=0.1, max=9999.9)
         self.scan_updown_en = scpiDevice('SCAS', str_type=bool)
         self.scan_repeat_en = scpiDevice('SCAC', str_type=bool)
         self.scan_display_update_en = scpiDevice('SCAD', str_type=bool)
