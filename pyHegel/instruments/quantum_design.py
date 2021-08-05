@@ -82,10 +82,6 @@ class QuantumDesign_PPMS(BaseInstrument):
           ip address (dns name) of the server.
         port defaults to 11000.
         type is one of 'ppms',  'versalab', 'dynacool', svsm
-        To initialize a device, give it the device name as returned
-        by find_all_Ol(), or the integer to use as an index in that
-        list (defaults to 0).
-        Only one process at a time can access this type of instrument.
         """
         _delayed_imports()
         types_map = dict(ppms=QDTypes.PPMS, versalab=QDTypes.VersaLab, dynacool=QDTypes.DynaCool,
@@ -125,6 +121,12 @@ class QuantumDesign_PPMS(BaseInstrument):
         else:
             self._qdinst.Client.Close()
 
+    def init(self, full=False):
+        if self._qd_type == 'ppms':
+            # we inistialize the position_speed parameters to the one from the instrument.
+            pos, mode, slowdown = self.move_get_last_params()
+            self.position_speed.set(slowdown)
+
     def idn(self):
         return 'Quantum Design,%s,no_serial,no_firmware'%self._qd_type
 
@@ -132,7 +134,13 @@ class QuantumDesign_PPMS(BaseInstrument):
     def _current_config(self, dev_obj=None, options={}):
         extra = ['AssemblyVersion=%r'%_assembly_Version, 'address=%r'%(self._qd_address,),
                  'qd_type=%s'%self._qd_type]
-        base = self._conf_helper('temp', 'field', 'chamber', 'position', options)
+        base = self._conf_helper('temp', 'field', 'chamber', 'position',
+                                 'current_field_approach', 'current_field_mode', 'current_temp_approach',
+                                 'current_pos_mode', 'current_pos_axis', 'position_speed',
+                                 'field_ramp_wait_after', 'temp_ramp_wait_after',
+                                 'field_rate', 'temp_rate', options)
+        if self._qd_type == 'ppms':
+            base += ['move_config=%s'%self.move_config()]
         return extra+base
 
     def _temp_checkdev(self, val, approach=None, rate=None):
@@ -232,6 +240,8 @@ class QuantumDesign_PPMS(BaseInstrument):
         if speed is not None:
             self.position_speed.set(speed)
         speed = self.position_speed.get()
+        if self._qd_type == 'ppms':
+            self._move_set(val, mode, speed)
         mode = getattr(QDInstrumentBase.PositionMode, mode)
         ret = self._qdinst.SetPosition(axis, val, speed, mode)
 #        if ret != 0:
@@ -241,6 +251,9 @@ class QuantumDesign_PPMS(BaseInstrument):
         # mode, speed are present because of setget
         if axis is None:
             axis = self.current_pos_axis.get()
+        if self._qd_type == 'ppms':
+            #self.position_last_status.set('Unknown status for ppms pos')
+            return self._move_get_pos()
         ret = self._qdinst.GetPosition(axis, 0., 0) # temperature and status byref
         result, pos, status = ret
 #        if result != 0:
@@ -361,11 +374,83 @@ class QuantumDesign_PPMS(BaseInstrument):
         result, val = ret
         return val
 
+    def send_ppms_command(self, command):
+        """ Send a gpib command to the PPMS 6000. This is only valid for ppms instrument type """
+        if self._qd_type != 'ppms':
+            raise RuntimeError(self.perror('This is not a ppms instrument so send_ppms_command does not work.'))
+        # The last 2 values are for device and timeout but I think they are ignored (the ppms 6000 gpib address should be 15
+        # but any number seems to work).
+        # You can implement the same as get_ppms_item with: "$GETONE? 3"
+        ret = self._qdinst.SendPPMSCommand(command, 'default_return_message', 'default_err_message', 0, 0.)
+        result, ret_string, ret_error = ret
+        self._send_ppms_command_last_ret = (result, ret_error)
+        # I think result 0 or 1 are not errors. 1 is used when no value is returned
+        if result not in [0, 1]:
+            raise RuntimeError(self.perror('Error in send_pppms_command: %i: %s')%(result, ret_error))
+        return ret_string
+
     def field_is_stable(self, param_dict=None):
         return self._wait_condition(field=True)
 
     def temp_is_stable(self, param_dict=None):
         return self._wait_condition(temp=True)
+
+    def move_config(self, unit=None, units_per_step=None, range=None, index_switch_en=None):
+        """ Either all values are None (default) then it returns the current settings
+            or they are all given to set a new value.
+            Allowed units are: 'steps', 'deg', 'rad', 'mm', 'cm', 'mils', 'in', 'user'
+            This is only for ppms devices.
+            """
+        units = ['steps', 'deg', 'rad', 'mm', 'cm', 'mils', 'in', 'user']
+        if unit == units_per_step == range == index_switch_en == None:
+            ret = self.send_ppms_command('MOVECFG?')
+            unit, units_per_step, range, index_switch_en = ret.split(',')
+            unit = units[int(unit)]
+            units_per_step = float(units_per_step)
+            range = float(range)
+            index_switch_en = bool(int(index_switch_en))
+            return dict(unit=unit, units_per_step=units_per_step, range=range, index_switch_en=index_switch_en)
+        elif units is None or units_per_step is None or range is None or index_switch_en is None:
+            raise ValueError('Either all parameters are None or they all need to be specified.')
+        # Now we change the value
+        unit = units.index(unit)
+        self.send_ppms_command('MOVECFG %i %.8e %.8e %i'%(unit, units_per_step, range, int(index_switch_en)))
+
+    def _move_limits_getdev(self):
+        """ This returns position of limit switch and the maximum travel limit.
+            This is only for PPMS instruments """
+        ret = self.send_ppms_command('MOVELIM?')
+        return map(float, ret.split(','))
+
+    # These values are from the multivu GUI in steps unit.
+    _move_slowdown = [225, 210, 195, 180, 165, 150, 135, 120, 105, 90, 75, 60, 45, 30, 15]
+    def _move_set(self, pos, mode='MoveToPosition', slowdown=225):
+        """
+           mode options are the ones in self._pos_modes
+           slowdown in units of step/s. Allowed values are:
+                225, 210, 195, 180, 165, 150, 135, 120, 105, 90, 75, 60, 45, 30, 15
+           This is only valid for PPMS instruments.
+        """
+        if mode not in self._pos_modes:
+            raise ValueError(self.perror('Invalid mode'))
+        if slowdown not in self._move_slowdown:
+            raise ValueError(self.perror('Invalid slowdown value'))
+        self.send_ppms_command('MOVE %.8e %i %i'%(pos, self._pos_modes.index(mode), self._move_slowdown.index(slowdown)))
+
+    def move_get_last_params(self):
+        """
+        This returns the position, mode and slowdown parameter for the last move request.
+        This is only valid for PPMS instruments.
+        """
+        ret = self.send_ppms_command('MOVE?')
+        pos, mode, slowdown = ret.split(',')
+        pos = float(pos)
+        mode = int(mode)
+        slowdown = int(slowdown)
+        return pos, self._pos_modes[mode], self._move_slowdown[slowdown]
+
+    def _move_get_pos(self):
+        return self.get_ppms_item(3)
 
     def _create_devs(self):
         self.current_field_approach = MemoryDevice(self._field_approaches[0], choices=self._field_approaches)
@@ -377,7 +462,10 @@ class QuantumDesign_PPMS(BaseInstrument):
         self.temp_ramp_wait_after = MemoryDevice(10., min=0.)
         self.field_rate = MemoryDevice(100, min=0.1, max=10000, doc='Oe/s')
         self.temp_rate = MemoryDevice(2, min=0.01, max=20, doc='K/min')
-        self.position_speed = MemoryDevice(1.)
+        if self._qd_type == 'ppms':
+            self.position_speed = MemoryDevice(1., choices=self._move_slowdown, doc='Unis are steps/s.')
+        else:
+            self.position_speed = MemoryDevice(1.)
         self.field_last_status = MemoryDevice('not initialized', doc='This is updated when getting field')
         self.temp_last_status = MemoryDevice('not initialized', doc='This is updated when getting temp')
         self.position_last_status = MemoryDevice('not initialized', doc='This is updated when getting position')
@@ -394,7 +482,7 @@ class QuantumDesign_PPMS(BaseInstrument):
                           rate      in K/min (defaults to temp_rate)
                           approach  one of {}, defaults to current_temp_approach
                       """.format(self.current_field_approach.choices))
-        self._devwrap('position', setget=True, autoinit=False, doc="""\
+        self._devwrap('position', setget=True, doc="""\
                       Options:
                           axis      defaults to current_pos_axis
                           speed      (defaults to position_speed)
@@ -403,7 +491,7 @@ class QuantumDesign_PPMS(BaseInstrument):
         self._devwrap('chamber', setget=True, choices=self._chamber_cmds)
         self._devwrap('field_ramp', setget=True, autoinit=False)
         self._devwrap('temp_ramp', setget=True, autoinit=False)
+        if self._qd_type == 'ppms':
+            self._devwrap('move_limits', multi=['limit', 'max_travel'])
         # This needs to be last to complete creation
         super(QuantumDesign_PPMS, self)._create_devs()
-
-#TODO: check position stuff
