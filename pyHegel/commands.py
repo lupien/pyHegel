@@ -1690,24 +1690,25 @@ class Sequencer(object):
             Seq_Wait_i, Seq_Wait, Seq_Func, Seq_Funcs, Seq_End, Seq_Keep_Going
 
         For example:
-         Sequencer( Seq_Wait_i(10), Seq_Func(set, magnet.field_target_T, 1), magnet.is_stable, Seq_Wait(20) )
+         Sequencer( Seq_Wait_i(10), Seq_Func(set, magnet.field_target_T, 1), magnet.is_stable, Seq_Wait(20), Seq_End() )
         which will wait 10 iterations, then set the magnet to ramp to 1 T, then wait for the magnet to stop ramping and
-        finally wait 20 seconds.
+        finally wait 20 seconds, then End. The Seq_End at the end is optional.
         """
         self.operations = operations
         self.N = len(operations)
+        self.reset()
+    def reset(self):
         self.seq_no = 0
         self.seq_start_i = 0
         self.seq_start_time = 0
         self.seq_start_time_prev = 0
     def __call__(self, param_dict):
-        if self.seq_no >= self.N:
-            # we keep going when we reach the end of the sequence.
-            return False
         i = param_dict['i']
         if i == 0:
-            self.seq_no = 0
-            self.seq_start_i = 0
+            self.reset()
+        if self.seq_no >= self.N:
+            # we stop when we reach past the end of the sequence.
+            return False
         seq_start_first = False
         if i == self.seq_start_i:
             self.seq_start_time = time.time()
