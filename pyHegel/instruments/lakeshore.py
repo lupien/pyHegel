@@ -1875,8 +1875,8 @@ class lakeshore_625(visaInstrument):
         min_fieldkG = min_fieldT*10
         self.field_target_T = ScalingDevice(self.target_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT)
         self.field_target_kG = ScalingDevice(self.target_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG)
-        self.field_T = ScalingDevice(self.current_magnet, scaleT, quiet_del=True, doc='Field in magnet (even in persistent mode)')
-        self.field_kG = ScalingDevice(self.current_magnet, scalekG, quiet_del=True, doc='Field in magnet (even in persistent mode)')
+        self.field_T = ScalingDevice(self.current_magnet, scaleT, quiet_del=True, doc='Field in magnet (even in persistent mode)\n')
+        self.field_kG = ScalingDevice(self.current_magnet, scalekG, quiet_del=True, doc='Field in magnet (even in persistent mode)\n')
         rmin, rmax = .0001, self._max_ramp_rate
         if rmax is None:
             rmax = max_rate
@@ -1894,8 +1894,8 @@ class lakeshore_625(visaInstrument):
         self.ramp_rate_field_kG.choices.choices['s'].max = rmax*scalekG
         self.ramp_current.max = max_current
         self.ramp_current.min = min_current
-        self.ramp_field_T = ScalingDevice(self.ramp_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT, doc='Same options as ramp_current')
-        self.ramp_field_kG = ScalingDevice(self.ramp_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG, doc='Same optiosn as ramp_current')
+        self.ramp_field_T = ScalingDevice(self.ramp_current, scaleT, quiet_del=True, max=max_fieldT, min=min_fieldT, doc='Same options as ramp_current\n')
+        self.ramp_field_kG = ScalingDevice(self.ramp_current, scalekG, quiet_del=True, max=max_fieldkG, min=min_fieldkG, doc='Same optiosn as ramp_current\n')
         self.alias = self.field_T
         self._create_devs_helper() # to get logical devices return proper name (not name_not_found)
 
