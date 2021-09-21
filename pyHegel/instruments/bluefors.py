@@ -1246,6 +1246,9 @@ class bf_temperature_controller(BaseInstrument):
             data = np.array([meas['timestamp'], meas['temperature'], meas['resistance'], meas['reactance'], meas['settings_nr']])
             return data
 
+    _calibration_types =  {-1:'Slot empty', 1:'RT curve', 2:'XT curve (8 Hz)', 3:'XT curve (64 Hz)'}
+    _calibration_types_rev = {v:k for k, v in _calibration_types.items()}
+
     @locked_calling
     def get_calibration(self, curve_no, raw=False):
         """\
@@ -1258,13 +1261,49 @@ class bf_temperature_controller(BaseInstrument):
         if raw:
             return ret
         else:
-            types = {-1:'Slot empty', 1:'RT curve', 2:'XT curve (8 Hz)', 3:'XT curve (64 Hz)'}
+            types = self._calibration_types
             result = dict(name=ret['name'], sensor_model=ret['sensor_model'], type=types[ret['type']])
             data = np.array([ret['impedances'], ret['temperatures']])
             if len(data[0]) != len(data[1]) != ret['points']:
                 raise RuntimeError('Read the wrong number of points.')
             result['data'] = data
             return result
+
+    @locked_calling
+    def set_calibration(self, curve_no, data, force=False):
+        """\
+        data is either a dictionnary in the same format has get_calibration (with keys name, sensor_model, type, data)
+        a filename for a .340 calibration file or
+        None which will delete the calibration.
+        With force=False (default), an existing curve will not be overwritten.
+        For the dictionnary, the data item has dims (2, n) where 2 are the impedances and temperatures
+         and the impedances need to be in increasing order.
+        """
+        if curve_no<1 or curve_no>100:
+            raise ValueError('curve_no needs to be from 1 to 100.')
+        d = self.get_calibration(curve_no)
+        if not force and d['type'] != 'Slot empty':
+            raise RuntimeError('The calibration curve_no is already in use. You can use force=True to overwrite (BE CAREFUL)')
+        if data is None:
+            self.write('calibration-curve/remove', proto='post', calib_curve_nr=curve_no)
+        elif isinstance(data, basestring):
+            with open(data) as f:
+                d = f.read()
+            self.write('calibration-curve/file-upload', proto='post', calib_curve_nr=curve_no, file_contents=d)
+        else:
+            types = self._calibration_types_rev
+            d = data['data']
+            if d.ndim != 2:
+                raise ValueError('Data should have 2 dimensions')
+            if d.shape[0] != 2:
+                raise ValueError('Data should have a shape of (2, n) with the columns containing impedances and temperatures')
+            self.write('calibration-curve/update', proto='post', calib_curve_nr=curve_no,
+                        name=data['name'],
+                        sensor_model=data['sensor_model'],
+                        points=d.shape[1],
+                        impedances=list(d[0]),
+                        temperatures=list(d[1]),
+                        type=types[data['type']])
 
     def _enabled_chs_getdev(self):
         return [d['channel_nr'] for d in self._mqtt_listen_buffers['chs'] if d['active']]
