@@ -66,7 +66,8 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
            'batch', 'sleep', 'load', 'load_all_usb', 'load_all_gpib', 'test_gpib_srq_state',
            'task', 'top', 'kill', '_init_pyHegel_globals', '_faster_timer', 'quiet_KeyboardInterrupt',
            'Loop_Control',
-           'Sequencer', 'Seq_Wait_i', 'Seq_Wait', 'Seq_Func', 'Seq_Funcs', 'Seq_Keep_Going', 'Seq_End']
+           'Sequencer', 'Seq_Wait_i', 'Seq_Wait', 'Seq_Func', 'Seq_Funcs', 'Seq_Keep_Going', 'Seq_End',
+           'rsrc_manager_reload', 'rsrc_manager_get_object', 'rsrc_manager_info']
 
 # not in __all__: local_config _globaldict
 #             _Clock _update_sys_path writevec _get_dev_kw _getheaders
@@ -159,6 +160,9 @@ def help_pyHegel():
         quiet_KeyboardInterrupt
         _faster_timer
         test_gpib_srq_state
+        rsrc_manager_reload
+        rsrc_manager_get_object
+        rsrc_manager_info
         All the commands in util (savefig, merge_pdf, ...)
     Available instruments:
         sweep
@@ -2426,6 +2430,26 @@ def kill(n, force=False):
                 print 'Stopped task'
     except KeyboardInterrupt:
         print 'Breaking out of kill. Task could still finish...'
+
+def rsrc_manager_reload(lib=None):
+    """ Load a new resource manager.
+    None (the default) will try to load either the agilent visa implementation or the default one
+           depending on the try_agilent_first config value.
+    ''  will load the default visa implementation ('visa32.dll' on windows)
+    Other options, on windows, could be 'visa64.dll', 'nivisa64.dll' (for national instruments),
+     'agvisa32.dll' for agilent/keysight (can also use 'ktvisa32.dll'). All those
+     are in directory \Windows\System32
+    """
+    instruments_base._load_resource_manager(lib)
+
+def rsrc_manager_get_object():
+    """ returns the current resource manager object """
+    return instruments_base.rsrc_mngr
+
+def rsrc_manager_info():
+    """ returns all the properties of the current resource manager """
+    return rsrc_manager_get_object().get_lib_properties()
+
 
 # Differences with old version of Hegel
 #alias: replaced by assignement instr1=instr2, dev=instr.devx
