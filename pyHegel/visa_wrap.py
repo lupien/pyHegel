@@ -843,6 +843,8 @@ class old_resource_manager(object):
             except AttributeError:
                 self._is_agilent = False
         return self._is_agilent
+    def get_lib_properties(self):
+        return _get_lib_properties(vpp43.visa_library()._handle)
     @property
     def visalib(self):
         return vpp43.visa_library()
@@ -881,6 +883,8 @@ class new_WrapResourceManager(redirect_instr):
             except AttributeError:
                 self._is_agilent = False
         return self._is_agilent
+    def get_lib_properties(self):
+        return _get_lib_properties(self.visalib.lib._handle)
     def open_resource(self, resource_name, **kwargs):
         kwargs_after = {}
         for k in self.additional_properties:
