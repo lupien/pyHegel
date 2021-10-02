@@ -44,16 +44,19 @@ QDInstrumentBase = None
 QDInstrumentFactory = None
 QDTypes = None
 _assembly_Version = None
+CommunicationObjectFaultedException = None
 
 _delayed_imports_done = False
 
 def _delayed_imports():
     global _delayed_imports_done
     if not _delayed_imports_done:
-        global clr, EnumGetNames, EnumGetValues, QDInstrument, QDInstrumentBase, QDInstrumentFactory, QDTypes, _assembly_Version
+        global clr, EnumGetNames, EnumGetValues, QDInstrument, QDInstrumentBase, QDInstrumentFactory, QDTypes, _assembly_Version,\
+               CommunicationObjectFaultedException
         try:
             import clr
             from System import Enum
+            from System.ServiceModel import CommunicationObjectFaultedException
             EnumGetNames = Enum.GetNames
             EnumGetValues = Enum.GetValues
         except ImportError as exc:
@@ -159,8 +162,12 @@ class QuantumDesign_PPMS(BaseInstrument):
         rate = self.temp_rate.get()
         approach = getattr(QDInstrumentBase.TemperatureApproach, approach)
         ret = self._qdinst.SetTemperature(val, rate, approach)
-        if ret != 1: # This is different than the othes, at least on the instrument I tested
-            raise RuntimeError('temp set failed: %i'%ret)
+        if self._qd_type == 'ppms':
+            if ret != 1: # This is different than the othes, at least on the ppms instrument I tested
+                raise RuntimeError('temp set failed: %i'%ret)
+        else:
+            if ret != 0: # This is fine for a dynacool
+                raise RuntimeError('temp set failed: %i'%ret)
 
     def _temp_getdev(self, approach=None, rate=None):
         # approach, rate are present because of setget
@@ -254,10 +261,13 @@ class QuantumDesign_PPMS(BaseInstrument):
         if self._qd_type == 'ppms':
             #self.position_last_status.set('Unknown status for ppms pos')
             return self._move_get_pos()
-        ret = self._qdinst.GetPosition(axis, 0., 0) # temperature and status byref
+        try:
+            ret = self._qdinst.GetPosition(axis, 0., 0) # position and status byref
+        except CommunicationObjectFaultedException: # I get this exception on dynacool without the rotator installed.
+            ret = (0, -999, 0) # ok, -999 deg, 0=position unknown
         result, pos, status = ret
-#        if result != 0:
-#            raise RuntimeError('position get failed: %i'%result)
+        if result != 0:
+            raise RuntimeError('position get failed: %i'%result)
         status_s = self._pos_status[status]
         self.position_last_status.set(status_s)
         return pos
@@ -336,6 +346,22 @@ class QuantumDesign_PPMS(BaseInstrument):
     def _temp_ramp_getdev(self, approach=None, rate=None, wait=None):
         return self.temp.get()
 
+    def _position_ramp_checkdev(self, val, axis=None, mode=None, speed=None, wait=None):
+        self.position.check(val, axis=axis, mode=mode, speed=speed)
+    def _position_ramp_setdev(self, val, axis=None, mode=None, speed=None, wait=None):
+        """\
+            Asks for a position change and then wait for it to be stable.
+            Same options as position.
+            wait is extra time to wait after Quantum Design says the position is stable.
+              if None, uses position_ramp_wait_after
+        """
+        if wait is None:
+            wait = self.position_ramp_wait_after.get()
+        self.position.set(val, axis=axis, mode=mode, speed=speed)
+        self.wait_for(pos=True, extra_wait=wait)
+    def _position_ramp_getdev(self, approach=None, rate=None, wait=None):
+        return self.position.get()
+
     def get_ppms_item(self, index, fast=True):
         """\
         fast, when True (which is the default) returns the current value. When False
@@ -394,6 +420,9 @@ class QuantumDesign_PPMS(BaseInstrument):
 
     def temp_is_stable(self, param_dict=None):
         return self._wait_condition(temp=True)
+
+    def position_is_stable(self, param_dict=None):
+        return self._wait_condition(pos==True)
 
     def move_config(self, unit=None, units_per_step=None, range=None, index_switch_en=None):
         """ Either all values are None (default) then it returns the current settings
@@ -460,12 +489,16 @@ class QuantumDesign_PPMS(BaseInstrument):
         self.current_pos_axis = MemoryDevice("Horizontal Rotator")
         self.field_ramp_wait_after = MemoryDevice(10., min=0.)
         self.temp_ramp_wait_after = MemoryDevice(10., min=0.)
+        self.position_ramp_wait_after = MemoryDevice(10., min=0.)
         self.field_rate = MemoryDevice(100, min=0.1, max=10000, doc='Oe/s')
         self.temp_rate = MemoryDevice(2, min=0.01, max=20, doc='K/min')
         if self._qd_type == 'ppms':
             self.position_speed = MemoryDevice(1., choices=self._move_slowdown, doc='Unis are steps/s.')
         else:
-            self.position_speed = MemoryDevice(1.)
+            self.position_speed = MemoryDevice(1., doc="""\
+            For dynacool HighRes rotator, speed is .1 to 7 deg/s, values outside
+            this range will just use the limit. For lowRes the range is 3 to 30 degrees.
+            """)
         self.field_last_status = MemoryDevice('not initialized', doc='This is updated when getting field')
         self.temp_last_status = MemoryDevice('not initialized', doc='This is updated when getting temp')
         self.position_last_status = MemoryDevice('not initialized', doc='This is updated when getting position')
@@ -491,6 +524,7 @@ class QuantumDesign_PPMS(BaseInstrument):
         self._devwrap('chamber', setget=True, choices=self._chamber_cmds)
         self._devwrap('field_ramp', setget=True, autoinit=False)
         self._devwrap('temp_ramp', setget=True, autoinit=False)
+        self._devwrap('position_ramp', setget=True, autoinit=False)
         if self._qd_type == 'ppms':
             self._devwrap('move_limits', multi=['limit', 'max_travel'])
         # This needs to be last to complete creation
