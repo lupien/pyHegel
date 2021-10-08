@@ -1577,6 +1577,10 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
     def _snap_png_getdev(self, logo=True, time=True, color=True, portrait=False, pdf=False, window='all'):
         """ logo, time: set to True (default) to show in file
             color: set True (default) to enable color, False for gray
+                   for firmware >3 can also use:
+                    'user_def', 'dark_background', 'light_background', 'BW_line_styles',
+                    'BW_line_solid'
+                    BW means black and white
             portrait: set True for portrait orientation, False (default) for Landscape
             pdf: set to True to create pdf file, False (default) for png
             window: can be 'all' (default), 'active', 'hardcopy'
@@ -1587,6 +1591,11 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
                                   and not in background (windows desktop)
                     all can produce vector graph (in pdf) except for hardcopy
         """
+        color_sel = {True: 'ON', # for 3.12 same as PCLBackgrnd = Printer optimized color scheme with light background
+                    False: 'OFF', # for 3.12 same as PBWLstyles = Printer optimized black and white with different line styles
+                    'user_def': 'UDEFined', 'dark_background':'DBACkground',
+                    'light_background':'LBACkground', 'BW_line_styles':'BWLStyles',
+                    'BW_line_solid':'BWSolid'}
         def handle_option(val, setup_str, on='1', off='0'):
             if val:
                 self.write(setup_str+' '+on)
@@ -1597,6 +1606,10 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
             # single produces multiple pages except when saving to file
             #  where only the first page is output.
             raise ValueError(self.snap_png.perror('Invalid window.'))
+        if self._firmware_version < 3. and color not in [True, False]:
+            raise ValueError(self.snap_png.perror('Invalid color. Use one of %s'%([True, False])))
+        elif color not in color_sel:
+            raise ValueError(self.snap_png.perror('Invalid color. Use one of %s'%(color_sel.keys())))
         handle_option(logo, 'HCOPy:ITEM:LOGO')
         # marker info is a separate window where the markers information can be moved to
         # when enabling its output, it is added to another page.
@@ -1604,7 +1617,8 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         # This is the same problem for HCOPy:PAGE:WINDow single
         #handle_option(marker_info, 'HCOPy:ITEM:MLISt')
         handle_option(time, 'HCOPy:ITEM:TIME')
-        handle_option(color, 'HCOPy:PAGE:COLor')
+        # Note that for firmware 3.12, the only thing that seems to be affected is the logo.
+        self.write('HCOPy:PAGE:COLor '+color_sel[color])
         handle_option(portrait, 'HCOPy:PAGE:ORIentation', on='PORTrait', off='LANDscape')
         self.write('HCOPy:DESTination "MMEM"') # other options: DEFPRT
         self.write('HCOPy:PAGE:WINDow %s'%window)
@@ -1863,6 +1877,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         self.write('CALCulate{ch}:MARKer{mkr}:FUNCtion:EXECute {func}'.format(ch=ch, mkr=mkr, func=func))
 
     def _create_devs(self):
+        self._firmware_version = float(self.idn_split()['firmware'])
         opt = self.ask('*OPT?')
         self.available_options = opt.split(',')
         nports = int(self.ask('INSTrument:PORT:COUNt?'))
