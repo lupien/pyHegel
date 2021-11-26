@@ -3496,7 +3496,7 @@ class visaInstrument(BaseInstrument):
         """ reads data.
             The default is to read until an end is received in chunk_size blocks
              (if chunk_size is not given, uses the default chunk_size)
-            It then strips then termination characters unless raw is False.
+            It then strips then termination characters unless raw is True.
             When a count is given, it does not wait for an end. It
             only reads exactly count characters. It never strips the
             termination characters.
