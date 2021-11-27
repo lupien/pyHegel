@@ -260,6 +260,7 @@ class qdevil_qdac_ii(visaInstrument):
         self._devwrap('ramp')
         self._devwrap('fetch', autoinit=False)
         #TODO: handle sine, triangle, square, awg and the various triggers
+        #TODO: add resolution enhencement: SOURce:RENHancement
         #self._devwrap('level')
         self.alias = self.level
         super(qdevil_qdac_ii, self)._create_devs()
