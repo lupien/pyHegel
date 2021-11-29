@@ -26,7 +26,7 @@ from __future__ import absolute_import
 from ..instruments_base import visaInstrument,\
                             scpiDevice, MemoryDevice, ReadvalDev, BaseDevice,\
                             ChoiceBase, ChoiceStrings, ChoiceSimpleMap, _general_check,\
-                            decode_float64, locked_calling, visa_wrap,\
+                            decode_float64, locked_calling, visa_wrap, Choice_bool_OnOff,\
                             wait, release_lock_context, mainStatusLine, resource_info
 
 from ..instruments_registry import register_instrument
@@ -110,22 +110,25 @@ class qdevil_qdac_ii(visaInstrument):
         filters = []
         dc_modes = []
         slews = []
+        enhs = []
         measI_ranges = []
         measI_apertures = []
-        def get_append(quest_base, conv, arr):
+        def get_append(quest_base, conv):
             vals_str = self.ask(quest_base+' (@1:24)')
             vals = map(conv, vals_str.split(','))
-            arr.append(vals)
-        get_append('SOURce:VOLTage:LAST?', float, levels)
-        get_append('SOURce:RANGe?', self.output_range.choices, ranges)
-        get_append('SOURce:FILTer?', self.output_filter.choices, filters)
-        get_append('SOURce:VOLTage:MODE?', self.dc_mode.choices, dc_modes)
-        get_append('SOURce:VOLTage:SLEW?', float, slews)
-        get_append('SENSe:RANGe?', self.measI_range.choices, measI_ranges)
-        get_append('SENSe:APERture?', float, measI_apertures)
+            return vals
+        levels = get_append('SOURce:VOLTage:LAST?', float)
+        ranges = get_append('SOURce:RANGe?', self.output_range.choices)
+        filters = get_append('SOURce:FILTer?', self.output_filter.choices)
+        enhs = get_append('SOURce:RENHancement?', self.output_resolution_enhencement_en.choices)
+        dc_modes =get_append('SOURce:VOLTage:MODE?', self.dc_mode.choices)
+        slews = get_append('SOURce:VOLTage:SLEW?', float)
+        measI_ranges = get_append('SENSe:RANGe?', self.measI_range.choices)
+        measI_apertures = get_append('SENSe:APERture?', float)
         base = ['level=%r'%levels,
                 'output_range=%r'%ranges,
                 'output_filter=%r'%filters,
+                'output_resolution_enhencement_en=%r'%enhs,
                 'dc_mode=%r'%dc_modes,
                 'slew_dc=%r'%slews,
                 'measI_range=%r'%measI_ranges,
@@ -243,8 +246,10 @@ class qdevil_qdac_ii(visaInstrument):
         range_ch = ChoiceSimpleMap(dict(LOW=2., HIGH=10.), filter=string.upper)
         #TODO we might need to cache all the ranges (not just current_channel) to speed up level check
         self.output_range = devChannelOption('SOURce{ch}:RANGe', choices=range_ch)
-        self.output_filter = devChannelOption('SOURce{ch}:FILTer', choices=ChoiceStrings('DC', 'MEDium:', 'HIGH'),
+        self.output_filter = devChannelOption('SOURce{ch}:FILTer', choices=ChoiceStrings('DC', 'MEDium', 'HIGH'),
                                               doc="""DC is about 10 Hz, medium is about 10 kHz and high is about 230 kHz""")
+        # fw 5-0.9.26 does not accept 0/1 for boolean
+        self.output_resolution_enhencement_en = devChannelOption('SOURce{ch}:RENHancement', choices=Choice_bool_OnOff)
         self.dc_mode = devChannelOption('SOURce{ch}:VOLTage:MODE', choices=ChoiceStrings('FIXed', 'SWEep', 'LIST'))
         self.slew_dc = devChannelOption('SOURce{ch}:VOLTage:SLEW', choices=float_inf(min=20, max=2e7), doc='in V/s')
 
@@ -260,7 +265,6 @@ class qdevil_qdac_ii(visaInstrument):
         self._devwrap('ramp')
         self._devwrap('fetch', autoinit=False)
         #TODO: handle sine, triangle, square, awg and the various triggers
-        #TODO: add resolution enhencement: SOURce:RENHancement
         #self._devwrap('level')
         self.alias = self.level
         super(qdevil_qdac_ii, self)._create_devs()
