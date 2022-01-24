@@ -444,7 +444,17 @@ class MagnetController_SMC(visaInstrument):
         return _parse_magnet_return(s, [('A', 'rate', float), ('D', 'reverse', bool),
                                         ('T', 'Tunit', bool), ('B', 'lockout', bool),
                                         ('W', 'Htr_current', float), ('C', 'calibTpA', float)])
+
     def _setpoints_setdev(self, values):
+        """
+        When setting, use a dictionnary with keys of 'lower' and/or 'voltLim'
+        and with value the setpoint/limit you want (the sign of the value is lost).
+        Also use 'Tunit' key with value False/True.
+        For lower/upper you should also always set Tunit (if not it will use the current unit of the instrument.)
+        For set, any unspecified value is unchanged.
+        upper can only be set if password is given with the value 'IReallyKnowWhatIAmDoing'
+        """
+        password = values.pop('password', '!NoPasswordUsed!')
         Tunit = values.pop('Tunit', None)
         if Tunit is not None:
             self.write('T%i'%Tunit)
@@ -452,21 +462,19 @@ class MagnetController_SMC(visaInstrument):
             v = abs(v)
             if k == 'lower':
                 self.write('L%f'%v)
-            #elif k == 'upper':
-            #    self.write('U%f'%v)
             elif k == 'voltLim':
                 self.write('Y%f'%v)
+            elif k == 'upper':
+                if password == '!NoPasswordUsed!':
+                    print 'Password not given, changing upper skipped.'
+                    continue
+                if password != 'IReallyKnowWhatIAmDoing':
+                    raise ValueError(self.setpoints.perror('Invalid password provided, which is required to change upper.'))
+                self.write('U%f'%v)
             else:
                 raise NotImplementedError('Changing %s is not implememented'%k)
     @_repeat_getdev_dec
     def _setpoints_getdev(self, Tunit='default'):
-        """
-        When setting, use a dictionnary with keys of 'lower' and/or 'voltLim'
-        and with value the setpoint/limit you want (the sign of the value is lost).
-        Also use 'Tunit' key with value False/True.
-        For upper/lower you should also always set Tunit (if not it will use the current unit of the instrument.)
-        For set, any unspecified value is unchanged.
-        """
         s = self.ask('S')
         d = _parse_magnet_return(s, [ ('T', 'Tunit', bool), ('U', 'upper', float), ('L', 'lower', float),
                                      ('Y', 'voltLim', float)])
@@ -652,7 +660,7 @@ class MagnetController_SMC(visaInstrument):
         self._devwrap('operating_parameters', setget=True, allow_kw_as_dict=True,
                       choices=ChoiceMultiple(['rate', 'reverse', 'Tunit'], [float, bool, bool], allow_missing_keys=True))
         self._devwrap('setpoints', setget=True, allow_kw_as_dict=True,
-                      choices=ChoiceMultiple(['lower', 'voltLim', 'Tunit'], [float, float, bool], allow_missing_keys=True))
+                      choices=ChoiceMultiple(['lower', 'upper', 'voltLim', 'Tunit', 'password'], [float, float, float, bool, str], allow_missing_keys=True))
         self._devwrap('status', setget=True, allow_kw_as_dict=True,
                       choices=ChoiceMultiple(['pause', 'target', 'persistent'], [bool, float, bool], allow_missing_keys=True))
         self._devwrap('current_status')
