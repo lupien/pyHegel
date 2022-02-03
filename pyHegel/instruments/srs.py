@@ -63,6 +63,23 @@ class sr830_lia(visaInstrument):
     and it applies to the harmonic, not the fundamental (so it will not filter out the
     fundamental frequency when detecting harmonics.)
     """
+    def __init__(self, visa_addr, *args, **kwargs):
+        # This is required, otherwise, with the default write_termination of '\r\n'
+        # it does not set the IFC bit in the serial status.
+        kwargs['write_termination'] = '\n'
+        kwargs['read_termination'] = '\n'
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.asrl:
+            if 'parity' not in kwargs:
+                kwargs['parity'] = visa_wrap.constants.Parity.none
+            kwargs['data_bits'] = 8
+            if 'baud_rate' not in kwargs:
+                kwargs['baud_rate'] = 9600
+            if 'flow_control' not in kwargs:
+                kwargs['flow_control'] = visa_wrap.constants.VI_ASRL_FLOW_NONE
+            kwargs['read_termination'] = '\r'
+        super(sr830_lia, self).__init__(visa_addr, *args, **kwargs)
+
     # TODO setup snapsel to use the names instead of the numbers
     _snap_type = {1:'x', 2:'y', 3:'R', 4:'theta', 5:'Aux_in1', 6:'Aux_in2',
                   7:'Aux_in3', 8:'Aux_in4', 9:'Ref_Freq', 10:'Ch1', 11:'Ch2'}
