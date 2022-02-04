@@ -118,6 +118,7 @@ class sr830_lia(visaInstrument):
         sensesl = self.sens.choices.values
         sensesa = np.array(sensesl)
         i = 0
+        changed = False
         while True:
             i += 1
             if i > 10:
@@ -175,16 +176,20 @@ class sr830_lia(visaInstrument):
                 if verbose:
                     print 'Autogain going down to', new_sens
             self.sens.set(new_sens)
+            changed = True
             curr_sens = self.sens.getcache()
             wait(tc_factor*tc)
+        return changed
 
     @locked_calling
-    def auto_gain(self, wait_done=True, auto_skip=True, soft='auto', limit=None, extra_wait=0.):
+    def auto_gain(self, wait_done=True, auto_skip=True, soft='auto', limit=None, extra_wait='auto', always_wait=0.):
         """
            commands the auto gain.
            options:
             wait_done: to wait until it is finished before returning (only for hardware autogain).
-            extra_wait: is added after the change is done.
+            extra_wait: is added after the change is done if there was a change.
+                        If it is set as 'auto', it uses the async_wait time.
+            always_wait: is added at the end in all condition (even when skipping autogain)
             auto_skip: to not do auto_gain if the current value (r) is in the
                        within 20% to 100% of the range.
             soft: for using the software autogain (instead of the hardware one).
@@ -192,12 +197,19 @@ class sr830_lia(visaInstrument):
             limit: is a lower limit to use for autoranging (only when using soft)
                    It is necessary when the values is very close to 0.
                    When it is None, the value in device auto_gain_limit_default is used.
-           which can be 'x', 'y' or 'r'
+           Note that with the default extra_wait, you might end up waiting 2x async_wait
+           for readval (once before starting autogain and once after), and
+           1x async_wait for fetch. You will need to override the default to obtain
+           a different behavior.
         """
+        if extra_wait == 'auto':
+            extra_wait = self.async_wait.get()
         if auto_skip:
             curr_sens = self.sens.get()
             R = self.r.get()
             if R > .2*curr_sens and R < curr_sens:
+                if always_wait != 0.:
+                    wait(always_wait)
                 return
         if soft == 'auto':
             if limit is not None:
@@ -213,12 +225,17 @@ class sr830_lia(visaInstrument):
         if not soft:
             self.write('agan')
             if wait_done:
+                changed = True
                 while not self.read_status_byte()&2:
                     wait(.1)
+            else:
+                changed = False
         else:
-            self.auto_gain_soft(limit)
-        if extra_wait != 0.:
+            changed = self.auto_gain_soft(limit)
+        if changed and extra_wait != 0.:
             wait(extra_wait)
+        if always_wait != 0.:
+            wait(always_wait)
 
     def auto_offset(self, ch='x'):
         """
