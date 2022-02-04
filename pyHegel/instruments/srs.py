@@ -89,10 +89,14 @@ class sr830_lia(visaInstrument):
     def _check_snapsel(self,sel):
         if not (2 <= len(sel) <= 6):
             raise ValueError, 'snap sel needs at least 2 and no more thant 6 elements'
-    def _snap_getdev(self, sel=[1,2], norm=False):
+    def _snap_getdev(self, sel=[1,2], norm=False, autogain=None):
         # sel must be a list
         self._check_snapsel(sel)
         sel = map(str, sel)
+        if autogain is not None and autogain is not False:
+            if autogain is True:
+                autogain = {}
+            self.auto_gain(**autogain)
         data = decode_float64(self.ask('snap? '+','.join(sel)))
         if norm:
             amp = self.srclvl.get()
@@ -106,7 +110,116 @@ class sr830_lia(visaInstrument):
             headers = map(lambda x: x+'_norm', headers) + headers
         d = self.snap._format
         d.update(multi=headers, graph=range(len(sel)))
-        return BaseDevice.getformat(self.snap, sel=sel, **kwarg)
+        return BaseDevice.getformat(self.snap, sel=sel, norm=norm, **kwarg)
+
+    def auto_gain_soft(self, limit=None, verbose=False):
+        tc = self.timeconstant.get()
+        curr_sens = self.sens.get()
+        sensesl = self.sens.choices.values
+        sensesa = np.array(sensesl)
+        i = 0
+        while True:
+            i += 1
+            if i > 10:
+                if verbose:
+                    print 'Aborting autogain, too many iterations'
+                break
+            overload = self.status_byte.get() & 7 # any overload
+            R = self.r.get()
+            tc_factor = 2.
+            if verbose:
+                print 'Current R value, sens:', R, curr_sens
+            if overload:
+                if curr_sens == 1.:
+                    if verbose:
+                        print 'Aborting autogain due to overload on 1V'
+                    break
+                # Go up at most a factor of 1000.
+                ind = sensesl.index(curr_sens)
+                new_sens = sensesl[min(ind+9, len(sensesl)-1)]
+                tc_factor = 4.
+                if verbose:
+                    print 'Autoranging to 1 because of overload to', new_sens
+            elif R > 0.95*curr_sens:
+                if curr_sens == 1.:
+                    if verbose:
+                        print 'Aborting up autogain because already at 1V'
+                    break
+                # Go up one
+                ind = sensesl.index(curr_sens)
+                new_sens = sensesl[ind+1]
+                if verbose:
+                    print 'Autogain going up to', new_sens
+            else:
+                # find the best gain.
+                frac = 0.8
+                if limit is not None and R < frac*limit:
+                    new_sens = limit
+                else:
+                    new_sens = np.where(frac*sensesa-R > 0, sensesa, 1.).min()
+                    if new_sens > curr_sens:
+                        # This is to generate some hysteresis, we will only go up
+                        # if >0.95*curr_sens
+                        if verbose:
+                            print 'Autoranging prevented from going up.'
+                        break
+                if curr_sens/new_sens >= 1000.:
+                    # limit to a change of 1000.
+                    ind = sensesl.index(curr_sens)
+                    new_sens = sensesl[ind-9]
+                    tc_factor = 4.
+                if new_sens == curr_sens:
+                    if verbose:
+                        print 'Autogain reached best target of', new_sens
+                    break
+                if verbose:
+                    print 'Autogain going down to', new_sens
+            self.sens.set(new_sens)
+            curr_sens = self.sens.getcache()
+            wait(tc_factor*tc)
+
+    @locked_calling
+    def auto_gain(self, wait_done=True, auto_skip=True, soft='auto', limit=None, extra_wait=0.):
+        """
+           commands the auto gain.
+           options:
+            wait_done: to wait until it is finished before returning (only for hardware autogain).
+            extra_wait: is added after the change is done.
+            auto_skip: to not do auto_gain if the current value (r) is in the
+                       within 20% to 100% of the range.
+            soft: for using the software autogain (instead of the hardware one).
+                  'auto' selects software of the timeconstant is >1s (uses cached value) or a limit is given
+            limit: is a lower limit to use for autoranging (only when using soft)
+                   It is necessary when the values is very close to 0.
+                   When it is None, the value in device auto_gain_limit_default is used.
+           which can be 'x', 'y' or 'r'
+        """
+        if auto_skip:
+            curr_sens = self.sens.get()
+            R = self.r.get()
+            if R > .2*curr_sens and R < curr_sens:
+                return
+        if soft == 'auto':
+            if limit is not None:
+                soft = True
+            elif self.timeconstant.getcache() > 1.:
+                soft = True
+            else:
+                soft = False
+        if limit is not None:
+            self.sens.check(limit)
+        else:
+            limit = self.auto_gain_limit_default.get()
+        if not soft:
+            self.write('agan')
+            if wait_done:
+                while not self.read_status_byte()&2:
+                    wait(.1)
+        else:
+            self.auto_gain_soft(limit)
+        if extra_wait != 0.:
+            wait(extra_wait)
+
     def auto_offset(self, ch='x'):
         """
            commands the auto offset for channel ch
@@ -119,7 +232,7 @@ class sr830_lia(visaInstrument):
     def _current_config(self, dev_obj=None, options={}):
         #base = ['async_delay=%r'%self.async_delay]
         return self._conf_helper('async_wait', 'freq', 'sens', 'srclvl', 'harm', 'phase', 'timeconstant', 'filter_slope',
-                                 'sync_filter', 'reserve_mode',
+                                 'sync_filter', 'reserve_mode', 'auto_gain_limit_default',
                                  'offset_expand_x', 'offset_expand_y', 'offset_expand_r',
                                  'input_conf', 'grounded_conf', 'dc_coupled_conf', 'linefilter_conf',
                                  'reference_trigger', 'reference_mode',
@@ -131,6 +244,7 @@ class sr830_lia(visaInstrument):
         self.reference_mode = scpiDevice('fmod', choices=ChoiceIndex(['external', 'internal']))
         sens = ChoiceIndex(make_choice_list([2,5,10], -9, -1), normalize=True)
         self.sens = scpiDevice('sens', choices=sens, doc='Set the sensitivity in V (for currents it is in uA)')
+        self.auto_gain_limit_default = MemoryDevice(sens[0], choices=sens)
         self.oauxi1 = scpiDevice(getstr='oaux? 1', str_type=float)
         self.auxout1 = scpiDevice('AUXV 1,{val}', 'AUXV? 1', str_type=float, setget=True, min=-10.5, max=10.5)
         self.auxout2 = scpiDevice('AUXV 2,{val}', 'AUXV? 2', str_type=float, setget=True, min=-10.5, max=10.5)
@@ -189,6 +303,9 @@ class sr830_lia(visaInstrument):
             The numbers are taken from the following dictionnary:
                 %r
             The option norm when True return the data divided by the srclvl (and followed by raw data)
+            The option autogain can be either None or False to have no autogain, or
+                                   True or a dictionnary of parameters to call
+                                   auto_gain. True will use all the defaults of auto_gain.
                 """%self._snap_type)
         self.fetch = self.snap
         self.readval = ReadvalDev(self.fetch)
