@@ -1166,7 +1166,7 @@ class BaseDevice(object):
         # first handle options we don't want saved in 'options'
         graph = kwarg.pop('graph', None)
         extra_conf = kwarg.pop('extra_conf', None)
-        self._format['options'] = kwarg
+        self._format['options'] = kwarg.copy()
         #now handle the other overides
         bin = kwarg.pop('bin', None)
         xaxis = kwarg.pop('xaxis', None)
