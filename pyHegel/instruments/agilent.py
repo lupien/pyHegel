@@ -2369,9 +2369,11 @@ class agilent_EXA_mode_noise_figure(agilent_EXA_mode_base):
 ##    Agilent PNA-L network analyzer
 #######################################################
 
+#@register_instrument('Keysight Technologies', 'M9803A', 'A.15.20.07')
 #@register_instrument('Keysight Technologies', 'N5244B', 'A.13.95.09')
 #@register_instrument('Agilent Technologies', 'N5244A', 'A.09.50.13')
 #@register_instrument('Agilent Technologies', 'N5230C', 'A.09.20.08')
+@register_instrument('Keysight Technologies', 'M9803A', alias='M9803A PXIe VNA')
 @register_instrument('Keysight Technologies', 'N5244B', usb_vendor_product=[0x2A8D, 0x2B01], alias='N5244B PNAX')
 @register_instrument('Agilent Technologies', 'N5244A', usb_vendor_product=[0x0957, 0x0118], alias='N5244A PNAX')
 @register_instrument('Agilent Technologies', 'N5230C', usb_vendor_product=[0x0957, 0x0118], alias='N5230C PNA-L')
@@ -2784,6 +2786,9 @@ class agilent_PNAL(visaInstrumentAsync):
                                  'average_count', 'average_mode', 'average_en', options)
         return extra+base
     def _create_devs(self):
+        autominmax = False
+        if self.idn_split()['model'].upper().startswith('M980'):
+            autominmax = True
         self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
         self.self_test_results = scpiDevice(getstr='*tst?', str_type=int, doc="""
             Flag bits:
@@ -2841,7 +2846,8 @@ class agilent_PNAL(visaInstrumentAsync):
         self.edelay_length_unit = devCalcOption('CALC{ch}:CORR:EDEL:UNIT', choices=ChoiceStrings('METer', 'FEET', 'INCH'))
         self.edelay_length_medium = devCalcOption('CALC{ch}:CORR:EDEL:MEDium', choices=ChoiceStrings('COAX', 'WAVEguide'))
         self.edelay_time = devCalcOption('CALC{ch}:CORR:EDEL', str_type=float, min=-10, max=10, doc='Set delay in seconds')
-        data_format = ChoiceStrings('MLINear', 'MLOGarithmic', 'PHASe', 'UPHase', 'IMAGinary', 'REAL', 'POLar', 'SMITh', 'SADMittance', 'SWR', 'GDELay', 'KELVin', 'FAHRenheit', 'CELSius')
+        # at least for PXIe VNA, add: PPHase, IMPedance, VOLT, COMPlex
+        data_format = ChoiceStrings('MLINear', 'MLOGarithmic', 'PHASe', 'UPHase', 'IMAGinary', 'REAL', 'POLar', 'SMITh', 'SADMittance', 'SWR', 'GDELay', 'KELVin', 'FAHRenheit', 'CELSius', 'PPHase', 'IMPedance', 'VOLT', 'COMPlex')
         self.trace_format = devCalcOption('CALCulate{ch}:FORMat', choices=data_format) # needed when marker_format is 'DEF'
         self.calib_en = devCalcOption('CALC{ch}:CORR', str_type=bool)
         calib_data_options = dict(eterm='EDIR', p1=1, p2=1)
@@ -2882,17 +2888,17 @@ class agilent_PNAL(visaInstrumentAsync):
         self.average_mode = devChOption('SENSe{ch}:AVERage:MODE', choices=ChoiceStrings('POINt', 'SWEep'))
         self.average_en = devChOption('SENSe{ch}:AVERage', str_type=bool)
         self.coupling_mode = devChOption('SENSe{ch}:COUPle', choices=ChoiceStrings('ALL', 'NONE'), doc='ALL means sweep mode set to chopped (trans and refl measured on same sweep)\nNONE means set to alternate, imporves mixer bounce and isolation but slower')
-        self.freq_start = devChOption('SENSe{ch}:FREQuency:STARt', str_type=float, min=10e6, max=40e9)
-        self.freq_stop = devChOption('SENSe{ch}:FREQuency:STOP', str_type=float, min=10e6, max=40e9)
-        self.freq_center = devChOption('SENSe{ch}:FREQuency:CENTer', str_type=float, min=10e6, max=40e9)
-        self.freq_span = devChOption('SENSe{ch}:FREQuency:SPAN', str_type=float, min=0, max=40e9)
-        self.freq_cw= devChOption('SENSe{ch}:FREQuency:CW', str_type=float, min=10e6, max=40e9)
+        self.freq_start = devChOption('SENSe{ch}:FREQuency:STARt', str_type=float, min=10e6, max=40e9, auto_min_max=autominmax)
+        self.freq_stop = devChOption('SENSe{ch}:FREQuency:STOP', str_type=float, min=10e6, max=40e9, auto_min_max=autominmax)
+        self.freq_center = devChOption('SENSe{ch}:FREQuency:CENTer', str_type=float, min=10e6, max=40e9, auto_min_max=autominmax)
+        self.freq_span = devChOption('SENSe{ch}:FREQuency:SPAN', str_type=float, min=0, max=40e9, auto_min_max=autominmax)
+        self.freq_cw= devChOption('SENSe{ch}:FREQuency:CW', str_type=float, min=10e6, max=40e9, auto_min_max=autominmax)
         self.ext_ref = scpiDevice(getstr='SENSe:ROSCillator:SOURce?', str_type=str)
         self.npoints = devChOption('SENSe{ch}:SWEep:POINts', str_type=int, min=1)
         self.sweep_gen = devChOption('SENSe{ch}:SWEep:GENeration', choices=ChoiceStrings('STEPped', 'ANALog'))
         self.sweep_gen_pointsweep =devChOption('SENSe{ch}:SWEep:GENeration:POINtsweep', str_type=bool, doc='When true measure rev and fwd at each frequency before stepping')
         self.sweep_fast_en =devChOption('SENSe{ch}:SWEep:SPEed', choices=ChoiceStrings('FAST', 'NORMal'), doc='FAST increases the speed of sweep by almost a factor of 2 at a small cost in data quality')
-        self.sweep_time = devChOption('SENSe{ch}:SWEep:TIME', str_type=float, min=0, max=86400.)
+        self.sweep_time = devChOption('SENSe{ch}:SWEep:TIME', str_type=float, min=0, max=86400., setget=True)
         self.sweep_type = devChOption('SENSe{ch}:SWEep:TYPE', choices=ChoiceStrings('LINear', 'LOGarithmic', 'POWer', 'CW', 'SEGMent', 'PHASe'))
         self.x_axis = devChOption(getstr='SENSe{ch}:X?', raw=True, str_type=decode_float64, autoinit=False, doc='This gets the default x-axis for the channel (some channels can have multiple x-axis')
         self.calc_x_axis = devCalcOption(getstr='CALC{ch}:X?', raw=True, str_type=decode_float64, autoinit=False, doc='Get this x-axis for a particular trace.')
@@ -2902,7 +2908,7 @@ class agilent_PNAL(visaInstrumentAsync):
         self.calc_sdata = devCalcOption(getstr='CALC{ch}:DATA? SDATA', raw=True, str_type=decode_complex128, autoinit=False, trig=True)
         self.calc_fmem = devCalcOption(getstr='CALC{ch}:DATA? FMEM', raw=True, str_type=decode_float64, autoinit=False)
         self.calc_smem = devCalcOption(getstr='CALC{ch}:DATA? SMEM', raw=True, str_type=decode_complex128, autoinit=False)
-        self.current_mkr = MemoryDevice(1, min=1, max=10)
+        self.current_mkr = MemoryDevice(1, min=1, max=15) # was 10, now 15 for PXIe VNA
         def devMkrOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(mkr=self.current_mkr)
@@ -2939,7 +2945,7 @@ class agilent_PNAL(visaInstrumentAsync):
         self.power_dbm_port2 = devChOption(':SOURce{ch}:POWer2', str_type=float)
         self.power_mode_port1 = devChOption(':SOURce{ch}:POWer1:MODE', choices=ChoiceStrings('AUTO', 'ON', 'OFF'))
         self.power_mode_port2 = devChOption(':SOURce{ch}:POWer2:MODE', choices=ChoiceStrings('AUTO', 'ON', 'OFF'))
-        self.remote_cwd = scpiDevice('MMEMory:CDIRectory', str_type=quoted_string(),
+        self.remote_cwd = scpiDevice('MMEMory:CDIRectory', str_type=quoted_string(), autoinit=False,
                                      doc=r"""
                                           instrument default is C:/Program Files/Agilent/Network Analyzer/Documents
                                           You can use / (if you are using \, make sure to use raw string r"" or
