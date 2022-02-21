@@ -289,7 +289,7 @@ class QuantumDesign_PPMS(BaseInstrument):
         """\
             during the pre_check_timeout waits to get the check parameters to return False
             (It sometimes takes a long time for the field sweep to start)
-            The checks during check_timeout time (if None, it nevers gives up)
+            Then checks during check_timeout time (if None, it nevers gives up)
             Then once the check is passed, waits the extra_wait.
             If it times out during check_timeout, it can continue with the wait or raise an exception
              depending on value of exc_on_timeout
@@ -421,8 +421,16 @@ class QuantumDesign_PPMS(BaseInstrument):
     def temp_is_stable(self, param_dict=None):
         return self._wait_condition(temp=True)
 
+    @locked_calling
+    def temp_is_near_or_stable(self, param_dict=None):
+        """ Returns True if the temperature status is either near or stable """
+        # update status
+        self.temp.get()
+        state = self.temp_last_status.get()
+        return state in ['Near', 'Stable']
+
     def position_is_stable(self, param_dict=None):
-        return self._wait_condition(pos==True)
+        return self._wait_condition(pos=True)
 
     def move_config(self, unit=None, units_per_step=None, range=None, index_switch_en=None):
         """ Either all values are None (default) then it returns the current settings
