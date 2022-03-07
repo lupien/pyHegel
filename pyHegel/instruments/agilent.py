@@ -2447,6 +2447,10 @@ class agilent_PNAL(visaInstrumentAsync):
         if not ret:
             # This cycle is not finished
             return ret
+        if not self._async_last_esr&1:
+            # At least HiSlip on M9046A on Keysight IO 18.2.27313.1 I think it times out (~20s) and returns and event
+            # even if none was there (Wireshark does not show the SRQ)
+            return False
         # cycle is finished
         self._trig_reps_current += 1
         if self._trig_reps_current < self._trig_reps_total:
