@@ -306,8 +306,9 @@ class lakeshore_336(visaInstrument):
     _passwd_check = "IknowWhatIamDoing"
     def __init__(self, visa_addr, *args, **kwargs):
         """
-        option write_with_opc can have value, True, False, or 'auto' which enables it
-          for tcpip and usb connection.
+        options:
+         write_with_opc: can have value, True, False, or 'auto' (default)
+            which enables it for tcpip and usb connection.
         """
         self._write_with_opc = kwargs.pop('write_with_opc', 'auto')
         rsrc_info = resource_info(visa_addr)
@@ -361,7 +362,13 @@ class lakeshore_336(visaInstrument):
             in_type.append(self.input_type.get(ch=c))
             crv_i = self.input_crv.get()
             in_crv.append(crv_i)
-            in_crv_hdr.append(self.curve_hdr.get(ch=crv_i))
+            if crv_i != 0:
+                crv_hdr = self.curve_hdr.get(ch=crv_i)
+            else:
+                crv_hdr = self.curve_hdr.get(ch=1)
+                crv_hdr.name = 'None'
+                crv_hdr.serial_no = ''
+            in_crv_hdr.append(crv_hdr)
             in_t.append(self.t.get())
             in_name.append(self.input_name.get())
             in_diode_current.append(self.input_diode_current.get())
@@ -472,6 +479,8 @@ class lakeshore_336(visaInstrument):
                    by default (None), all active channels are used
                    possible channels names are:
                        A, B, C, D
+                   or (with 3062 scanner option)
+                       A, B, C, D1, D2, D3, D4, D5
         """
         ch = self._fetch_helper(ch)
         ret = []
@@ -479,7 +488,7 @@ class lakeshore_336(visaInstrument):
         ts,ss = all_ts.split(';')
         ts = [float(v) for v in ts.split(',')]
         ss = [float(v) for v in ss.split(',')]
-        ch_ind = dict(A=0, B=1, C=2, D=3)
+        ch_ind = dict(A=0, B=1, C=2, D=3, D1=3, D2=4, D3=5, D4=6, D5=7)
         for c in ch:
             i = ch_ind[c.upper()]
             ret.append(ts[i])
@@ -722,11 +731,16 @@ class lakeshore_336(visaInstrument):
         else: #GPIB
             self._write_write_wait = 0.0
         #TODO: handle 3062 option card (adds channels D1 - D5)
-        #ch_Base = ChoiceStrings('A', 'B', 'C', 'D', 'D2', 'D3', 'D4', 'D5')
-        #ch_Base = ChoiceStrings('A', 'B', 'C', 'D1', 'D2', 'D3', 'D4', 'D5')
-        ch_Base = ChoiceStrings('A', 'B', 'C', 'D')
-        #ch_sel = ChoiceIndex('none', 'A', 'B', 'C', 'D', 'D2', 'D3', 'D4', 'D5')
-        ch_sel = ChoiceIndex(['none', 'A', 'B', 'C', 'D'])
+        tmp = self.ask('srdg? 0')
+        if len(tmp.split(',')) > 4:
+            self._scanner_installed = True
+            ch_Base = ChoiceStrings('A', 'B', 'C', 'D1', 'D2', 'D3', 'D4', 'D5')
+            #ch_Base = ChoiceStrings('A', 'B', 'C', 'D', 'D2', 'D3', 'D4', 'D5')
+            ch_sel = ChoiceIndex(['none', 'A', 'B', 'C', 'D1', 'D2', 'D3', 'D4', 'D5'])
+        else:
+            self._scanner_installed = False
+            ch_Base = ChoiceStrings('A', 'B', 'C', 'D')
+            ch_sel = ChoiceIndex(['none', 'A', 'B', 'C', 'D'])
         self.current_ch = MemoryDevice('A', choices=ch_Base)
         def devChOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
@@ -774,7 +788,7 @@ class lakeshore_336(visaInstrument):
                    Default of instrument is 10 uA (used after every change of sensor type).""")
         self.input_name = devChOption('INNAME {ch},{val}', 'INNAME? {ch}', str_type=quoted_name(15))
 
-        self.input_crv = devChOption('INCRV {ch},{val}', 'INCRV? {ch}', str_type=int)
+        self.input_crv = devChOption('INCRV {ch},{val}', 'INCRV? {ch}', str_type=int, min=0)
         self.input_filter = devChOption('FILTER {ch},{val}', 'FILTER? {ch}',
                                       choices=ChoiceMultiple(['filter_en', 'n_points', 'window'], [bool, int, int]))
         self.temperature_limit = devChOption('TLIMIT {ch},{val}', 'TLIMIT? {ch}', str_type=float_fix3)
