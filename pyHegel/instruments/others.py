@@ -2075,6 +2075,135 @@ There is a frequency dependence but for 1 kHz it is and C<0.165 µF (G<12 µS):
 
 
 #######################################################
+##    Sumitomo F70 compressor
+#######################################################
+
+class sumitomo_dev(BaseDevice):
+    def __init__(self, cmd_name, ret_types=None, **kwargs):
+        super(sumitomo_dev, self).__init__(**kwargs)
+        self.cmd_name = cmd_name
+        self.ret_types = ret_types
+        self._getdev_p = 'foo'
+    def _getdev(self):
+        ret_strs = self.instr.request('$'+self.cmd_name)
+        ret_vals = [t(v) for t,v in zip(self.ret_types, ret_strs)]
+        if len(self.ret_types) == 1:
+            ret_vals = ret_vals[0]
+        return ret_vals
+
+
+@register_instrument('Sumitomo', 'F70')
+class sumitomo_F70(visaInstrument):
+    """
+    This is to control a Sumitomo F70 compressor.
+       Useful device:
+           temperatures
+           pressure_return
+       Useful methods:
+           compressor_start
+           compressor_stop
+           request
+    WARNING: compressor ON/OFF frequency must be less than 6 times per hour and
+             less than 24 times per day. The restart interval must be more than 3 minutes.
+    """
+    def __init__(self, visa_addr, **kwargs):
+        cnsts = visa_wrap.constants
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == cnsts.InterfaceType.asrl:
+            baud_rate = kwargs.pop('baud_rate', 9600)
+            parity = kwargs.pop('parity', cnsts.Parity.none)
+            data_bits = kwargs.pop('data_bits', 8)
+            stop_bits = kwargs.pop('stop_bits', cnsts.StopBits.one)
+            kwargs['baud_rate'] = baud_rate
+            kwargs['parity'] = parity
+            kwargs['data_bits'] = data_bits
+            kwargs['stop_bits'] = stop_bits
+        kwargs['write_termination'] = '\r'
+        kwargs['read_termination'] = '\r'
+        super(sumitomo_F70, self).__init__(visa_addr, **kwargs)
+    def idn(self):
+        res = self.request('$ID1')
+        firmware = res[0]
+        return 'Sumitomo,F70,no_serial,%s'%(firmware)
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('temperatures', 'pressures', 'operating_hours', 'status', options)
+    def _operating_hours_getdev(self):
+        res = self.request('$ID1')
+        return float(res[1])
+    def _crc16(self, mesg):
+        crc = 0xffff
+        for s in mesg:
+            crc ^= ord(s)
+            for bit in range(8):
+                if crc&1:
+                    crc >>= 1
+                    crc ^= 0xa001
+                else:
+                    crc >>= 1
+        return '%04X'%(crc&0xffff)
+    def request(self, cmd):
+        """ cmd is the full request, including the starting $ code.
+            The CRC checksum will be added.
+            It returns a list of strings of the answer split on the ','
+        """
+        mesg = cmd + self._crc16(cmd)
+        resp = self.ask(mesg)
+        resp_base = resp[:-4]
+        resp_crc = resp[-4:]
+        if self._crc16(resp_base) != resp_crc:
+            raise RuntimeError(self.perror('Invalid crc16 in message.'))
+        if resp_base == '$???,':
+            raise RuntimeError(self.perror('Invalid or malformed message.'))
+        if resp_base[:4] != cmd[:4]:
+            raise RuntimeError(self.perror('Invalid start of message.'))
+        answer = resp_base[5:].split(',') # 5: skips the first comma
+        if answer[-1] == '': # This skips the last comma before the crc if needed.
+            answer = answer[:-1]
+        return answer
+    def compressor_start(self):
+        self.request('$ON1')
+    def compressor_stop(self):
+        self.request('$OFF')
+    def reset_error(self):
+        self.request('RS1')
+    # Other cmds: $CHR=cold head run (when compressor off. Cold head can be stopped with compressor_stop or it stops after 30min.),
+    #             $CHP=cold head pause (when compressor on), $POF=cold head pause off
+    def _create_devs(self):
+        self.temperatures = sumitomo_dev('TEA', [int]*4, multi=['helium_C', 'water_out_C', 'water_in_C', 'unused'],
+                                         graph=[0, 1, 2],
+                                         doc="In Celsius. [helium, water out, water in, unused].")
+        self.temp_he = sumitomo_dev('TE1', [int], doc="In Celsius.")
+        self.temp_water_out = sumitomo_dev('TE2', [int], doc="In Celsius.")
+        self.temp_water_in = sumitomo_dev('TE3', [int], doc="In Celsius.")
+        self.temp_4 = sumitomo_dev('TE4', [int], doc="In Celsius.")
+        self.pressures = sumitomo_dev('PRA', [int]*2, multi=['return_psig', 'unused'], graph=[0],
+                                      doc="In psig. [return pressure, unused_usually]")
+        self.pressure_return = sumitomo_dev('PR1', [int], doc="In psig")
+        self.pressure_2 = sumitomo_dev('PR2', [int], doc="In psig")
+        self.status = sumitomo_dev('STA', [lambda x: int(x, 16)], doc=
+                    """
+                    It is a bit field.
+                    bit 15 (32768): 0=Configuration 1, 1=Configuration 2
+                    bit 12-14: unused
+                    bit 9-11: Operating state
+                           0 = Local Off, 1 = Local On, 2 = Remote Off, 3= Remote On
+                           4 = Cold Head Run, 5 = Cold Head Pause, 6 = Fault Off, 7 = Oil Fault Off
+                    bit 8 (256): Solenoid on
+                    bit 7 (128): Pressure alarm
+                    bit 6 (64): Oil level alarm
+                    bit 5 (32): Water Flow alarm
+                    bit 4 (16): Water Temperature alarm
+                    bit 3 (8): Helium temperature alarm
+                    bit 2 (4): Phase Sequence/fuse alarm
+                    bit 1 (2): Motor temperature alarm
+                    bit 0 (1): System on
+                    """)
+        self._devwrap('operating_hours')
+        # This needs to be last to complete creation
+        super(sumitomo_F70, self)._create_devs()
+
+
+#######################################################
 ##    Dummy instrument
 #######################################################
 
