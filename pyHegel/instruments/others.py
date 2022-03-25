@@ -37,7 +37,7 @@ from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsy
                             decode_float64, visa_wrap, locked_calling,\
                             Lock_Extra, Lock_Instruments, _sleep_signal_context_manager, wait,\
                             release_lock_context, mainStatusLine, quoted_string, Choice_bool_OnOff,\
-                            resource_info
+                            resource_info, ProxyMethod
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -1605,12 +1605,13 @@ class inficon_vgc50x(visaInstrument):
                 identification error: -6e-6
                 error BPG, HPG, BCG:  -7e-6
             """
-        self.pressure1 = inficon_dev('PR1', str_type=self._conv_pressure, autoinit=False, doc=pressure_doc)
+        conv_pressure = ProxyMethod(self._conv_pressure)
+        self.pressure1 = inficon_dev('PR1', str_type=conv_pressure, autoinit=False, doc=pressure_doc)
         if nch >= 2:
-            self.pressure2 = inficon_dev('PR2', str_type=self._conv_pressure, autoinit=False, doc=pressure_doc)
+            self.pressure2 = inficon_dev('PR2', str_type=conv_pressure, autoinit=False, doc=pressure_doc)
         if nch == 3:
-            self.pressure3 = inficon_dev('PR3', str_type=self._conv_pressure, autoinit=False, doc=pressure_doc)
-        self.pressures = inficon_dev('PRX', str_type=self._conv_pressure, nch_en=True, doc=pressure_doc)
+            self.pressure3 = inficon_dev('PR3', str_type=conv_pressure, autoinit=False, doc=pressure_doc)
+        self.pressures = inficon_dev('PRX', str_type=conv_pressure, nch_en=True, doc=pressure_doc)
         self.pressure_unit = inficon_dev('UNI', enable_set=True, choices=ChoiceIndex(['mbar/bar', 'Torr', 'Pascal', 'Micron', 'hPascal', 'Volt']))
         self.gas_type = inficon_dev('GAS', enable_set=True, nch_en=True, choices=ChoiceIndex(['N2', 'Ar', 'H2', 'He', 'Ne', 'Kr', 'Xe', 'Other']))
         self.cal_factor = inficon_dev('COR', enable_set=True, nch_en=True, str_type=float, min=0.1, max= 10., setget=True)
