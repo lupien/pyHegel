@@ -27,12 +27,13 @@ import numpy as np
 import random
 import time
 from scipy.optimize import brentq as brentq_rootsolver
+import codecs
 
 from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
                             ChoiceBase, ChoiceMultiple, ChoiceMultipleDep, ChoiceSimpleMap,\
                             ChoiceStrings, ChoiceIndex,\
-                            make_choice_list, _fromstr_helper,\
+                            make_choice_list, _fromstr_helper, _tostr_helper,\
                             decode_float64, visa_wrap, locked_calling,\
                             Lock_Extra, Lock_Instruments, _sleep_signal_context_manager, wait,\
                             release_lock_context, mainStatusLine, quoted_string, Choice_bool_OnOff,\
@@ -1057,8 +1058,8 @@ class agilent_dev(BaseDevice):
         self.setcache(val)
 
 
-@register_instrument('Agilent', 'TPS')
-class agilent_tps_pump(visaInstrument):
+@register_instrument('Agilent', 'TwisTorr')
+class agilent_twis_torr(visaInstrument):
     """
     This is the driver for a TPS compact agilent pump.
     Most useful devices:
@@ -1077,8 +1078,6 @@ class agilent_tps_pump(visaInstrument):
         ask_window
         write_window
     """
-    # we had trouble with the Visa serial connection that kept frezzing.
-    # So we use the serial module instead.
     def __init__(self, visa_address, serial_address=0, **kwargs):
         """
         serial_address should be 0 for RS-232, and 0-31 for RS-485
@@ -1095,11 +1094,11 @@ class agilent_tps_pump(visaInstrument):
         kwargs['stop_bits'] = stop_bits
         kwargs['write_termination'] = ''
         kwargs['read_termination'] = ''
-        super(agilent_tps_pump, self).__init__(visa_address, **kwargs)
+        super(agilent_twis_torr, self).__init__(visa_address, **kwargs)
     def idn(self):
-        return 'Agilent,TPS,no_serial,no_firmare'
+        return 'Agilent,TwisTorr,no_serial,no_firmare'
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('pumping_en', 'pressure_unit', 'pump_status', 'pump_life_hour', 'pump_cycles', 'tip_seal_life_hour', options)
+        return self._conf_helper('pumping_en', 'pressure', 'pressure_unit', 'gage_status', 'gage_power', 'pump_status', 'pump_life_hour', 'pump_cycles', options)
     def _do_chksum(self, message):
         cks = reduce(operator.xor, bytearray(message))
         return '%02X'%cks
@@ -1218,6 +1217,13 @@ class agilent_tps_pump(visaInstrument):
         return parsed
     def _pressure_getdev(self):
         p = self.pressure_raw.get()
+        if p == 0.:
+            status = self.gauge_status.get()
+            power = self.gauge_power.get()
+            if power == 'off' or status in ['no gauge connected', 'rid unknown']:
+                return -1
+            if status.startswith('over'):
+                p = 1e10
         if p>1e9:
             # overange
             unit = self.pressure_unit.getcache()
@@ -1231,6 +1237,12 @@ class agilent_tps_pump(visaInstrument):
         self.pressure_unit = agilent_dev(163, 'integer', enable_set=True, choices=ChoiceSimpleMap({0:'mbar', 1:'Pa', 2:'Torr'}))
         #self.pressure = agilent_dev(224, 'exp', autoinit=False)
         self.pressure_raw = agilent_dev(224, 'exp')
+        self.gauge_status_raw = agilent_dev(257, 'integer')
+        self.gauge_status = agilent_dev(257, 'integer', choices=ChoiceSimpleMap({0:'no gauge connected', 1:'gauge connected',
+                                                                                 2:'under range/gage error', 3:'over range/gage error',
+                                                                                 4:'rid unknown'}))
+        self.gauge_power = agilent_dev(267, 'integer', enable_set=True,
+                                       choices=ChoiceSimpleMap({0:'off', 1:'on', 2:'prog sp1', 3:'prog sp2', 4:'prog sp3'}))
         self.rotation_rpm = agilent_dev(226, 'real')
         self.pump_current_mA = agilent_dev(200, 'real')
         self.pump_voltage = agilent_dev(201, 'real')
@@ -1255,14 +1267,365 @@ class agilent_tps_pump(visaInstrument):
         self.controller_heatsink_temp = agilent_dev(211, 'real') # t-plus says: (208=25 C, ... 128=60 C), but I think its in Celsius
         self.controller_part_number = agilent_dev(319, 'string')
         self.controller_serial_number = agilent_dev(323, 'string')
-        self.tip_seal_life_hour = agilent_dev(358, 'real')
         self.pump_cycles = agilent_dev(301, 'real')
         self.pump_life_hour = agilent_dev(302, 'real')
         # Others: 106=Cooling (0:air or water)
         self._devwrap('pressure')
         self.alias = self.pressure
         # This needs to be last to complete creation
+        super(agilent_twis_torr, self)._create_devs()
+
+@register_instrument('Agilent', 'TPS')
+class agilent_tps_pump(agilent_twis_torr):
+    def idn(self):
+        return 'Agilent,TPS,no_serial,no_firmare'
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('pumping_en', 'pressure_unit', 'pump_status', 'pump_life_hour', 'pump_cycles', 'tip_seal_life_hour', options)
+    def _pressure_getdev(self):
+        p = self.pressure_raw.get()
+        if p>1e9:
+            # overange
+            unit = self.pressure_unit.getcache()
+            return {'mbar':1.5e3, 'Pa':150e3, 'Torr':1e3}[unit]
+        return p
+    def _create_devs(self):
+        #self.pressure = agilent_dev(224, 'exp', autoinit=False)
+        self.tip_seal_life_hour = agilent_dev(358, 'real')
+        # This needs to be last to complete creation
         super(agilent_tps_pump, self)._create_devs()
+        # Remove stuff from base class that do not work here.
+        del self.gauge_power
+        del self.gauge_status
+        del self.gauge_status_raw
+
+
+#######################################################
+##    Innficon VCG50x control unit
+#######################################################
+class inficon_dev(BaseDevice):
+    """
+    if choices is given, it overrides str_type
+    if nch_en is given, if more than one channel is available, then
+     choices or str_type will be applied as many times as necessary.
+     Both get and set will handle ch. if not set it will use current_ch.
+     When a ch is selected only that value will be returned or set.
+     When ch is 'all' a vector of all the valus will be set or change.
+      if ch is 'all' and set is only given a value, it is repeated to all the channels.
+     n_elem is is the number of elements to treat together. It only works for get.
+    """
+    def __init__(self, cmd, str_type=None, n_elem=1, enable_set=False, nch_en=False, **kwargs):
+        super(inficon_dev, self).__init__(**kwargs)
+        self._cmd = cmd
+        self._str_type = str_type
+        self._nch_en = nch_en
+        self._n_elem = n_elem
+        self._getdev_p = 'foo'
+        if enable_set:
+            self._setdev_p = 'foo'
+
+    def _getch(self, ch=None, tmp=False):
+        if self.instr._nchannels == 1:
+            ch = 1
+        else:
+            prev_ch = self.instr.current_ch.get()
+            if ch is not None:
+                if isinstance(ch, slice):
+                    ch = 'all'
+                self.instr.current_ch.set(ch)
+            ch =  self.instr.current_ch.get()
+            if ch == 'all':
+                ch = slice(None)
+            if tmp:
+                self.instr.current_ch.set(prev_ch)
+        return ch
+
+    def _get_nch(self):
+        if self._nch_en:
+            return self.instr._nchannels
+        else:
+            return 1
+
+    def _checkdev(self, val, ch=None):
+        nch = self._get_nch()
+        if nch > 1:
+            ch = self._getch(ch)
+            if isinstance(ch, slice):
+                if isinstance(val, (list, tuple, np.ndarray)):
+                    if len(val) != nch:
+                        raise ValueError(self.perror('Invalid length for values. It should have %i elements.'%nch))
+                    for i in range(nch):
+                        super(inficon_dev, self)._checkdev(val[i])
+                else:
+                    super(inficon_dev, self)._checkdev(val)
+        else:
+            super(inficon_dev, self)._checkdev(val)
+
+    def getformat(self, **kwarg):
+        nch = self._get_nch()
+        multi = False
+        graph = [0]
+        if nch > 1:
+            ch = kwarg.get('ch', None)
+            ch = self._getch(ch, tmp=True)
+            if isinstance(ch, slice):
+                multi = False
+            else:
+                multi = ['ch%i'%i for i in range(1, nch+1)]
+                graph = range(3)
+        else:
+            multi = False
+        fmt = self._format
+        fmt.update(multi=multi, graph=graph)
+        return super(inficon_dev, self).getformat(**kwarg)
+
+    def _getdev(self, ch=None, tmp=False):
+        res = self.instr.ask(self._cmd)
+        def conv(val):
+            if isinstance(self.choices, ChoiceBase):
+                return self.choices(val)
+            else:
+                return _fromstr_helper(val, self._str_type)
+        nch = self._get_nch()
+        if nch > 1:
+            r = res.split(',')
+            N = self._n_elem
+            if N != 1:
+                r = [r[i*N:(i+1)*N] for i in range(nch)]
+            ret = [conv(d) for d in r]
+            ch = self._getch(ch, tmp)
+            ret = ret[ch]
+        else:
+            ret = conv(res)
+        return ret
+
+    def _setdev(self, val, ch=None):
+        def conv(val):
+            if isinstance(self.choices, ChoiceBase):
+                return self.choices.tostr(val)
+            else:
+                return _tostr_helper(val, self._str_type)
+        nch = self._get_nch()
+        if nch > 1:
+            if isinstance(val, (list, tuple, np.ndarray)):
+                # we already checked this is valid
+                pass
+            else:
+                # onlt a single value given
+                ch = self._getch(ch)
+                if isinstance(ch, slice):
+                    # we repeat the value to all sensors
+                    val = [val]*nch
+                else:
+                    vals = self.get(ch='all', tmp=True)
+                    vals[ch-1] = val
+                    val = vals
+            val_str = ','.join([conv(d) for d in val])
+        else:
+            val_str = conv(val)
+        self.write('%s,%s'%(self._cmd, val_str))
+        self.setcache(val)
+
+
+@register_instrument('INFICON', 'VGC503') # Untested
+@register_instrument('INFICON', 'VGC502') # Untested
+#@register_instrument('INFICON', 'VGC501', 'fw:1.07-hw:1.0-model:398-481')
+@register_instrument('INFICON', 'VGC501')
+class inficon_vgc50x(visaInstrument):
+    """
+    This is the driver for a Inficon gage control unit.
+    Most useful devices:
+        pressure
+    Useful methods:
+        datetime
+        continous_output_disable
+    """
+    # we had trouble with the Visa serial connection that kept frezzing.
+    # So we use the serial module instead.
+    def __init__(self, visa_addr, overrange_val=1500., underrange_val=0., sensor_off_val=-1., **kwargs):
+        """
+        overrange_val, underrange val and sensor_off_val are the pressure returned when the gauge is in that condition.
+            It is a single value used for all channels.
+        """
+        self._underrange_val = underrange_val
+        self._overrange_val = overrange_val
+        self._sensor_off_val = sensor_off_val
+        cnsts = visa_wrap.constants
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == cnsts.InterfaceType.asrl:
+            #baud_rate = kwargs.pop('baud_rate', 115200)
+            baud_rate = kwargs.pop('baud_rate', 9600)
+            parity = kwargs.pop('parity', cnsts.Parity.none)
+            data_bits = kwargs.pop('data_bits', 8)
+            stop_bits = kwargs.pop('stop_bits', cnsts.StopBits.one)
+            kwargs['baud_rate'] = baud_rate
+            kwargs['parity'] = parity
+            kwargs['data_bits'] = data_bits
+            kwargs['stop_bits'] = stop_bits
+        kwargs['write_termination'] = '\r\n'
+        kwargs['read_termination'] = '\r\n'
+        self._write_top_level = True
+        super(inficon_vgc50x, self).__init__(visa_addr, **kwargs)
+    def idn(self):
+        res = self.ask('AYT')
+        r = res.split(',')
+        return 'INFICON,{0},{2},fw:{3}-hw:{4}-model:{1}'.format(*r)
+    def get_error_raw(self):
+        return self.ask('ERR')
+    def get_error(self, raw_val=None):
+        if raw_val is None:
+            err = self.get_error_raw()
+        else:
+            err = raw_val
+        res = []
+        if err == '0000':
+            return "No error."
+        if err[0] == '1':
+            res.append('Controller error')
+        if err[1] == '1':
+            res.append('No Hardware error')
+        if err[2] == '1':
+            res.append('inadmissible error')
+        if err[3] == '1':
+            res.append('Syntax error')
+        return ','.join(err) + '.'
+    def reset(self, perform=False):
+        """ if perform is not True, the reset is not done but it returns
+            the list of present error messages
+        """
+        cmd = 'RES'
+        if perform:
+            cmd += ',1'
+        res = self.ask(cmd)
+        if perform:
+            wait(5)
+            # The continous mode was reenable. So stop it.
+            self.continous_output_disable()
+        msgs = ['No error', 'Watchdog has responded', 'Task fail error', 'Flash error',
+                'RAM error', 'EEPROM error', 'DISPLAY error', 'A/D converter error', 'UART error',
+                'Gauge 1 general error', 'Gauge 1 ID error',
+                'Gauge 2 general error', 'Gauge 2 ID error',
+                'Gauge 3 general error', 'Gauge 3 ID error']
+        return [msgs[int(r)] for r in res.split(',')]
+
+    def _conv_pressure(self, val):
+        if not isinstance(val, list):
+            val = val.split(',')
+        #return dict(pressure=float(val[1]), status=int(val[0]))
+        status, pressure = int(val[0]), float(val[1])
+        if status >= 1:
+            # status are: 0= measurement okay, 1= underrange, 2= overrange,
+            #             3=  Sensore error, 4= Sensor off, 5= No sensor,
+            #             6= identification error, 7= Error BPG, HPG, BCG
+            pressure = [None, self._underrange_val, self._overrange_val, -3e6,
+                        self._sensor_off_val, -5e6, -6e6, -7e6][status]
+        return pressure
+
+
+    def datetime(self, set=False):
+        """ If set is True, it will push the computer time. Otherwise
+            it reads the value from the controller.
+        """
+        if set:
+            lt = time.localtime()
+            self.write('DAT,'+time.strftime('%Y-%m-%d', lt))
+            self.write('TIM,'+time.strftime('%H:%M', lt))
+        else:
+            date = self.ask('DAT')
+            tm = self.ask('TIM')
+            return date+' '+tm
+
+    def _current_config(self, dev_obj=None, options={}):
+        prev_ch = self.current_ch.get()
+        self.current_ch.set('all')
+        base = self._conf_helper('pressures', 'pressure_unit', 'gas_type', 'cal_factor',
+                                 'offset_correction', 'offset_correction_val', 'gage_type',
+                                 'filter', 'HV_control_en')
+        base += ['vals_under_over_off=%r'%[self._underrange_val, self._overrange_val, self._sensor_off_val]]
+        self.current_ch.set(prev_ch)
+        return base + self._conf_helper('current_ch', options)
+
+    @locked_calling
+    def write(self, cmd, termination='default'):
+        if self._write_top_level:
+            try:
+                self._write_top_level = False
+                self.ask(cmd, not_enq=True)
+            finally:
+                self._write_top_level = True
+        else:
+            super(inficon_vgc50x, self).write(cmd, termination=termination)
+
+    def continous_output_disable(self):
+        """ This stops continous output and empties the read buffer """
+        super(inficon_vgc50x, self).write('\x03', termination=None) # Sends ETX, end of Text (CTRL-C)
+        # It takes a little while before the system recovers
+        wait(1)
+        self.visa.flush(visa_wrap.constants.VI_IO_IN_BUF_DISCARD)
+
+
+    def continuous_output_enable(self, interval=1):
+        """ set the continuous reporting of values (like when it is turned on)
+            interval can be 0.1, 1 or 60 s. The default is 1.
+        """
+        i = [.1, 1, 60].index(interval)
+        self.write('COM,%i'%i)
+
+    @locked_calling
+    def ask(self, cmd, not_enq=False):
+        if self._write_top_level:
+            try:
+                self._write_top_level = False
+                res = super(inficon_vgc50x, self).ask(cmd)
+            finally:
+                self._write_top_level = True
+        else:
+            res = super(inficon_vgc50x, self).ask(cmd)
+        if res != '\x06': # \x06 is ACK
+            if res == '\x15': # this is NACK
+                raise RuntimeError(self.perror('Received NACK (negative acknowledge)'))
+            else:
+                raise RuntimeError(self.perror('Received unexpected reply (hex:"%s")'%codecs.encode(res, 'hex_codec')))
+        if not_enq:
+            return
+        super(inficon_vgc50x, self).write('\x05', termination=None) # ENQ character: enquiry (request data)
+        return self.read()
+    def _create_devs(self):
+        self.continous_output_disable()
+        nch = int(self.idn_split()['model'].split('_')[0][-1])
+        self._nchannels = nch
+        self.current_ch = MemoryDevice('all', choices=['all']+range(1, nch+1))
+        pressure_doc = """
+            see pressure_unit device for unit used.
+            Some special values are returned for the following conditions:
+                underrange: see underrange_val as instrument instantation parameter (default to 0.)
+                overrange: see overrange_val as instrument instantation parameter (default to 1500.)
+                sensor error:         -3e-6
+                sensor off: see sensor_off_val as instrument instantation parameter (default to -1.)
+                no sensor:            -5e-6
+                identification error: -6e-6
+                error BPG, HPG, BCG:  -7e-6
+            """
+        self.pressure1 = inficon_dev('PR1', str_type=self._conv_pressure, autoinit=False, doc=pressure_doc)
+        if nch >= 2:
+            self.pressure2 = inficon_dev('PR2', str_type=self._conv_pressure, autoinit=False, doc=pressure_doc)
+        if nch == 3:
+            self.pressure3 = inficon_dev('PR3', str_type=self._conv_pressure, autoinit=False, doc=pressure_doc)
+        self.pressures = inficon_dev('PRX', str_type=self._conv_pressure, nch_en=True, doc=pressure_doc)
+        self.pressure_unit = inficon_dev('UNI', enable_set=True, choices=ChoiceIndex(['mbar/bar', 'Torr', 'Pascal', 'Micron', 'hPascal', 'Volt']))
+        self.gas_type = inficon_dev('GAS', enable_set=True, nch_en=True, choices=ChoiceIndex(['N2', 'Ar', 'H2', 'He', 'Ne', 'Kr', 'Xe', 'Other']))
+        self.cal_factor = inficon_dev('COR', enable_set=True, nch_en=True, str_type=float, min=0.1, max= 10., setget=True)
+        self.offset_correction = inficon_dev('OFC', enable_set=True, nch_en=True, choices=ChoiceIndex(['off', 'on', 'activate', 'adjust_zero']))
+        self.offset_correction_val = inficon_dev('OFD', enable_set=True, nch_en=True, str_type=float, setget=True)
+        self.gage_type = inficon_dev('TID', str_type=str, nch_en=True)
+        self.filter = inficon_dev('FIL', enable_set=True, nch_en=True, choices=ChoiceIndex(['off', 'fast', 'normal', 'slow']))
+        self.HV_control_en = inficon_dev('HVC', enable_set=True, nch_en=True, str_type=bool)
+        self.temp_inner = inficon_dev('TMP', str_type=int, doc='In Celsius.')
+        self.resistance_id_test = inficon_dev('TAI', nch_en=True, str_type=float, autoinit=False)
+        self.operating_hours = inficon_dev('RHR', str_type=int, autoinit=False)
+        self.alias = self.pressures
+        # This needs to be last to complete creation
+        super(inficon_vgc50x, self)._create_devs()
+
 
 
 #######################################################
