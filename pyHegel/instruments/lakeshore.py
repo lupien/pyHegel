@@ -910,7 +910,44 @@ class lakeshore_340(visaInstrument):
        which defaults to current_ch
        status_ch returns the status of ch
        fetch allows to read all channels
+       PID control details: P multiplies both integral and derivative terms.
+            P*error controls the heater in current (not power).
+            With 50 K of error, a P of 1 produces ~8% of current full range.
+            So for full range, it requires P of 12 (with 50 K error)
+                                                600 (with 1K error)
+            Changing the heater range does not heater output %.
     """
+    def __init__(self, visa_addr, **kwarg):
+        """
+        By default, on serial will use 7 data bits, odd parity, 9600 baud which is the
+        instrument default, but it can be overriden
+        """
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.asrl:
+            kwarg['parity'] = visa_wrap.constants.Parity.odd
+            kwarg['data_bits'] = 7
+        super(lakeshore_340, self).__init__(visa_addr, **kwarg)
+    def _get_esr(self):
+        return int(self.ask('*esr?'))
+    def get_error(self):
+        esr = self._get_esr()
+        ret = ''
+        if esr&0x80:
+            ret += 'Power on. '
+        if esr&0x20:
+            ret += 'Command Error. '
+        if esr&0x10:
+            ret += 'Execution Error. '
+        if esr&0x08:
+            ret += 'Device Dependent Error (DDE). '
+        if esr&0x04:
+            ret += 'Query Error (output queue full). '
+        if esr&0x01:
+            ret += 'OPC received.'
+        if ret == '':
+            ret = 'No Error.'
+        return ret
+
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         if dev_obj == self.fetch:
@@ -921,18 +958,47 @@ class lakeshore_340(visaInstrument):
             in_set = []
             in_crv = []
             in_type = []
+            in_filter = []
+            in_alarm = []
+            in_status = []
             for c in ch:
                 ch_list.append(c)
                 in_set.append(self.input_set.get(ch=c))
                 in_crv.append(self.input_crv.get())
                 in_type.append(self.input_type.get())
+                in_filter.append(self.input_filter.get())
+                in_alarm.append(self.alarm_conf.get())
+                in_status.append(self.status_ch.get())
             self.current_ch.set(old_ch)
             base = ['current_ch=%r'%ch_list, 'input_set=%r'%in_set,
-                    'input_crv=%r'%in_crv, 'input_type=%r'%in_type]
+                    'input_crv=%r'%in_crv, 'input_type=%r'%in_type, 'input_filter=%r'%in_filter,
+                    'status_ch=%r'%in_status, 'alarm_conf=%r'%in_alarm]
         else:
             base = self._conf_helper('current_ch', 'input_set', 'input_crv', 'input_type')
-        base += self._conf_helper('current_loop', 'sp', 'pid', options)
+        base += self._conf_helper('heater_range', 'htr_status', 'htr')
+        old_loop = self.current_loop.get()
+        for c in [1, 2]:
+            self.current_loop.set(c)
+            info = self._conf_helper('pid', 'manual_out', 'control_mode', 'control_setup', 'control_filter',
+                              'control_limit', 'control_display', 'ramp_control', 'ramp_sweeping_status')
+            base += ['loop_%i=[%s]'%(c, ', '.join(info))]
+        self.current_loop.set(old_loop)
+        base += self._conf_helper('control_limit_max_current_user')
+        old_analog = self.current_analog.get()
+        for c in [1, 2]:
+            self.current_analog.set(c)
+            info = self._conf_helper('analog_conf', 'analog_out')
+            base += ['analog_%i=[%s]'%(c, ', '.join(info))]
+        self.current_analog.set(old_analog)
+        old_relay = self.current_relay.get()
+        for c in ['high', 'low']:
+            self.current_relay.set(c)
+            info = self._conf_helper('relay_conf', 'relay_status')
+            base += ['relay_%s=[%s]'%(c, ', '.join(info))]
+        self.current_relay.set(old_relay)
+        base += self._conf_helper('digital_out', options)
         return base
+
     def _enabled_list_getdev(self):
         old_ch = self.current_ch.getcache()
         ret = []
@@ -976,6 +1042,50 @@ class lakeshore_340(visaInstrument):
             ret.append(self.s.get())
         self.current_ch.set(old_ch)
         return ret
+
+    def clear_alarm_status(self):
+        self.write('ALMRST')
+
+    def _full_range_power(self, htr_range, max_current, resistance):
+        """ Returns a dictionnary with the full scale power (use in htr output)
+            and max_power (which includes voltage limit of 50 V)
+        """
+        if htr_range == 0.:
+            return 0.
+        if max_current == 'user':
+            maxI = self.control_limit_max_current_user.getcache()
+        else:
+            maxI = max_current
+        # Table 6.2 Shows voltage limit if the resistance is too large but
+        # when considering the full scale for power output the instrument does not.
+        frac = 10**(htr_range-5)
+        max_power_I = frac*maxI**2 * resistance
+        max_power_V = 50.**2/resistance
+        max_actual = min(max_power_I, max_power_V)
+        return dict(full_scale=max_power_I, max_power=max_actual)
+
+    @locked_calling
+    def _htr_getdev(self):
+        """Always in W.
+        """
+        htr_range = self.heater_range.get() # need to get if it is changed by zone control.
+        if htr_range == 0:
+            return 0.
+        prev_ch = self.current_loop.get()
+        self.current_loop.set(1)
+        display = self.control_display.getcache()
+        limits = self.control_limit.getcache()
+        unit = display['display_unit']
+        resistance = display['resistance']
+        maxI = limits['max_current']
+        htr = self.htr_raw.get()/100. # fraction of full scale
+        full_range_power = self._full_range_power(htr_range, maxI, resistance)['full_scale']
+        print htr_range, maxI, resistance, htr, full_range_power
+        self.current_loop.set(prev_ch)
+        if unit == 'current':
+            htr = htr**2 # to power
+        return htr * full_range_power
+
     def _create_devs(self):
         rev_str = self.ask('rev?')
         conv = ChoiceMultiple(['master_rev_date', 'master_rev_num', 'master_serial_num', 'sw1', 'input_rev_date',
@@ -983,7 +1093,9 @@ class lakeshore_340(visaInstrument):
         rev_dic = conv(rev_str)
         ch_Base = ChoiceStrings('A', 'B')
         ch_3462_3464 = ChoiceStrings('A', 'B', 'C', 'D') # 3462=2 other channels, 3464=2 thermocouple
-        ch_3468 = ChoiceStrings('A', 'B', 'C1', 'C2', 'C3', 'C4', 'D1', 'D2','D3','D4') # 2 groups of 4, limited rate, limited current sources (10u or 1m)
+        ch_3468 = ChoiceStrings('A', 'B', 'C1', 'C2', 'C3', 'C4', 'D1', 'D2','D3','D4',
+                                redirects=dict(C01='C1', C02='C2', C03='C3', C04='C4',
+                                               D01='D1', D02='D2', D03='D3', D04='D4')) # 2 groups of 4, limited rate, limited current sources (10u or 1m)
         ch_3465 = ChoiceStrings('A', 'B', 'C') # single capacitance
         ch_opt = {'3462':ch_3462_3464, '3464':ch_3462_3464, '3468':ch_3468, '3465':ch_3465}
         ch_opt_sel = ch_opt.get(rev_dic['option_id'], ch_Base)
@@ -1020,10 +1132,62 @@ class lakeshore_340(visaInstrument):
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
         self.pid = devLoopOption('PID {loop},{val}', 'PID? {loop}',
-                                 choices=ChoiceMultiple(['P', 'I', 'D'], float))
-        self.htr = scpiDevice(getstr='HTR?', str_type=float) #heater out in %
-        self.sp = devLoopOption(setstr='SETP {loop},{val}', getstr='SETP? {loop}', str_type=float_fix6)
+                                 choices=ChoiceMultiple(['P', 'I', 'D'], float), doc='I in mHz')
+        self.manual_out = devLoopOption('MOUT {loop},{val}', 'MOUT? {loop}', str_type=float, doc='Value is in % of power or current full scale depending on display unit.')
+        self.htr_raw = scpiDevice(getstr='HTR?', str_type=float, doc='Heater output in % of power or current full scale depending on display unit.')
+        self.htr_status = scpiDevice(getstr='HTRST?', str_type=int,
+                                     doc='1: Supply over V, 2: Supply under V, 3: Output DAC error, 4: ILimit DAC error, 5: Open Heater load, 6: load < 10 Ohm')
+        self.ramp_control = devLoopOption('RAMP {loop},{val}', 'RAMP? {loop}', allow_kw_as_dict=True, allow_missing_dict=True,
+                                       choices=ChoiceMultiple(['en', 'rate'], [bool, (float_fix3,(0.0, 100))]), doc="Activates the sweep mode. rate is in K/min.", setget=True)
+        self.ramp_sweeping_status = devLoopOption(getstr='RAMPST? {loop}', str_type=bool)
+        htr_ranges = ChoiceIndex(range(5+1))
+        self.heater_range = scpiDevice('RANGE', choices=htr_ranges, doc='See manual 6.12.1 to describe range. range 0 is power off. Only for loop 1.')
+        self.control_filter = devLoopOption('CFILT {loop},{val}', 'CFILT? {loop}', str_type=bool)
+        csetup = ChoiceMultiple(['channel', 'units', 'loop_en', 'loop_powerup_en'],
+                          [ch_opt_sel, ChoiceIndex({1:'kelvin', 2:'celsius', 3:'ohm'}), bool, bool])
+        climit = ChoiceMultiple(['sp_limit', 'pos_slope', 'neg_slope', 'max_current', 'max_range'],
+                          [float, float, float, ChoiceIndex([0.25, 0.5, 1.0, 2.0, 'user'], offset=1), htr_ranges])
+        self.control_setup = devLoopOption('CSET {loop},{val}', 'CSET? {loop}', choices=csetup, allow_kw_as_dict=True, allow_missing_dict=True)
+        control_display_op = ChoiceMultiple(['n_loop', 'resistance', 'display_unit', 'large_display_en'],
+                                            [ChoiceIndex(['none', 'loop1', 'loop2', 'both']), (int, (1, 1000)), ChoiceIndex({1:'current', 2:'power'}), bool])
+        self.control_display = devLoopOption('CDISP {loop},{val}', 'CDISP? {loop}', choices=control_display_op, allow_kw_as_dict=True, allow_missing_dict=True,
+                                             doc="resistance and display_unit only applies to loop1")
+        self.control_limit = devLoopOption('CLIMIT {loop},{val}', 'CLIMIT? {loop}', choices=climit, allow_kw_as_dict=True, allow_missing_dict=True)
+        self.control_limit_max_current_user = scpiDevice('CLIMI', str_type=float, min=0.1, max=2)
+        cmodes = ChoiceIndex({1:'pid', 2:'zone', 3:'open_loop', 4:'auto_tune_PID', 5:'auto_tune_PI', 6:'auto_tune_P'})
+        self.control_mode = devLoopOption('CMODE {loop},{val}', 'CMODE? {loop}', choices=cmodes)
+
+        self.digital_out = scpiDevice('DOUT', choices=
+                                      ChoiceMultiple(['mode', 'bits'],
+                                                     [ChoiceIndex(['off', 'alarms', 'scanner', 'manual']), int]), allow_kw_as_dict=True, allow_missing_dict=True)
+        self.current_analog = MemoryDevice(1, choices=[1, 2])
+        def devAnalogOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(outch=self.current_analog)
+            app = kwarg.pop('options_apply', ['outch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.analog_conf = devAnalogOption('ANALOG {outch},{val}', 'ANALOG? {outch}', choices=
+                                           ChoiceMultiple(['bipolar_en', 'mode', 'input', 'source', 'high_val', 'low_val', 'manual_out'],
+                                                          [bool, ChoiceIndex(['off', 'input', 'manual', 'loop']), ch_opt_sel, ChoiceIndex(['kelvin', 'celsius', 'sensor', 'linear'], offset=1), float, float, float]))
+        self.analog_out = devAnalogOption(getstr='AOUT? {outch}', str_type=float, doc='Value in % of full voltage scale.')
+        self.current_relay = MemoryDevice('low', choices=['low', 'high'])
+        def devRelayOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(relay=self.current_relay)
+            app = kwarg.pop('options_apply', ['relay'])
+            conv = dict(relay=lambda base_val, conv_val: dict(low='2', high='1')[base_val])
+            kwarg.update(options=options, options_apply=app, options_conv=conv)
+            return scpiDevice(*arg, **kwarg)
+        self.relay_conf = devRelayOption('RELAY {relay},{val}', 'RELAY? {relay}', choices=ChoiceMultiple(['mode', 'manual_mode_en'],
+                                         [ChoiceIndex(['off', 'alarms', 'manual']), bool]), allow_kw_as_dict=True, allow_missing_dict=True)
+        self.relay_status = devRelayOption(getstr='RELAYST? {relay}', str_type=bool)
+        alarm_cnf = ChoiceMultiple(['alarm_en', 'source', 'high_val', 'low_val', 'latch_en', 'relay_en'],
+                                   [bool, ChoiceIndex(['kelvin', 'celsius', 'sensor', 'linear'], offset=1), float, float, bool, bool])
+        self.alarm_conf = devChOption('ALARM {ch},{val}', 'ALARM? {ch}', choices=alarm_cnf)
+        self.alarm_status = devChOption(getstr='ALARMST? {ch}', choices=ChoiceMultiple(['high', 'low'], [bool, bool]))
         self._devwrap('enabled_list')
+        self._devwrap('htr')
         self._devwrap('fetch', autoinit=False)
         self.alias = self.fetch
         # This needs to be last to complete creation
