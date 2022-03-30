@@ -24,8 +24,9 @@
 from __future__ import absolute_import
 
 import struct
+import types
 
-from ..instruments_base import visaInstrument,\
+from ..instruments_base import visaInstrument, BaseDevice,\
                             scpiDevice, MemoryDevice,\
                             ChoiceStrings, ChoiceMultiple, Choice_bool_OnOff,\
                             decode_float64, ChoiceIndex,\
@@ -39,15 +40,28 @@ from ..instruments_registry import register_instrument
 # all commands and response are in capitals. The instrument does not accept small caps.
 #TODO use _write_test to keep alive the connection if necessary.
 
+def cond_proxy(func):
+    if isinstance(func, types.MethodType):
+        return ProxyMethod(func)
+    return func
+
 class iceoxford_dev(scpiDevice):
     """ handles standard returns and forces lower/upper conversions """
     def __init__(self, *args, **kwargs):
-        """ strip_reply can be True(default)/False/'auto' """
+        """ strip_reply can be True(default)/False/'auto'
+            confirm is the function to set the values
+        """
         self._strip_reply = kwargs.pop('strip_reply', True)
+        self._confirm_func = cond_proxy(kwargs.pop('confirm', None))
         self._autoset_val_str = '={val}'
+        self._noset_last = None
         kwargs['write_func'] = ProxyMethod(self._write_override)
         kwargs['ask_func'] = ProxyMethod(self._ask_override)
+        kwargs['extra_set_after_func'] = ProxyMethod(self._after_write)
         super(iceoxford_dev, self).__init__(*args, **kwargs)
+    def _after_write(self, val, dev_obj, **kwargs):
+        if self._confirm_func is not None and not self._noset_last:
+            self._confirm_func()
     def _write_override(self, cmd, **kwargs):
         resp = self.instr.ask(cmd.upper(), **kwargs)
         self.instr._handle_std_reply(resp)
@@ -62,8 +76,11 @@ class iceoxford_dev(scpiDevice):
         if strip_reply is True or (strip_reply == 'auto' and ispre):
             valstr = valstr[len(pre):]
         return super(iceoxford_dev, self)._fromstr(valstr.lower())
+    def check(self, *val, **kwargs):
+        self._noset_last = kwargs.pop('noset', False)
+        super(iceoxford_dev, self).check(*val, **kwargs)
     #def __del__(self):
-    #    print 'Releasing iceoxford dev'
+    #    print 'Releasing iceoxford dev', self._getdev_p
 
 def sensor_return(valstr):
     if valstr == '':
@@ -90,14 +107,19 @@ class iceoxford_temperature_controller(visaInstrument):
         nv_set_values
         heat_sw_set_values
         heater_set_values
+    All the nv*, heat_sw* and heater set device automatically call the matching set_values by default.
+    To prevent that, call the set with noset=True
     """
-    def __init__(self, visa_addr, direct='auto', open_app=False, *args, **kwargs):
+    def __init__(self, visa_addr, direct='auto', open_app=False, temps={0:'50k', 1:'4K', 2:'1Kpot'},
+                 pressures=[0, 2], *args, **kwargs):
         """
         direct when True, connects directly to the ICE Temperature Control program.
                when False, connects through the ICE Remote Comms Service program that needs to be running.
                when auto, it will select it according the the visa_addr ports (True for 6435, False for 6340)
                This option need to match with the visa_addr port.
         open_app when True and when direct is False, will try an start the application before making the connection.
+        temps is a dictionnary of the index as key and name as value to extract from temperatures device
+        pressures is a list of the index to extract with pressures device.
         """
         kwargs['read_termination'] = '\r\n'
         kwargs['write_termination'] = '\r\n'
@@ -113,6 +135,8 @@ class iceoxford_temperature_controller(visaInstrument):
                 raise ValueError('Unknown port so you need to select True or False for direct.')
         self._direct_con = direct
         self._open_app = open_app
+        self._temps_sel = temps
+        self._pressures_sel = pressures
         super(iceoxford_temperature_controller, self).__init__(visa_addr, *args, **kwargs)
 
     def idn(self):
@@ -126,8 +150,21 @@ class iceoxford_temperature_controller(visaInstrument):
     @locked_calling
     def write(self, val, termination='default'):
         if self._direct_con:
-            n = len(val)
-            val = struct.pack('>q', n) + val +  struct.pack('>lql', 1, 0, 0)
+            vs = val.split('=', 1)
+            if len(vs) == 1:
+                vs += ['']
+            pre, end = vs
+            n_pre = len(pre)
+            n_end = len(end)
+            end_vals = end.split(',')
+            try:
+                end_floats = [float(v) for v in end_vals]
+            except ValueError:
+                end_floats = [0.]
+            data =  struct.pack('>l', len(end_floats))
+            for v in end_floats:
+                data += struct.pack('>d', v)
+            val = struct.pack('>q', n_pre) + pre + data + struct.pack('>l', n_end) + end
         super(iceoxford_temperature_controller, self).write(val)
 
     def _handle_std_reply(self, resp, good='OK', bad='ERROR'):
@@ -138,12 +175,10 @@ class iceoxford_temperature_controller(visaInstrument):
         raise RuntimeError(self.perror('The last command had an unexpected reply of: %s'%resp))
 
     def _current_config(self, dev_obj=None, options={}):
-        base = self._conf_helper('field_T', 'field_target_T', 'current_magnet', 'current_target',
-                                 'voltage', 'voltage_limit', 'ramp_rate_field_T_min',
-                                 'field_trip_T', 'lead_resistance_mOhm', 'magnet_inductance_H',
-                                 'persistent_heater_current_mA',
-                                 'status', 'psh_time_cool', 'psh_time_heat', 'psh_wait_before')
-        base += ['isobus_num=%s'%self._isobus_num]
+        base = self._conf_helper('system_status', 'temperatures', 'pressures')
+        base += self._conf_helper('current_nv', 'nv_mode', 'nv_setpoint', 'nv_ramp', 'nv_pid', 'nv_error_band', 'nv_output')
+        base += self._conf_helper('heat_sw_mode', 'nv_setpoint', 'heat_sw_input', 'heat_sw_setpoint', 'heat_sw_error_band', 'heat_sw_relay_en')
+        base += self._conf_helper('current_outch', 'heater_mode', 'heater_input', 'heater_setpoint', 'heater_ramp', 'heater_pid', 'heater_range', 'heater_output')
         return base + self._conf_helper(options)
 
     def get_error(self):
@@ -177,15 +212,44 @@ class iceoxford_temperature_controller(visaInstrument):
         resp = self.ask("OPEN LEMON")
         self._handle_std_reply(resp)
 
-    def nv_set_values(self):
-        resp = self.ask("NV1 SET VALUES")
+    def nv_set_values(self, ch=None):
+        if ch is not None:
+            self.current_nv.set(ch)
+        ch = self.current_nv.get()
+        resp = self.ask("NV{ch} SET VALUES".format(ch=ch))
         self._handle_std_reply(resp)
     def heat_sw_set_values(self):
         resp = self.ask("HEAT SW1 SET VALUES")
         self._handle_std_reply(resp)
-    def heater_set_values(self):
-        resp = self.ask("HEATER1 SET VALUES")
+    def heater_set_values(self, outch=None):
+        if outch is not None:
+            self.current_outch.set(outch)
+        outch = self.current_outch.get()
+        resp = self.ask("HEATER{outch} SET VALUES".format(outch=outch))
         self._handle_std_reply(resp)
+
+    def _temperatures_getformat(self, **kwarg):
+        idx = sorted(self._temps_sel.keys())
+        multi = [self._temps_sel[i] for i in idx]
+        fmt = self.temperatures._format
+        fmt.update(multi=multi)
+        return BaseDevice.getformat(self.temperatures, **kwarg)
+    def _temperatures_getdev(self):
+        vals = self.temperatures_raw.get()
+        idx = sorted(self._temps_sel.keys())
+        return vals[idx]
+
+    def _pressures_getformat(self, **kwarg):
+        idx = self._pressures_sel
+        titles = ['dump', 'sample', 'circulation']
+        multi = [titles[i] for i in idx]
+        fmt = self.pressures._format
+        fmt.update(multi=multi)
+        return BaseDevice.getformat(self.pressures, **kwarg)
+    def _pressures_getdev(self):
+        vals = self.pressures_raw.get()
+        idx = self._pressures_sel
+        return vals[idx]
 
     def _create_devs(self):
         if self._direct_con:
@@ -210,19 +274,27 @@ class iceoxford_temperature_controller(visaInstrument):
                     wait(9)
                 self.lemon_connect()
         self.system_status = iceoxford_dev(getstr='SYSTEM STATUS?', doc="""Result is either 'ready' or 'in use'""")
-        self.nv_mode = iceoxford_dev('NV1 MODE', choices=ChoiceStrings('manual', 'auto'))
-        self.nv_manual_out = iceoxford_dev('NV1 MAN OUT', str_type=float)
-        self.nv_error_band = iceoxford_dev('NV1 ERROR BAND', str_type=float)
-        self.nv_setpoint = iceoxford_dev('NV1 SETPOINT', str_type=float)
-        self.nv_ramp = iceoxford_dev('NV1 RAMP', str_type=float)
-        self.nv_output = iceoxford_dev(getstr='NV OUTPUT 1?', str_type=float)
-        self.nv_pid = iceoxford_dev('NV1 PID', choices=ChoiceMultiple(['p', 'i', 'd'], [float]*3))
-        self.heat_sw_mode = iceoxford_dev('HEAT SW1 MODE', choices=ChoiceStrings('manual', 'auto'))
+        self.current_nv = MemoryDevice(1, choices=[1, 2])
+        def devNvOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_nv)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app, confirm=self.nv_set_values)
+            return iceoxford_dev(*arg, **kwarg)
+        self.nv_mode = devNvOption('NV{ch} MODE', choices=ChoiceStrings('manual', 'auto'))
+        self.nv_manual_out = devNvOption('NV{ch} MAN OUT', str_type=float)
+        self.nv_error_band = devNvOption('NV{ch} ERROR BAND', str_type=float)
+        self.nv_setpoint = devNvOption('NV{ch} SETPOINT', str_type=float)
+        self.nv_ramp = devNvOption('NV{ch} RAMP', str_type=float)
+        self.nv_output = devNvOption(getstr='NV OUTPUT {ch}?', str_type=float)
+        self.nv_pid = devNvOption('NV{ch} PID', choices=ChoiceMultiple(['p', 'i', 'd'], [float]*3), allow_kw_as_dict=True, allow_missing_dict=True)
+        devHsOption = lambda *args, **kwargs: iceoxford_dev(*args, confirm=self.heat_sw_set_values, **kwargs)
+        self.heat_sw_mode = devHsOption('HEAT SW1 MODE', choices=ChoiceStrings('manual', 'auto'))
         input_sel = ChoiceStrings('A', 'B', 'C', 'D1', 'D2', 'D3', 'D4', 'D5')
-        self.heat_sw_input = iceoxford_dev('HEAT SW1 INPUT', choices=input_sel)
-        self.heat_sw_setpoint = iceoxford_dev('HEAT SW1 SETPOINT', str_type=float)
-        self.heat_sw_error_band = iceoxford_dev('HEAT SW1 ERROR BAND', str_type=float)
-        self.heat_sw_relay_en = iceoxford_dev('HEAT SW1 RELAY', choices=Choice_bool_OnOff)
+        self.heat_sw_input = devHsOption('HEAT SW1 INPUT', choices=input_sel)
+        self.heat_sw_setpoint = devHsOption('HEAT SW1 SETPOINT', str_type=float)
+        self.heat_sw_error_band = devHsOption('HEAT SW1 ERROR BAND', str_type=float)
+        self.heat_sw_relay_en = devHsOption('HEAT SW1 RELAY', choices=Choice_bool_OnOff)
         self.pressure_dump = iceoxford_dev(getstr='DUMP PRESSURE?', str_type=float)
         self.pressure_sample = iceoxford_dev(getstr='SAMPLE SPACE PRESSURE?', str_type=float)
         self.pressure_circulation = iceoxford_dev(getstr='CIRCULATION PRESSURE?', str_type=float)
@@ -239,20 +311,26 @@ class iceoxford_temperature_controller(visaInstrument):
             return iceoxford_dev(*arg, **kwarg)
         self.t = devChOption(getstr='TEMPERATURE {ch}?', str_type=float, doc='Temperature. See also s device.')
         self.s = devChOption(getstr='RAW {ch}?', str_type=float, doc='Raw sample unit of temperature sensore. See also t device.')
-        self.heater_mode = iceoxford_dev('HEATER1 MODE', choices=ChoiceStrings('manual', 'auto'))
-        self.heater_input = iceoxford_dev('HEATER1 CHAN', choices=input_sel)
-        self.heater_manual_out = iceoxford_dev('HEATER1 MAN OUT', str_type=float)
-        self.heater_setpoint = iceoxford_dev('HEATER1 SETPOINT', str_type=float)
-        self.heater_ramp = iceoxford_dev('HEATER1 RAMP', str_type=float)
-        self.heater_setpoint_ramp_en = iceoxford_dev('HEATER1 SETPOINT RAMP', choices=Choice_bool_OnOff)
-        self.heater_output = iceoxford_dev(getstr='HEATER OUTPUT 1?', str_type=float)
-        self.heater_pid = iceoxford_dev('HEATER1 PID', choices=ChoiceMultiple(['p', 'i', 'd'], [float]*3))
-        self.heater_range = iceoxford_dev('HEATER1 RANGE', choices=ChoiceStrings('off', 'low', 'medium', 'high'))
+        self.current_outch = MemoryDevice(1, choices=[1, 2])
+        def devOutOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(outch=self.current_outch)
+            app = kwarg.pop('options_apply', ['outch'])
+            kwarg.update(options=options, options_apply=app, confirm=self.heater_set_values)
+            return iceoxford_dev(*arg, **kwarg)
+        self.heater_mode = devOutOption('HEATER{outch} MODE', choices=ChoiceStrings('manual', 'auto'))
+        self.heater_input = devOutOption('HEATER{outch} CHAN', choices=input_sel)
+        self.heater_manual_out = devOutOption('HEATER{outch} MAN OUT', str_type=float)
+        self.heater_setpoint = devOutOption('HEATER{outch} SETPOINT', str_type=float)
+        self.heater_ramp = devOutOption('HEATER{outch} RAMP', str_type=float)
+        self.heater_setpoint_ramp_en = devOutOption('HEATER{outch} SETPOINT RAMP', choices=Choice_bool_OnOff)
+        self.heater_output = devOutOption(getstr='HEATER OUTPUT {outch}?', str_type=float)
+        self.heater_pid = devOutOption('HEATER{outch} PID', choices=ChoiceMultiple(['p', 'i', 'd'], [float]*3), allow_kw_as_dict=True, allow_missing_dict=True)
+        self.heater_range = devOutOption('HEATER{outch} RANGE', choices=ChoiceStrings('off', 'low', 'medium', 'high'))
         self.sensor_curve = iceoxford_dev('SENSOR {ch} CURVE', str_type=sensor_return, options=dict(ch='A'),
                                           options_lim=dict(ch=ChoiceIndex(['A', 'B', 'C', 'D1', 'D2', 'D3', 'D4', 'D5'], offset=1)))
+        self._devwrap('pressures')
+        self._devwrap('temperatures')
         super(iceoxford_temperature_controller, self)._create_devs()
 
-# TODO: combine nv settings with nv_set_values
-#  do the same for heat_sw_set_values and heater_set_values
-#       Handle nv1, nv2, heater1, heater2 (could also do HEAT SW1,2)
-#     handle pressures, temperatures (only returning valid values, no NaN)
+# TODO: could handle multiple heat_sw
