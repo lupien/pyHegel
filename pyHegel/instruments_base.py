@@ -877,7 +877,7 @@ class BaseDevice(object):
         # obj is used by _get_conf_header and _write_dev
         self._format = dict(file=False, multi=multi, xaxis=None, graph=graph,
                             append=False, header=None, bin=False, extra_conf=None,
-                            options={}, obj=self)
+                            options={}, obj=weakref.proxy(self))
     def  _delayed_init(self):
         """ This function is called by instrument's _create_devs once initialization is complete """
         pass
@@ -1804,6 +1804,7 @@ class scpiDevice(BaseDevice):
                  auto_min_max=False,
                  options={}, options_lim={}, options_apply=[], options_conv={},
                  extra_check_func=None, extra_set_func=None, extra_set_after_func=None,
+                 write_func=None, ask_func=None,
                  ask_write_opt={}, **kwarg):
         """
            str_type can be float, int, None
@@ -1851,6 +1852,10 @@ class scpiDevice(BaseDevice):
                can return "__SKIP__NEXT__" to jump the internal implementation
               extra_set_after_func(val, dev_obj, **kwargs)
            ask_write_options are options passed to the ask and write methods
+           write_func is the function to use to write to the instrument during set. If not given
+              it will be self.instr.write
+           ask_func is the function to use to ask to the instrument during get. If not given
+              it will be self.instr.ask
 
         """
         if setstr is None and getstr is None:
@@ -1888,6 +1893,7 @@ class scpiDevice(BaseDevice):
                 self._getdev_cache = True
                 getstr = True
         self._getdev_p = getstr
+        self._getdev_last_full_cmd = ''
         self._options = options
         self._options_lim = options_lim
         self._options_apply = options_apply
@@ -1900,6 +1906,8 @@ class scpiDevice(BaseDevice):
         self._raw = raw
         self._chunk_size = chunk_size
         self._option_cache = {}
+        self._write_func = write_func
+        self._ask_func = ask_func
 
     def _delayed_init(self):
         """ This is called after self.instr is set """
@@ -2064,7 +2072,11 @@ class scpiDevice(BaseDevice):
         options = self._check_cache['options']
         command = self._setdev_p
         command = command.format(val=val, **options)
-        self.instr.write(command, **self._ask_write_opt)
+        if self._write_func is None:
+            write = self.instr.write
+        else:
+            write = self._write_func
+        write(command, **self._ask_write_opt)
         if self._extra_set_after_func:
             self._extra_set_after_func(val_orig, self, **options)
     def _getdev(self, **kwarg):
@@ -2080,8 +2092,13 @@ class scpiDevice(BaseDevice):
             raise
         command = self._getdev_p
         command = command.format(**options)
+        self._getdev_last_full_cmd = command
         self._get_para_checked()
-        ret = self.instr.ask(command, raw=self._raw, chunk_size=self._chunk_size, **self._ask_write_opt)
+        if self._ask_func is None:
+            ask = self.instr.ask
+        else:
+            ask = self._ask_func
+        ret = ask(command, raw=self._raw, chunk_size=self._chunk_size, **self._ask_write_opt)
         return self._fromstr(ret)
     def _checkdev(self, val, **kwarg):
         options = self._combine_options(**kwarg)
