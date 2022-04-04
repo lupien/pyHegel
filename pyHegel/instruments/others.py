@@ -1098,7 +1098,7 @@ class agilent_twis_torr(visaInstrument):
     def idn(self):
         return 'Agilent,TwisTorr,no_serial,no_firmare'
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('pumping_en', 'pressure', 'pressure_unit', 'gage_status', 'gage_power', 'pump_status', 'pump_life_hour', 'pump_cycles', options)
+        return self._conf_helper('pumping_en', 'pressure', 'pressure_unit', 'gauge_status', 'gauge_power', 'pump_status', 'pump_life_hour', 'pump_cycles', options)
     def _do_chksum(self, message):
         cks = reduce(operator.xor, bytearray(message))
         return '%02X'%cks
