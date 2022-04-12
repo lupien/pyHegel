@@ -42,6 +42,7 @@ This module contains many utilities:
     read_blueforsRTF
     read_blueforsGauges
     read_blueforsChannels
+    read_iceoxford
     sort_file
     find_index_closest
 Conversion functions and time constants calculation helpers:
@@ -1054,6 +1055,95 @@ def read_bluefors_all(start_date, stop_date=None, logdir='C:/BlueFors/Logs', flo
         ret = ret[0]
     return ret
 
+#########################################################
+# Read ICE oxford NI data files
+#########################################################
+
+_ICEoxford_n2i_default = dict(t4k=0, time=1, htr1=3, t50k=4, t1k=7, pcirc=8, s1k=10, s4k=11, s50k=12,
+                              nv1=13, pdump=21, dt=22) # dt is time since start of file in s.
+#_ICEoxford_n2i_default = dict(t4k=0, time=1, htr2=2, htr1=3, t50k=4, mag_field=5, heat_ex_50k=6, t1k=7,
+#                              pcirc=8, mag_current=9, s1k=10, s4k=11, s50k=12,
+#                              nv1=13, nv2=14,
+#                              s_raw_d4=15, s_raw_d5=16, s_raw_d1=17, s_raw_d2=18, s_raw_d3=19,
+#                              heat_1k_ex=20, pdump=21, dt=22, out_current=23
+#                              sample=24, tdynamic_heat_exchanger=25, sample2=26)
+
+class ICEoxford_Data(object):
+    """
+    d is full data array.
+    filenames is the list of all filenames.
+    filenames_clean is the list of non-empty files
+    full_columns is the full name of the columns.
+    show_full_columns returns the full_columns name with the index
+    other names index a particular column.
+    """
+    def __init__(self, data, columns, filenames=None, filenames_clean=None, names2index=_ICEoxford_n2i_default):
+        self.filenames = filenames
+        self.filenames_clean = filenames_clean
+        self.full_columns = columns
+        if not isinstance(names2index, dict):
+            names = names2index
+            index = range(len(names))
+            names2index = dict( zip(names, index) )
+        self._names2index = names2index
+        self.d = data
+        # added them as (hidden) attribute so tab expansion can find them
+        for n in names2index.iterkeys():
+            setattr(self, n, None)
+    def __getattribute__(self, name):
+        names2index = super(ICEoxford_Data, self).__getattribute__('_names2index')
+        if name in names2index:
+            d = super(ICEoxford_Data, self).__getattribute__('d')
+            return d[names2index[name]]
+        return super(ICEoxford_Data, self).__getattribute__(name)
+    def show_full_columns(self):
+        return list(enumerate(self.full_columns))
+
+_full_columns = ["/'Data'/'4k Stage'",  "/'Data'/'Unix Timestamp'",  "/'Data'/'Heater 2'",  "/'Data'/'Heater 1'",
+                 "/'Data'/'50k Stage'",  "/'Data'/'Magnetic Field'",  "/'Data'/'50k Heat Exchanger'",  "/'Data'/'1K pot'",
+                 "/'Data'/'Circulation Pressure'", "/'Data'/'Magnet Current'", "/'Data'/'Raw C'",  "/'Data'/'Raw B'",
+                 "/'Data'/'Raw A'", "/'Data'/'Needle Valve 1'", "/'Data'/'Needle Valve 2'", "/'Data'/'Raw D4'",
+                 "/'Data'/'Raw D5'", "/'Data'/'Raw D1'", "/'Data'/'Raw D2'", "/'Data'/'Raw D3'", "/'Data'/'1k Heat Exchanger'",
+                 "/'Data'/'Dump Pressure'", "/'Data'/'Elapsed (s)'", "/'Data'/'Output Current'", "/'Data'/'Sample'",
+                 "/'Data'/'Dynamic Heat Exchanger'", "/'Data'/'Sample 2'"]
+
+def read_iceoxford(filenames_or_glob, prepend=None):
+    """ Read one or many files (either lists or globs)
+    written by ICE oxford program (.tdms files).
+    Returns a class will all the data concatenated and with
+    names to access to the columns.
+    preprend is prepended to all the filenames.
+    """
+    try:
+        import nptdms
+    except ImportError:
+        raise RuntimeError('You need to install the nptdms module: pip install npTDMS')
+    if not isinstance(filenames_or_glob, (list, tuple, np.ndarray)):
+        filenames_or_glob = [filenames_or_glob]
+    filelist = []
+    for fglob in filenames_or_glob:
+        if prepend is not None:
+            fglob = os.path.join(prepend, fglob)
+        fl = glob.glob(fglob)
+        fl.sort()
+        filelist.extend(fl)
+    all_tdms = [nptdms.TdmsFile.read(f) for f in filelist]
+    all_panda = [d.as_dataframe() for d in all_tdms]
+    all_data = [d.to_numpy().T for d in all_panda]
+    #Sanity checks
+    all_columns = [d.columns.to_list() for d in all_panda]
+    all_sel = [g!=[] for g in all_columns] # to remove empty files
+    all_data_clean = [d for s, d in zip(all_sel,  all_data) if s]
+    all_columns_clean = [d for s, d in zip(all_sel,  all_columns) if s]
+    if not len(all_columns_clean):
+        raise RuntimeError('All data files are empty.')
+    c0 = all_columns_clean[0]
+    if not all([c == c0  for c in all_columns_clean]):
+            raise RuntimeError("The files don't have all the same data structure")
+    if c0 != _full_columns:
+        print "read_iceoxford: the full_columns name are not the expected ones. Column assignment is probably wrong."
+    data = np.concatenate(all_data_clean, axis=-1)
+    return ICEoxford_Data(data, c0, filelist, [f for s, f in zip(all_sel, filelist) if s])
 
 
 #########################################################
