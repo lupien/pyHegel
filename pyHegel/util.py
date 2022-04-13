@@ -1059,7 +1059,7 @@ def read_bluefors_all(start_date, stop_date=None, logdir='C:/BlueFors/Logs', flo
 # Read ICE oxford NI data files
 #########################################################
 
-_ICEoxford_n2i_default = dict(t4k=0, time=1, htr1=3, t50k=4, t1k=7, pcirc=8, s1k=10, s4k=11, s50k=12,
+_ICEoxford_n2i_default = dict(t4k=0, time=1, htr2=2, htr1=3, t50k=4, t1k=7, pcirc=8, s1k=10, s4k=11, s50k=12,
                               nv1=13, pdump=21, dt=22) # dt is time since start of file in s.
 #_ICEoxford_n2i_default = dict(t4k=0, time=1, htr2=2, htr1=3, t50k=4, mag_field=5, heat_ex_50k=6, t1k=7,
 #                              pcirc=8, mag_current=9, s1k=10, s4k=11, s50k=12,
