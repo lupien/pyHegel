@@ -979,7 +979,7 @@ class lakeshore_340(visaInstrument):
         old_loop = self.current_loop.get()
         for c in [1, 2]:
             self.current_loop.set(c)
-            info = self._conf_helper('pid', 'manual_out', 'control_mode', 'control_setup', 'control_filter',
+            info = self._conf_helper('sp', 'pid', 'manual_out', 'control_mode', 'control_setup', 'control_filter',
                               'control_limit', 'control_display', 'ramp_control', 'ramp_sweeping_status')
             base += ['loop_%i=[%s]'%(c, ', '.join(info))]
         self.current_loop.set(old_loop)
@@ -1080,7 +1080,7 @@ class lakeshore_340(visaInstrument):
         maxI = limits['max_current']
         htr = self.htr_raw.get()/100. # fraction of full scale
         full_range_power = self._full_range_power(htr_range, maxI, resistance)['full_scale']
-        print htr_range, maxI, resistance, htr, full_range_power
+        #print htr_range, maxI, resistance, htr, full_range_power
         self.current_loop.set(prev_ch)
         if unit == 'current':
             htr = htr**2 # to power
