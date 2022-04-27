@@ -1133,6 +1133,7 @@ class lakeshore_340(visaInstrument):
             return scpiDevice(*arg, **kwarg)
         self.pid = devLoopOption('PID {loop},{val}', 'PID? {loop}',
                                  choices=ChoiceMultiple(['P', 'I', 'D'], float), doc='I in mHz')
+        self.sp = devLoopOption(setstr='SETP {loop},{val}', getstr='SETP? {loop}', str_type=float_fix6)
         self.manual_out = devLoopOption('MOUT {loop},{val}', 'MOUT? {loop}', str_type=float, doc='Value is in % of power or current full scale depending on display unit.')
         self.htr_raw = scpiDevice(getstr='HTR?', str_type=float, doc='Heater output in % of power or current full scale depending on display unit.')
         self.htr_status = scpiDevice(getstr='HTRST?', str_type=int,
