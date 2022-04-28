@@ -724,13 +724,20 @@ def read_bluefors(filename):
             ret.append((time.mktime(t), splits[2:]))
     return ret
 
-def read_blueforsRTF(filename):
+def read_blueforsRTF(filename, missing_as_empty=False, quiet=False):
     """
     Reads a bluefors log filename that contains Temperature, Resistance or Flow
     information.
     returns an array of shape (2, n) for n lines in the data
     The columns are time and values
+    when missing_as_empty, missing files are returned as empty arrays instead of causing an error.
+    quiet when False (default) shows the missing files.
     """
+    if missing_as_empty:
+        if not os.path.isfile(filename):
+            if not quiet:
+                print 'Skipping: %s'%filename
+            return np.zeros((2,0))
     v = read_bluefors(filename)
     v = [(t, float(val[0])) for t, val in v]
     return np.array(v).T
@@ -786,7 +793,7 @@ def _read_bluefors_select(start_date, stop_date=None):
         date += datetime.timedelta(days=1)
     return dirs
 
-def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:/BlueFors/Logs', merge_if_possible=True):
+def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:/BlueFors/Logs', merge_if_possible=True, missing_ok=True, quiet=False):
     """
     Reads and combines the data files for temperature channels selected.
     It looks for the files under date directories under logdir.
@@ -801,6 +808,7 @@ def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:
     if stop_day is None, then today's date is used.
     If start_date is an ndarray, it uses the minimum as start_date and maximum as stop_date.
     If start_date is a list, it is used directly.
+    missing_ok, when True which is the default, just skip missing files without producing an exception (but prints it, unless quiet is True).
     """
     results = []
     for ch in channels:
@@ -809,8 +817,8 @@ def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:
         Tfile = 'CH%i T {}.log'.format(dirname)
         Rfile = 'CH%i R {}.log'.format(dirname)
         for i,ch in enumerate(channels):
-            Tvals = read_blueforsRTF(os.path.join(logdir, dirname, Tfile%ch))
-            Rvals = read_blueforsRTF(os.path.join(logdir, dirname, Rfile%ch))
+            Tvals = read_blueforsRTF(os.path.join(logdir, dirname, Tfile%ch), missing_as_empty=missing_ok, quiet=quiet)
+            Rvals = read_blueforsRTF(os.path.join(logdir, dirname, Rfile%ch), missing_as_empty=missing_ok, quiet=quiet)
             if Tvals.shape[1] == 0 and Rvals.shape[1] == 0:
                 continue
             if Tvals.shape[1] == 0:
@@ -862,7 +870,7 @@ def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:
                     elif ti > tj:
                         ar.append([tj, np.nan, Rvals[1, k]])
                         k += 1
-                results[i] = np.concatenate((results[i], np.append(np.array(ar))))
+                results[i] = np.concatenate((results[i], np.array(ar)))
     results = [r.T for r in results]
     if merge_if_possible:
         for i in range(len(channels)-1):
