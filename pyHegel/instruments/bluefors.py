@@ -919,6 +919,9 @@ class bf_temperature_controller(BaseInstrument):
                         result[k] = v[-1]
                 self._mqtt_listen_buffers['meas'][ch-1] = result
             self.current_ch.set(1)
+            self._mqtt_listen_buffers['rsrcs'] = dict(cpu_total=0., disk_usage_data=0, disk_usage_log=0,
+                                     memory_free=0, memory_used=0, rtc_battery=0., uptime=0, status=u'OK',
+                                     datetime=u'2020-01-01T00:00:00.0')
         all_cals = self.ask('calibration-curves/data', proto='post')
         cals_map = {}
         for d in all_cals['data']:
