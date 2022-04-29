@@ -1546,3 +1546,193 @@ class bf_temperature_controller(BaseInstrument):
 #   heater/historical-data
 #   calibration-curves  calibrationcurves/data/
 #   calibration-curve calibrationcurve/update/ calibrationcurve/remove calibration-curve/fileupload
+
+
+#######################################################
+##    Bluefors controller
+#######################################################
+
+# possible protocols:
+# - http get/post: are blocking but can reuse a socket
+# - websocket: need to open multiple connections to the various variables
+
+# as of 2022-04-29 (Version 2.0)
+#    notifications only works under get (not websocket read) contrary to what frontend API seems to imply
+# TODO implement secure connection and api-key
+@register_instrument('BlueFors', 'Controller')
+class bf_controller(BaseInstrument):
+    _mqtt_connected = False
+    def __init__(self, address='localhost', port=49099, timeout=3, secure=False, api_key=None, **kwargs):
+        """
+        The api_key only works for https and secure websocket (wss).
+        The https, wss default port is 49098
+        """
+        if not requests_loaded:
+            raise RuntimeError('Cannot use bf_temperature_controller because of missing requests package. Can be installed with "pip install requests"')
+        self._ip_address = address
+        self._ip_port = port
+        self._timeout = timeout
+        self._api_key = api_key
+        self._secure = secure
+        self._requests_session = requests.Session()
+        self._websockets_cache = dict()
+        self._last_reply = None
+        self._last_sent = None
+        super(bf_controller, self).__init__(**kwargs)
+
+    def __del__(self):
+        self.disconnect()
+        print 'Deleted bf_controller instance'
+        super(bf_controller, self).__del__()
+
+    @locked_calling
+    def disconnect(self):
+        self._requests_session.close()
+        for k, ws in self._websockets_cache.items():
+            ws.close()
+        self._websockets_cache = []
+
+    def _websocket_helper(self, path):
+        ws = self._websockets_cache.get(path, None)
+        if ws is None:
+            if not websocket_loaded:
+                raise RuntimeError('Cannot use ws proto because of missing websocket package. Can be installed with "pip install websocket-client"')
+            if self._secure:
+                url = 'wss://%s:%i/%s'%(self._ip_address, self._ip_port, path)
+                if self._api_key is not None:
+                    url += '&key=%s'%self._api_key
+            else:
+                url = 'ws://%s:%i/%s'%(self._ip_address, self._ip_port, path)
+            ws = websocket.create_connection(url, timeout=self._timeout)
+            self._websockets_cache[path] = ws
+        return ws
+
+    @locked_calling
+    def ask(self, path, operation='get', endpoint='values', raw_return=False, raw_request=False, **params):
+        """ see documentation for write
+        """
+        return self.write(path, operation, endpoint, raw_return=raw_return, raw_request=raw_request, _ask=True, **params)
+
+    @locked_calling
+    def write(self, path, operation='post', endpoint='values', raw_return=False, raw_request=False, _ask=False, set_val=None, **params):
+        """ The path elements can be seperated by . or / and will be converted as needed.
+            operation can be get, post (will use http protocol), or read, set, listen, unlisten, status
+               (which will us the websocket protocol)
+            endpoint can be 'system', 'values', 'resources', 'notifications' or None.
+               When None, you should include the requested endpoint as part of the path.
+               Not that resources can only be used with get (and the / and . are not changed because an example use
+                is to ask for the layout.xml file as the path).
+            raw_return when True will bypass returning a dictionnary for the json data and just return the string.
+            raw_request when True, prevents the handling of the websocket request. You need to provide all the information
+                properly.
+            if set_val is given, the correct data dictionnary is built for 'post' and 'set'
+            params are the paramters to pass add to the communication. command for ws is added from operation automatically.
+              you might be interested in adding 'id' (string of hexadecimal numbers, _ and -) to track commands (only for websocket)
+                   'prettyprint=1' to better format the json string (not useful since we turn the json data into a dictionnary),
+                   'recursion' (-1 which is default means unlimited, only for get or read where default is 0),
+                   'style'(which can be flat(default) or tree, only for get and read),
+                   'must_exist' (if 1, not the default, check existence, only for post, set),
+                   'wait_response' (if 1, which is the default, waits to make sure to return updated value, only post).
+                   'all' is boolean for listen only. If True sends all update at the same time (not waiting for new values).
+                   'recursive' if True (not default) listen to all nodes recursively. Also applies to unlisten to stop all child nodes.
+            Examples:
+              bc = instruments.bf_controller()
+              bc.write('mapper.bf.heaters.hs-still', set_val=0)
+              bc.ask('', operation='post', data={'mapper.bf.heaters.hs-still':dict(content=dict(value=False))})
+              bc.ask('mapper.bf.heaters.hs-still')
+              bc.ask('mapper.bf.heaters.hs-still', operation='get', endpoint='values', fields='value;status')
+              bc.ask('layout.xml', endpoint='resources')
+              bc.ask(None, endpoint='system')
+              bc.ask(None, operation='read', endpoint='system')
+        """
+        if operation not in ['get', 'post', 'read', 'set', 'listen', 'unlisten', 'status']:
+            raise ValueError(self.perror('Invalid operation selected.'))
+        if endpoint not in ['system', 'values', 'resources', 'notifications', None]:
+            raise ValueError(self.perror('Invalid endpoint selected.'))
+        if endpoint == 'resources' and operation !='get':
+            raise ValueError(self.perror('You can only select get operation with resources endpoint.'))
+        if operation in ['post', 'get']:
+            if path is None:
+                path = ''
+            if endpoint != 'resources' and not raw_request:
+                data_path = path.replace('/', '.')
+                if operation == 'post':
+                    path = ''
+                else:
+                    path = path.replace('.', '/')
+            if endpoint is not None:
+                path = '%s/%s'%(endpoint, path)
+            data = params.pop('data', {})
+            if operation == 'post' and set_val is not None:
+                data[data_path] = dict(content=dict(value=set_val))
+            if self._api_key is not None:
+                params['key'] = self._api_key
+            get_proto = lambda url, params={}, json={}: self._requests_session.get(url, timeout=self._timeout, params=params)
+            getpost = get_proto if operation == 'get' else self._requests_session.post
+            if self._secure:
+                http_url = 'https://'
+            else:
+                http_url = 'http://'
+            req = getpost(http_url+'%s:%i/%s'%(self._ip_address, self._ip_port, path), params=params, json=dict(data=data))
+            self._last_reply = req
+            if not req.ok:
+                raise RuntimeError('Bad post/get request (status=%s, message="%s")'%(req.status_code, req.text))
+            if raw_return or endpoint == 'resources':
+                result = req.text
+            else:
+                result = req.json()
+                if 'error' in result:
+                    raise RuntimeError('Error in post/get request (result=%s)'%(result))
+        else: # websocket
+            if endpoint is None:
+                endpoint = path
+                path = None
+            else:
+                # without the ending '/' we get a "scheme http is invalid" ValueError exception
+                endpoint = 'ws/'+endpoint+'/'
+            if not raw_request:
+                js_params = {}
+                js_params['command'] = operation
+                cmd_id = params.pop('id', None)
+                if cmd_id is not None:
+                    js_params['id'] = cmd_id
+                data = params.pop('data', {})
+                js_params['data'] = data
+                if path is not None:
+                    path = path.replace('/', '.')
+                    if operation == 'set' and set_val is not None:
+                        data['data'] = {path: dict(content=dict(value=set_val))}
+                    else:
+                        data['target'] = path
+                data.update(params)
+            else:
+                js_params = params
+            ws = self._websocket_helper(endpoint)
+            req = json.dumps(js_params)
+            self._last_sent = req
+            ws.send(req)
+            ret = ws.recv()
+            self._last_reply = ret
+            result1 = json.loads(ret)
+            if result1['status'] != 'RECEIVED':
+                raise RuntimeError('Bad reply: %s'%result1)
+            ret2 = ws.recv()
+            result2 = json.loads(ret2)
+            if result2['status'] != 'SUCCEEDED':
+                raise RuntimeError('Bad reply: %s'%result2)
+            if raw_return:
+                result = ret2
+            else:
+                result = result2
+        if _ask:
+            return result
+
+    def list_all_mappers(self, path='mapper',  operation='get', endpoint='values', exclude=['mapper.bflegacy', 'driver.bftc.data.calibration_curves.calibration_curve_']):
+        ret = self.ask(path, operation, endpoint)
+        def check(key):
+            for ex in exclude:
+                if key.startswith(ex):
+                    return False
+            return True
+        result = [ key for key in ret['data'] if check(key)]
+        return sorted(result)
