@@ -1626,10 +1626,10 @@ class bf_controller(BaseInstrument):
                 raise RuntimeError('Cannot use ws proto because of missing websocket package. Can be installed with "pip install websocket-client"')
             if self._secure:
                 url = 'wss://%s:%i/%s'%(self._ip_address, self._ip_port, path)
-                if self._api_key is not None:
-                    url += '?key=%s'%self._api_key
             else:
                 url = 'ws://%s:%i/%s'%(self._ip_address, self._ip_port, path)
+            if self._api_key is not None:
+                url += '?key=%s'%self._api_key
             ws = websocket.create_connection(url, timeout=self._timeout, sslopt=self._websocket_sslopt)
             self._websockets_cache[path] = ws
         return ws
