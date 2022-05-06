@@ -30,6 +30,8 @@ import weakref
 import numpy as np
 import datetime
 import copy
+import os.path
+import ssl
 
 from ..instruments_base import BaseInstrument, MemoryDevice,\
                              dict_improved, locked_calling, wait_on_event, FastEvent, wait,\
@@ -1553,19 +1555,29 @@ class bf_temperature_controller(BaseInstrument):
 #######################################################
 
 # possible protocols:
-# - http get/post: are blocking but can reuse a socket
-# - websocket: need to open multiple connections to the various variables
+# - http get/post: are blocking but can reuse a socket.
+#      I use the requests module which pools connections and keeps them open.
+# - websocket: need to open multiple connections to the various endpoints, but keeps them open once used
 
 # as of 2022-04-29 (Version 2.0)
 #    notifications only works under get (not websocket read) contrary to what frontend API seems to imply
-# TODO implement secure connection and api-key
+
 @register_instrument('BlueFors', 'Controller')
 class bf_controller(BaseInstrument):
     _mqtt_connected = False
-    def __init__(self, address='localhost', port=49099, timeout=3, secure=False, api_key=None, **kwargs):
+    def __init__(self, address='localhost', port=49099, timeout=3, secure=False, api_key=None, cert=True, **kwargs):
         """
-        The api_key only works for https and secure websocket (wss).
+        The api_key is required for https and secure websocket (wss), and not used for http/ws.
+           The permissions will be the one for the api_key or the one from the unauthenicated API which ever
+           is more permissive. Regular http/ws are allowed everything.
+        secure, when True we use the https and wss protocols.
         The https, wss default port is 49098
+        cert should be the certificate file (.pem) or directory to verify the connection for https and wss.
+            It can be exported from the API configuration page.
+            You will need to use one of the domain name or ip address configured in the certificate
+            for it to be valid (see certutil on linux/cygwin).
+            cert can also be set to False to disable the certification.
+            When using a directory, it needs to be in a particular format. Use the linux c_rehash utility.
         """
         if not requests_loaded:
             raise RuntimeError('Cannot use bf_temperature_controller because of missing requests package. Can be installed with "pip install requests"')
@@ -1575,6 +1587,21 @@ class bf_controller(BaseInstrument):
         self._api_key = api_key
         self._secure = secure
         self._requests_session = requests.Session()
+        self._websocket_sslopt = dict()
+        if cert is not True and cert is not False:
+            # make it absolute (if not already) in case the current directory is changed
+            cert = os.path.abspath(cert)
+            if not os.path.exists(cert):
+                raise ValueError('The certificate file does not exists: %s'%cert)
+            if os.path.isfile(cert):
+                self._websocket_sslopt['ca_certs'] = cert
+            else:
+                self._websocket_sslopt['ca_cert_path'] = cert
+        if cert:
+            self._websocket_sslopt['cert_reqs'] = ssl.CERT_REQUIRED
+        else:
+            self._websocket_sslopt['cert_reqs'] = ssl.CERT_NONE
+        self._requests_session.verify = cert
         self._websockets_cache = dict()
         self._last_reply = None
         self._last_sent = None
@@ -1600,10 +1627,10 @@ class bf_controller(BaseInstrument):
             if self._secure:
                 url = 'wss://%s:%i/%s'%(self._ip_address, self._ip_port, path)
                 if self._api_key is not None:
-                    url += '&key=%s'%self._api_key
+                    url += '?key=%s'%self._api_key
             else:
                 url = 'ws://%s:%i/%s'%(self._ip_address, self._ip_port, path)
-            ws = websocket.create_connection(url, timeout=self._timeout)
+            ws = websocket.create_connection(url, timeout=self._timeout, sslopt=self._websocket_sslopt)
             self._websockets_cache[path] = ws
         return ws
 
@@ -1727,12 +1754,52 @@ class bf_controller(BaseInstrument):
         if _ask:
             return result
 
-    def list_all_mappers(self, path='mapper',  operation='get', endpoint='values', exclude=['mapper.bflegacy', 'driver.bftc.data.calibration_curves.calibration_curve_']):
+    def list_all_mappers(self, path='mapper',  show_read_only=False, show_type=False, operation='get', endpoint='values', exclude=['mapper.bflegacy', 'driver.bftc.data.calibration_curves.calibration_curve_']):
+        """ show_read_only when True, will return a tuple with the second element the read only value of the variables if present
+                            when the value is not present, it returns False
+            show_type  when True, will add the type information to the tuple.
+        """
         ret = self.ask(path, operation, endpoint)
         def check(key):
             for ex in exclude:
                 if key.startswith(ex):
                     return False
             return True
-        result = [ key for key in ret['data'] if check(key)]
+        data = ret['data']
+        if show_read_only or show_type:
+            def gen_result(key, val):
+                ret = (key, )
+                if show_read_only:
+                    cnt = val.get('content', None)
+                    if cnt is not None:
+                        ret += (cnt.get('read_only', False),)
+                    else:
+                        ret += (False, )
+                if show_type:
+                    ret += (val.get('type', 'NoTypeSpecified'),)
+                return ret
+        else:
+            gen_result = lambda key, val: key
+        result = [ gen_result(key, val) for key, val in data.items() if check(key)]
         return sorted(result)
+
+    def get_value(self, path, operation='post', endpoint='values', valid=True, raw_val=False, **params):
+        """
+          valid when True (default) returns the value in latest_valid_value, if False returns the
+                value in latest_value
+          raw_val when True, skips converting the value according to the type
+        """
+        js = self.ask(path, operation=operation, endpoint=endpoint, **params)
+        latest = 'latest_valid_value' if valid else 'latest_value'
+        base = js['data'][path]
+        val = base['content'][latest]['value']
+        tp = base['type']
+        if not raw_val:
+            if tp in ['Value.Number.Integer.Enumeration.yesNo', 'Value.Number.Integer.Enumeration.Boolean']:
+                val = bool(int(val))
+            elif tp.startswith('Value.Number.Float'):
+                val = float(val)
+            elif tp.startswith('Value.Number.Integer'):
+                val = int(val)
+        return val
+
