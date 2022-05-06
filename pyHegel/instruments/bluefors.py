@@ -337,7 +337,6 @@ class bf_valves(BaseInstrument):
         self.current_p = MemoryDevice(1, min=0, max=6)
         self._devwrap('all_gages', multi=['flow']+self._gages_names)
         self.alias = self.all_gages
-        self.all_gages
         self._devwrap('gage')
         self._devwrap('all_status')
         # This needs to be last to complete creation
@@ -1562,9 +1561,90 @@ class bf_temperature_controller(BaseInstrument):
 # as of 2022-04-29 (Version 2.0)
 #    notifications only works under get (not websocket read) contrary to what frontend API seems to imply
 
+class bf_controller_dev(BaseDevice):
+    def __init__(self, path, rw=True, ch=None, scale=None, endpoint='values', get_operation='get', set_operation='post', valid=True, **kwargs):
+        """
+        rw when True, allows read and write. Otherwise only read is allowed
+        ch when given is the device to select the channel. Use {ch} in the path for it to be properly used.
+        scale when given is multiplied/divided on get/set values
+        get_operation, set_operation are the operation to use for get/set
+        valid is the valid entry to use for get_value
+        """
+        self._path = path
+        self._ch = ch
+        self._endpoint = endpoint
+        self._get_operation = get_operation
+        self._set_operation = set_operation
+        self._valid = valid
+        self._scale = scale
+        super(bf_controller_dev, self).__init__(**kwargs)
+        if rw:
+            self._setdev_p = True
+        self._getdev_p = True
+
+    def check(self, val, ch=None, valid=None, operation=None):
+        if ch is not None and self._ch is not None:
+            self._ch.check(ch)
+        if self._scale:
+            val = val/self._scale
+        super(bf_controller_dev, self).check(val)
+
+    def _ch_helper(self, ch, path):
+        ch_dev = self._ch
+        if ch_dev is not None:
+            if ch is not None:
+                ch_dev.set(ch)
+            ch = ch_dev.get()
+            if isinstance(ch_dev.choices, ChoiceBase):
+                ch = ch_dev.choices.tostr(ch)
+            path = path.format(ch=ch)
+        else:
+            ch = None
+        return ch, path
+
+    def _setdev(self, val, ch=None, valid=None, operation=None):
+        path = self._path
+        ch, path = self._ch_helper(ch, path)
+        operation = operation if operation is not None else self._set_operation
+        if self._scale:
+            val = val/self._scale
+        self.instr.write(path, endpoint=self._endpoint, operation=operation, set_val=val)
+
+    def _getdev(self, ch=None, valid=None, operation=None):
+        path = self._path
+        ch, path = self._ch_helper(ch, path)
+        operation = operation if operation is not None else self._get_operation
+        valid = valid if valid is not None else self._valid
+        val = self.instr.get_value(path, endpoint=self._endpoint, valid=valid, operation=operation)
+        if self._scale:
+            val = val * self._scale
+        return val
+
+#TODO: handle listen/unlisten
+
 @register_instrument('BlueFors', 'Controller')
 class bf_controller(BaseInstrument):
-    _mqtt_connected = False
+    """
+    This is the driver for the Bluefors Control Software (full fridge control, not the temperature controller)
+    Useful devices:
+        fetch
+        valve
+        heater
+        gage
+        pump
+        flow
+        t50k
+        t4k
+        tstill
+        tmxc
+        t
+        s
+    Some methods available:
+        ask
+        write
+        list_all_mappers
+        get_value
+    """
     def __init__(self, address='localhost', port=49099, timeout=3, secure=False, api_key=None, cert=True, **kwargs):
         """
         The api_key is required for https and secure websocket (wss), and not used for http/ws.
@@ -1611,6 +1691,14 @@ class bf_controller(BaseInstrument):
         self.disconnect()
         print 'Deleted bf_controller instance'
         super(bf_controller, self).__del__()
+
+    def idn(self):
+        data = self.ask(None, endpoint='system')['data']
+        return "BlueFors,Controller,no-serial,syst:%s/api:%s"%(data['system_version'], data['api_version'])
+
+    @locked_calling
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('fetch', options)
 
     @locked_calling
     def disconnect(self):
@@ -1788,18 +1876,120 @@ class bf_controller(BaseInstrument):
           valid when True (default) returns the value in latest_valid_value, if False returns the
                 value in latest_value
           raw_val when True, skips converting the value according to the type
+          This only works for flat  style (not for tree)
         """
+        if 'recursion' not in params:
+            # This is the default for read. The default for get is -1 (all)
+            params['recursion'] = 0
         js = self.ask(path, operation=operation, endpoint=endpoint, **params)
         latest = 'latest_valid_value' if valid else 'latest_value'
         base = js['data'][path]
-        val = base['content'][latest]['value']
+        error = False
+        try:
+            val_latest = base['content'][latest]
+            if val_latest is None:
+                val = 'no_value'
+                error = True
+            else:
+                val = val_latest['value']
+        except KeyError:
+            error = True
+            val = 'no_value'
         tp = base['type']
         if not raw_val:
             if tp in ['Value.Number.Integer.Enumeration.yesNo', 'Value.Number.Integer.Enumeration.Boolean']:
-                val = bool(int(val))
+                val = bool(int(val)) if not error else False
             elif tp.startswith('Value.Number.Float'):
-                val = float(val)
+                val = float(val) if not error else np.nan
             elif tp.startswith('Value.Number.Integer'):
-                val = int(val)
+                val = int(val) if not error else -1
         return val
 
+    def _fetch_tch_helper(self, temp_ch):
+        if temp_ch is None:
+            temp_ch = self.active_temp_ch.getcache()
+        elif not isinstance(temp_ch, (list, tuple, np.ndarray)):
+            temp_ch = [temp_ch]
+        return temp_ch
+
+    def _fetch_getformat(self, **kwarg):
+        temp_ch = kwarg.get('temp_ch', None)
+        flow = kwarg.get('flow', True)
+        gages = kwarg.get('gages', True)
+        fmt = self.fetch._format
+        multi = []
+        graph = []
+        g = 0
+        temp_ch = self._fetch_tch_helper(temp_ch)
+        for c in temp_ch:
+            multi += ['t%i'%c, 's%i'%c]
+            graph.append(g)
+            g += 2
+        if flow:
+            multi.append('flow')
+            graph.append(g)
+            g += 1
+        if gages:
+            multi += ['p%i'%i for i in range(1,6+1)]
+            graph += list(range(g, g+6))
+            g += 6
+        fmt.update(multi=multi, graph=graph)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+
+    def _fetch_getdev(self, temp_ch=None, flow=True, gages=True):
+        """
+        temp_ch when None, will return all enabled channels (from cache), otherwise you can select the ch numbers.
+        """
+        ret = []
+        temp_ch = self._fetch_tch_helper(temp_ch)
+        orig_ch = self.current_ts_ch.get()
+        for c in temp_ch:
+            ret += [self.t.get(ch=c), self.s.get()]
+        self.current_ts_ch.set(orig_ch)
+        if flow:
+            ret.append(self.flow.get())
+        if gages:
+            orig_ch = self.current_gage.get()
+            for i in range(1,6+1):
+                ret.append(self.gage.get(ch=i))
+            self.current_gage.set(orig_ch)
+        return ret
+
+    def _active_temp_ch_getdev(self):
+        active = []
+        orig_ch = self.current_ts_ch.get()
+        for i in range(1, 16+1):
+            en = self.t_en.get(ch=i)
+            if en:
+                active.append(i)
+        self.current_ts_ch.set(orig_ch)
+        return active
+
+    def _create_devs(self):
+        self.current_valve = MemoryDevice(1, choices=range(1, 23+1))
+        self.current_heater = MemoryDevice('hs-still', choices=ChoiceSimpleMap({
+                            'hs-still':'hs-still', 'hs-mc':'hs-mc', 'ext':'ext', 'heater':'4k-heater'}))
+        self.current_gage = MemoryDevice(1, choices=range(1, 6+1))
+        self.current_pump = MemoryDevice('scroll2', choices=['compressor', 'scroll1', 'scroll2', 'turbo1', 'turbo2'])
+        self.current_ts_ch = MemoryDevice(1, choices=range(1, 16+1))
+        self.valve = bf_controller_dev('mapper.bf.valves.v{ch}', ch=self.current_valve)
+        self.heater = bf_controller_dev('mapper.bf.heaters.{ch}', ch=self.current_heater)
+        self.gage = bf_controller_dev('mapper.bf.pressures.p{ch}', ch=self.current_gage, scale=1e3, doc='in mbar')
+        self.pump = bf_controller_dev('mapper.bf.pumps.{ch}', ch=self.current_pump)
+        self.flow = bf_controller_dev('mapper.bf.flow', doc='in mmol/s')
+        self.pulsetube = bf_controller_dev('mapper.bf.pulsetube')
+        self.t50k = bf_controller_dev('mapper.bf.temperatures.t50k')
+        self.t4k = bf_controller_dev('mapper.bf.temperatures.t4k')
+        self.tstill = bf_controller_dev('mapper.bf.temperatures.tstill')
+        self.tmxc = bf_controller_dev('mapper.bf.temperatures.tmixing')
+        self.tmagnet = bf_controller_dev('mapper.bf.temperatures.tmagnet', autoinit=False)
+        self.tfse = bf_controller_dev('mapper.bf.temperatures.tfse', autoinit=False)
+        self.t = bf_controller_dev('mapper.temperature_control.sensors.t{ch}.temperature', ch=self.current_ts_ch, autoinit=False)
+        self.s = bf_controller_dev('mapper.temperature_control.sensors.t{ch}.resistance', ch=self.current_ts_ch, autoinit=False)
+        self.t_en = bf_controller_dev('mapper.temperature_control.sensors.t{ch}.enabled', ch=self.current_ts_ch)
+        self.gage_1_en = bf_controller_dev('mapper.bf.pressures.p1_on')
+        self._devwrap('active_temp_ch')
+        self._devwrap('fetch')
+        self.alias = self.fetch
+        # This needs to be last to complete creation
+        super(bf_controller, self)._create_devs()
