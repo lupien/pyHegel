@@ -32,11 +32,12 @@ import datetime
 import copy
 import os.path
 import ssl
+import select
 
 from ..instruments_base import BaseInstrument, MemoryDevice,\
                              dict_improved, locked_calling, wait_on_event, FastEvent, wait,\
                              ProxyMethod, BaseDevice, ChoiceBase, KeyError_Choices, ChoiceLimits,\
-                             ChoiceSimpleMap,  ChoiceIndex, Dict_SubDevice
+                             ChoiceSimpleMap,  ChoiceIndex, Dict_SubDevice,_sleep_signal_context_manager
 from ..instruments_registry import register_instrument
 _wait = wait
 
@@ -1621,6 +1622,99 @@ class bf_controller_dev(BaseDevice):
         return val
 
 #TODO: handle listen/unlisten
+class Bf_controller_listen_thread(threading.Thread):
+    def __init__(self, control, ping_interval=120):
+        super(Bf_controller_listen_thread, self).__init__()
+        self.control = control
+        self._stop = False
+        self._regular_cache = queue.Queue() # infinite size
+        self._lock = threading.Lock()
+        self._listen_cache = {}
+        self._last_ping = dict()
+        self.ping_interval = ping_interval
+
+    def cancel(self):
+        self._stop = True
+
+    def recv(self, ws):
+        # Have to replace the websocket recv because it will hang when the pong is received
+        # instead of just returning. We add the control_frame=True option
+        with ws.readlock:
+            opcode, data = ws.recv_data(control_frame=True)
+        if six.PY3 and opcode == websocket.ABNF.OPCODE_TEXT:
+            return data.decode("utf-8")
+        elif opcode == websocket.ABNF.OPCODE_TEXT or opcode == websocket.ABNF.OPCODE_BINARY:
+            return data
+        else:
+            return ''
+
+    def run(self):
+        # This print is needed on anaconda 2019.10 on windows 10 to prevent
+        #  a windows error exeption when later trying to print in the thread (status_line)
+        # Doing a print at the beginning of the thread fixes that problem.
+        #print 'Listen Thread started'
+        while True:
+            if self._stop:
+                return
+            readers = []
+            ws_map = dict()
+            for endpoint, ws in self.control._websockets_cache.items():
+                readers.append(ws.sock)
+                ws_map[ws.sock] = (endpoint, ws)
+                now = time.time()
+                if now - self._last_ping.get(endpoint, 0) > self.ping_interval:
+                    ws.ping()
+                    self._last_ping[endpoint] = now
+            if not len(readers):
+                wait(.1)
+                continue
+            rs, ws, xs = select.select(readers, [],  [], .1) # timeout of .1 s
+            for r in rs:
+                endpoint, ws = ws_map[r]
+                #data = ws.recv()
+                data = self.recv(ws)
+                if data == '':
+                    continue
+                js_data = dict(status='nothing')
+                js_data = json.loads(data)
+                if js_data['status'] == 'NOTIFICATION':
+                    self.put_cache(endpoint, js_data)
+                else:
+                    self._regular_cache.put(data)
+
+    def put_cache(self, endpoint, js_data):
+        path = js_data['data'].keys()[0]
+        with self._lock:
+            self._listen_cache[(endpoint, path)] = js_data
+
+    def get_cache(self, endpoint, path):
+        with self._lock:
+            ret = self._listen_cache.get((endpoint, path), None)
+        return ret
+
+    def del_cache(self,  endpoint, path):
+        with self._lock:
+            try:
+                del self._listen_cache.get[(endpoint, path)]
+            except KeyError:
+                pass
+
+    def get_last_regular(self):
+        return self._regular_cache.get(timeout=self.control._timeout)
+
+    def clear_buffer(self):
+        while True:
+            try:
+                self._regular_cache.get_nowait()
+            except queue.Empty:
+                break
+
+    def wait(self, timeout=None):
+        # we use a the context manager because join uses sleep.
+        with _sleep_signal_context_manager():
+            self.join(timeout)
+        return not self.is_alive()
+
 
 @register_instrument('BlueFors', 'Controller')
 class bf_controller(BaseInstrument):
@@ -1685,9 +1779,14 @@ class bf_controller(BaseInstrument):
         self._websockets_cache = dict()
         self._last_reply = None
         self._last_sent = None
+        s = weakref.proxy(self)
+        self._helper_thread = Bf_controller_listen_thread(s)
+        self._helper_thread.start()
         super(bf_controller, self).__init__(**kwargs)
 
     def __del__(self):
+        self._helper_thread.cancel()
+        self._helper_thread.wait(.5)
         self.disconnect()
         print 'Deleted bf_controller instance'
         super(bf_controller, self).__del__()
@@ -1707,6 +1806,9 @@ class bf_controller(BaseInstrument):
             ws.close()
         self._websockets_cache = []
 
+    def clear_websocket_buffer(self):
+        self._helper_thread.clean_buffer()
+
     def _websocket_helper(self, path):
         ws = self._websockets_cache.get(path, None)
         if ws is None:
@@ -1718,7 +1820,7 @@ class bf_controller(BaseInstrument):
                 url = 'ws://%s:%i/%s'%(self._ip_address, self._ip_port, path)
             if self._api_key is not None:
                 url += '?key=%s'%self._api_key
-            ws = websocket.create_connection(url, timeout=self._timeout, sslopt=self._websocket_sslopt)
+            ws = websocket.create_connection(url, timeout=self._timeout, sslopt=self._websocket_sslopt, enable_multithread=True)
             self._websockets_cache[path] = ws
         return ws
 
@@ -1826,12 +1928,14 @@ class bf_controller(BaseInstrument):
             req = json.dumps(js_params)
             self._last_sent = req
             ws.send(req)
-            ret = ws.recv()
+            #ret = ws.recv()
+            ret = self._helper_thread.get_last_regular()
             self._last_reply = ret
             result1 = json.loads(ret)
             if result1['status'] != 'RECEIVED':
                 raise RuntimeError('Bad reply: %s'%result1)
-            ret2 = ws.recv()
+            #ret2 = ws.recv()
+            ret2 = self._helper_thread.get_last_regular()
             result2 = json.loads(ret2)
             if result2['status'] != 'SUCCEEDED':
                 raise RuntimeError('Bad reply: %s'%result2)
