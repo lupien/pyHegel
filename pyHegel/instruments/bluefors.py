@@ -1563,7 +1563,8 @@ class bf_temperature_controller(BaseInstrument):
 #    notifications only works under get (not websocket read) contrary to what frontend API seems to imply
 
 class bf_controller_dev(BaseDevice):
-    def __init__(self, path, rw=True, ch=None, scale=None, endpoint='values', get_operation='get', set_operation='post', valid=True, **kwargs):
+    def __init__(self, path, rw=True, ch=None, scale=None, endpoint='values', get_operation='get', set_operation='post', valid=True,
+                 get_pre_update=None, set_post_update=None, **kwargs):
         """
         rw when True, allows read and write. Otherwise only read is allowed
         ch when given is the device to select the channel. Use {ch} in the path for it to be properly used.
@@ -1576,6 +1577,8 @@ class bf_controller_dev(BaseDevice):
         self._endpoint = endpoint
         self._get_operation = get_operation
         self._set_operation = set_operation
+        self._get_pre_update = get_pre_update
+        self._set_post_update = set_post_update
         self._valid = valid
         self._scale = scale
         super(bf_controller_dev, self).__init__(**kwargs)
@@ -1610,11 +1613,15 @@ class bf_controller_dev(BaseDevice):
         if self._scale:
             val = val/self._scale
         self.instr.write(path, endpoint=self._endpoint, operation=operation, set_val=val)
+        if self._set_post_update is not None:
+            self.instr.write(self._set_post_update, operation='post', call=True)
 
     def _getdev(self, ch=None, valid=None, operation=None):
         path = self._path
         ch, path = self._ch_helper(ch, path)
         operation = operation if operation is not None else self._get_operation
+        if self._get_pre_update is not None:
+            self.instr.write(self._get_pre_update, operation='post', call=True)
         valid = valid if valid is not None else self._valid
         val = self.instr.get_value(path, endpoint=self._endpoint, valid=valid, operation=operation)
         if self._scale:
@@ -1831,7 +1838,7 @@ class bf_controller(BaseInstrument):
         return self.write(path, operation, endpoint, raw_return=raw_return, raw_request=raw_request, _ask=True, **params)
 
     @locked_calling
-    def write(self, path, operation='post', endpoint='values', raw_return=False, raw_request=False, _ask=False, set_val=None, **params):
+    def write(self, path, operation='post', endpoint='values', raw_return=False, raw_request=False, _ask=False, set_val=None, call=None, **params):
         """ The path elements can be seperated by . or / and will be converted as needed.
             operation can be get, post (will use http protocol), or read, set, listen, unlisten, status
                (which will us the websocket protocol)
@@ -1843,6 +1850,8 @@ class bf_controller(BaseInstrument):
             raw_request when True, prevents the handling of the websocket request. You need to provide all the information
                 properly.
             if set_val is given, the correct data dictionnary is built for 'post' and 'set'
+            if call is given, it is either True (if not parameters) or a list of parameters to pass to a method
+                       This only works on post right now.
             params are the paramters to pass add to the communication. command for ws is added from operation automatically.
               you might be interested in adding 'id' (string of hexadecimal numbers, _ and -) to track commands (only for websocket)
                    'prettyprint=1' to better format the json string (not useful since we turn the json data into a dictionnary),
@@ -1882,6 +1891,11 @@ class bf_controller(BaseInstrument):
             data = params.pop('data', {})
             if operation == 'post' and set_val is not None:
                 data[data_path] = dict(content=dict(value=set_val))
+            if operation == 'post' and call is not None:
+                if call is True:
+                    data[data_path] = dict(content=dict(call=1))
+                else:
+                    data[data_path] = dict(content=dict(call=1, parameters=call))
             if self._api_key is not None:
                 params['key'] = self._api_key
             get_proto = lambda url, params={}, json={}: self._requests_session.get(url, timeout=self._timeout, params=params)
@@ -1975,7 +1989,7 @@ class bf_controller(BaseInstrument):
         result = [ gen_result(key, val) for key, val in data.items() if check(key)]
         return sorted(result)
 
-    def get_value(self, path, operation='post', endpoint='values', valid=True, raw_val=False, **params):
+    def get_value(self, path, operation='get', endpoint='values', valid=True, raw_val=False, **params):
         """
           valid when True (default) returns the value in latest_valid_value, if False returns the
                 value in latest_value
@@ -2092,6 +2106,17 @@ class bf_controller(BaseInstrument):
         self.s = bf_controller_dev('mapper.temperature_control.sensors.t{ch}.resistance', ch=self.current_ts_ch, autoinit=False)
         self.t_en = bf_controller_dev('mapper.temperature_control.sensors.t{ch}.enabled', ch=self.current_ts_ch)
         self.gage_1_en = bf_controller_dev('mapper.bf.pressures.p1_on')
+#        htrrng_dict = {0:0., 1:31.6e-6, 2:100e-6, 3:316e-6,
+#               4:1.e-3, 5:3.16e-3, 6:10e-3, 7:31.6e-3, 8:100e-3}
+#        htrrng = ChoiceSimpleMap(htrrng_dict)
+        lakeshore_dev = lambda *args, **kwargs: bf_controller_dev(*args, autoinit=False,
+                                                                  get_pre_update='driver.lakeshore.settings.outputs.sample.read',
+                                                                  set_post_update='driver.lakeshore.settings.outputs.sample.write', **kwargs)
+        self.lakeshore_sample_htr_range = lakeshore_dev('driver.lakeshore.settings.outputs.sample.range', choices=range(0, 8+1))
+        self.lakeshore_sample_sp = lakeshore_dev('driver.lakeshore.settings.outputs.sample.setpoint')
+        self.lakeshore_sample_p = lakeshore_dev('driver.lakeshore.settings.outputs.sample.p')
+        self.lakeshore_sample_i = lakeshore_dev('driver.lakeshore.settings.outputs.sample.i')
+        self.lakeshore_sample_d = lakeshore_dev('driver.lakeshore.settings.outputs.sample.d')
         self._devwrap('active_temp_ch')
         self._devwrap('fetch')
         self.alias = self.fetch
