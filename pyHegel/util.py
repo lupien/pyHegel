@@ -1077,7 +1077,7 @@ def read_bluefors_all(start_date, stop_date=None, logdir='C:/BlueFors/Logs', flo
 # Read ICE oxford NI data files
 #########################################################
 
-_ICEoxford_n2i_default = dict(t4k=0, time=1, htr2=2, htr1=3, t50k=4, t1k=7, pcirc=8, s1k=10, s4k=11, s50k=12,
+_ICEoxford_n2i_default = dict(t4k=0, time_raw=1, htr2=2, htr1=3, t50k=4, t1k=7, pcirc=8, s1k=10, s4k=11, s50k=12,
                               nv1=13, pdump=21, dt=22) # dt is time since start of file in s.
 #_ICEoxford_n2i_default = dict(t4k=0, time=1, htr2=2, htr1=3, t50k=4, mag_field=5, heat_ex_50k=6, t1k=7,
 #                              pcirc=8, mag_current=9, s1k=10, s4k=11, s50k=12,
@@ -1085,6 +1085,11 @@ _ICEoxford_n2i_default = dict(t4k=0, time=1, htr2=2, htr1=3, t50k=4, t1k=7, pcir
 #                              s_raw_d4=15, s_raw_d5=16, s_raw_d1=17, s_raw_d2=18, s_raw_d3=19,
 #                              heat_1k_ex=20, pdump=21, dt=22, out_current=23
 #                              sample=24, tdynamic_heat_exchanger=25, sample2=26)
+
+# The timestamp in the data is calculated incorrectly
+# My guess is that they take the labview timestamp (seconds since 1904-01-01 00:00:00 UTC)
+# and substract the unix epoch 1970-01-01 00:00:00 UTC, but they probably used
+# the local timezone instead of the UTC one for the unix epoch.
 
 class ICEoxford_Data(object):
     """
@@ -1095,7 +1100,7 @@ class ICEoxford_Data(object):
     show_full_columns returns the full_columns name with the index
     other names index a particular column.
     """
-    def __init__(self, data, columns, filenames=None, filenames_clean=None, names2index=_ICEoxford_n2i_default):
+    def __init__(self, data, columns, filenames=None, filenames_clean=None, names2index=_ICEoxford_n2i_default, tz_offset=None):
         self.filenames = filenames
         self.filenames_clean = filenames_clean
         self.full_columns = columns
@@ -1108,6 +1113,9 @@ class ICEoxford_Data(object):
         # added them as (hidden) attribute so tab expansion can find them
         for n in names2index.iterkeys():
             setattr(self, n, None)
+        if tz_offset is None:
+            tz_offset = time.timezone
+        self._timeoffset = tz_offset
     def __getattribute__(self, name):
         names2index = super(ICEoxford_Data, self).__getattribute__('_names2index')
         if name in names2index:
@@ -1116,6 +1124,9 @@ class ICEoxford_Data(object):
         return super(ICEoxford_Data, self).__getattribute__(name)
     def show_full_columns(self):
         return list(enumerate(self.full_columns))
+    @property
+    def time(self):
+        return self.time_raw + self._timeoffset
 
 _full_columns = ["/'Data'/'4k Stage'",  "/'Data'/'Unix Timestamp'",  "/'Data'/'Heater 2'",  "/'Data'/'Heater 1'",
                  "/'Data'/'50k Stage'",  "/'Data'/'Magnetic Field'",  "/'Data'/'50k Heat Exchanger'",  "/'Data'/'1K pot'",
@@ -1125,12 +1136,15 @@ _full_columns = ["/'Data'/'4k Stage'",  "/'Data'/'Unix Timestamp'",  "/'Data'/'H
                  "/'Data'/'Dump Pressure'", "/'Data'/'Elapsed (s)'", "/'Data'/'Output Current'", "/'Data'/'Sample'",
                  "/'Data'/'Dynamic Heat Exchanger'", "/'Data'/'Sample 2'"]
 
-def read_iceoxford(filenames_or_glob, prepend=None):
+def read_iceoxford(filenames_or_glob, prepend=None, tz_offset=None):
     """ Read one or many files (either lists or globs)
     written by ICE oxford program (.tdms files).
     Returns a class will all the data concatenated and with
     names to access to the columns.
     preprend is prepended to all the filenames.
+    tz_offset if None (default) will use the local timezone to fix the time
+              otherwise, provide the value to add to time_raw to generate the time
+              attribute
     """
     try:
         import nptdms
@@ -1161,7 +1175,7 @@ def read_iceoxford(filenames_or_glob, prepend=None):
     if c0 != _full_columns:
         print "read_iceoxford: the full_columns name are not the expected ones. Column assignment is probably wrong."
     data = np.concatenate(all_data_clean, axis=-1)
-    return ICEoxford_Data(data, c0, filelist, [f for s, f in zip(all_sel, filelist) if s])
+    return ICEoxford_Data(data, c0, filelist, [f for s, f in zip(all_sel, filelist) if s], tz_offset=tz_offset)
 
 
 #########################################################
