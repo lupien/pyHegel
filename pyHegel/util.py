@@ -45,6 +45,7 @@ This module contains many utilities:
     read_iceoxford
     sort_file
     find_index_closest
+    QD_Data
 Conversion functions and time constants calculation helpers:
     dB2A, dB2P, P2dB, A2dB
     dBm2o, o2dBm
@@ -71,6 +72,7 @@ import io
 from scipy.optimize import brentq as brentq_rootsolver
 from scipy.special import gamma
 
+from qd_data import QD_Data
 
 try:
     try:
