@@ -980,6 +980,14 @@ def read_blueforsChannels(filename):
         d[i][1]['main'] = main_st.get(int(v[i][1][0]), '!! UNKNOWN !!')
     return d
 
+def read_blueforsStatus(filename):
+    """
+    Reads a bluefors log filename that contains Status information.
+    Returns a list of (time, dict) tuples.
+    """
+    v = read_bluefors(filename)
+    d = [(t,dict(zip(s[0::2], map(lambda ss: float(ss.strip()), s[1::2])))) for t,s in v]
+    return d
 
 def read_blueforsGauges(filename):
     """
