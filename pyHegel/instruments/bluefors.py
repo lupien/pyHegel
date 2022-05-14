@@ -1908,7 +1908,7 @@ class bf_controller(BaseInstrument):
             data = params.pop('data', {})
             if operation == 'post' and set_val is not None:
                 data[data_path] = dict(content=dict(value=set_val))
-            if operation == 'post' and call is not None:
+            if operation == 'post' and call is not None and not raw_request:
                 if call is True:
                     data[data_path] = dict(content=dict(call=1))
                 else:
@@ -1948,10 +1948,19 @@ class bf_controller(BaseInstrument):
                 js_params['data'] = data
                 if path is not None:
                     path = path.replace('/', '.')
+                    content = {}
                     if operation == 'set' and set_val is not None:
-                        data['data'] = {path: dict(content=dict(value=set_val))}
+                        content['value'] = set_val
                     else:
                         data['target'] = path
+                    if operation == 'set' and call is not None:
+                        if call is True:
+                            content['call'] = 1
+                        else:
+                            content['call'] = 1
+                            content['parameters'] = call
+                    if len(content) != 0:
+                        data['data'] = {path: dict(content=content)}
                 data.update(params)
             else:
                 js_params = params
