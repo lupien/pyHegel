@@ -1564,13 +1564,14 @@ class bf_temperature_controller(BaseInstrument):
 
 class bf_controller_dev(BaseDevice):
     def __init__(self, path, rw=True, ch=None, scale=None, endpoint='values', get_operation='get', set_operation='post', valid=True,
-                 get_pre_update=None, set_post_update=None, **kwargs):
+                 get_pre_update=None, set_post_update=None, allow_check=False, **kwargs):
         """
         rw when True, allows read and write. Otherwise only read is allowed
         ch when given is the device to select the channel. Use {ch} in the path for it to be properly used.
         scale when given is multiplied/divided on get/set values
         get_operation, set_operation are the operation to use for get/set
         valid is the valid entry to use for get_value
+        allow_check when True, will prevent set unless allow_write is True
         """
         self._path = path
         self._ch = ch
@@ -1581,17 +1582,18 @@ class bf_controller_dev(BaseDevice):
         self._set_post_update = set_post_update
         self._valid = valid
         self._scale = scale
+        self._allow_check = allow_check
         super(bf_controller_dev, self).__init__(**kwargs)
         if rw:
             self._setdev_p = True
         self._getdev_p = True
 
-    def check(self, val, ch=None, valid=None, operation=None):
+    def _checkdev(self, val, ch=None, valid=None, operation=None):
         if ch is not None and self._ch is not None:
             self._ch.check(ch)
         if self._scale:
             val = val/self._scale
-        super(bf_controller_dev, self).check(val)
+        super(bf_controller_dev, self)._checkdev(val)
 
     def _ch_helper(self, ch, path):
         ch_dev = self._ch
@@ -1607,11 +1609,15 @@ class bf_controller_dev(BaseDevice):
         return ch, path
 
     def _setdev(self, val, ch=None, valid=None, operation=None):
+        if self._allow_check and not self.instr.allow_write.get():
+            raise RuntimeError(self.perror('using set is not allowed for this device until allow_write is set to True.'))
         path = self._path
         ch, path = self._ch_helper(ch, path)
         operation = operation if operation is not None else self._set_operation
         if self._scale:
             val = val/self._scale
+        if isinstance(self.choices, ChoiceBase):
+            val = self.choices.tostr(val)
         self.instr.write(path, endpoint=self._endpoint, operation=operation, set_val=val)
         if self._set_post_update is not None:
             self.instr.write(self._set_post_update, operation='post', call=True)
@@ -1624,6 +1630,8 @@ class bf_controller_dev(BaseDevice):
             self.instr.write(self._get_pre_update, operation='post', call=True)
         valid = valid if valid is not None else self._valid
         val = self.instr.get_value(path, endpoint=self._endpoint, valid=valid, operation=operation)
+        if isinstance(self.choices, ChoiceBase):
+            val = self.choices(val)
         if self._scale:
             val = val * self._scale
         return val
@@ -1690,6 +1698,8 @@ class Bf_controller_listen_thread(threading.Thread):
                     self._regular_cache.put(data)
 
     def put_cache(self, endpoint, js_data):
+        if endpoint.startswith('ws/'):
+            endpoint = endpoint[3:].rstrip('/')
         path = js_data['data'].keys()[0]
         with self._lock:
             self._listen_cache[(endpoint, path)] = js_data
@@ -1699,10 +1709,15 @@ class Bf_controller_listen_thread(threading.Thread):
             ret = self._listen_cache.get((endpoint, path), None)
         return ret
 
-    def del_cache(self,  endpoint, path):
+    def del_cache(self,  endpoint, path, recursion=False):
         with self._lock:
             try:
-                del self._listen_cache.get[(endpoint, path)]
+                if recursion:
+                    for k in list(self._listen_cache.keys()):
+                        if k[0] == endpoint and k[1].startswith(path):
+                            del self._listen_cache[k]
+                else:
+                    del self._listen_cache[(endpoint, path)]
             except KeyError:
                 pass
 
@@ -1740,6 +1755,7 @@ class bf_controller(BaseInstrument):
         tmxc
         t
         s
+        allow_write
     Some methods available:
         ask
         write
@@ -1860,7 +1876,8 @@ class bf_controller(BaseInstrument):
                    'must_exist' (if 1, not the default, check existence, only for post, set),
                    'wait_response' (if 1, which is the default, waits to make sure to return updated value, only post).
                    'all' is boolean for listen only. If True sends all update at the same time (not waiting for new values).
-                   'recursive' if True (not default) listen to all nodes recursively. Also applies to unlisten to stop all child nodes.
+                   'recursion' if True (not default) listen to all nodes recursively. Also applies to unlisten to stop all child nodes.
+                               Note that the documention says it is 'recursive' but that does not work.
             Examples:
               bc = instruments.bf_controller()
               bc.write('mapper.bf.heaters.hs-still', set_val=0)
@@ -1950,9 +1967,13 @@ class bf_controller(BaseInstrument):
                 raise RuntimeError('Bad reply: %s'%result1)
             #ret2 = ws.recv()
             ret2 = self._helper_thread.get_last_regular()
+            self._last_reply = ret, ret2
             result2 = json.loads(ret2)
             if result2['status'] != 'SUCCEEDED':
                 raise RuntimeError('Bad reply: %s'%result2)
+            if operation == 'unlisten':
+                recursion = params.get('recursion', False)
+                self._helper_thread.del_cache(endpoint, path, recursion)
             if raw_return:
                 result = ret2
             else:
@@ -1995,11 +2016,21 @@ class bf_controller(BaseInstrument):
                 value in latest_value
           raw_val when True, skips converting the value according to the type
           This only works for flat  style (not for tree)
+          if operation is listen it will try to get that data from the listen cache,
+               otherwise it will be the same as read
         """
+        if operation == 'listen':
+            # this could return None
+            js = self._helper_thread.get_cache(endpoint, path)
+            # in case of failure
+            operation = 'read'
+        else:
+            js = None
         if 'recursion' not in params:
             # This is the default for read. The default for get is -1 (all)
             params['recursion'] = 0
-        js = self.ask(path, operation=operation, endpoint=endpoint, **params)
+        if js is None:
+            js = self.ask(path, operation=operation, endpoint=endpoint, **params)
         latest = 'latest_valid_value' if valid else 'latest_value'
         base = js['data'][path]
         error = False
@@ -2094,20 +2125,27 @@ class bf_controller(BaseInstrument):
         return active
 
     def _create_devs(self):
+        self.allow_write = MemoryDevice(False, choices=[True, False])
         self.current_valve = MemoryDevice(1, choices=range(1, 23+1))
         self.current_heater = MemoryDevice('hs-still', choices=ChoiceSimpleMap({
                             'hs-still':'hs-still', 'hs-mc':'hs-mc', 'ext':'ext', 'heater':'4k-heater'}))
         self.current_gage = MemoryDevice(1, choices=range(1, 6+1))
         self.current_pump = MemoryDevice('scroll2', choices=['compressor', 'scroll1', 'scroll2', 'turbo1', 'turbo2'])
         self.current_ts_ch = MemoryDevice(1, choices=range(1, 16+1))
-        self.valve = bf_controller_dev('mapper.bf.valves.v{ch}', ch=self.current_valve)
-        self.heater = bf_controller_dev('mapper.bf.heaters.{ch}', ch=self.current_heater)
+        self.valve = bf_controller_dev('mapper.bf.valves.v{ch}', ch=self.current_valve, allow_check=True)
+        self.heater = bf_controller_dev('mapper.bf.heaters.{ch}', ch=self.current_heater, allow_check=True)
         self.gage = bf_controller_dev('mapper.bf.pressures.p{ch}', ch=self.current_gage, scale=1e3, doc='in mbar')
-        self.pump = bf_controller_dev('mapper.bf.pumps.{ch}', ch=self.current_pump)
+        self.pump = bf_controller_dev('mapper.bf.pumps.{ch}', ch=self.current_pump, allow_check=True)
         self.flow = bf_controller_dev('mapper.bf.flow', doc='in mmol/s')
-        self.pulsetube = bf_controller_dev('mapper.bf.pulsetube')
+        self.pulsetube = bf_controller_dev('mapper.bf.pulsetube', allow_check=True)
         self.t50k = bf_controller_dev('mapper.bf.temperatures.t50k')
         self.t4k = bf_controller_dev('mapper.bf.temperatures.t4k')
+        #  This is an example to use listen mode (next 2 lines)
+        #self.write('mapper.bf.temperatures.tstill', operation='listen', recursion=False)
+        #self.tstill = bf_controller_dev('mapper.bf.temperatures.tstill', get_operation='listen')
+        #  This is how to stop listen
+        #self.write('mapper.bf.temperatures.tstill', operation='unlisten', recursion=False)
+        #  This is the usual mode
         self.tstill = bf_controller_dev('mapper.bf.temperatures.tstill')
         self.tmxc = bf_controller_dev('mapper.bf.temperatures.tmixing')
         self.tmagnet = bf_controller_dev('mapper.bf.temperatures.tmagnet', autoinit=False)
@@ -2116,13 +2154,14 @@ class bf_controller(BaseInstrument):
         self.s = bf_controller_dev('mapper.temperature_control.sensors.t{ch}.resistance', ch=self.current_ts_ch, autoinit=False)
         self.t_en = bf_controller_dev('mapper.temperature_control.sensors.t{ch}.enabled', ch=self.current_ts_ch)
         self.gage_1_en = bf_controller_dev('mapper.bf.pressures.p1_on')
-#        htrrng_dict = {0:0., 1:31.6e-6, 2:100e-6, 3:316e-6,
-#               4:1.e-3, 5:3.16e-3, 6:10e-3, 7:31.6e-3, 8:100e-3}
-#        htrrng = ChoiceSimpleMap(htrrng_dict)
+        htrrng_dict = {0:0., 1:31.6e-6, 2:100e-6, 3:316e-6,
+               4:1.e-3, 5:3.16e-3, 6:10e-3, 7:31.6e-3, 8:100e-3}
+        htrrng = ChoiceSimpleMap(htrrng_dict)
         lakeshore_dev = lambda *args, **kwargs: bf_controller_dev(*args, autoinit=False,
                                                                   get_pre_update='driver.lakeshore.settings.outputs.sample.read',
                                                                   set_post_update='driver.lakeshore.settings.outputs.sample.write', **kwargs)
-        self.lakeshore_sample_htr_range = lakeshore_dev('driver.lakeshore.settings.outputs.sample.range', choices=range(0, 8+1))
+        self.lakeshore_sample_htr_range = lakeshore_dev('driver.lakeshore.settings.outputs.sample.range', choices=htrrng)
+        #self.lakeshore_sample_htr_range = lakeshore_dev('driver.lakeshore.settings.outputs.sample.range', choices=range(0, 8+1))
         self.lakeshore_sample_sp = lakeshore_dev('driver.lakeshore.settings.outputs.sample.setpoint')
         self.lakeshore_sample_p = lakeshore_dev('driver.lakeshore.settings.outputs.sample.p')
         self.lakeshore_sample_i = lakeshore_dev('driver.lakeshore.settings.outputs.sample.i')
