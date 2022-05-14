@@ -2015,8 +2015,18 @@ class bf_controller(BaseInstrument):
             val = 'no_value'
         tp = base['type']
         if not raw_val:
-            if tp in ['Value.Number.Integer.Enumeration.yesNo', 'Value.Number.Integer.Enumeration.Boolean']:
+            if tp is None:
+                pass
+            elif tp in ['Value.Number.Integer.Enumeration.yesNo', 'Value.Number.Integer.Enumeration.Boolean']:
                 val = bool(int(val)) if not error else False
+            elif tp == 'Value.Number.Integer.Enumeration.onOffError':
+                val = int(val)
+                # This info was obtained from Olga at support@bluefors.com
+                if val == 2:
+                    raise RuntimeError(self.perror('There was an off error'))
+                elif val == 3:
+                    raise RuntimeError(self.perror('There was an on error'))
+                val = bool(val) if not error else False
             elif tp.startswith('Value.Number.Float'):
                 val = float(val) if not error else np.nan
             elif tp.startswith('Value.Number.Integer'):
