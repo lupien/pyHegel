@@ -2676,26 +2676,43 @@ class ChoiceSimpleMap(ChoiceBase):
     the values are what are used on the python side.
     filter, when given, is a function applied to the input from the instrument.
     It can be used to normalize the input entries
+    allow_keys will permit __contains__ and tostr to also use entries in the keys
+       if values fail.
     """
-    def __init__(self, input_dict, filter=None):
+    def __init__(self, input_dict, filter=None, allow_keys=False):
         self.dict = input_dict
         self.keys = input_dict.keys()
         self.values = input_dict.values()
         self.filter = filter
+        self.allow_keys = allow_keys
         if filter is not None:
             for x in self.keys:
                 if filter(x) != x:
                     raise ValueError, "The input dict has at least one key where filter(key)!=key."
     def __contains__(self, x):
-        return x in self.values
+        is_in = x in self.values
+        if not is_in and self.allow_keys:
+            is_in = x in self.keys
+        return is_in
     def __call__(self, input_key):
         if self.filter is not None:
             input_key = self.filter(input_key)
         return self.dict[input_key]
     def tostr(self, input_choice):
-        return self.keys[self.values.index(input_choice)]
+        try:
+            indx = self.values.index(input_choice)
+        except ValueError:
+            # Did not find it
+            if self.allow_keys:
+                indx = self.keys.index(input_choice)
+            else:
+                raise
+        return self.keys[indx]
     def __repr__(self):
-        return repr(self.values)
+        if self.allow_keys:
+            return repr(self.dict)
+        else:
+            return repr(self.values)
 
 Choice_bool_OnOff = ChoiceSimpleMap(dict(ON=True, OFF=False), filter=string.upper)
 Choice_bool_YesNo = ChoiceSimpleMap(dict(YES=True, NO=False), filter=string.upper)
