@@ -1647,6 +1647,7 @@ class Bf_controller_listen_thread(threading.Thread):
         self._listen_cache = {}
         self._last_ping = dict()
         self.ping_interval = ping_interval
+        self.daemon = True # This will allow python to exit
 
     def cancel(self):
         self._stop = True
