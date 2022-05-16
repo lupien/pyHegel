@@ -2165,11 +2165,12 @@ class bf_controller(BaseInstrument):
         self.gage_1_en = bf_controller_dev('mapper.bf.pressures.p1_on')
         htrrng_dict = {0:0., 1:31.6e-6, 2:100e-6, 3:316e-6,
                4:1.e-3, 5:3.16e-3, 6:10e-3, 7:31.6e-3, 8:100e-3}
-        htrrng = ChoiceSimpleMap(htrrng_dict)
+        htrrng = ChoiceSimpleMap(htrrng_dict, allow_keys=True)
         lakeshore_dev = lambda *args, **kwargs: bf_controller_dev(*args, autoinit=False,
                                                                   get_pre_update='driver.lakeshore.settings.outputs.sample.read',
                                                                   set_post_update='driver.lakeshore.settings.outputs.sample.write', **kwargs)
-        self.lakeshore_sample_htr_range = lakeshore_dev('driver.lakeshore.settings.outputs.sample.range', choices=htrrng)
+        self.lakeshore_sample_htr_range = lakeshore_dev('driver.lakeshore.settings.outputs.sample.range', choices=htrrng,
+                                                        doc=""" You can use either the current or the index for the heater range""")
         #self.lakeshore_sample_htr_range = lakeshore_dev('driver.lakeshore.settings.outputs.sample.range', choices=range(0, 8+1))
         self.lakeshore_sample_sp = lakeshore_dev('driver.lakeshore.settings.outputs.sample.setpoint')
         self.lakeshore_sample_p = lakeshore_dev('driver.lakeshore.settings.outputs.sample.p')
