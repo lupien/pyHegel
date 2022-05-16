@@ -24,7 +24,8 @@ def timestamp_offset(year=None):
     # so it is not immediately affected by clock change or daylight savings.
     # but since it lasts at most 49.7 days, it must reset at some point.
     # Multivu itself does not calculate the date correctly (offset by 1) and
-    # the time is also eventually wrong after
+    # the time is also eventually wrong after daylight saving.
+    # The time might be readjusted after deactivating and reactivating the resistivity option.
     #  Here dynacool multivu seems to decode the timestamp ts as
     #    datetime.timedelta(ts//86400, ts%86400)+datetime.datetime(1999,12,31)
     if year is None:
