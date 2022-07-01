@@ -2061,12 +2061,14 @@ class bf_controller(BaseInstrument):
             elif tp in ['Value.Number.Integer.Enumeration.yesNo', 'Value.Number.Integer.Enumeration.Boolean']:
                 val = bool(int(val)) if not error else False
             elif tp == 'Value.Number.Integer.Enumeration.onOffError':
-                val = int(val)
+                val = int(val) if not error else -1
                 # This info was obtained from Olga at support@bluefors.com
                 if val == 2:
                     raise RuntimeError(self.perror('There was an off error'))
                 elif val == 3:
                     raise RuntimeError(self.perror('There was an on error'))
+                elif val == -1:
+                    raise RuntimeError(self.perror('There was not data'))
                 val = bool(val) if not error else False
             elif tp.startswith('Value.Number.Float'):
                 val = float(val) if not error else np.nan
