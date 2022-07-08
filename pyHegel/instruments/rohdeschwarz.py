@@ -691,6 +691,9 @@ class rs_rto_scope(visaInstrumentAsync):
            -format: can be int8, int16, real or ascii
            -history: use a number 0 - -n with n from acquire_navailable to read a value from history
                      when None (default) it skips turning history on and should read the last acq
+                             unless history is already on, in which case it reads the last selected history.
+                     when 'all' reads all history from -n to 0
+                     Note that history is disabled after every acquisition
         """
         self.set_format(format)
         ch = self._fetch_ch_helper(ch)
@@ -698,30 +701,57 @@ class rs_rto_scope(visaInstrumentAsync):
         first = True
         cur_ch = self.current_channel.get()
         cur_wf = self.current_channel_waveform.get()
+        if history == 'all':
+            history = range(-self.acquire_navailable.get()+1, 0+1)
+        else:
+            history = [history]
+        N_hist = len(history)
+        scales = dict()
         for c in ch:
             cch = int(c[1])
             cwf = int(c[3])
-            if history is not None:
-                self.waveform_history_en.set(True)
-                self.waveform_history_index.set(history, ch=cch, wf=cwf)
             header = self.waveform_data_header.get(ch=cch, wf=cwf)
             if (not raw) and xaxis and first:
                 # this has been tested with 'EXPort:WAVeform:INCXvalues ON'
-                ret = [ np.linspace(header.x_start, header.x_stop, header.n_sample, endpoint=False) ]
-                first = False
-            data = self.waveform_data.get()
-            if raw or format in ['ascii', 'real']:
-                y = data
-            else:
-                gain = self.input_full_range.get()
-                offset_pos = self.input_position_div.get()*gain/10.
-                if format == 'int16':
-                    gain /=  253*256.
+                one_x = np.linspace(header.x_start, header.x_stop, header.n_sample, endpoint=False)
+                if N_hist > 1:
+                    ret = [ np.concatenate([one_x]*N_hist)]
                 else:
-                    gain /=  253
-                offset = self.input_offset.get()
-                y = data*gain + offset - offset_pos
-            ret.append(y)
+                    ret = [ one_x ]
+            full_y = []
+            for h in history:
+                if h is not None:
+                    self.waveform_history_en.set(True)
+                    self.waveform_history_index.set(h, ch=cch, wf=cwf)
+                else:
+                    # Note that history is disabled after every acq
+                    # So do not disable it here. Also do not change index since
+                    # that can be slow.
+                    #self.waveform_history_en.set(False)
+                    #self.waveform_history_index.set(0, ch=cch, wf=cwf)
+                    pass
+                data = self.waveform_data.get()
+                if raw or format in ['ascii', 'real']:
+                    y = data
+                else:
+                    scale = scales.get(c, None)
+                    if scale is None:
+                        gain = self.input_full_range.get()
+                        offset_pos = self.input_position_div.get()*gain/10.
+                        if format == 'int16':
+                            gain /=  253*256.
+                        else:
+                            gain /=  253
+                        offset = self.input_offset.get()
+                        scales[c] = dict(gain=gain, offset=offset, offset_pos=offset_pos)
+                    else:
+                        gain  = scale['gain']
+                        offset  = scale['offset']
+                        offset_pos  = scale['offset_pos']
+                    y = data*gain + offset - offset_pos
+                full_y.append(y)
+            first = False
+            ret.append(np.concatenate(full_y))
         self.current_channel.set(cur_ch)
         self.current_channel_waveform.set(cur_wf)
         ret = np.asarray(ret)
