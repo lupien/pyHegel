@@ -72,6 +72,7 @@ import io
 from scipy.optimize import brentq as brentq_rootsolver
 from scipy.special import gamma
 
+from pyHegel import qd_data
 from .qd_data import QD_Data
 
 try:

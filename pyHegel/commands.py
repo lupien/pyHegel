@@ -242,6 +242,7 @@ def reset_pyHegel():
     reload(sys.modules['pyHegel.ni_dstp'])
     reload(instruments)
     reload(gui_tools)
+    reload(util.qd_data)
     reload(util)
     import pyHegel
     reload(pyHegel)
