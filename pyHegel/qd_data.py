@@ -68,8 +68,11 @@ def timestamp_log_conv(timestamp):
     day = 3600*24
     ret = np.empty(len(timestamp_flat))
     for i, ts in enumerate(timestamp_flat):
-        dt = datetime.timedelta(ts//day, ts%day) + base
-        ret[i] = time.mktime(dt.timetuple()) + dt.microsecond/1e6
+        if np.isnan(ts):
+            ret[i] = np.nan
+        else:
+            dt = datetime.timedelta(ts//day, ts%day) + base
+            ret[i] = time.mktime(dt.timetuple()) + dt.microsecond/1e6
     if single:
         ret = ret[0]
     elif isinstance(timestamp, np.ndarray) and timestamp.ndim >1:
@@ -286,7 +289,9 @@ class QD_Data(object):
             is_log = True
             offset = timestamp_offset_log()
         elif year in ['auto', 'auto_year']:
-            if year == 'auto' and t.min() > 10*365*24*3600:
+            # do not use t.min, I have seen missing time datapoints
+            #   cause by an empty line in the data logs (wrapped BRlog)
+            if year == 'auto' and np.nanmin(t) > 10*365*24*3600:
                 is_log = True
                 offset = timestamp_offset_log()
             else: # auto_year
@@ -294,7 +299,9 @@ class QD_Data(object):
                 for h in self.headers:
                     if h.startswith('FILEOPENTIME'):
                         # looks like: FILEOPENTIME,1636641706.00,11/11/2021,9:41 AM
-                        year = int(h.split(',')[2].split('/')[-1])
+                        # or for brlog:
+                        #  FILEOPENTIME, 3846454070.154991 11/19/2021, 3:27:44 AM
+                        year = int(h.split(',')[-2].split('/')[-1])
                         break
                 offset = timestamp_offset(year)
         elif 1970 < year:
@@ -318,8 +325,12 @@ class QD_Data(object):
         return self._t_cache
 
 
-    def show_titles(self):
-        return list(enumerate(self.titles))
+    def show_titles(self, raw=False):
+        if raw:
+            t = self.titles_raw
+        else:
+            t = self.titles
+        return list(enumerate(t))
 
     def __getitem__(self, indx):
         return self.v[indx]
