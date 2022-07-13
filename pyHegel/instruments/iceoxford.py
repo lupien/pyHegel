@@ -107,6 +107,10 @@ class iceoxford_temperature_controller(visaInstrument):
         nv_set_values
         heat_sw_set_values
         heater_set_values
+        prep_cooldown
+        do_warmup
+        finish_warmup
+        finish_cooldown
     All the nv*, heat_sw* and heater set device automatically call the matching set_values by default.
     To prevent that, call the set with noset=True
     """
@@ -332,5 +336,83 @@ class iceoxford_temperature_controller(visaInstrument):
         self._devwrap('pressures')
         self._devwrap('temperatures')
         super(iceoxford_temperature_controller, self)._create_devs()
+
+    def prep_cooldown(self):
+        """ Setup the ICEoxford program so it is ready for a cooldown.
+            It adjusts the heaters (off), the needle valve and the heatswitch.
+        """
+        self.nv_mode.set('auto', noset=True)
+        self.nv_setpoint.set(1, noset=True)
+        self.nv_ramp.set(100, noset=True)
+        self.nv_pid.set(p=50, i=.2, d=0, noset=True)
+        self.nv_error_band.set(0.2)
+        self.heater_range.set('off', outch=1, noset=True)
+        self.heater_mode.set('manual', noset=True)
+        self.heater_setpoint_ramp_en.set(False)
+        self.heater_setpoint.set(.5)
+        self.heater_range.set('off', outch=2, noset=True)
+        self.heater_mode.set('manual', noset=True)
+        self.heater_setpoint_ramp_en.set(False)
+        self.heater_setpoint.set(.5)
+        self.heat_sw_mode.set('auto', noset=True)
+        self.heat_sw_input.set('B', noset=True)
+        self.heat_sw_setpoint.set(5, noset=True)
+        self.heat_sw_error_band.set(.5)
+
+    def do_warmup(self):
+        """ Setup the ICEoxford program so it starts the warmup.
+            It adjusts the heaters, the needle valve and the heatswitch.
+        """
+        temps = self.temperatures.get()
+        t1k = temps[2]
+        t4k = temps[1]
+        self.heat_sw_relay_en.set(False, noset=True)
+        self.heat_sw_mode.set('manual')
+        self.nv_mode.set('auto', noset=True)
+        self.nv_setpoint.set(5, noset=True)
+        self.nv_ramp.set(100, noset=True)
+        self.nv_pid.set(p=200, i=50, d=0, noset=True)
+        self.nv_error_band.set(0.2)
+        # heater 1, (4K, B)
+        self.heater_range.set('off', outch=1, noset=True)
+        self.heater_input.set('B', noset=True)
+        self.heater_mode.set('auto', noset=True)
+        self.heater_setpoint_ramp_en.set(False, noset=True)
+        self.heater_ramp.set(0.4, noset=True)
+        self.heater_pid.set(p=10, i=20, d=0)
+        # Now toggle setpoint and ramp in the proper order.
+        self.heater_setpoint.set(t4k)
+        self.heater_setpoint_ramp_en.set(True)
+        self.heater_range.set('medium')
+        self.heater_setpoint.set(285)
+        # heater 2, (1K, C)
+        self.heater_range.set('off', outch=2, noset=True)
+        self.heater_input.set('C', noset=True)
+        self.heater_mode.set('auto', noset=True)
+        self.heater_setpoint_ramp_en.set(False, noset=True)
+        self.heater_ramp.set(0.4, noset=True)
+        self.heater_pid.set(p=10, i=20, d=0)
+        # Now toggle setpoint and ramp in the proper order.
+        self.heater_setpoint.set(t1k)
+        self.heater_setpoint_ramp_en.set(True)
+        self.heater_range.set('high')
+        self.heater_setpoint.set(295)
+
+    def finish_warmup(self):
+        """ Setup the ICEoxford program so it stops the warmup.
+            It turns off the heaters
+        """
+        self.heater_range.set('off', outch=1, noset=True)
+        self.heater_mode.set('manual')
+        self.heater_range.set('off', outch=2, noset=True)
+        self.heater_mode.set('manual')
+
+    def finish_cooldown(self):
+        """ Setup the ICEoxford program so it stops the cooldown.
+            It just makes sure the heatswitch is disabled
+        """
+        self.heat_sw_relay_en.set(False, noset=True)
+        self.heat_sw_mode.set('manual')
+
 
 # TODO: could handle multiple heat_sw
