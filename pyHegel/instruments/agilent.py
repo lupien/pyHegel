@@ -1210,6 +1210,8 @@ class agilent_rf_Attenuator(visaInstrument):
 #@register_instrument('AGILENT TECHNOLOGIES', 'MSO-X 3054A', '02.37.2014052001', usb_vendor_product=[0x0957, 0x17a2])
 #@register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 2024A', '01.10.2011031600', usb_vendor_product=[0x0957, 0x1796])
 #@register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 3054A', '01.10.2011031600', usb_vendor_product=[0x0957, 0x17a2])
+@register_instrument('KEYSIGHT TECHNOLOGIES', 'DSO-X 3014T', usb_vendor_product=[0x2A8D, 0x1768], skip_add=True)
+@register_instrument('KEYSIGHT TECHNOLOGIES', 'DSO-X 3024T', usb_vendor_product=[0x2A8D, 0x1766], skip_add=True)
 @register_instrument('AGILENT TECHNOLOGIES', 'MSO-X 3054A', usb_vendor_product=[0x0957, 0x1796], skip_add=True)
 @register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 2024A', usb_vendor_product=[0x0957, 0x1796], skip_add=True)
 @register_instrument('AGILENT TECHNOLOGIES', 'DSO-X 3054A', usb_vendor_product=[0x0957, 0x17a2])
@@ -1244,11 +1246,12 @@ class infiniiVision_3000(visaInstrumentAsync):
         opts = []
         for ch in self.find_all_active_channels():
             mode = self.points_mode.get(src='Channel%i'%ch)
+            scale = self.channel_range.get(ch=ch)
             preamble = self.preamble.get()
-            opts += ['ch%i=%r'%(ch, dict(mode=mode, preamble=preamble))]
+            opts += ['ch%i=%r'%(ch, dict(mode=mode, preamble=preamble, scale=scale))]
         self.current_channel.set(orig_ch)
         self.source.set(orig_src)
-        opts += self._conf_helper('timebase_mode', 'timebase_pos', 'timebase_range', 'timebase_reference', 'timebase_scale',
+        opts += self._conf_helper('timebase_mode', 'timebase_pos', 'timebase_range', 'timebase_reference', 'timebase_reference_custom', 'timebase_scale',
                                  'waveform_count', 'acq_type', 'acq_mode', 'average_count', 'acq_samplerate', 'acq_npoints')
         return opts + self._conf_helper(options)
     def clear_dev(self):
@@ -1389,10 +1392,13 @@ class infiniiVision_3000(visaInstrumentAsync):
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
         self.channel_display = devChannelOption('CHANnel{ch}:DISPlay', str_type=bool)
+        self.channel_range = devChannelOption('CHANnel{ch}:RANGe', str_type=float, setget=True)
+        self.channel_scale = devChannelOption('CHANnel{ch}:SCALe', str_type=float, setget=True)
         self.timebase_mode= scpiDevice(':TIMebase:MODE', choices=ChoiceStrings('MAIN', 'WINDow', 'XY', 'ROLL'))
         self.timebase_pos= scpiDevice(':TIMebase:POSition', str_type=float) # in seconds from trigger to display ref
         self.timebase_range= scpiDevice(':TIMebase:RANGe', str_type=float) # in seconds, full scale
-        self.timebase_reference= scpiDevice(':TIMebase:REFerence', choices=ChoiceStrings('LEFT', 'CENTer', 'RIGHt'))
+        self.timebase_reference= scpiDevice(':TIMebase:REFerence', choices=ChoiceStrings('LEFT', 'CENTer', 'RIGHt', 'CUSTom'))
+        self.timebase_reference_custom = scpiDevice(':TIMebase:REFerence:LOCation', str_type=float, min=0, max=1., setget=True)
         self.timebase_scale= scpiDevice(':TIMebase:SCALe', str_type=float) # in seconds, per div
         #TODO: add a bunch of CHANNEL commands, Then MARKER and MEASure, TRIGger
         self._devwrap('fetch', autoinit=False, trig=True)
