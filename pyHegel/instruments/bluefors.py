@@ -1812,7 +1812,6 @@ class bf_controller(BaseInstrument):
         self._helper_thread.cancel()
         self._helper_thread.wait(.5)
         self.disconnect()
-        print 'Deleted bf_controller instance'
         super(bf_controller, self).__del__()
 
     def idn(self):
