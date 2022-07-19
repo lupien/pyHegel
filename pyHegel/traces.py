@@ -358,8 +358,29 @@ def _offsetText_helper(self):
     else:
         self.offsetText.xytext = new_xy
 
+class ExtraDialog(QtGui.QDialog):
+    def __init__(self, value, parent=None):
+        if value is None:
+            value = 1.
+        super(ExtraDialog, self).__init__(parent, windowModality=QtCore.Qt.WindowModal)
+        lay = QtGui.QGridLayout()
+        self.setLayout(lay)
+        sb = QtGui.QDoubleSpinBox(value=value, decimals=3, minimum=0.020, maximum=86400)
+        self.sb_wait_time = sb
+        lay.addWidget(QtGui.QLabel('Wait time (s)'), 0, 0)
+        lay.addWidget(sb, 0, 1)
+        cb = QtGui.QCheckBox()
+        self.cb_sync_all_y = cb
+        lay.addWidget(QtGui.QLabel('Synchronize all y axes'), 1, 0)
+        lay.addWidget(cb, 1, 1)
+        ok = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok)
+        self.button_box = ok
+        lay.addWidget(ok, 2, 0, 1, 2)
+        ok.accepted.connect(self.hide)
+
+
 class Trace(TraceBase):
-    def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False, comment_func=None):
+    def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False, comment_func=None, wait_time=None):
         super(Trace, self).__init__(width=width, height=height, dpi=dpi)
         ax = host_subplot_class(self.fig, 111)
         self.fig.add_subplot(ax)
@@ -372,6 +393,7 @@ class Trace(TraceBase):
         self.legend_strs = None
         self.first_update = True
         self.time_mode = time_mode
+        self.wait_time = wait_time
         # could also use self.fig.autofmt_xdate()
         ax = self.axs[0]
         tlabels = ax.axis['bottom'].major_ticklabels
@@ -415,6 +437,13 @@ class Trace(TraceBase):
         self.rescale_button = QtGui.QPushButton('Rescale')
         self.toolbar.addWidget(self.rescale_button)
         self.rescale_button.clicked.connect(self.rescale_button_press)
+        # extra
+        self.extra_button = QtGui.QPushButton('Extra...')
+        self.toolbar.addWidget(self.extra_button)
+        self.extra_dialog = ExtraDialog(wait_time, self.extra_button)
+        self.extra_button.clicked.connect(self.extra_dialog.show)
+        self.extra_dialog.sb_wait_time.valueChanged.connect(self.wait_time_changed)
+        self.extra_dialog.cb_sync_all_y.clicked.connect(self.sync_all_y_changed)
         # status
         self.status_label = QtGui.QLabel(text='temporary')
         self.toolbar.addWidget(self.status_label)
@@ -477,6 +506,18 @@ class Trace(TraceBase):
             ax.set_autoscaley_on(True)
             ax.autoscale(enable=None)
         self.draw()
+    def wait_time_changed(self, val):
+        self.wait_time = val
+
+    def sync_all_y_changed(self, checked):
+        if checked:
+            grouper = self.axs[0].get_shared_y_axes()
+            grouper.join(*self.axs)
+        else:
+            grouper = self.axs[0].get_shared_y_axes()
+            for ax in self.axs:
+                grouper.remove(ax)
+
     def set_xlogscale(self, enable=True):
         s = {True:'log', False:'linear'}
         self.axs[0].set_xscale(s[enable])
