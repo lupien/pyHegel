@@ -886,8 +886,8 @@ class _Sweep(instruments.BaseInstrument):
             extra_conf.append(sweep.out)
         return extra_conf
 
-    def _init_graph(self, title, filename, hdrs, x_idx, span, graphsel, logspace, negative, title_pre='Sweep: '):
-        t = traces.Trace()
+    def _init_graph(self, title, filename, hdrs, x_idx, span, graphsel, logspace, negative, title_pre='Sweep: ', wait_time=None):
+        t = traces.Trace(wait_time=wait_time)
         if title is None:
             title = filename
         if title is None:
@@ -1077,7 +1077,7 @@ class _Sweep(instruments.BaseInstrument):
         if graph is None:
             graph = self.graph.get()
         if graph:
-            t, gsel = self._init_graph(title, filename, hdrs, 0, span, graphsel, logspace, negative, title_pre='Sweep: ')
+            t, gsel = self._init_graph(title, filename, hdrs, 0, span, graphsel, logspace, negative, title_pre='Sweep: ', wait_time=beforewait)
         else:
             t = gsel = None
         try:
@@ -1106,7 +1106,6 @@ class _Sweep(instruments.BaseInstrument):
                 ioffset = 0
                 clf = False
                 #dev, dev_opt, v, beforewait, doset, set_counts
-                bwait = [beforewait]
                 sets = [[dev], [dev_opt], [], [], [True], set_counts]
                 cycle_list = [(fwd, f, formats)]
                 if updown == True:
@@ -1119,10 +1118,12 @@ class _Sweep(instruments.BaseInstrument):
                         cycle_span = span[::-1]
                     for i,v in enumerate(cycle_span):
                         sets[2] = [v]
+                        if graph:
+                            beforewait = t_proxy.wait_time
                         if iter_partial == 0 and first_wait is not None:
                             sets[3] = [beforewait + first_wait]
                         else:
-                            sets[3] = bwait
+                            sets[3] = [beforewait]
                         iter_partial += 1
                         iter_info = i+ioffset, iter_partial, npts_total, cfwd, [cfwd]
                         yield iter_info, cf, cformats, sets, clf
@@ -1210,6 +1211,9 @@ class _Sweep(instruments.BaseInstrument):
         stop = mklist(stop)
         updown = mklist(updown)
         first_wait = mklist(first_wait)
+        first_wait_last = first_wait[-1]
+        if first_wait_last is None:
+            first_wait_last = 0.
         if beforewait is None:
             beforewait = self.beforewait.get()
         beforewait = mklist(beforewait)
@@ -1300,7 +1304,8 @@ class _Sweep(instruments.BaseInstrument):
         if graph:
             # We graph using last span
             x_idx = np.sum(np.array(set_counts)[:-1])
-            t, gsel = self._init_graph(title, filename, hdrs, x_idx, spans[-1], graphsel, logspace[-1], negativel[-1], title_pre='Sweep_multi: ')
+            t, gsel = self._init_graph(title, filename, hdrs, x_idx, spans[-1], graphsel, logspace[-1], negativel[-1], title_pre='Sweep_multi: ', wait_time=beforewait[-1])
+            t_proxy = instruments_base.weakref.proxy(t) # needed to allow "del t" below
         else:
             t = gsel = None
         try:
@@ -1336,6 +1341,8 @@ class _Sweep(instruments.BaseInstrument):
                         if i == 0:
                             sets[3] = first_wait
                         else:
+                            if graph:
+                                beforewait[-1] = t_proxy.wait_time
                             sets[3] = beforewait
                         iter_info = i, i+1, npts_total, fwd, fwd_all
                         yield iter_info, f, formats, sets, False
@@ -1388,6 +1395,9 @@ class _Sweep(instruments.BaseInstrument):
                             if changing and i != 0 and k+1 < multiN:
                                 if close_after[k+1]:
                                     clf = True
+                            if graph:
+                                beforewait[-1] = t_proxy.wait_time
+                                first_wait[-1] = t_proxy.wait_time + first_wait_last
                             if changing and j == 0 and not both_updown[k]:
                                 next_wait = first_wait[k]
                                 if updown[k] == 'alternate' and k>0:
@@ -1789,7 +1799,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     # make sure devs is list like
     if not isinstance(devs, list):
         devs = [devs]
-    t = traces.Trace(time_mode=True)
+    t = traces.Trace(time_mode=True, wait_time=interval)
     fullpath = None
     if filename is not None:
         fullpath = use_sweep_path(filename)
@@ -1837,6 +1847,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
                 break
             i += 1
             if npoints is None or i < npoints:
+                interval = t.wait_time
                 wait(interval)
             _checkTracePause(t)
     except KeyboardInterrupt:
@@ -1871,7 +1882,7 @@ def scope(dev, interval=.1, title='', **kwarg):
            scope(acq1.readval, unit='V') # with acq1 in scope mode
     """
     dev, kwarg = _get_dev_kw(dev, **kwarg)
-    t = traces.Trace()
+    t = traces.Trace(wait_time=interval)
     t.setWindowTitle('Scope: '+title)
     fmt = dev.getformat(**kwarg)
     if fmt['xaxis'] == True:
@@ -1893,7 +1904,7 @@ def scope(dev, interval=.1, title='', **kwarg):
         if v.ndim == 1:
             v.shape=(1,-1)
         t.setPoints(xscale, v)
-        wait(interval)
+        wait(t.wait_time)
         _checkTracePause(t)
         if t.abort_enabled:
             break
