@@ -1996,7 +1996,7 @@ def _process_filename(filename, now=None, next_i=None, start_i=0, search=True, *
 
 
 ### get overides get the mathplotlib
-def get(dev, filename=None, extra_conf=None, **kwarg):
+def get(dev, filename=None, extra_conf=None, skip_force_get=False, **kwarg):
     """
        Get a value from device (or the alias for an instrument)
        When giving it a filename, data will be saved to it
@@ -2010,6 +2010,10 @@ def get(dev, filename=None, extra_conf=None, **kwarg):
        in the current directory.
 
        extra_conf behaves like in sweep.
+       skip_force_get when True will prevent the force_get to update all
+                       cached values. Skipping it will possibly run faster
+                       but might miss some changed configuration on the
+                       instrument.
 
        The options for the device are listed as keyword arguments (**kwarg).
        Standard options are (can also see sweep.out):
@@ -2036,7 +2040,8 @@ def get(dev, filename=None, extra_conf=None, **kwarg):
         kwarg['extra_conf'] = f.getvalue()
         f.close()
     if filename is not None:
-        dev.force_get()
+        if not skip_force_get:
+            dev.force_get()
         filename = use_sweep_path(filename)
         filename, unique_i = _process_filename(filename)
         kwarg.update(filename=filename)
