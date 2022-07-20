@@ -1218,15 +1218,29 @@ class agilent_rf_Attenuator(visaInstrument):
 class infiniiVision_3000(visaInstrumentAsync):
     """
      To use this instrument, the most useful devices are probably:
-       fetch  (only works in the main timebase mode, not for roll or XY or zoom)
-       readval (press run/stop on scope to terminate it, or use clear_dev method)
+       fetch  (only works in the main timebase mode, not for roll or XY or zoom.
+               Also it does not works badly when in Run State. Avoid it if possible.)
+       readval (press run/stop on scope to terminate it, or use clear_dev method.
+                You probably want to start in the stop mode, or use the skip_force_get option
+                of get)
        snap_png
+       use_single_trig  (note that single mode requires a trigger, it cannot use auto trigger mode
+                         only normal mode)
+     With use_single_trig set to True, the display will update during acquisition but
+         the overall operation takes a little longer.
      See also the setup_trig_detection method.
-     Be warned that fetch, resets the current acquistion and waits for the next
-     when the scope is running (a firmware bug?).
-     fetch when stopped is ok.
+     Be warned that fetch (preamble and waveform_count), resets the current acquistion
+     and waits for the next one when the scope is running (a firmware bug?). Therefore
+     trying to get with a filename will probably fail if the capture is long, and might
+     do double trig otherwise. When the scope is stopped, there is no problem.
+     If no trigger comes or the acquisition is long, the commands will time out and put
+     the instrument in a blocked state. To recover use the clear_dev method.
      Another way is to start an acq with single_trig, check the acq with is_running
      and then fetch it.
+     When performing a sweep/record with this device, the header in the main save file will
+         include preamble information from the last acquisition, not for the ones of the sweep
+         but the header in the scope files should be correct.
+    It is faster to save the data in .npy format, but there will not be any headers.
     """
     def __init__(self, visa_addr, poll='force_handler'):
         super(infiniiVision_3000, self).__init__(visa_addr, poll)
@@ -1235,12 +1249,36 @@ class infiniiVision_3000(visaInstrumentAsync):
         self.write(':WAVeform:BYTeorder LSBFirst') # can be LSBFirst pr MSBFirst
         self.write(':WAVeform:UNSigned ON') # ON,1 or OFF,0
         super(infiniiVision_3000, self).init(full=full)
+    # This is commented out because triggering on the trig status does not work
+    # properly (see below in _async_trigger_helper)
+#    def _async_trig_cleanup(self):
+#        # reset trig_status
+#        self.trig_status.get()
+#        super(infiniiVision_3000, self)._async_trig_cleanup()
     def _async_trigger_helper(self):
-        self.digitize()
+        self.write('*sre 32')
+        if self.use_single_trig.get():
+            # triggering on *sre 1 does not work since
+            #  it when it returns, the acquisition is not fully complete so
+            #  that asking for the preamble starts a new acquisition.
+            #self.write('*sre 1')
+            self.single_trig(skip_trig_status=True)
+        else:
+            # need to make sure it is stopped before starting,
+            # otherwise it sometimes stays long enough in run at end of acq
+            # to cause another trig when reading headers.
+            if self.is_running():
+                self.stop_trig()
+                #sleep(.1)
+            self.digitize()
         self.write('*OPC')
         #self.write(':DIGitize;*OPC')
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
+        if self.is_running():
+            # This is to prevent preamble, scal and count below from timing out
+            # if it acq is long. But it means we get date from the previous scan.
+            self.stop_trig()
         orig_src = self.source.getcache()
         orig_ch = self.current_channel.get()
         opts = []
@@ -1248,22 +1286,27 @@ class infiniiVision_3000(visaInstrumentAsync):
             mode = self.points_mode.get(src='Channel%i'%ch)
             scale = self.channel_range.get(ch=ch)
             preamble = self.preamble.get()
-            opts += ['ch%i=%r'%(ch, dict(mode=mode, preamble=preamble, scale=scale))]
+            count = self.waveform_count.get()
+            opts += ['ch%i=%r'%(ch, dict(mode=mode, preamble=preamble, scale=scale, count=count))]
         self.current_channel.set(orig_ch)
         self.source.set(orig_src)
         opts += self._conf_helper('timebase_mode', 'timebase_pos', 'timebase_range', 'timebase_reference', 'timebase_reference_custom', 'timebase_scale',
-                                 'waveform_count', 'acq_type', 'acq_mode', 'average_count', 'acq_samplerate', 'acq_npoints')
+                                 'acq_type', 'acq_mode', 'average_count', 'acq_samplerate', 'acq_npoints')
         return opts + self._conf_helper(options)
     def clear_dev(self):
         self.visa.instr.clear()
     def setup_trig_detection(self):
         """ This setups trig detection. Only use this on one thread and not with readval (run_and_wait).
-            Undo its effect with reset_trig_detection.
+            Undo its effect with reset_trig_detection (readval will also undo it)
             After calling this use:
               s.single_trig()
               get(s.trig_status) # when True there was a trig event
-              get(s.lasttrig_time) # if not 0. then there it is the last trig time
+              get(s.lasttrig_time) # if not 0. then it is the last trig time
             The trig time accuracy is probably within 100 ms.
+            Note that at least for DSOX3014T (but probably all of them),
+            the trig state seem to only be transferred to the SRQ line at the end of
+            the acquisition. Therefore the lasttrig_time is actually the time at the end of
+            the acquisition.
         """
         # lets presume we were started with poll='force_handler'
         self.write('*sre 1')
@@ -1287,11 +1330,12 @@ class infiniiVision_3000(visaInstrumentAsync):
         The same as pressing stop
         """
         self.write(':STOP')
-    def single_trig(self):
+    def single_trig(self, skip_trig_status=False):
         """
         The same as pressing single
         """
-        self.trig_status.get() # reset trig
+        if not skip_trig_status:
+            self.trig_status.get() # reset trig
         self._async_last_status_time = 0.
         self.write(':SINGle')
     def is_running(self):
@@ -1360,6 +1404,7 @@ class infiniiVision_3000(visaInstrumentAsync):
         self.current_channel.set(orig_ch)
         return ret
     def _create_devs(self):
+        self.use_single_trig = MemoryDevice(False, choices=[True, False], doc="Use either Run/stop (when False) or single_trig when True")
         self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', raw=True, str_type=_decode_block_base, autoinit=False, doc="Use like this: get(s500.snap_png, filename='testname.png')\nThe .png extensions is optional. It will be added if necessary.")
         self.snap_png._format['bin']='.png'
         self.inksaver = scpiDevice(':HARDcopy:INKSaver', str_type=bool, doc='This control whether the graticule colors are inverted or not.') # ON, OFF 1 or 0
@@ -1374,10 +1419,10 @@ class infiniiVision_3000(visaInstrumentAsync):
             app = kwarg.pop('options_apply', ['src'])
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
-        self.points = devSrcOption(':WAVeform:POINts', str_type=int) # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
+        self.points = devSrcOption(':WAVeform:POINts', str_type=int, autoinit=False, doc='Do not use when in run state.') # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
         self.points_mode = devSrcOption(':WAVeform:POINts:MODE', choices=ChoiceStrings('NORMal', 'MAXimum', 'RAW'))
-        self.preamble = devSrcOption(getstr=':waveform:PREamble?', choices=ChoiceMultiple(['format', 'type', 'points', 'count', 'xinc', 'xorig', 'xref', 'yinc', 'yorig', 'yref'],[int, int, int, int, float, float, int, float, float, int]))
-        self.waveform_count = devSrcOption(getstr=':WAVeform:COUNt?', str_type=int)
+        self.preamble = devSrcOption(getstr=':waveform:PREamble?', choices=ChoiceMultiple(['format', 'type', 'points', 'count', 'xinc', 'xorig', 'xref', 'yinc', 'yorig', 'yref'],[int, int, int, int, float, float, int, float, float, int]), autoinit=False)
+        self.waveform_count = devSrcOption(getstr=':WAVeform:COUNt?', str_type=int, autoinit=False)
         self.acq_type = scpiDevice(':ACQuire:TYPE', choices=ChoiceStrings('NORMal', 'AVERage', 'HRESolution', 'PEAK'))
         self.acq_mode= scpiDevice(':ACQuire:MODE', choices=ChoiceStrings('RTIM', 'SEGM'))
         self.average_count = scpiDevice(':ACQuire:COUNt', str_type=int, min=2, max=65536)
