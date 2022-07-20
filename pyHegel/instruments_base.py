@@ -388,8 +388,8 @@ def _write_dev(val, filename, format=format, first=False):
             filename = _replace_ext(filename, bin)
     f=open(filename, open_mode)
     dev._last_filename = filename
-    header = _get_conf_header(format)
     if doheader: # if either is not None or not ''
+        header = _get_conf_header(format)
         if header:
             for h in header:
                 h = h.replace('\n', '\\n').replace('\r', '\\r')
