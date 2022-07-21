@@ -1408,7 +1408,15 @@ class infiniiVision_3000(visaInstrumentAsync):
         self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', raw=True, str_type=_decode_block_base, autoinit=False, doc="Use like this: get(s500.snap_png, filename='testname.png')\nThe .png extensions is optional. It will be added if necessary.")
         self.snap_png._format['bin']='.png'
         self.inksaver = scpiDevice(':HARDcopy:INKSaver', str_type=bool, doc='This control whether the graticule colors are inverted or not.') # ON, OFF 1 or 0
-        self.data = scpiDevice(getstr=':waveform:DATA?', raw=True, str_type=decode_uint16_bin, autoinit=False) # returns block of data (always header# for asci byte and word)
+         # :waveform:DATA? returns block of data (always header# for asci byte and word)
+         # with chunk_size = 1024*1024 it seems to lower the frequency of transfer error that lock up
+         # the communication to the scope (requiring a power cycle; clear_dev is not sufficient,
+         #  writing to the scope still works but reading always times out.)
+         #  The default is 20*1024, which requires multiple visa read requests and
+         #  and one of them (often in the 70's) would hang (as seen with io monitor).
+         # The above observation were with either NI or Keysight visa lib and with the
+         #   DSO-X 3014T,MY61500174,07.50.2021102830
+        self.data = scpiDevice(getstr=':waveform:DATA?', raw=True, str_type=decode_uint16_bin, autoinit=False, chunk_size=1024*1024)
           # also read :WAVeform:PREamble?, which provides, format(byte,word,ascii),
           #  type (Normal, peak, average, HRes), #points, #avg, xincr, xorg, xref, yincr, yorg, yref
           #  xconv = xorg+x*xincr, yconv= (y-yref)*yincr + yorg
