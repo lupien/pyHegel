@@ -2793,13 +2793,18 @@ class ChoiceDevDep(ChoiceBase):
         Works the same as str_type from scpi_device.
         if sub_type is None, it calls the to/from str of the selected value of
         the dictionnary (which should be an instance of ChoiceBase).
+        force_get when True will use get on subdevice instead of getcache
     """
-    def __init__(self, dev, choices, sub_type=None):
+    def __init__(self, dev, choices, sub_type=None, force_get=False):
         self.choices = choices
         self.dev = dev
         self.sub_type = sub_type
+        self.force_get = force_get
     def _get_choice(self):
-        val = self.dev.getcache()
+        if self.force_get:
+            val = self.dev.get()
+        else:
+            val = self.dev.getcache()
         for k, v in self.choices.iteritems():
             if isinstance(k, (tuple, ChoiceBase)) and val in k:
                 return v
