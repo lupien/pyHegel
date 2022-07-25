@@ -34,9 +34,10 @@ import os.path
 import ssl
 import select
 
-from ..instruments_base import BaseInstrument, MemoryDevice,\
+from ..instruments_base import BaseInstrument, MemoryDevice, make_choice_list,\
                              dict_improved, locked_calling, wait_on_event, FastEvent, wait,\
                              ProxyMethod, BaseDevice, ChoiceBase, KeyError_Choices, ChoiceLimits,\
+                             ChoiceDevDep,\
                              ChoiceSimpleMap,  ChoiceIndex, Dict_SubDevice,_sleep_signal_context_manager
 from ..instruments_registry import register_instrument
 _wait = wait
@@ -1620,14 +1621,16 @@ class bf_controller_dev(BaseDevice):
             val = self.choices.tostr(val)
         self.instr.write(path, endpoint=self._endpoint, operation=operation, set_val=val)
         if self._set_post_update is not None:
-            self.instr.write(self._set_post_update, operation='post', call=True)
+            path2 = self._set_post_update.format(ch=ch)
+            self.instr.write(path2, operation='post', call=True)
 
     def _getdev(self, ch=None, valid=None, operation=None):
         path = self._path
         ch, path = self._ch_helper(ch, path)
         operation = operation if operation is not None else self._get_operation
         if self._get_pre_update is not None:
-            self.instr.write(self._get_pre_update, operation='post', call=True)
+            path2 = self._get_pre_update.format(ch=ch)
+            self.instr.write(path2, operation='post', call=True)
         valid = valid if valid is not None else self._valid
         val = self.instr.get_value(path, endpoint=self._endpoint, valid=valid, operation=operation)
         if isinstance(self.choices, ChoiceBase):
@@ -2178,6 +2181,24 @@ class bf_controller(BaseInstrument):
         self.lakeshore_sample_p = lakeshore_dev('driver.lakeshore.settings.outputs.sample.p')
         self.lakeshore_sample_i = lakeshore_dev('driver.lakeshore.settings.outputs.sample.i')
         self.lakeshore_sample_d = lakeshore_dev('driver.lakeshore.settings.outputs.sample.d')
+        lakeshore_dev2 = lambda *args, **kwargs: bf_controller_dev(*args, autoinit=False, ch=self.current_ts_ch,
+                                                                  get_pre_update='driver.lakeshore.settings.inputs.in{ch}.read',
+                                                                  set_post_update='driver.lakeshore.settings.inputs.in{ch}.write', **kwargs)
+
+        make_range = lambda ch_list: ChoiceSimpleMap({(k+1):ChoiceIndex.normalize_N(v) for k,v in enumerate(ch_list)})
+        res_ranges = make_range(make_choice_list([2, 6.32], -3, 7))
+        cur_ranges = make_range(make_choice_list([1, 3.16], -12, -2))
+        volt_ranges = make_range(make_choice_list([2, 6.32], -6, -1))
+        self.lakeshore_input_exc_mode = lakeshore_dev2('driver.lakeshore.settings.inputs.in{ch}.excitation_mode',  choices=ChoiceSimpleMap({0:'voltage', 1:'current'}))
+        curvolt_ranges = ChoiceDevDep(self.lakeshore_input_exc_mode, {'voltage':volt_ranges, 'current':cur_ranges}, force_get=True)
+        self.lakeshore_input_exc_range = lakeshore_dev2('driver.lakeshore.settings.inputs.in{ch}.excitation_range', choices=curvolt_ranges)
+        self.lakeshore_input_resistance_range = lakeshore_dev2('driver.lakeshore.settings.inputs.in{ch}.range', choices=res_ranges)
+        self.lakeshore_input_resistance_autorange_en = lakeshore_dev2('driver.lakeshore.settings.inputs.in{ch}.autorange', choices=ChoiceSimpleMap({0:False, 1:True}))
+        self.lakeshore_input_filter_en = lakeshore_dev2('driver.lakeshore.settings.inputs.in{ch}.filter_on')
+        self.lakeshore_input_filter_settle_time = lakeshore_dev2('driver.lakeshore.settings.inputs.in{ch}.filter_settle_time')
+        self.lakeshore_input_filter_window = lakeshore_dev2('driver.lakeshore.settings.inputs.in{ch}.filter_window')
+        self.still_heater_en = bf_controller_dev('mapper.temperature_control.heaters.still.enabled')
+        self.still_heater_power = bf_controller_dev('mapper.temperature_control.heaters.still.power', setget=True)
         self._devwrap('active_temp_ch')
         self._devwrap('fetch')
         self.alias = self.fetch
