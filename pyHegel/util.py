@@ -251,7 +251,7 @@ def _reshape_helper(data, shape, force=False, force_def=np.nan, file=None):
 _readfile_lastnames = []
 _readfile_lastheaders = []
 _readfile_lasttitles = []
-def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True, concatenate=False, multi_force_def=np.nan, comments=False, encoding='utf8', opts={}):
+def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto', dtype=None, multi_sweep=True, concatenate=False, multi_force_def=np.nan, comments=False, encoding='utf8', firstdim='default', opts={}):
     """
     This function will return a numpy array containing all the data in the
     file.
@@ -306,6 +306,14 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
        read_comments. comments can also be a dictionnary, in which case they are the options
        to read_comments. When enabled, the return values will be
          (array, comments).
+
+    firstdim can be 'default', False, True or a column index.
+             False will not transpose axes,
+             True will swap axes (switching dim 0 and 1)
+             an index will move that dimension to be the first one.
+             default does like True but only for multiple files that have more than one column.
+               Note that it will swap axes for multiple files of .npy with 2 dimensions
+
 
     The list of files is saved in the global variable _readfile_lastnames.
     When the parameter getnames=True, the return value is a tuple
@@ -373,6 +381,7 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
     ret = []
     comments_array = []
     first_shape = None
+    orig_ndim = None
     for fn in filelist:
         if dtype is not None:
             current = np.fromfile(fn, dtype=dtype, **opts)
@@ -390,7 +399,8 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
                 current = loadtxt_csv(fn, **opts).T
             else:
                 current = np.loadtxt(fn, **opts).T
-        N_lines = current.shape[-1]
+        N_lines = np.atleast_1d(current).shape[-1]
+        orig_ndim = current.ndim
         current = do_reshape(current, fn)
         if first_shape is None:
             first_shape = current.shape
@@ -430,13 +440,33 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
         do_comment_reshape = False
     else:
         # convert into a nice numpy array. The data is copied and made contiguous
-        # the .npy with dim 3 is to match the behavior of a previous version.
-        if dtype is not None:
-            ret = np.array(ret)
-        elif filelist[0].lower().endswith('.npy') and ret[0].ndim != 2:
-            ret = np.array(ret)
-        else:
-            ret = np.array(ret).swapaxes(0,1).copy()
+        # originally I would swapaxes for any ndim==3 data set (before reshaping of multisweep)
+        #   This meant that it would swap 2 dim .npy multiple files and also
+        #    3 dim single .npy file.
+        # then I modified (commit 4bda44652c39be12af55163679162ddc05dd44c1)
+        #   the workings and it swapaxes for all multiple files except
+        #   raw binary data (dtype) and .npy files with 2 dimensions.
+        #   Therefore it even affected data files with a single dim (which is incorrect).
+        #   So that was wrong
+        # Now default firstdim is the same as originally except I do not swap axes
+        #  for single 3 dim .npy files.
+        ret = np.array(ret)
+        ndim = ret[0].ndim
+        if firstdim == 'default':
+            if dtype is not None:
+                firstdim = False
+            elif orig_ndim == 2:
+                firstdim = 1
+            else:
+                firstdim = False
+        elif firstdim is True:
+            firstdim = 1
+        if firstdim is not False:
+            # old code was
+            # ret = ret.swapaxes(0,1).copy()
+            a = range(ndim+1) # +1 for file index
+            indx = [firstdim] + a[:firstdim] + a[firstdim+1:]
+            ret = ret.transpose(indx).copy()
     if do_comments and do_comment_reshape:
         a = []
         sh = ret.shape[1:]
