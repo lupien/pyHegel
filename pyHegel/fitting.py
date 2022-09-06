@@ -63,6 +63,8 @@ def getVarNames(func):
     return (para, kwpara, varargs, varkw, defaults)
 
 def toEng(p, pe, signif=2):
+    if isinstance(p, (str, unicode)):
+        raise NotImplementedError
     if not np.isscalar(p): # lists and arrays:
         raise NotImplementedError
     if pe != 0:
@@ -229,7 +231,7 @@ def plotResult(func, p, pe, extra={}, signif=2, loc='upper right', ax=None, form
     It uses annotate, so you can override some of the settings with formats
     """
     res = '\n'.join(strResult(func, p, pe, extra, signif))
-    kwarg = dict(family='monospace', size=14, xycoords='axes fraction')
+    kwarg = dict(family='monospace', size=14, xycoords='axes fraction', multialignment='left')
     update = False
     if ax is None:
         ax = plt.gca()
