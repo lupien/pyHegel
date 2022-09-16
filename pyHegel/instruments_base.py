@@ -318,7 +318,11 @@ def _repr_or_string(val):
     if isinstance(val, basestring):
         return val
     else:
-        return repr(val)
+        ret = repr(val)
+        # clean up long int (python 2)
+        if isinstance(val, long):
+            ret = ret.rstrip('L')
+        return ret
 
 def _writevec_flatten_list(vals_list):
     ret = []
