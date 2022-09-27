@@ -1628,6 +1628,150 @@ class inficon_vgc50x(visaInstrument):
         super(inficon_vgc50x, self)._create_devs()
 
 
+class _Pressure_Conv(object):
+    scales = dict(torr=1., mbar= 1.3332236842105263, Pa= 133.32236842105263)
+    def __init__(self, unit=None):
+        self.unit = unit
+    def __call__(self, input_str):
+        val = float(input_str)
+        if self.unit:
+            unit = self.unit.get()
+            scale = self.scales[unit]
+            val *= scale
+        return val
+    def tostr(self, val):
+        return '%.2e'%val
+
+#@register_instrument('KurtJLesker', '375', '02141-12')
+@register_instrument('KurtJLesker', '375')
+class kurtJlesker_375(visaInstrument):
+    """
+    This is the driver for a Kurt J Lesker model 375 gauge controller.
+    Most useful devices:
+        pressure
+    Useful methods:
+        datetime
+        continous_output_disable
+    """
+    # we had trouble with the Visa serial connection that kept frezzing.
+    # So we use the serial module instead.
+    def __init__(self, visa_addr, unit='mbar', addr=1, ask_retries=1, **kwargs):
+        """
+        unit is the starting unit to use. One of mbar, torr or Pa
+        addr is the rs485 (also applies to rs232) address.
+        ask_retries is the number of retries of ask after a timeout.
+        """
+        self._default_unit = unit
+        self._addr = addr
+        self._ask_retries = ask_retries
+        cnsts = visa_wrap.constants
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == cnsts.InterfaceType.asrl:
+            baud_rate = kwargs.pop('baud_rate', 19200)
+            parity = kwargs.pop('parity', cnsts.Parity.none)
+            data_bits = kwargs.pop('data_bits', 8)
+            stop_bits = kwargs.pop('stop_bits', cnsts.StopBits.one)
+            kwargs['baud_rate'] = baud_rate
+            kwargs['parity'] = parity
+            kwargs['data_bits'] = data_bits
+            kwargs['stop_bits'] = stop_bits
+        kwargs['write_termination'] = '\r'
+        kwargs['read_termination'] = '\r'
+        self._write_top_level = True
+        self._write_no_addr = False
+        super(kurtJlesker_375, self).__init__(visa_addr, **kwargs)
+
+    def idn(self):
+        return 'KurtJLesker,375,no_serial,%s'%self._sw_version
+
+    def get_error(self):
+        raise NotImplementedError('This is not implemented for this instrument')
+    def read_status_byte(self):
+        raise NotImplementedError('This is not implemented for this instrument')
+    def control_remotelocal(self, *args, **kwargs):
+        raise NotImplementedError('This is not implemented for this instrument')
+    def reset_poweron(self):
+        raise NotImplementedError('This is not implemented for this instrument')
+    def clear(self):
+        raise NotImplementedError('This is not implemented for this instrument')
+
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('pressure', 'unit', options)
+
+    def _add_addr(self, cmd, resp=False):
+        rep = '*' if resp else '#'
+        return rep + "%02X"%self._addr +  cmd
+
+    @locked_calling
+    def write(self, cmd, termination='default', no_addr=False, no_resp=False):
+        if self._write_top_level:
+            try:
+                self._write_top_level = False
+                self._write_no_addr = no_addr
+                if no_resp:
+                    self.write(cmd, termination=termination)
+                else:
+                    resp = self.ask(cmd, clean_reply=False)
+                    if not no_addr and resp != self._add_addr(' PROGM OK', resp=True):
+                        raise RuntimeError('Unexpected response: %s'%resp)
+                    else:
+                        return resp
+            finally:
+                self._write_top_level = True
+                self._write_no_addr = False
+        else:
+            if not self._write_no_addr:
+                cmd = self._add_addr(cmd)
+            super(kurtJlesker_375, self).write(cmd, termination=termination)
+
+    @locked_calling
+    def _ask_internal(self, cmd, raw=False, chunk_size=None, no_addr=False, clean_reply=True):
+        if self._write_top_level:
+            try:
+                self._write_top_level = False
+                self._write_no_addr = no_addr
+                res = super(kurtJlesker_375, self).ask(cmd, raw=raw, chunk_size=chunk_size)
+            finally:
+                self._write_top_level = True
+                self._write_no_addr = False
+        else:
+            res = super(kurtJlesker_375, self).ask(cmd, raw=raw, chunk_size=chunk_size)
+        if not no_addr and clean_reply:
+            start = self._add_addr(' ', resp=True)
+            if not res.startswith(start):
+                raise RuntimeError('Unexpected response: %s'%res)
+            res = res[len(start):]
+        return res
+
+    def ask(self, cmd, raw=False, chunk_size=None, no_addr=False, clean_reply=True):
+        i = 0
+        while i <= self._ask_retries :
+            try:
+                res = self._ask_internal(cmd, raw, chunk_size, no_addr, clean_reply)
+                return res
+            except visa_wrap.VisaIOError as exc:
+                i += 1
+        raise exc
+
+    def reset(self):
+        """ Required for some changes to be applied.
+            You  might need to wait for before talking to the instrument again.
+        """
+        self.write('RST', no_resp=True)
+
+    def _create_devs(self):
+        self._sw_version = self.ask('VER')
+        self.unit = MemoryDevice(self._default_unit, choices=['torr', 'mbar', 'Pa'], doc='unit for pressure, not for trip points.')
+        self.pressure = scpiDevice(getstr='RD', str_type=_Pressure_Conv(self.unit))
+        conv = _Pressure_Conv()
+        self.trip1_below = scpiDevice('SL+{val}', 'RL+', str_type=conv, autoinit=False, setget=True, doc='In instrument unit (not the unit device)')
+        self.trip1_above = scpiDevice('SL-{val}', 'RL-', str_type=conv, autoinit=False, setget=True, doc='In instrument unit (not the unit device)')
+        self.trip2_below = scpiDevice('SH+{val}', 'RH+', str_type=conv, autoinit=False, setget=True, doc='In instrument unit (not the unit device)')
+        self.trip2_above = scpiDevice('SH-{val}', 'RH-', str_type=conv, autoinit=False, setget=True, doc='In instrument unit (not the unit device)')
+        self.alias = self.pressure
+        # This needs to be last to complete creation
+        super(kurtJlesker_375, self)._create_devs()
+
 
 #######################################################
 ##    Delft BIAS-DAC
