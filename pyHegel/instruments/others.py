@@ -26,6 +26,7 @@ from __future__ import absolute_import
 import numpy as np
 import random
 import time
+import scipy
 from scipy.optimize import brentq as brentq_rootsolver
 import codecs
 
@@ -2731,7 +2732,7 @@ class dummy(BaseInstrument):
         return 'pyHegel_Instrument,dummy,00000,1.0'
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
-        return self._conf_helper('volt', 'current', 'other', options)
+        return self._conf_helper('volt', 'current', 'other', 's11_Zo', 's11_dt', options)
     def _incr_getdev(self):
         ret = self.incr_val
         self.incr_val += 1
@@ -2744,6 +2745,48 @@ class dummy(BaseInstrument):
     def _rand_getdev(self):
         wait(self.wait)
         return random.normalvariate(0,1.)
+    def _s11_getformat(self, **kwarg):
+        unit = kwarg.get('unit', 'default')
+        multi = ['freq(Hz)']
+        if unit == 'db_deg':
+            multi += ['dB', 'deg']
+        else:
+            multi += ['real', 'imag']
+        fmt = self.s11._format
+        multi = tuple(multi)
+        fmt.update(multi=multi, graph=[])
+        return BaseDevice.getformat(self.s11, **kwarg)
+    def _s11_getdev(self, unit='default'):
+        """
+        options available: unit
+         -unit: can be 'default' (real, imag)
+                 'db_deg' (db, deg) , where phase is unwrapped
+        """
+        if unit not in ['default', 'db_deg']:
+            raise ValueError("Invalid unit option. Use on of 'default' or 'db_deg'")
+        N = self._s11_N
+        noise = self._s11_noise
+        loss = self._s11_loss
+        dt = self.s11_dt.get()
+        Zo = self.s11_Zo.get()
+        f = np.linspace(.1e9, 10e9, N)
+        # line of impedance 10. ending in a short and some losses
+        gamma = 2j*np.pi*f + np.sqrt(f)*loss
+        Z = Zo * np.tanh(gamma*dt)
+        v  = (Z - 50.)/(Z + 50.)
+        v += ( np.random.randn(N) + 1j*np.random.randn(N) ) * noise
+        ret = [f]
+        if unit == 'db_deg':
+            r = 20.*np.log10(np.abs(v))
+            theta = np.angle(v, deg=False)
+            theta = scipy.rad2deg( scipy.unwrap(theta) )
+            ret.append(r)
+            ret.append(theta)
+        else:
+            ret.append(v.real)
+            ret.append(v.imag)
+        return np.array(ret)
+
     def _create_devs(self):
         self.volt = MemoryDevice(0., doc='This is a memory voltage, a float')
         self.current = MemoryDevice(1., doc='This is a memory current, a float')
@@ -2751,6 +2794,12 @@ class dummy(BaseInstrument):
         #self.freq = scpiDevice('freq', str_type=float)
         self._devwrap('rand', doc='This returns a random value. There is not set.', trig=True)
         self._devwrap('incr')
+        self._devwrap('s11', autoinit=False)
+        self.s11_Zo = MemoryDevice(20.)
+        self.s11_dt = MemoryDevice(1e-9)
+        self._s11_N = 301
+        self._s11_noise = 0.05
+        self._s11_loss = 3e3
         self.alias = self.current
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
