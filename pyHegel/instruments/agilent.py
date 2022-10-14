@@ -50,6 +50,7 @@ register_usb_name('Keysight Technologies', 0x2A8D)
 #@register_instrument('Agilent Technologies', '33522A', '1.11-1.19-1.01-46-00')
 #@register_instrument('Agilent Technologies', '33522A', '1.12-1.19-1.01-50-00')
 #@register_instrument('Agilent Technologies', '33522A', '2.01-1.19-2.00-52-00')
+@register_instrument('Agilent Technologies', '33522B', usb_vendor_product=[0x0957, 0x2C07], skip_add=True)
 @register_instrument('Agilent Technologies', '33522A', usb_vendor_product=[0x0957, 0x2307], alias='33522A RF generator')
 class agilent_rf_33522A(visaInstrument):
     """
