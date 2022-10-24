@@ -1293,6 +1293,8 @@ class infiniiVision_3000(visaInstrumentAsync):
         self.source.set(orig_src)
         opts += self._conf_helper('timebase_mode', 'timebase_pos', 'timebase_range', 'timebase_reference', 'timebase_reference_custom', 'timebase_scale',
                                  'acq_type', 'acq_mode', 'average_count', 'acq_samplerate', 'acq_npoints')
+        if self._touchscreen:
+            opts += self._conf_helper('acq_digitizer_en', 'acq_antialias_mode')
         return opts + self._conf_helper(options)
     def clear_dev(self):
         self.visa.instr.clear()
@@ -1405,6 +1407,10 @@ class infiniiVision_3000(visaInstrumentAsync):
         self.current_channel.set(orig_ch)
         return ret
     def _create_devs(self):
+        touchscreen = False
+        if self.idn_split()['model'].lower().endswith('t'):
+            touchscreen = True
+        self._touchscreen = touchscreen
         self.use_single_trig = MemoryDevice(False, choices=[True, False], doc="Use either Run/stop (when False) or single_trig when True")
         self.snap_png = scpiDevice(getstr=':DISPlay:DATA? PNG, COLor', raw=True, str_type=_decode_block_base, autoinit=False, doc="Use like this: get(s500.snap_png, filename='testname.png')\nThe .png extensions is optional. It will be added if necessary.")
         self.snap_png._format['bin']='.png'
@@ -1429,14 +1435,18 @@ class infiniiVision_3000(visaInstrumentAsync):
             kwarg.update(options=options, options_apply=app)
             return scpiDevice(*arg, **kwarg)
         self.points = devSrcOption(':WAVeform:POINts', str_type=int, autoinit=False, doc='Do not use when in run state.') # 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000
+        self.points_max_possible = devSrcOption(getstr=':WAVeform:POINts? MAX', str_type=int, autoinit=False)
         self.points_mode = devSrcOption(':WAVeform:POINts:MODE', choices=ChoiceStrings('NORMal', 'MAXimum', 'RAW'))
         self.preamble = devSrcOption(getstr=':waveform:PREamble?', choices=ChoiceMultiple(['format', 'type', 'points', 'count', 'xinc', 'xorig', 'xref', 'yinc', 'yorig', 'yref'],[int, int, int, int, float, float, int, float, float, int]), autoinit=False)
         self.waveform_count = devSrcOption(getstr=':WAVeform:COUNt?', str_type=int, autoinit=False)
         self.acq_type = scpiDevice(':ACQuire:TYPE', choices=ChoiceStrings('NORMal', 'AVERage', 'HRESolution', 'PEAK'))
         self.acq_mode= scpiDevice(':ACQuire:MODE', choices=ChoiceStrings('RTIM', 'SEGM'))
         self.average_count = scpiDevice(':ACQuire:COUNt', str_type=int, min=2, max=65536)
-        self.acq_samplerate = scpiDevice(getstr=':ACQuire:SRATe?', str_type=float)
-        self.acq_npoints = scpiDevice(getstr=':ACQuire:POINts?', str_type=int)
+        if touchscreen:
+            self.acq_digitizer_en = scpiDevice(':ACQuire:DIGitizer', str_type=bool)
+            self.acq_antialias_mode = scpiDevice(':ACQuire:DAALias', choices=ChoiceStrings('DISable', 'AUTO'))
+        self.acq_samplerate = scpiDevice(':ACQuire:SRATe', str_type=float, setget=True)
+        self.acq_npoints = scpiDevice(':ACQuire:POINts', str_type=int, setget=True)
         self.current_channel = MemoryDevice(1, min=1, max=4)
         self.trig_status = scpiDevice(getstr=':TER?', str_type=bool, autoinit=False, doc="This returns True after the instrument has been triggered. It also resets the trig state.")
         def devChannelOption(*arg, **kwarg):
