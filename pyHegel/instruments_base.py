@@ -3536,6 +3536,8 @@ class visaInstrument(BaseInstrument):
             sleep(delta)
     @locked_calling
     def read(self, raw=False, count=None, chunk_size=None):
+        return self.read_unlocked(raw=raw, count=count, chunk_size=chunk_size)
+    def read_unlocked(self, raw=False, count=None, chunk_size=None):
         """ reads data.
             The default is to read until an end is received in chunk_size blocks
              (if chunk_size is not given, uses the default chunk_size)
