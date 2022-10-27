@@ -28,13 +28,15 @@ import os.path
 import threading
 import time
 import weakref
+import socket
+import select
 
-from ..instruments_base import visaInstrument, visaInstrumentAsync,\
+from ..instruments_base import BaseInstrument,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             _repr_or_string, ChoiceStrings,\
-                            decode_float32, locked_calling, visa_wrap,\
-                            _retry_wait, Block_Codec,\
-                            resource_info, _sleep_signal_context_manager, FastEvent, ProxyMethod
+                            decode_float32, locked_calling,\
+                            _retry_wait, Block_Codec, _delayed_signal_context_manager,\
+                            _sleep_signal_context_manager, FastEvent, ProxyMethod
 from ..instruments_registry import register_instrument
 
 #register_usb_name('Agilent Technologies', 0x0957)
@@ -44,7 +46,7 @@ from ..instruments_registry import register_instrument
 #######################################################
 
 class SignalHound_SM200C_listen_thread(threading.Thread):
-    def __init__(self, control):
+    def __init__(self, control, keep_alive=0):
         super(SignalHound_SM200C_listen_thread, self).__init__()
         self.control = control
         self._stop = False
@@ -54,9 +56,11 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         self.data_available_event = FastEvent()
         self.daemon = True # This will allow python to exit
         self.control.set_timeout = .2
+        self.keep_alive = keep_alive
+        self._last_comm = time.time()
 
-#    def __del__(self):
-#        print 'deleting SignalHound_SM200C_listen_thread'
+    def __del__(self):
+        print 'deleting SignalHound_SM200C_listen_thread'
 
     def cancel(self):
         self._stop = True
@@ -65,32 +69,27 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         # This print is needed on anaconda 2019.10 on windows 10 to prevent
         #  a windows error exeption when later trying to print in the thread (status_line)
         # Doing a print at the beginning of the thread fixes that problem.
-#        print 'Listen Thread started'
-#        read_f = super(SignalHound_SM200C, self.control).read
-        read_f = ProxyMethod(self.control.read_unlocked)
+        print 'Listen Thread started'
+        readers = [self.control._socket]
         while True:
             if self._stop:
                 return
-            try:
-                data = read_f(raw=True, count=1)
-            except visa_wrap.VisaIOError as exc:
-                if exc.error_code == visa_wrap.constants.StatusCode.error_timeout:
-                    continue
-                else:
-                    return
-            if data == b'':
-                continue
-            if data.startswith(b'#'):
-                cnt = read_f(raw=True, count=1)
-                data += cnt
-                N = read_f(raw=True, count=int(cnt))
-                data += N
-                data += read_f(raw=True, count=int(N)+1, chunk_size=10*1024*1024)
-                data = bytes(data[:-1]) # remove newline and convert to byte string
+            if len(self.control._read_extra):
+                rs = readers
             else:
-                data += read_f()
-                data = str(data)
-            self.put_data(data)
+                rs, ws, xs = select.select(readers, [],  [], .1) # timeout of .1 s
+            if rs != []:
+                data = self.control._read()
+                self.put_data(data)
+            now = time.time()
+            if self.keep_alive != 0 and (self._last_comm + self.keep_alive) < now:
+                self.send_keep_alive()
+
+    def send_keep_alive(self):
+        self.control.write('') # sends just a newline.
+
+    def keep_alive_update(self):
+        self._last_comm = time.time()
 
     def put_data(self, data):
         with self._lock:
@@ -130,10 +129,13 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
 
 
 
+# Tried using visaInstrument, but implementing the listen thread made everything slow
+# because visa write has to wait for the visa read to end.
+# So this new version uses sockets directly
 
 #@register_instrument('SignalHound', 'SM200C', '8.8.6')
 @register_instrument('SignalHound', 'SM200C')
-class SignalHound_SM200C(visaInstrument):
+class SignalHound_SM200C(BaseInstrument):
     """
     This is the driver for the SignalHound SM200C spectrum analyzer
     Useful devices:
@@ -156,25 +158,33 @@ class SignalHound_SM200C(visaInstrument):
     A lot of other commands require a selected trace or a mkr
     see current_trace, current_mkr
     """
-    def __init__(self, visa_addr, Ro=50.,*args, **kwargs):
+    def __init__(self, addr='localhost', port=5025, Ro=50., timeout=1.,*args, **kwargs):
         """ Ro is the impedance used in power conversions. see unit option in fetch """
         self.Ro = Ro
-        rsrc_info = resource_info(visa_addr)
-        if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.tcpip:
-            read_term = kwargs.pop('read_termination', '\n')
-            write_term = kwargs.pop('write_termination', '\n')
-            kwargs['read_termination'] = read_term
-            kwargs['write_termination'] = write_term
+        self._socket = None
         self._helper_thread = None
-        self.read_timeout = 3.
-        super(SignalHound_SM200C, self).__init__(visa_addr, *args, **kwargs)
+        self._connect_socket(addr, port, timeout)
         s = weakref.proxy(self)
         self._helper_thread = SignalHound_SM200C_listen_thread(s)
         self._helper_thread.start()
+        self.read_timeout = 3.
+        self._read_extra = ''
+        self._chunk_size = 2**16
+        super(SignalHound_SM200C, self).__init__(*args, **kwargs)
+
+    def _connect_socket(self, addr='localhost', port=5025, timeout=1):
+        self._socket = socket.create_connection((addr, port), timeout=timeout)
 
     def __del__(self):
+        self._disconnect_socket()
         self._close_helper_thread()
         super(SignalHound_SM200C, self).__del__()
+
+    def _disconnect_socket(self):
+        if self._socket is not None:
+            self._socket.shutdown(socket.SHUT_RDWR)
+            self._socket.close()
+            self._socket = None
 
     def _close_helper_thread(self):
         if self._helper_thread is not None:
@@ -182,10 +192,96 @@ class SignalHound_SM200C(visaInstrument):
             self._helper_thread.wait(.5)
             self._helper_thread = None
 
-    def read(self, raw=False, count=None, chunk_size=None, timeout=None):
+    def _keep_alive_update(self):
+        if self._helper_thread is not None:
+            self._helper_thread.keep_alive_update()
+
+    @locked_calling
+    def write(self, val, termination='default'):
+        if termination == 'default':
+            termination = '\n'
+        self._socket.send(val+termination)
+        self._keep_alive_update()
+
+    @locked_calling
+    def ask(self, question, raw=None, chunk_size=None):
+        """
+        Does write then read.
+        raw is unsed here (it is there to match scpiDevice calls)
+        """
+        # we prevent CTRL-C from breaking between write and read using context manager
+        with _delayed_signal_context_manager():
+            self.write(question)
+            ret = self.read(chunk_size=chunk_size)
+        return ret
+
+    def _read_block(self, min_size=1, chunk_size=None):
+        if chunk_size is None:
+            chunk_size = self._chunk_size
+        max_size = max(min_size, chunk_size)
+        N = chunk_size
+        data = bytearray(max_size)
+        cnt = 0
+        while cnt < min_size:
+            N = min(max_size-cnt, chunk_size)
+            new_data = self._socket.recv(N)
+            self._keep_alive_update()
+            n = len(new_data)
+            if n == 0:
+                raise RuntimeError(self.perror('Read timeout'))
+            data[cnt:cnt+n] = new_data
+            cnt += n
+        return data[:cnt]
+
+    def _read_n_or_nl(self, count=None, chunk_size=None):
+        """ if count is None, read until newline. remove newline """
+        term = '\n'
+        if count is None:
+            data = self._read_extra
+            while term not in data:
+                data += self._read_block(chunk_size=chunk_size)
+            data, rest = data.split(term, 1)
+            self._read_extra = rest
+            return bytes(data)
+        else:
+            data = bytearray(count)
+            d = self._read_extra
+            self._read_extra = ''
+            n = 0
+            while n < count:
+                left = count - n
+                ld = len(d)
+                if ld >= left:
+                    data[n:n+left] = d[:left]
+                    self._read_extra = d[left:]
+                    break
+                data[n:n+ld] = d
+                n += ld
+                d = self._read_block(left-ld, chunk_size=chunk_size)
+            return bytes(data)
+
+    def _read(self, chunk_size=None):
+        term = '\n'
+        read_f = lambda x=None: self._read_n_or_nl(x, chunk_size=chunk_size)
+        data = read_f(1)
+        if data.startswith(b'#'):
+            cnt = read_f(1)
+            data += cnt
+            N = read_f(int(cnt))
+            data += N
+            data += read_f(int(N)+1)
+            if data[-1] != term:
+                raise RuntimeError(self.perror('Did not receive expected termination character.'))
+            data = bytes(data[:-1]) # remove newline and convert to byte string
+        else:
+            data += read_f()
+        return data
+
+    @locked_calling
+    def read(self, timeout=None, chunk_size=None):
         """ timeout can be 'infinite' """
         if self._helper_thread is None:
-            return super(SignalHound_SM200C, self).read(raw=raw, count=count, chunk_size=chunk_size)
+            return self._read(chunk_size=chunk_size)
         else:
             if timeout is None:
                 timeout = self.read_timeout
@@ -200,6 +296,22 @@ class SignalHound_SM200C(visaInstrument):
         #self.write(':FORMat:IQ BINary') # 16bit integer
         #self.write(':FORMat:IQ ASCii')
         super(SignalHound_SM200C, self).init(full=full)
+
+    def idn(self):
+        return self.ask('*idn?')
+    @locked_calling
+    def reset_poweron(self):
+        """
+        This returns the instrument to a known state.
+        Use CAREFULLY!
+        """
+        self.write('*RST')
+        self.init(True)
+        self.force_get()
+    def get_error(self):
+        return self.ask('SYSTem:ERRor?')
+
+
     def preset_save(self, filename):
         """ saves a preset. The filename should have .ini as an extension. """
         self.write(':SYSTem:PRESet:SAVE "%s"'%filename)
