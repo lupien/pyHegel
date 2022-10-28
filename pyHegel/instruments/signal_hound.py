@@ -45,6 +45,9 @@ from ..instruments_registry import register_instrument
 ##   Signal Hound SM200C signal analyzer
 #######################################################
 
+class TimeoutError(RuntimeError):
+    pass
+
 class SignalHound_SM200C_listen_thread(threading.Thread):
     def __init__(self, control, keep_alive=0):
         super(SignalHound_SM200C_listen_thread, self).__init__()
@@ -138,6 +141,14 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
 class SignalHound_SM200C(BaseInstrument):
     """
     This is the driver for the SignalHound SM200C spectrum analyzer
+    To use readval, you should make shure that cont_trigger is False (readval turns it off)
+    otherwise your first readval might use old data.
+    Readval (or async or run_and_wait) will repeat as many time as the largest average cnt
+    for updating curves that have average type, or even Min/Max types if trace_reset_mnmx_en
+    is True.
+    Also Note that trace average can be more averaged than the selected count if another trace
+    averages more. For example if trace1 asks for 2 and trace2 asks for 50, than trace1
+    will be averaged more like 6 (at least for verision 3.7.2 of Spike software.)
     Useful devices:
         fetch, readval
         marker_y
@@ -155,6 +166,7 @@ class SignalHound_SM200C(BaseInstrument):
         current_trace
         current_mkr
         marker_x
+        trace_reset_mnmx_en
     A lot of other commands require a selected trace or a mkr
     see current_trace, current_mkr
     """
@@ -170,14 +182,18 @@ class SignalHound_SM200C(BaseInstrument):
         self.read_timeout = 3.
         self._read_extra = ''
         self._chunk_size = 2**16
+        self._async_last_response = None
+        self._async_max_count = 0
+        self._async_current_count = 0
         super(SignalHound_SM200C, self).__init__(*args, **kwargs)
+        self._async_mode = 'opc'
 
     def _connect_socket(self, addr='localhost', port=5025, timeout=1):
         self._socket = socket.create_connection((addr, port), timeout=timeout)
 
     def __del__(self):
-        self._disconnect_socket()
         self._close_helper_thread()
+        self._disconnect_socket()
         super(SignalHound_SM200C, self).__del__()
 
     def _disconnect_socket(self):
@@ -228,7 +244,7 @@ class SignalHound_SM200C(BaseInstrument):
             self._keep_alive_update()
             n = len(new_data)
             if n == 0:
-                raise RuntimeError(self.perror('Read timeout'))
+                raise TimeoutError(self.perror('Read_block timeout'))
             data[cnt:cnt+n] = new_data
             cnt += n
         return data[:cnt]
@@ -287,8 +303,61 @@ class SignalHound_SM200C(BaseInstrument):
                 timeout = self.read_timeout
             ret = self._helper_thread.get_next(timeout)[0]
             if ret == '':
-                raise RuntimeError(self.perror('read timeout'))
+                raise TimeoutError(self.perror('read timeout'))
             return ret
+
+    def wait_after_trig(self, no_exc=False):
+        try:
+            super(SignalHound_SM200C, self).wait_after_trig()
+        except Exception:
+            if not no_exc:
+                raise
+
+    def _async_trig_init(self, avg_count=0):
+        self._async_last_response = None
+        self._async_max_count = avg_count
+        self._async_current_count = 0
+
+    def _async_trig_helper(self):
+        self.write('INITiate;*OPC?')
+
+    @locked_calling
+    def _async_trig(self):
+        orig_trace = self.current_trace.get()
+        max_count = 0
+        reset_mnmx = self.trace_reset_mnmx_en.get()
+        for t in range(1, 6+1):
+            if not self.trace_updating.get(trace=t):
+                continue
+            typ = self.trace_type.get().lower()
+            if typ == 'average':
+                self.trace_clear()
+                count = self.trace_average_count.get()
+                max_count = max(count, max_count)
+            elif reset_mnmx and typ not in ['off', 'write']:
+                self.trace_clear()
+                count = self.trace_average_count.get()
+                max_count = max(count, max_count)
+        self._async_trig_init(max_count)
+        self.current_trace.set(orig_trace)
+        self.cont_trigger.set(False)
+        super(SignalHound_SM200C, self)._async_trig()
+        #self.trace_clear('all')
+        self._async_trig_helper()
+
+    def _async_detect(self, max_time=.5): # 0.5 s max by default
+        try:
+            ret = self.read(timeout=max_time)
+        except TimeoutError:
+            return False
+        if ret != '1':
+            raise RuntimeError(self.perror('unexpected return from async_detect'))
+        self._async_current_count += 1
+        if self._async_current_count < self._async_max_count:
+            self._async_trig_helper()
+            return False
+        self._async_last_response = ret
+        return True
 
     def init(self, full=False):
         self.write(':FORMat:TRACe REAL') # 32bit floating little endian
@@ -299,35 +368,58 @@ class SignalHound_SM200C(BaseInstrument):
 
     def idn(self):
         return self.ask('*idn?')
+
     @locked_calling
     def reset_poweron(self):
         """
         This returns the instrument to a known state.
         Use CAREFULLY!
         """
-        self.write('*RST')
+        self._async_trig_init()
+        self.write('*RST;*OPC?')
+        self.wait_after_trig(no_exc=True)
+        if self._async_last_response != '1':
+            raise RuntimeError(self.perror('Error after reset.'))
         self.init(True)
         self.force_get()
+
     def get_error(self):
         return self.ask('SYSTem:ERRor?')
 
-
-    def preset_save(self, filename):
-        """ saves a preset. The filename should have .ini as an extension. """
-        self.write(':SYSTem:PRESet:SAVE "%s"'%filename)
-    def preset_load(self, filename):
-        """ saves a preset. The filename should have .ini as an extension.
-        if filename is None, it will load the default preset.
-        It can take 6-20 s to load a preset (especially the default one).
-        """
-        if filename is None:
-            self.write(':SYSTem:PRESet')
+    def preset_save(self, filename_or_num):
+        """ saves a preset.
+            provide either a number 1-9 or a filename.
+            The filename should have .ini as an extension. """
+        if filename_or_num in range(1, 9+1):
+            self.write('*SAV %d'%filename_or_num)
         else:
-            self.write(':SYSTem:PRESet:LOAD "%s"'%filename)
+            self.write(':SYSTem:PRESet:SAVE "%s"'%filename_or_num)
+
+    def preset_load(self, filename_or_num):
+        """ load a preset.
+            provide either a number 1-9, a filename or None.
+            The filename should have .ini as an extension.
+            if filename is None, it will load the default preset.
+            It can take 6-20 s to load a preset (especially the default one).
+        """
+        if filename_or_num is None:
+            self._async_trig_init()
+            self.write(':SYSTem:PRESet?')
+            self.wait_after_trig(no_exc=True)
+            if self._async_last_response != '1':
+                raise RuntimeError(self.perror('Error loading preset.'))
+        elif filename_or_num in range(1, 9+1):
+            self.write('*RCL %d'%filename_or_num)
+        else:
+            self.write(':SYSTem:PRESet:LOAD "%s"'%filename_or_num)
+
     def disconnect(self):
-        ret = self.ask(':SYSTem:DEVice:DISConnect?')
-        if ret != '1':
-            raise RuntimeError(self.perror('Unexpected return from disconnect'))
+        self._async_trig_init()
+        self.write(':SYSTem:DEVice:DISConnect?')
+        self.wait_after_trig(no_exc=True)
+        if self._async_last_response != '1':
+            raise RuntimeError(self.perror('Error disconnecting.'))
+
     def connect(self, name=None):
         """ connect to device called name.
             if name is None (the default), list available names.
@@ -342,10 +434,13 @@ class SignalHound_SM200C(BaseInstrument):
             l = self.ask(':SYSTem:DEVice:LIST?')
             return l.split(',')
         else:
-            ret = self.ask(':SYSTem:DEVice:CONnect? %s'%name)
-            ret = bool(int(ret))
+            self._async_last_response = None
+            self.write(':SYSTem:DEVice:CONnect? %s'%name)
+            self.wait_after_trig(no_exc=True)
+            ret = bool(int(self._async_last_response))
             if not ret:
                 raise RuntimeError(self.perror('Was unable to connect'))
+
     def _snap_png_getdev(self, filename=None):
         """ Without a filename, get will use the quick save.
             You should use a full path for the filename.
@@ -362,10 +457,6 @@ class SignalHound_SM200C(BaseInstrument):
     def recalibrate(self):
         self.write(':INSTrument:RECALibrate')
 
-    @locked_calling
-    def _async_trig(self):
-        self.cont_trigger.set(False)
-        super(SignalHound_SM200C, self)._async_trig()
     @locked_calling
     def trace_clear(self, trace=None):
         """ Clears the trace, or all traces if you ask 'all' """
@@ -415,7 +506,7 @@ class SignalHound_SM200C(BaseInstrument):
                                       'bw_res', 'bw_res_auto', 'bw_video', 'bw_video_auto', 'bw_res_shape',
                                       'rf_level_dBm', 'rf_level_offset_dB', 'rf_attenuation_auto', 'rf_attenuation_index',
                                       'rf_preamp_en', 'rf_preamp_auto', 'rf_preselector_en', 'rf_spur_reject_en',
-                                      'sweep_time', 'sweep_detector_function', 'sweep_detector_units',
+                                      'sweep_time', 'sweep_detector_function', 'sweep_detector_units', 'trace_reset_mnmx_en',
                                       'trace_math_en', 'trace_math_first', 'trace_math_second', 'trace_math_result', 'trace_math_offset',
                                       'trace_math_operation',
                                       'system_temperature', 'system_voltage', 'system_current', 'current_device')
@@ -546,6 +637,7 @@ class SignalHound_SM200C(BaseInstrument):
         self.trace_math_offset = scpiDevice(':CALCulate:MATH:OFFSet', str_type=float, setget=True)
         self.trace_math_operation = scpiDevice(':CALCulate:MATH:OP',  choices=ChoiceStrings('PDIFF', 'PSUM', 'LOFFset', 'LDIFF'))
 
+        self.trace_reset_mnmx_en = MemoryDevice(True, choices=[True, False])
         self.current_trace = scpiDevice(':TRACe:SELect', str_type=int, min=1, max=6)
         def devTraceOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
