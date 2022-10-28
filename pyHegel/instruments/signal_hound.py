@@ -62,8 +62,8 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         self.keep_alive = keep_alive
         self._last_comm = time.time()
 
-    def __del__(self):
-        print 'deleting SignalHound_SM200C_listen_thread'
+#    def __del__(self):
+#        print 'deleting SignalHound_SM200C_listen_thread'
 
     def cancel(self):
         self._stop = True
@@ -72,7 +72,7 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         # This print is needed on anaconda 2019.10 on windows 10 to prevent
         #  a windows error exeption when later trying to print in the thread (status_line)
         # Doing a print at the beginning of the thread fixes that problem.
-        print 'Listen Thread started'
+#        print 'Listen Thread started'
         readers = [self.control._socket]
         while True:
             if self._stop:
@@ -713,6 +713,15 @@ class SignalHound_SM200C(BaseInstrument):
         incorrect values for wrong detector/averaging. The best result is normally
         obtained with averaging detector in RMS mode.
         """
+        # Signal Hound details
+        # The Noise marker uses the power in a band of 5% the span.
+        # The formula is PdBm/Hz = 10 * log10 (sum_f1^f2(Pmw/(Span_Hs * NBW))) + C
+        # Where C is a correction factor if not using power video units.
+        #   it is 2.51 for log video and 1.05 for voltage
+        # f1, f2 are the limits of the 5% span, they are centered on the marker position
+        # NBW is the RBW noise bandwidth.
+        # Between the power in a band of 5% of span and the noise measurement (both with power video units)
+        # the difference is 10*log10(5% span)
         return 1.
         #bw = self.bw_res.get()
         bw_mode = self.bw_res_shape.get()
