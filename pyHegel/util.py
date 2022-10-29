@@ -619,15 +619,18 @@ def list_printers():
 # Convert to BlueFors Tlog format
 #########################################################
 
-def _blueforsTlog_Conv(data, time_data, channels, logdir):
+def _blueforsTlog_Conv(data, time_data, channels, logdir, onlyT=False):
     """
     input is similar to blueforsTlog except data and time_data are a single row
     It returns a tuple of dirname, list of (filename, datastr)
     """
-    dataT = data[::2]
-    dataR = data[1::2]
+    if onlyT:
+        dataT = dataR = data
+    else:
+        dataT = data[::2]
+        dataR = data[1::2]
     localtime = time.localtime(time_data)
-    str_pref = time.strftime(' %d-%m-%y,%H:%M:%S', localtime)+',%.6E'
+    str_pref = time.strftime('%d-%m-%y,%H:%M:%S', localtime)+',%.6E'
     filedir = time.strftime('%y-%m-%d', localtime)
     dirname = os.path.join(logdir, filedir)
     Tfile = 'CH%i T {}.log'.format(filedir)
@@ -635,17 +638,18 @@ def _blueforsTlog_Conv(data, time_data, channels, logdir):
     outvec = []
     for T, R, c in zip(dataT, dataR, channels):
         outvec.append((Tfile%c, str_pref%T))
-        outvec.append((Rfile%c, str_pref%R))
+        if not onlyT:
+            outvec.append((Rfile%c, str_pref%R))
     return dirname, outvec
 
 def blueforsTlog(data, time_data, channels=[1,2,5,6], logdir='C:/BlueFors/Logs',
-                 sort_exist=True, cleanup=True):
+                 sort_exist=True, cleanup=True, onlyT=False):
     """
     From a vector of data and time_data (obtained from a py hegel record for example),
     it creates the temperature logfiles in the logdir path
     data needs to have a shape (2*nch, ndata) where nch is the number of channels
     which needs to match with channels. The 2 is because the data needs to be
-    temperature then resistance.
+    temperature then resistance. Unless onlyT is used.
     time_data is in seconds since epoch (what record and sweep use)
     The data is always appended to the destination file.
     When sort_exist=True, file that existed before being called are sorted
@@ -662,12 +666,14 @@ def blueforsTlog(data, time_data, channels=[1,2,5,6], logdir='C:/BlueFors/Logs',
         a=readfile('some_log_file_from_record.txt')
         util.blueforsTlog(a[3:],a[0]) # assuming a record([sr1, tc3.fetch]), sr1 adds 2 columns
     """
-    if data.shape[0] != len(channels)*2:
+    N = len(channels)
+    N = N if onlyT else 2*N
+    if data.shape[0] != N:
         raise ValueError, 'Invalid number of columns in data vs channels'
     prevdir = ''
-    prevfile = [('', None, '')]*len(channels)*2
+    prevfile = [('', None, '')]*N
     for d, t in zip(data.T, time_data):
-        dirname, vec = _blueforsTlog_Conv(d, t, channels, logdir)
+        dirname, vec = _blueforsTlog_Conv(d, t, channels, logdir, onlyT=onlyT)
         if prevdir != dirname:
             if not os.path.exists(dirname):
                 os.mkdir(dirname)
@@ -722,10 +728,11 @@ def sort_file(filename, uniq=True, cleanup=False):
             term = line[-2]
     if term != '\n':
         lines = [l.replace('\n', term) for l in lines]
+    # different versions added/removed a space at the beginning of the line
     if uniq:
-        lines = sorted(set(lines))
+        lines = sorted(set(lines), key=str.lstrip)
     else:
-        lines.sort()
+        lines.sort(key=str.lstrip)
     backup = filename+'.bak'
     if os.path.exists(backup):
         # windows does not rename if the file already exists, so delete
