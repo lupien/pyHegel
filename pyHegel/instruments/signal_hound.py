@@ -62,8 +62,8 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         self.keep_alive = keep_alive
         self._last_comm = time.time()
 
-#    def __del__(self):
-#        print 'deleting SignalHound_SM200C_listen_thread'
+    def __del__(self):
+        print 'deleting SignalHound_SM200C_listen_thread'
 
     def cancel(self):
         self._stop = True
@@ -72,7 +72,7 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         # This print is needed on anaconda 2019.10 on windows 10 to prevent
         #  a windows error exeption when later trying to print in the thread (status_line)
         # Doing a print at the beginning of the thread fixes that problem.
-#        print 'Listen Thread started'
+        print 'Listen Thread started'
         readers = [self.control._socket]
         while True:
             if self._stop:
@@ -149,6 +149,12 @@ class SignalHound_SM200C(BaseInstrument):
     Also Note that trace average can be more averaged than the selected count if another trace
     averages more. For example if trace1 asks for 2 and trace2 asks for 50, than trace1
     will be averaged more like 6 (at least for verision 3.7.2 of Spike software.)
+    Trace average is average on the dB display data so it is a log type average.
+    The noise marker will only work if detector is average. It can deal with
+    different video unis but it prefers Power. Not that trace average is always log, so
+    if you use no detector average (max VBW, min time) and only trace average, use Log as the
+    video units otherwise you will not get the correct results.
+    Combining some detector averaging with trace average will probably generate an offset.
     Useful devices:
         fetch, readval
         marker_y
@@ -548,16 +554,15 @@ class SignalHound_SM200C(BaseInstrument):
     @locked_calling
     def get_xscale(self, trace=None):
         """
-        Returns the currently active x scale. It uses cached values so make sure
-        they are up to date.
+        Returns the currently active x scale.
         This scale is recalculated but produces the same values (within floating
         point errors) as the instrument.
         """
         if trace is not None:
             self.current_trace.set(trace)
-        start = self.trace_xstart.getcache()
-        inc = self.trace_xincrement.getcache()
-        N = self.trace_npoints.getcache()
+        start = self.trace_xstart.get()
+        inc = self.trace_xincrement.get()
+        N = self.trace_npoints.get()
         return np.arange(N)*inc + start
     def _create_devs(self):
         self.system_version = self.ask(':SYSTem:VERsion?')
@@ -722,6 +727,70 @@ class SignalHound_SM200C(BaseInstrument):
         # NBW is the RBW noise bandwidth.
         # Between the power in a band of 5% of span and the noise measurement (both with power video units)
         # the difference is 10*log10(5% span)
+        # The C values can be checked with
+        # N = 256
+        # x = randn(40000, N)
+        # X = abs(fft.rfft(x)[:, 1:-1])/sqrt(N)
+        # util.P2dB(mean(X**2, axis=0))
+        # util.P2dB(mean(mean(X**2, axis=0)))
+        # util.P2dB((mean(X, axis=0)**2))
+        # util.P2dB(mean(mean(X, axis=0)**2)) # -> 1.05
+        # mean(mean(X, axis=0)**2) # 0.7856802667293946
+        # std(mean(X, axis=0)**2)  # 0.004009297664314997
+        # mean(util.P2dB(X**2), axis=0)
+        # mean(mean(util.P2dB(X**2), axis=0)) # -2.504862318917875
+        # std(mean(util.P2dB(X**2), axis=0))  #  0.027506443186903408
+        # Noise calc tests:
+        #  m1, m2, m3 = get(sh.marker_y, mkr=1), get(sh.marker_y, mkr=2), get(sh.marker_y, mkr=3); v = get(sh.fetch); m4 = v[1].mean()
+        #  v.shape # (2L, 6553L)
+        #  v[0, -1] - v[0, 0] # 9997558.59375
+        #  # m1 is noise @ 10.1 GHz, span of 10 MHz, m2 is power in 5% bw (500  kHz), m3 is normal amplitude and m4 is average amplitude
+        #  # Flattop
+        #  RBW = VBW = 10 kHz, 1s sweep time, Average detector, power unit
+        #  m1, m2, m3, m4 # (-157.224327474482, -100.243910855919, -117.222663879395, -117.198746)
+        #  m2 - m1 # 56.98041661856301 # == util.P2dB(10e6*.05) # == 56.98970004336019
+        #  m1 - m4 # -40.02558174694295
+        #  repeated 100 times
+        #  mall = []
+        #  for i in range(100):
+        #     v = get(sh.readval)
+        #     m4 = v[1].mean()
+        #     m1, m2, m3 = get(sh.marker_y, mkr=1), get(sh.marker_y, mkr=2), get(sh.marker_y, mkr=3)
+        #     mall.append([m1, m2, m3, m4])
+        #  mall = array(mall)
+        #  mm = mall.mean(axis=0); mm
+        #  #  array([-157.2219624 , -100.24121452, -117.23411817, -117.19637945])
+        #  mall.std(axis=0)
+        #  #  array([0.0115732 , 0.01155483, 0.07838239, 0.00273661])
+        #  mall.std(axis=0)/sqrt(mall.shape[0])
+        #  #  array([0.00120659, 0.00120467, 0.00817193, 0.00028531])
+        #  mm[0]-mm[3]  #  -40.025582948694236
+        #  # Nutall
+        #  mm = mall.mean(axis=0); mm # array([-157.26322251, -100.2957647 , -117.255877  , -117.23789757])
+        #  mall.std(axis=0)/sqrt(mall.shape[0]) # array([0.0009693 , 0.00096317, 0.00523803, 0.00021102])
+        #  mm[0]-mm[3] #  -40.02532494285839
+        #  v.shape, v[0, -1] - v[0, 0] # ((2L, 3276L), 9994506.8359375)
+        #  # CISPR (Gaussian)
+        #  mm = mall.mean(axis=0); mm # array([-157.26409335, -100.29662542, -118.4966423 , -118.47672844])
+        #  mall.std(axis=0)/sqrt(mall.shape[0]) # array([0.00084717, 0.00085071, 0.00577983, 0.00020041])
+        #  mm[0]-mm[3] #  -38.78736490778073
+        #  v.shape, v[0, -1] - v[0, 0] # ((2L, 3276L), 9994506.8359375)
+        #  Flat, 3 kHz
+        #  m1 - m4 #  -34.79
+        #  v.shape, v[0, -1] - v[0, 0] # ((2L, 13107L), 9999084.47265625)
+        #  Flat, 1 kHz
+        #  m1 - m4 #  -30.02
+        #  v.shape, v[0, -1] - v[0, 0] # ((2L, 52428L), 9999656.677246094)
+        #  Flat, 0.3 kHz
+        #  m1 - m4 #   -24.73
+        #  v.shape, v[0, -1] - v[0, 0] # ((2L, 209715L), 9999942.779541016)
+        #  mm = mall.mean(axis=0); mm #  array([-157.28820797, -100.2988223 , -132.54396606, -132.51500677])
+        #  mall.std(axis=0)/sqrt(mall.shape[0]) # array([0.00116422, 0.00116349, 0.04349571, 0.00023208])
+        #  mm[0]-mm[3] #  -24.773201202722333
+        #  The bandwidth are the full width at the 3 dB point for Nutall and Flattop, 6dB for Gaussian
+        #  The 3 dB point is not necessarily present (I found it pretty close for Nutall at least for one test.)
+        # NOTE: there is something weird with Nuttall ar 3 MHz RBW it seesm to offset the peak. See it with 50 MHz span.
+
         return 1.
         #bw = self.bw_res.get()
         bw_mode = self.bw_res_shape.get()
