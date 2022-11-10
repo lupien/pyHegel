@@ -2443,6 +2443,7 @@ class agilent_EXA_mode_noise_figure(agilent_EXA_mode_base):
 #@register_instrument('Keysight Technologies', 'N5244B', 'A.13.95.09')
 #@register_instrument('Agilent Technologies', 'N5244A', 'A.09.50.13')
 #@register_instrument('Agilent Technologies', 'N5230C', 'A.09.20.08')
+@register_instrument('Keysight Technologies', 'P9374A', alias='P9374A USB VNA')
 @register_instrument('Keysight Technologies', 'M9803A', alias='M9803A PXIe VNA')
 @register_instrument('Keysight Technologies', 'N5244B', usb_vendor_product=[0x2A8D, 0x2B01], alias='N5244B PNAX')
 @register_instrument('Agilent Technologies', 'N5244A', usb_vendor_product=[0x0957, 0x0118], alias='N5244A PNAX')
