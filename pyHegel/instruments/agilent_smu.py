@@ -2255,6 +2255,7 @@ meas_en_type = _meas_en_type()
 
 #@register_instrument('Keysight Technologies', 'B2912A', '3.4.2011.5100')
 #@register_instrument('Agilent Technologies', 'B2912A', '2.0.1225.1717')
+@register_instrument('Keysight Technologies', 'B2902B', usb_vendor_product=[0x2A8D, 0x9201]) # fw: 5.0.2029.1911
 @register_instrument('Keysight Technologies', 'B2912A', skip_add=True)
 @register_instrument('Agilent Technologies', 'B2912A', usb_vendor_product=[0x0957, 0x8E18])
 class agilent_B2900_smu(visaInstrumentAsync):
