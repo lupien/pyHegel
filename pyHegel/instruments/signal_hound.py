@@ -510,6 +510,7 @@ class SignalHound_SM200C(BaseInstrument):
         base_conf = self._conf_helper('instrument_mode', 'cont_trigger', 'ref_oscillator',
                                       'freq_start', 'freq_center', 'freq_stop', 'freq_span',
                                       'bw_res', 'bw_res_auto', 'bw_video', 'bw_video_auto', 'bw_res_shape',
+                                      'rf_level_unit', 'noise_eq_bw',
                                       'rf_level_dBm', 'rf_level_offset_dB', 'rf_attenuation_auto', 'rf_attenuation_index',
                                       'rf_preamp_en', 'rf_preamp_auto', 'rf_preselector_en', 'rf_spur_reject_en',
                                       'sweep_time', 'sweep_detector_function', 'sweep_detector_units', 'trace_reset_mnmx_en',
@@ -587,6 +588,7 @@ class SignalHound_SM200C(BaseInstrument):
         self.freq_center = scpiDevice(':FREQuency:CENTer', str_type=float, min=minfreq, max=maxfreq, setget=True)
         self.freq_span = scpiDevice(':FREQuency:SPAN', str_type=float, min=0., max=maxfreq-minfreq, setget=True)
         self.rf_level_dBm =  scpiDevice(':POWer:RLEVel', str_type=float, setget=True)
+        self.rf_level_unit =  scpiDevice(getstr=':POWer:RLEVel:UNIT?', str_type=str) # 'dBuV', 'dBmV', 'dBm', 'mV'
         self.rf_level_offset_dB =  scpiDevice(':POWer:RLEVel:OFFSet', str_type=float, setget=True)
         self.rf_attenuation_index = scpiDevice(':POWer:ATTenuation', str_type=int)
         self.rf_attenuation_auto = scpiDevice(':POWer:ATTenuation:AUTO', str_type=bool)
@@ -662,6 +664,7 @@ class SignalHound_SM200C(BaseInstrument):
         self.get_trace = devTraceOption(getstr=':TRACe?', str_type=decode_float32, autoinit=False, trig=True)
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
+        self._devwrap('noise_eq_bw')
         self._devwrap('snap_png', autoinit=False, trig=True)
         self.snap_png._format['file'] = True
         self.snap_png._format['bin'] = '.png'
@@ -671,52 +674,7 @@ class SignalHound_SM200C(BaseInstrument):
 #TODO make this function work.
     def _noise_eq_bw_getdev(self):
         """
-        Using the bw_res and bw_res_shape this estimates the bandwith
-        necessary to convert the data into power density.
-
-        For gaussian filters the error in the estimate compared to the marker
-        result is at most 0.06 dB (1.4% error) at 4 MHz (DB3),
-        otherwise it is mostly within 0.01 dB (0.23%)
-        For Flattop filters the error is at most -0.45 dB at 8 MHz (11%),
-        otherwise it is mostly 0.040 - 0.050 (0.92-1.12%), centered around
-        0.045 dB (1.0% offset) for bw below 120 kHz. (EXA N9010A, MY51170142)
-        The correction means the equivalent bandwidth used for markers is
-        1% greater than the selected value of the flat bandwidth. To correct
-        for this, you can substract the noise density by 0.045 dB (or divide by
-        1.010 if linear power scale).
-
-        To see this errors, or to obtain the same factor as for the markers,
-        set the instrument in the following way:
-            -select resolution bandwidth (range, type ...)
-            -setup a trace (assume units are dB...)
-            -on trace put 2 markers at the same position
-            -First marker shows just the raw value
-            -Second marker setup to show noise (either noise or band density function)
-            -Set band span for second marker to 0 (or the a single bin)
-            -Then the bandwith used for marker calculation is
-             10**((marker1-marker2)/10)
-        You can see both by enabling the marker table. Note that for the function
-        results the Y and function column should be the same here, but when the
-        band span is larger they will be different. The Y value is the value of
-        the function when the sweep has reached the marker position so it uses
-        old values after the marker and so is not a valid result. You should
-        consider the function result as the proper one. That is the value
-        returned by marker_y devce in that case.
-
-        The band power function is the integral of the band density over the
-        selected band span (a span of 0 is the same as a span of one bin).
-        So when band span is one bin:
-            band_power(dBm)-band_density(dBm) = 10*log10(bin_width(Hz))
-            bin_width = (freq_stop-freq_start)/(npoints-1)
-
-        The distinction between the noise function and the band density function
-        is that the noise function tries to apply correction for non-ideal
-        detectors (peak, negative peak) or wrong averaging (volt, log Pow).
-        The correction is calculated assuming the incoming signal is purely noise,
-        and considers the video bandwidth.
-        The band density function makes no such assumption and will return
-        incorrect values for wrong detector/averaging. The best result is normally
-        obtained with averaging detector in RMS mode.
+        returns the bandwidth in Hz
         """
         # Signal Hound details
         # The Noise marker uses the power in a band of 5% the span.
@@ -790,35 +748,27 @@ class SignalHound_SM200C(BaseInstrument):
         #  The bandwidth are the full width at the 3 dB point for Nutall and Flattop, 6dB for Gaussian
         #  The 3 dB point is not necessarily present (I found it pretty close for Nutall at least for one test.)
         # NOTE: there is something weird with Nuttall ar 3 MHz RBW it seesm to offset the peak. See it with 50 MHz span.
-
-        return 1.
-        #bw = self.bw_res.get()
-        bw_mode = self.bw_res_shape.get()
-        if bw_mode in self.bw_res_shape.choices[['gaussian']]:
-            # The filters are always the same. They are defined for db3
-            # but they are reported differently in the other modes.
-            # We need the noise one.
-            # In theory:
-            #  The 3dB full width is 2*sqrt(log(2))*sigma
-            #  The 6dB full width is sqrt(2) times 3dB
-            #  The noise width is sqrt(pi)/(2*sqrt(log(2))) times 3dB (and is equivalent bw for power: from integral of V**2)
-            #  The impulse width is sqrt(2) times noise (and is equivalent bw for amplitude: from integral of V)
-            # In practice we use the noise and it is probably related to the
-            # 3dB by some calibration. The conversion factor between 3dB and noise returned by
-            # the instrument is not a constant (it is ~1.065).
-            old_gaus_type = self.bw_res_gaussian_type.get()
-            self.bw_res_gaussian_type.set('noise')
-            bw = self.bw_res.get()
-            self.bw_res_gaussian_type.set(old_gaus_type)
-            # get the bw_res cache back to the correct value
-            self.bw_res.get()
-        else: # flat
-            # Normally the equivalent noise bandwidth of a flat filter
-            # is the bw of the filter. However, in practice, it could be different.
-            bw = self.bw_res.get()
-            # TODO maybe decide to apply the correction
-            #bw *= 1.01
-        return bw
+        #
+        # Note that matlab gausswin window has a default of alpha = 2.5 which is the same as the scipy window:
+        #   get_window(('gaussian', (N-1)/2.5/2), N, False)
+        # The nuttall and flattop are the same on python and matlab.
+        # Flattop is also the same on mathematica
+        # Nuttall is not the same on mathematica.
+        #  mathematica and wikipedia uses terms {\displaystyle a_{0}=0.355768;\quad a_{1}=0.487396;\quad a_{2}=0.144232;\quad a_{3}=0.012604.}
+        #  while python and matlab use(Nuttall4c): 0.3635819, 0.4891775, 0.1365995, 0.0106411
+        ######
+        # signal hound send me (CL) the code that they use to calculate the noise marker
+        # here I reimplent that code
+        # This code seems pretty good but is not correct with the gaussian window.
+        func = self.sweep_detector_function.get() # 'AVERage', 'MINMAX', 'MIN', 'MAX'
+        if func.lower() != 'average':
+            return 1.
+        #shape = self.bw_res_shape.get() #'GAUSsian', 'FLATtop', 'NUTTall'
+        det = self.sweep_detector_units.get() #'POWer', 'SAMPle', 'VOLTage', 'LOG'
+        det_factor = dict(power=0., voltage=1.05, log=2.51, sample=0.) # in dB
+        bw = self.bw_res.get()
+        f = det_factor[det.lower()]
+        return bw / 10.**(f/10)
     def _fetch_getformat(self, **kwarg):
         unit = kwarg.get('unit', 'default')
         xaxis = kwarg.get('xaxis', True)
@@ -874,6 +824,8 @@ class SignalHound_SM200C(BaseInstrument):
             # convert to W
             if from_unit == 'V':
                 v = v**2 / Ro
+            elif from_unit == 'MV':
+                v = v**2 / Ro * 1e-6
             elif from_unit == 'A':
                 v = v**2 * Ro
         to_db_list = ['dBm', 'dBm_Hz']
@@ -933,9 +885,10 @@ class SignalHound_SM200C(BaseInstrument):
             ret = []
         if not isinstance(unit, (list, tuple)):
             unit = [unit]*len(traces)
-        base_unit = 'dBm'
-        #noise_bw = self.noise_eq_bw.get()
-        noise_bw = self._noise_eq_bw_getdev()
+        is_lin = self.rf_level_unit.get() == 'mV'
+        base_unit = 'mV' if is_lin else 'dBm'
+        noise_bw = self.noise_eq_bw.get()
+        #noise_bw = self._noise_eq_bw_getdev()
         for t, u in zip(traces, unit):
             v = self.get_trace.get(trace=t)
             v = self._convert_unit(v, base_unit, u, noise_bw)
