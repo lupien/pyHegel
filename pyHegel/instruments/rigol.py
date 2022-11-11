@@ -21,9 +21,6 @@
 #                                                                            #
 ##############################################################################
 
-#######################################################
-##    Rohde & Schwarz instruments
-#######################################################
 
 from __future__ import absolute_import
 
@@ -195,7 +192,7 @@ class rigol_power_dp831a(visaInstrument):
         self._devwrap('fetch', autoinit=False)
         self.alias = self.voltage
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(rigol_power_dp831a, self)._create_devs()
 
 
 #######################################################
@@ -204,14 +201,14 @@ class rigol_power_dp831a(visaInstrument):
 
 #@register_instrument('Rigol Technologies', 'DG812', '00.02.05.00.00 ')
 @register_instrument('Rigol Technologies', 'DG812', usb_vendor_product=[0x1AB1, 0x643])
-class rigol_power_dp831a(visaInstrument):
+class rigol_awg_dg812(visaInstrument):
     """
     This is the driver for the RIGOL AWG generator DG812.
     """
     def init(self, full=False):
         # This should depend on the endian type of the machine. Here we assume intel which is LSB.
         self.write('FORMat:BORDer SWAPped') # This is LSB
-        super(rigol_power_dp831a, self).init(full=full)
+        super(rigol_awg_dg812, self).init(full=full)
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = self._conf_helper('ref_oscillator_current_state', 'coupled_ampl_en', 'coupled_freq_en')
@@ -305,7 +302,7 @@ class rigol_power_dp831a(visaInstrument):
 
         self.alias = self.freq
         # This needs to be last to complete creation
-        super(rigol_power_dp831a, self)._create_devs()
+        super(rigol_awg_dg812, self)._create_devs()
     def phase_sync(self):
         self.write('PHASe:SYNChronize')
     def get_file(self, remote_file, local_file=None):
