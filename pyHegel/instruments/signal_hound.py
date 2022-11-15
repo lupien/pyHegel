@@ -671,7 +671,6 @@ class SignalHound_SM200C(BaseInstrument):
         # This needs to be last to complete creation
         super(SignalHound_SM200C, self)._create_devs()
 
-#TODO make this function work.
     def _noise_eq_bw_getdev(self):
         """
         returns the bandwidth in Hz
@@ -759,14 +758,15 @@ class SignalHound_SM200C(BaseInstrument):
         ######
         # signal hound send me (CL) the code that they use to calculate the noise marker
         # here I reimplent that code
-        # This code seems pretty good but is not correct with the gaussian window.
         func = self.sweep_detector_function.get() # 'AVERage', 'MINMAX', 'MIN', 'MAX'
         if func.lower() != 'average':
             return 1.
-        #shape = self.bw_res_shape.get() #'GAUSsian', 'FLATtop', 'NUTTall'
+        shape = self.bw_res_shape.get() #'GAUSsian', 'FLATtop', 'NUTTall'
         det = self.sweep_detector_units.get() #'POWer', 'SAMPle', 'VOLTage', 'LOG'
         det_factor = dict(power=0., voltage=1.05, log=2.51, sample=0.) # in dB
         bw = self.bw_res.get()
+        if shape.lower() == 'gaussian':
+            bw /= 1.33
         f = det_factor[det.lower()]
         return bw / 10.**(f/10)
     def _fetch_getformat(self, **kwarg):
