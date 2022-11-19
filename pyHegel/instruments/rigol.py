@@ -33,7 +33,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceMultiple, Choice_bool_OnOff, Choice_bool_YesNo, _repr_or_string,\
                             ChoiceStrings, ChoiceDevDep, ChoiceDev, ChoiceDevSwitch, ChoiceIndex,\
                             ChoiceLimits, quoted_string, _fromstr_helper, ProxyMethod, decode_float64,\
-                            locked_calling
+                            locked_calling, _encode_block, _decode_block
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 register_usb_name('Rigol Technologies', 0x1AB1)
@@ -199,16 +199,18 @@ class rigol_power_dp831a(visaInstrument):
 ##    Rigol AWG DG812
 #######################################################
 
+class float_as_int(object):
+    def __call__(self, input_str):
+        return int(float(input_str))
+    def tostr(self, val):
+        return '%d'%val
+
 #@register_instrument('Rigol Technologies', 'DG812', '00.02.05.00.00 ')
 @register_instrument('Rigol Technologies', 'DG812', usb_vendor_product=[0x1AB1, 0x643])
 class rigol_awg_dg812(visaInstrument):
     """
     This is the driver for the RIGOL AWG generator DG812.
     """
-    def init(self, full=False):
-        # This should depend on the endian type of the machine. Here we assume intel which is LSB.
-        self.write('FORMat:BORDer SWAPped') # This is LSB
-        super(rigol_awg_dg812, self).init(full=full)
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         opts = self._conf_helper('ref_oscillator_current_state', 'coupled_ampl_en', 'coupled_freq_en')
@@ -227,9 +229,16 @@ class rigol_awg_dg812(visaInstrument):
                                   'out_sync_polarity', 'out_sync_en',
                                   'freq', 'phase', 'mode', 'pulse_width',
                                   'mod_am_en', 'mod_am_depth_pct', 'mod_am_dssc_en', 'mod_am_src', 'mod_am_int_func', 'mod_am_int_freq',
-                                  'mod_fm_en', 'mod_phase_en')
+                                  'mod_fm_en', 'mod_phase_en',
+                                  'seq_filter', 'seq_sample_rate', 'seq_edge_time',
+                                  'current_seq', 'seq_n_period', 'seq_n_period'
+                                  )
         self.current_ch.set(curr_ch)
         return opts + self._conf_helper(options)
+
+    def _wait_after_write(self, *args, **kwargs):
+        self.ask('*OPC?')
+
     def _create_devs(self):
         self.ref_oscillator = scpiDevice('SYSTem:ROSCillator:SOURce', choices=ChoiceStrings('INTernal', 'EXTernal'))
         self.ref_oscillator_current_state = scpiDevice(getstr='ROSCillator:SOURce:CURRent?', choices=ChoiceStrings('INTernal', 'EXTernal'))
@@ -272,7 +281,8 @@ class rigol_awg_dg812(visaInstrument):
                 'PULSILOGRAM', 'TENS1', 'TENS2', 'TENS3', 'SURGE', 'DAMPEDOSC', 'SWINGOSC', 'RADAR', 'THREEAM',
                 'THREEFM', 'THREEPM', 'THREEPWM', 'THREEPFM', 'RESSPEED', 'MCNOSIE', 'PAHCUR', 'RIPPLE', 'ISO76372TP1',
                 'ISO76372TP2A', 'ISO76372TP2B', 'ISO76372TP3A', 'ISO76372TP3B', 'ISO76372TP4', 'ISO76372TP5A',
-                'ISO76372TP5B', 'ISO167502SP', 'ISO167502VR', 'SCR', 'IGNITION', 'NIMHDISCHARGE', 'GATEVIBR'))
+                'ISO76372TP5B', 'ISO167502SP', 'ISO167502VR', 'SCR', 'IGNITION', 'NIMHDISCHARGE', 'GATEVIBR', 'SEQUENCE'),
+                  extra_set_after_func=ProxyMethod(self._wait_after_write))
         self.pulse_width = devChOption('SOURce{ch}:PULSe:WIDTh', str_type=float) # s
         self.out_en = devChOption('OUTPut{ch}', str_type=Choice_bool_OnOff)
         self.out_load_ohm = devChOption('OUTPut{ch}:LOAD', str_type=float, setget=True, min=1, doc="max is 10 kOhm. For High impedance (INFinity) use 9.9e37")
@@ -291,38 +301,86 @@ class rigol_awg_dg812(visaInstrument):
         self.mod_fm_en = devChOption('SOURce{ch}:FM:STATe', str_type=Choice_bool_OnOff)
         self.mod_phase_en = devChOption('SOURce{ch}:PM:STATe', str_type=Choice_bool_OnOff)
 
+        self.seq_filter = devChOption('SOURce{ch}:FUNCtion:SEQuence:FILTer', choices=ChoiceStrings('SMOOth', 'STEP', 'INSErt'),
+                                        extra_set_after_func=ProxyMethod(self._wait_after_write),
+                                        doc="INSErt means interpolation filter.")
+        self.seq_sample_rate = devChOption('SOURce{ch}:FUNCtion:SEQuence:SRATe', str_type=float)
+        self.seq_edge_time = devChOption('SOURce{ch}:FUNCtion:SEQuence:EDGETime', str_type=float,
+                                         doc="Only for interpolation(INSErt) filter.")
+        # This is documented but does not work (possible replaced by unlisted mode "SEQUENCE")
+        #self.seq_en = devChOption('SOURce{ch}:FUNCtion:SEQuence', str_type=bool)
+        self.current_seq = MemoryDevice(1, min=1, max=8)
+        def devChSeqOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(seq=self.current_seq)
+            app = kwarg.pop('options_apply', ['ch', 'seq'])
+            kwarg.update(options=options, options_apply=app)
+            return devChOption(*arg, **kwarg)
+        # this returns floats?
+        self.seq_n_period = devChSeqOption('SOURce{ch}:FUNCtion:SEQuence:PERiod {val},{seq}',
+                                           'SOURce{ch}:FUNCtion:SEQuence:PERiod? {seq}', str_type=float_as_int())
+        self.seq_n_wave = devChSeqOption('SOURce{ch}:FUNCtion:SEQuence:WAVE {val},{seq}',
+                                         'SOURce{ch}:FUNCtion:SEQuence:WAVE? {seq}', choices=ChoiceStrings(
+                                            'SINusoid', 'SQUare ', 'RAMP', 'PULSe', 'NOISe', 'USER', 'HARMonic',
+                                            'CUSTom', 'DC', 'KAISER', 'ROUNDPM', 'SINC', 'NEGRAMP', 'ATTALT',
+                                            'AMPALT', 'STAIRDN', 'STAIRUP', 'STAIRUD', 'CPULSE', 'PPULSE',
+                                            'NPULSE', 'TRAPEZIA', 'ROUNDHALF', 'ABSSINE', 'ABSSINEHALF',
+                                            'SINETRA', 'SINEVER', 'EXPRISE', 'EXPFALL', 'TAN', 'COT', 'SQRT',
+                                            'X2DATA', 'GAUSS', 'HAVERSINE', 'LORENTZ', 'DIRICHLET', 'GAUSSPULSE',
+                                            'AIRY', 'CARDIAC', 'QUAKE', 'GAMMA', 'VOICE', 'TV', 'COMBIN', 'BANDLIMITED',
+                                            'STEPRESP', 'BUTTERWORTH', 'CHEBYSHEV1', 'CHEBYSHEV2', 'BOXCAR',
+                                            'BARLETT', 'TRIANG', 'BLACKMAN', 'HAMMING', 'HANNING', 'DUALTONE',
+                                            'ACOS', 'ACOSH', 'ACOTCON', 'ACOTPRO', 'ACOTHCON', 'ACOTHPRO',
+                                            'ACSCCON', 'ACSCPRO', 'ACSCHCON', 'ACSCHPRO', 'ASECCON', 'ASECPRO',
+                                            'ASECH', 'ASIN', 'ASINH', 'ATAN', 'ATANH', 'BESSELJ', 'BESSELY',
+                                            'CAUCHY', 'COSH', 'COSINT', 'COTHCON', 'COTHPRO', 'CSCCON',
+                                            'CSCPRO', 'CSCHCON', 'CSCHPRO', 'CUBIC', 'ERF', 'ERFC',
+                                            'ERFCINV', 'ERFINV', 'LAGUERRE', 'LAPLACE', 'LEGEND', 'LOG',
+                                            'LOGNORMAL', 'MAXWELL', 'RAYLEIGH', 'RECIPCON', 'RECIPPRO',
+                                            'SECCON', 'SECPRO', 'SECH', 'SINH', 'SININT', 'TANH', 'VERSIERA',
+                                            'WEIBULL', 'BARTHANN', 'BLACKMANH', 'BOHMANWIN', 'CHEBWIN',
+                                            'FLATTOPWIN', 'NUTTALLWIN', 'PARZENWIN', 'TAYLORWIN', 'TUKEYWIN',
+                                            'CWPUSLE', 'LFPULSE', 'LFMPULSE', 'EOG', 'EEG', 'EMG', 'PULSILOGRAM',
+                                            'TENS1', 'TENS2', 'TENS3', 'SURGE', 'DAMPEDOSC', 'SWINGOSC', 'RADAR',
+                                            'THREEAM', 'THREEFM', 'THREEPM', 'THREEPWM', 'THREEPFM', 'RESSPEED',
+                                            'MCNOSIE', 'PAHCUR', 'RIPPLE', 'ISO76372TP1', 'ISO76372TP2A',
+                                            'ISO76372TP2B', 'ISO76372TP3A', 'ISO76372TP3B', 'ISO76372TP4',
+                                            'ISO76372TP5A', 'ISO76372TP5B', 'ISO167502SP', 'ISO167502VR',
+                                            'SRC', 'IGNITION', 'NIMHDISCHARGE', 'GATEVIBR'))
 
-#        self.remote_cwd = scpiDevice('MMEMory:CDIRectory', str_type=quoted_string(),
-#                             doc=r"""
-#                                  instrument default is INT:/
-#                                  Available drives are INT or USB.
-#                                  You can use / (if you are using \, make sure to use raw string r"" or
-#                                  double them \\)
-#                                  """)
+        self.remote_cwd = scpiDevice('MMEMory:CDIRectory', str_type=quoted_string(fromstr=False),
+                             doc=r"""
+                                  instrument default is C:\\
+                                  Available drives are C or D.
+                                  """)
 
         self.alias = self.freq
         # This needs to be last to complete creation
         super(rigol_awg_dg812, self)._create_devs()
     def phase_sync(self):
         self.write('PHASe:SYNChronize')
-    def get_file(self, remote_file, local_file=None):
+    def file_store(self, filename):
         """
-            Obtain the file remote_file from the analyzer and save it
-            on this computer as local_file if given, otherwise returns the data
+          stores the current config (.RSF) or currrent arbitrary (.RAF)
+          into filename.
+          The filename is limited to 7 uppercase characters or numbers.
+          You need to include the extension, either .RSF or .RAF.
         """
-        s = self.ask('MMEMory:UPLoad? "%s"'%remote_file, raw=True)
-        s = _decode_block_base(s)
-        if local_file:
-            with open(local_file, 'wb') as f:
-                f.write(s)
-        else:
-            return s
+        self.write(':MMEMory:STORe "%s"'%filename)
+    def file_load(self, filename):
+        """
+          load the config (.RSF) or arbitrary (.RAF)
+          from filename to the current setting or arb curve.
+          The filename is limited to 7 uppercase characters or numbers.
+          You need to include the extension, either .RSF or .RAF.
+        """
+        self.write(':MMEMory:LOAD "%s"'%filename)
     def remote_ls(self, remote_path=None, show_space=False, show_size=False):
         """
             if remote_path is None, get catalog of device remote_cwd.
             Directories are show with an ending /
             returns None for empty and invalid directories.
-            The drives are called INT: and USB:.
+            The drives are called C: and D: (usb drive).
             if show_space is enable, it returns
                file_list, used, free
             if show_size is enabled, file_list are tuples of name, size
@@ -340,9 +398,9 @@ class rigol_awg_dg812(visaInstrument):
         lst = p[2].strip('"').rstrip('"').split('","')
         outlst = []
         for l in lst:
-            fname, ftype, fsize = l.rsplit(',', 2)
+            fsize, ftype, fname = l.rsplit(',', 2)
             fsize = int(fsize)
-            if ftype == 'FOLD':
+            if ftype == 'DIR':
                 fname += '/'
             if show_size:
                 outlst.append((fname, fsize))
@@ -352,99 +410,71 @@ class rigol_awg_dg812(visaInstrument):
             return outlst, used, free
         return outlst
 
+######  This is the documented way to do it and generates no error but also
+######  does not create the file. Don't know what is wrong
+#    @locked_calling
+#    def send_file(self, dest_file, local_src_file=None, src_data=None, overwrite=False):
+#        """
+#            dest_file: is the file name (absolute or relative to device remote_cwd)
+#                       you can use / to separate directories
+#            overwrite: when True will skip testing for the presence of the file on the
+#                       instrument and proceed to overwrite it without asking confirmation.
+#            Use one of local_src_file (local filename) or src_data (data string)
+#        """
+#        if not overwrite:
+#            # split seeks both / and \
+#            directory, filename = os.path.split(dest_file)
+#            ls = self.remote_ls(directory)
+#            if ls:
+#                ls = map(lambda s: s.lower(), ls)
+#                if filename.lower() in ls:
+#                    raise RuntimeError('Destination file already exists. Will not overwrite.')
+#        if src_data is local_src_file is None:
+#            raise ValueError('You need to specify one of local_src_file or src_data')
+#        if src_data and local_src_file:
+#            raise ValueError('You need to specify only one of local_src_file or src_data')
+#        if local_src_file:
+#            with open(local_src_file, 'rb') as f:
+#                src_data = f.read()
+#        data_str = _encode_block(src_data)
+#        # manually add terminiation to prevent warning if data already ends with termination
+#        self.write('MMEMory:DOWNload:FNAMe "%s"'%dest_file)
+#        self.write('MMEMory:DOWNload:DATA %s\n'%data_str, termination=None)
     @locked_calling
-    def send_file(self, dest_file, local_src_file=None, src_data=None, overwrite=False):
+    def arb_send_data(self, data, ch=None):
         """
-            dest_file: is the file name (absolute or relative to device remote_cwd)
-                       you can use / to separate directories
-            overwrite: when True will skip testing for the presence of the file on the
-                       instrument and proceed to overwrite it without asking confirmation.
-            Use one of local_src_file (local filename) or src_data (data string)
+        data can be a numpy array of float32 (from -1.0 to 1.0) or of int16 (from -32768 to 32767).
+              The length can be 8 pts (16 B)  to the memory limit.
+              floats are converted to the integers.
+        The channel must be in sequence mode.
         """
-        if not overwrite:
-            # split seeks both / and \
-            directory, filename = os.path.split(dest_file)
-            ls = self.remote_ls(directory)
-            if ls:
-                ls = map(lambda s: s.lower(), ls)
-                if filename.lower() in ls:
-                    raise RuntimeError('Destination file already exists. Will not overwrite.')
-        if src_data is local_src_file is None:
-            raise ValueError('You need to specify one of local_src_file or src_data')
-        if src_data and local_src_file:
-            raise ValueError('You need to specify only one of local_src_file or src_data')
-        if local_src_file:
-            with open(local_src_file, 'rb') as f:
-                src_data = f.read()
-        data_str = _encode_block(src_data)
-        # manually add terminiation to prevent warning if data already ends with termination
-        self.write('MMEMory:DOWNload:FNAMe "%s"'%dest_file)
-        self.write('MMEMory:DOWNload:DATA %s\n'%data_str, termination=None)
-    @locked_calling
-    def arb_load_file(self, filename, ch=None, clear=False, load=True):
-        """
-        Load a file (.arb, .barb or .seq) on the device into the channel.
-             If file is already loaded, this will fail unless clear=True.
-        clear when True erases all loaded files from the channel volatile memory.
-        load  when True (default), it activates the data as the current waveform
-        Note that int:/builtin/exp_rise.arb is always loaded, it is the default curve after a clear
-            so it can never be loaded directly.
-        """
+        # the manual said 0 to 0x3ff (14 bits) but this instrument is 16 bit resolution and needs
+        #  signed 16 bits
         if ch is not None:
             self.current_ch.set(ch)
         ch=self.current_ch.getcache()
-        if clear:
-            self.write('SOURce{ch}:DATA:VOLatile:CLEar'.format(ch=ch))
-        self.write('MMEMory:LOAD:DATA{ch} "{filename}"'.format(ch=ch, filename=filename))
-        if load:
-            self.arb_wave_seq.set(filename)
-    @locked_calling
-    def arb_save_file(self, filename, ch=None):
-        """Save a file (.arb, .barb or .seq) on the device from the channel"""
-        if ch is not None:
-            self.current_ch.set(ch)
-        ch=self.current_ch.getcache()
-        self.write('MMEMory:STORe:DATA{ch} "{filename}"'.format(ch=ch, filename=filename))
-    # TODO add send sequence: SOURce{ch}:DATA:SEQuence
-    @locked_calling
-    def arb_send_data(self, name, data, ch=None, clear=False, load=True, floats=None, csv=False):
-        """
-        name is needed to be used with arb_load_file (a string of up to 12 characters, no extension needed).
-             If name already exists, this will fail unless clear=True.
-        data can be a numpy array of float32 (from -1.0 to 1.0) or of int16 (from -32768 to 32767)
-              It can also be a string (bytes), but then floats needs to be specified.
-              There needs to be at least 8 data points.
-        clear when True erases all loaded files from the channel volatile memory.
-               (same as clear_volatile_mem)
-        floats when True/False, overrides the type detection. It is necessary when providing a string for the data.
-               True for floats, False for int16.
-        load  when True (default), it activates the data as the current waveform.
-              Note that this will change the amplitude/offset to 100 mVpp/0.
-              To load it yourself use the arb_wave_seq device.
-        csv when True, the the input data should be a string with comma separated values. floats needs to be specified.
-        """
-        if ch is not None:
-            self.current_ch.set(ch)
-        ch=self.current_ch.getcache()
-        if isinstance(data, bytes):
-            if floats is None:
-                raise ValueError('floats needs to be specified (True/False')
-        elif data.dtype == np.float32 or data.dtype == np.int16:
-            if floats is None:
-                floats = True if data.dtype == np.float32 else False
+        mode = self.mode.get()
+        if mode.lower() != 'sequence':
+            raise ValueError(self.perror('The channel mode must be in sequence mode for method to work.'))
+        if data.dtype in [np.float32, np.float64]:
+            data = data*0x7fff
+            data = data.astype(np.int16)
+        elif data.dtype in [np.int16, np.uint16]:
+            pass
         else:
-            if floats is None:
-                raise ValueError('Unknown data type and floats is not specified')
-            print 'Unknown data type in arb_send_data. Trying anyway...'
-        if csv:
-            data_str = data
-        else:
-            data_str = _encode_block(data)
-        if clear:
-            self.clear_volatile_mem()
-        if floats:
-            self.write(b'SOURce{ch}:DATA:ARBitrary {name},{data}\n'.format(ch=ch, name=name, data=data_str), termination=None)
-        else:
-            self.write(b'SOURce{ch}:DATA:ARBitrary:DAC {name},{data}\n'.format(ch=ch, name=name, data=data_str), termination=None)
-        if load:
-            self.arb_wave_seq.set(name)
+            raise ValueError('Unknown data type')
+        max_size = 2**15 # valid for sequence
+        #max_size = 2**13 # for ARB without sequence
+        N = len(data)
+        i = 0
+        pre = b'SOURce{ch}:DATA:DAC16 VOLATILE'
+        if N > max_size:
+            while N-i > max_size:
+                data_str = _encode_block(data[i:i+max_size])
+                self.write(pre + b',CON,{data}\n'.format(ch=ch, data=data_str), termination=None)
+                self._wait_after_write()
+                #pre = b''
+                i += max_size
+        data_str = _encode_block(data[i:])
+        self.write(pre + b',END,{data}\n'.format(ch=ch, data=data_str), termination=None)
+        self._wait_after_write()
