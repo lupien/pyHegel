@@ -1151,6 +1151,7 @@ quoted_dict_znb = functools.partial(quoted_dict, quote_char="'", empty='', eleme
 
 
 #@register_instrument('Rohde-Schwarz', 'ZNB40-2Port', '2.92')
+@register_instrument('Rohde-Schwarz', 'ZNB40-2Port', usb_vendor_product=[0x0AAD, 0x01BF])
 @register_instrument('Rohde-Schwarz', 'ZNB40-2Port', usb_vendor_product=[0x0AAD, 0x01A2])
 class rs_znb_network_analyzer(visaInstrumentAsync):
     """
