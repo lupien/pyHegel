@@ -848,7 +848,8 @@ class Average(LogicalDevice):
                     There will always be at least a 20 ms wait
         show_repeats will count the number of repeats and print them
         """
-        super(type(self), self).__init__(basedev=basedev, doc=doc, multi=['avg', 'std'], autoget=False, **extrak)
+        # Disable autoinit, to prevent long average being called when using force_get (sweep, ...)
+        super(type(self), self).__init__(basedev=basedev, doc=doc, multi=['avg', 'std'], autoget=False, autoinit=False, **extrak)
         self._filter_time = filter_time
         self._repeat_time = repeat_time
         self._show_repeats = show_repeats
