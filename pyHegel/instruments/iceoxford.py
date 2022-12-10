@@ -25,6 +25,7 @@ from __future__ import absolute_import
 
 import struct
 import types
+import time
 
 from ..instruments_base import visaInstrument, BaseDevice,\
                             scpiDevice, MemoryDevice,\
@@ -111,6 +112,8 @@ class iceoxford_temperature_controller(visaInstrument):
         do_warmup
         finish_warmup
         finish_cooldown
+        do_boiloff
+        cooldown_fast
     All the nv*, heat_sw* and heater set device automatically call the matching set_values by default.
     To prevent that, call the set with noset=True
     """
@@ -344,14 +347,19 @@ class iceoxford_temperature_controller(visaInstrument):
         self.nv_mode.set('auto', noset=True)
         self.nv_setpoint.set(1, noset=True)
         self.nv_ramp.set(100, noset=True)
-        self.nv_pid.set(p=50, i=.2, d=0, noset=True)
+        #self.nv_pid.set(p=50, i=.2, d=0, noset=True)
+        self.nv_pid.set(p=1000, i=0.01, d=0, noset=True)
         self.nv_error_band.set(0.2)
         self.heater_range.set('off', outch=1, noset=True)
+        self.heater_input.set('B', noset=True)
         self.heater_mode.set('manual', noset=True)
+        self.heater_pid.set(p=10, i=20, d=0, noset=True)
         self.heater_setpoint_ramp_en.set(False)
         self.heater_setpoint.set(.5)
         self.heater_range.set('off', outch=2, noset=True)
+        self.heater_input.set('C', noset=True)
         self.heater_mode.set('manual', noset=True)
+        self.heater_pid.set(p=100, i=20, d=0, noset=True)
         self.heater_setpoint_ramp_en.set(False)
         self.heater_setpoint.set(.5)
         self.heat_sw_mode.set('auto', noset=True)
@@ -359,20 +367,97 @@ class iceoxford_temperature_controller(visaInstrument):
         self.heat_sw_setpoint.set(5, noset=True)
         self.heat_sw_error_band.set(.5)
 
+    def _do_warmup_prep(self):
+        # heat switch disengaged
+        self.heat_sw_relay_en.set(False, noset=True)
+        self.heat_sw_mode.set('manual')
+        # nv auto, ramp 100 mBar/min, 0.2 mBar error band. Left are Setpoint and PID
+        self.nv_mode.set('auto', noset=True)
+        self.nv_ramp.set(100, noset=True)
+        self.nv_error_band.set(0.2)
+        # heater 2, (C, auto, no power, no ramp). Left are SetPoint, PID, power range
+        self.heater_range.set('off', outch=2, noset=True)
+        self.heater_input.set('C', noset=True)
+        self.heater_mode.set('auto', noset=True)
+        self.heater_setpoint_ramp_en.set(False)
+
+    def _get_t1k(self):
+        temps = self.temperatures.get()
+        return temps[2]
+
+    def do_boiloff(self, skip_prep=False):
+        """ Boil off the liquid Helium if present.
+            The function waits until all the helium is gone
+            The skip_prep is an internal option. Do not use it (it skips some settings to save time).
+        """
+        t1k = self._get_t1k()
+        if t1k < 5:
+            print "\n!!! Please wait for the Helium to boil off before proceeding !!!\n Starting at: %s\n"%time.ctime()
+            if not skip_prep:
+                self._do_warmup_prep()
+            # might have some liquid, need to boil it off
+            #  set nv so that is is going to close (but will open back if something happens)
+            self.nv_setpoint.set(1, noset=True)
+            self.nv_pid.set(p=1000, i=.1, d=0)
+            self.heater_pid.set(p=50, i=50, d=0, noset=True)
+            self.heater_setpoint.set(8.)
+            self.heater_range.set('medium')
+            while True:
+                t1k = self._get_t1k()
+                Pcirc = self.pressure_circulation.get()
+                if t1k > 6 and Pcirc < 3:
+                    break
+                wait(10)
+            self.heater_pid.set(p=50, i=10, d=0)
+            self.nv_setpoint.set(5, noset=True)
+            self.nv_pid.set(p=1000, i=0.1, d=0)
+            i = 0
+            # wait until flow > 3 for at least 1 min
+            while i < 6:
+                Pcirc = self.pressure_circulation.get()
+                if Pcirc > 3:
+                    i += 1
+                else:
+                    i = 0
+                wait(10)
+            self.nv_pid.set(p=1000, i=1, d=0)
+            print "\n Boil off finished at:", time.ctime()
+        else:
+            print "\n Already warm enough. There should be no liquid He present. Boil off skipped.\n"
+
+    def cooldown_fast(self, cooldown_nv_sp=8):
+        """ Cool down fast. First set the setpoint and pid you want for both nv and heater2. """
+        t1k = self._get_t1k()
+        t1ksp = self.heater_setpoint.get(outch=2)
+        hr = self.heater_range.get()
+        if t1k-2 > t1ksp or (hr == 'off' and t1k > 4.0):
+            print "\n!!! Please wait for the temperature to reach the setpoint\n"
+            nv_setpoint = self.nv_setpoint.get()
+            nv_pid = self.nv_pid.get()
+            self.nv_setpoint.set(cooldown_nv_sp, noset=True)
+            self.nv_pid.set(p=1000, i=.02, d=0)
+            self.heater_range.set('off')
+            while self._get_t1k() > t1ksp+1:
+                wait(10)
+            self.nv_setpoint.set(nv_setpoint, noset=True)
+            self.nv_pid.set(nv_pid)
+            self.heater_range.set(hr)
+        else:
+            print "\n !! Fast cooldown skipped because temperature is not above Setpoint by more than 2K\n"
+
     def do_warmup(self):
         """ Setup the ICEoxford program so it starts the warmup.
             It adjusts the heaters, the needle valve and the heatswitch.
         """
+        self._do_warmup_prep()
+        self.do_boiloff(skip_prep=True)
         temps = self.temperatures.get()
         t1k = temps[2]
         t4k = temps[1]
-        self.heat_sw_relay_en.set(False, noset=True)
-        self.heat_sw_mode.set('manual')
-        self.nv_mode.set('auto', noset=True)
+        # open nv large enough so that we are far from being close
+        # This is to prevent any problem of thermal contraction breaking the needle valve thread.
         self.nv_setpoint.set(5, noset=True)
-        self.nv_ramp.set(100, noset=True)
-        self.nv_pid.set(p=200, i=50, d=0, noset=True)
-        self.nv_error_band.set(0.2)
+        self.nv_pid.set(p=1000, i=1, d=0)
         # heater 1, (4K, B)
         self.heater_range.set('off', outch=1, noset=True)
         self.heater_input.set('B', noset=True)
@@ -386,17 +471,14 @@ class iceoxford_temperature_controller(visaInstrument):
         self.heater_range.set('medium')
         self.heater_setpoint.set(285)
         # heater 2, (1K, C)
-        self.heater_range.set('off', outch=2, noset=True)
-        self.heater_input.set('C', noset=True)
-        self.heater_mode.set('auto', noset=True)
-        self.heater_setpoint_ramp_en.set(False, noset=True)
-        self.heater_ramp.set(0.4, noset=True)
+        self.heater_ramp.set(0.4, outch=2, noset=True)
         self.heater_pid.set(p=10, i=20, d=0)
         # Now toggle setpoint and ramp in the proper order.
         self.heater_setpoint.set(t1k)
         self.heater_setpoint_ramp_en.set(True)
         self.heater_range.set('high')
         self.heater_setpoint.set(295)
+        print "\n ***  You can now shut off the compressor.  ***\n"
 
     def finish_warmup(self):
         """ Setup the ICEoxford program so it stops the warmup.
