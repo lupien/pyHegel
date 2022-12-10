@@ -239,11 +239,17 @@ def register_instrument(manuf=None, product=None, firmware_version=None, usb_ven
             if product is not None and ',' in product:
                 raise ValueError("product can't contain ',' for %s"%instr_class)
             key = (manuf, product, firmware_version)
-            if not quiet and _instruments_ids.has_key(key):
-                print ' Warning: Registering %s with %s to override %s'%(
-                        key, instr_class, _instruments_ids[key])
+            do_append = True
+            if _instruments_ids.has_key(key):
+                if _instruments_ids[key] is not instr_class:
+                    if not quiet:
+                        print ' Warning: Registering %s with %s to override %s'%(
+                                key, instr_class, _instruments_ids[key])
+                else:
+                    do_append = False
             _instruments_ids[key] = instr_class
-            _instruments_ids_rev[instr_class].append(key)
+            if do_append:
+                _instruments_ids_rev[instr_class].append(key)
             if not skip_alias and alias:
                 register_idn_alias(alias, manuf, product, firmware_version)
         if usb_vendor_product is not None:
