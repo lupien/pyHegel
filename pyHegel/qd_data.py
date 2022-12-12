@@ -12,6 +12,7 @@ import csv
 from numpy import genfromtxt, isnan, where, array
 import datetime
 import dateutil.tz
+import io
 
 def timestamp_offset(year=None):
     """ Returns the timestamp offset to add to the timestamp column
@@ -92,7 +93,7 @@ def quoted_split(string):
     reader = csv.reader([string])
     return list(reader)[0]
 
-def read_one_ppms_dat(filename, sel_i=0, nbcols=None):
+def read_one_ppms_dat(filename, sel_i=0, nbcols=None, encoding='latin1'):
     hdrs = []
     titles = []
     i = 0
@@ -100,7 +101,7 @@ def read_one_ppms_dat(filename, sel_i=0, nbcols=None):
     if nbcols is not None:
         kwargs['usecols'] = list(range(nbcols))
         kwargs['invalid_raise'] = False
-    with open(filename, 'r') as f:
+    with io.open(filename, 'r', encoding=encoding) as f:
         while True:
             line = f.readline().rstrip()
             i += 1
@@ -114,7 +115,7 @@ def read_one_ppms_dat(filename, sel_i=0, nbcols=None):
         hdrs.append(line)
         titles = quoted_split(line)
     titles = np.array(titles)
-    v = genfromtxt(filename, skip_header=i, delimiter=',', **kwargs).T
+    v = genfromtxt(filename, skip_header=i, delimiter=',', encoding=encoding, **kwargs).T
     if v.ndim == 1:
         # There was only one line:
         v = v[:, np.newaxis]
@@ -156,7 +157,8 @@ def _glob(filename):
 #  https://numpy.org/doc/stable/user/basics.subclassing.html
 
 class QD_Data(object):
-    def __init__(self, filename_or_data, sel_i=0, titles=None, qd_data=None, concat=False, nbcols=None, timestamp='auto'):
+    def __init__(self, filename_or_data, sel_i=0, titles=None, qd_data=None, concat=False, nbcols=None, timestamp='auto',
+                 encoding='latin1'):
         """ provide either a numpy data array a filename or a list of filenames,
             of a Quantum Design .dat file. The filenames can have glob patterns (*,?).
             When multiple files are provided, either they are concatenated if
@@ -207,7 +209,7 @@ class QD_Data(object):
             hdrs_all = []
             vr_all = []
             for f in filenames:
-                v, _titles, hdrs, sel = read_one_ppms_dat(f, sel_i=None, nbcols=nbcols)
+                v, _titles, hdrs, sel = read_one_ppms_dat(f, sel_i=None, nbcols=nbcols, encoding=encoding)
                 if titles is None:
                     titles = _titles
                 if first:
