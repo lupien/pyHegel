@@ -2030,7 +2030,7 @@ class ATSBoard(BaseInstrument):
         # if units in self.get_fft:
             # If FFT units, perform FFT
             # return self.make_fft(data)
-        elif units == "V**2" or units in self.get_fft:
+        if units == "V**2" or units in self.get_fft:
             # If "V**2", compute Power Spectrum
             scaling = "spectrum"
         else:
