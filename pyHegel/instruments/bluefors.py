@@ -2112,6 +2112,8 @@ class bf_controller(BaseInstrument):
     def _fetch_getdev(self, temp_ch=None, flow=True, gages=True):
         """
         temp_ch when None, will return all enabled channels (from cache), otherwise you can select the ch numbers.
+        flow when False disables taking flow data
+        gages when False disables taking gages data
         """
         ret = []
         temp_ch = self._fetch_tch_helper(temp_ch)
