@@ -482,12 +482,15 @@ class iceoxford_temperature_controller(visaInstrument):
 
     def finish_warmup(self):
         """ Setup the ICEoxford program so it stops the warmup.
-            It turns off the heaters
+            It turns off the heaters and adjusts the needle valve before stopping
+            the circulation pump.
         """
         self.heater_range.set('off', outch=1, noset=True)
         self.heater_mode.set('manual')
         self.heater_range.set('off', outch=2, noset=True)
         self.heater_mode.set('manual')
+        self.nv_mode.set('manual')
+        self.nv_manual_out.set(95)
 
     def finish_cooldown(self):
         """ Setup the ICEoxford program so it stops the cooldown.
