@@ -203,6 +203,8 @@ class agilent_SMU(visaInstrumentAsync):
         do_impedance_correction
     Note: The B1500A needs to have the EasyExpert Start button running for
           remote GPIB to work. Do not start the application.
+          To use the internal usb connection, the easyExpert Start button needs to be stopped
+           (no running GPIB interface and no running EasyExpert application either).
     """
     def __init__(self, *args, **kwargs):
         """
