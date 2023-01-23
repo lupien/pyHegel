@@ -2008,7 +2008,7 @@ class agilent_SMU(visaInstrumentAsync):
                 ret_dict['active_range'] = stair[2]/10.
             comp = 'empty' if len(stair) < 7 else stair[6]
             power = 'empty' if len(stair) < 8 else stair[7]
-            mode_opt = {1:'linear', 2:'log', 3:'linear updown', 4:'log updown'}
+            mode_opt = {1:'linear', 2:'log', 3:'linear_updown', 4:'log_updown'}
             ret_dict.update(dict(sweep_ch = ch,
                                  mode = mode_opt[stair[1]],
                                  start = stair[3],
