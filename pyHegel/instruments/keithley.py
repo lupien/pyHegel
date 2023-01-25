@@ -31,7 +31,8 @@ from collections import OrderedDict
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
                             ChoiceBase, ChoiceLimits, ChoiceStrings, ChoiceDevDep,\
-                            locked_calling, visa_wrap, _decode_block_auto, ChoiceSimpleMap
+                            locked_calling, visa_wrap, _decode_block_auto, ChoiceSimpleMap,\
+                            ChoiceMultiple
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 #hex(1510) = 0x05E6
@@ -127,6 +128,7 @@ class keithley_2450_smu(visaInstrumentAsync):
      set_avg_count   (used internally by set_long_avg)
      data_buffer_delete
      data_buffer_create
+     exec_tsp_code
     """
     def __init__(self, *args, **kwargs):
         super(keithley_2450_smu, self).__init__(*args, **kwargs)
@@ -686,8 +688,32 @@ class keithley_2450_smu(visaInstrumentAsync):
         self._trig_data['last_block'] = self.trigger_blocks_list.get()
         self._trig_data['buffer'] = buffer
 
+    def exec_tsp_code(self, tsp_code, readback=False):
+        """ if you enable readback, it will read one line (if True) or n lines if given a number
+            after executing the tsp_code (which could be multiple lines)
+            An example of use:
+              smu.exec_tsp_code(\"""beeper.beep(.1, 400)
+            print('delay')
+            delay(.1)
+            beeper.beep(1, 200)
+            print('done')\""", 2))
+        """
+        self.write('*LANG TSP')
+        self.write(tsp_code)
+        self.write('*LANG SCPI')
+        if readback is True:
+            ret = self.read()
+        elif readback is False:
+            ret = None
+        else:
+            ret = []
+            for i in range(readback):
+                ret.append(self.read())
+        return ret
+
     #TODO implement inteligent set level like for yokogawa.
     def _create_devs(self):
+        self.write('*LANG SCPI')
         self.route_terminals = scpiDevice('ROUTe:TERMinals', choices=ChoiceStrings('FRONt', 'REAR'))
         self.output_en = scpiDevice('OUTPut', str_type=bool)
         self.interlock_ok = scpiDevice(getstr='OUTPut:INTerlock:TRIPped?', str_type=bool)
@@ -841,6 +867,31 @@ class keithley_2450_smu(visaInstrumentAsync):
         self.trigger_state = scpiDevice(getstr='TRIGger:STATe?', str_type=str)
         # This takes about 1 ms on usb
         self.trigger_blocks_list = scpiDevice(getstr='TRIGger:BLOCk:LIST?', str_type=str)
+
+        self.current_ioch = MemoryDevice(1, choices=range(1, 6+1))
+        def ioCH_Device(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ioch=self.current_ioch)
+            app = kwarg.pop('options_apply', ['ioch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+#        iomode_ch = ChoiceMultiple(['type', 'direction'], fmts=[ChoiceStrings('DIGital' ,'TRIGger', 'SYNChronous'),
+#                                   ChoiceStrings('IN', 'OUT', 'OPENdrain', 'MASTer', 'ACCeptor')])
+#        self.digital_io_mode = ioCH_Device(':DIGital:LINE{ioch}:MODE', choices=iomode_ch, allow_kw_as_dict=True, allow_missing_dict=True)
+        iomode_ch = ChoiceSimpleMap({'DIG,IN':'digital_in', 'DIG,OUT':'digital_out', 'DIG,OPEN':'digital_opendrain',
+                                     'TRIG,IN':'trig_in', 'TRIG,OUT':'trig_out', 'TRIG,OPEN':'trig_opendrain',
+                                     'SYNC,MAST':'sync_master', 'SYNC,ACC':'sync_acceptor'})
+        self.digital_io_mode = ioCH_Device(':DIGital:LINE{ioch}:MODE', choices=iomode_ch)
+        self.digital_io_state_one = ioCH_Device(':DIGital:LINE{ioch}:STATe', str_type=int, choices=[0, 1], autoinit=False)
+        self.digital_io_state_all = scpiDevice(':DIGital:WRITe', ':DIGital:READ?', str_type=int, min=0, max=0x3f, autoinit=False)
+        self.digital_io_trigger_logic = ioCH_Device(':TRIGger:DIGital{ioch}:OUT:LOGic', choices=ChoiceStrings('POS', 'NEG'))
+        self.digital_io_trigger_pulsewidth = ioCH_Device(':TRIGger:DIGital{ioch}:OUT:PULSewidth', str_type=float, min=0)
+        self.digital_io_trigger_stimulus = ioCH_Device(':TRIGger:DIGital{ioch}:OUT:STIMulus', choices=ChoiceStrings(
+                'NONE', 'DISPlay', 'NOTify1', 'NOTify2', 'NOTify3', 'NOTify4', 'NOTify5', 'NOTify6', 'NOTify7', 'NOTify8',
+                'COMMand', 'DIGio1', 'DIGio2', 'DIGio3', 'DIGio4', 'DIGio5', 'DIGio6',
+                'TSPLink1', 'TSPLink2', 'TSPLink3', 'LAN1', 'LAN2', 'LAN3', 'LAN4', 'LAN5', 'LAN6', 'LAN7', 'LAN8',
+                'BLENder1', 'BLENder2', 'TIMer1', 'TIMer2', 'TIMer3', 'TIMer4', 'SLIMit'), doc=
+                 """ COMMand allows trigger with the trigger method """)
 
         #self.user_display = scpiDevice('DISPlay:USER{line}:TEXT', str_type=quoted_string(), options=dict(line=1), options_lim=dict(line=[1,2]), doc='20 (32) char max for line=1 (2)', autoget=False)
 
