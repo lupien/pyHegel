@@ -65,7 +65,7 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
            'iprint', 'ilist', 'dlist', 'find_all_instruments', 'checkmode', 'check',
            'batch', 'sleep', 'load', 'load_all_usb', 'load_all_gpib', 'test_gpib_srq_state',
            'task', 'top', 'kill', '_init_pyHegel_globals', '_faster_timer', 'quiet_KeyboardInterrupt',
-           'Loop_Control',
+           'Loop_Control', '_Snap',
            'Sequencer', 'Seq_Wait_i', 'Seq_Wait', 'Seq_Func', 'Seq_Funcs', 'Seq_Keep_Going', 'Seq_End',
            'rsrc_manager_reload', 'rsrc_manager_get_object', 'rsrc_manager_info']
 
@@ -73,7 +73,7 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
 #             _Clock _update_sys_path writevec _get_dev_kw _getheaders
 #             _dev_filename _readall _readall_async _checkTracePause
 #             _itemgetter _write_conf
-#             _Sweep _Snap _record_execafter _normalize_usb _normalize_gpib _get_visa_idns
+#             _Sweep _record_execafter _normalize_usb _normalize_gpib _get_visa_idns
 #             _Hegel_Task _quiet_KeyboardInterrupt_Handler
 #             _greetings _load_helper _get_extra_confs dump_conf _time_check
 #             _write_comment
