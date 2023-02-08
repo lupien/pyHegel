@@ -2801,7 +2801,7 @@ class agilent_B2900_smu(visaInstrumentAsync):
                     if pulse2:
                         paras['Pdelay2'] = self.pulse_delay.get()
                         paras['Pwidth2'] = self.pulse_width.get()
-                    if vals1 != 'keep' and vals2 != 'keep' and len(vals1) != len(vals2):
+                    if isinstance(vals1, np.ndarray) and isinstance(vals2, np.ndarray) and len(vals1) != len(vals2):
                         raise RuntimeError('Inconsistent source lists on instrument for ch2. It was probably changed by hand.')
             self.current_channel.set(orig_ch)
             return paras
