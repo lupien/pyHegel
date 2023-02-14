@@ -522,7 +522,7 @@ class QuantumDesign_PPMS(BaseInstrument):
                       Options:
                           rate      in K/min (defaults to temp_rate)
                           approach  one of {}, defaults to current_temp_approach
-                      """.format(self.current_field_approach.choices))
+                      """.format(self.current_temp_approach.choices))
         self._devwrap('position', setget=True, doc="""\
                       Options:
                           axis      defaults to current_pos_axis
