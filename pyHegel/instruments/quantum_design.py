@@ -499,7 +499,7 @@ class QuantumDesign_PPMS(BaseInstrument):
         self.temp_ramp_wait_after = MemoryDevice(10., min=0.)
         self.position_ramp_wait_after = MemoryDevice(10., min=0.)
         self.field_rate = MemoryDevice(100, min=0.1, max=10000, doc='Oe/s')
-        self.temp_rate = MemoryDevice(2, min=0.01, max=20, doc='K/min')
+        self.temp_rate = MemoryDevice(2, min=0.01, max=50, doc='K/min')
         if self._qd_type == 'ppms':
             self.position_speed = MemoryDevice(1., choices=self._move_slowdown, doc='Unis are steps/s.')
         else:
