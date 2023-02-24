@@ -377,6 +377,7 @@ class MagnetController_SMC(visaInstrument):
     the current needs to be near zero to work (<0.09 A). It fails silently
     when above (reread operating_parameters to confirm the change).
     """
+    _passwd_check = "IknowWhatIamDoing"
     def __init__(self, address):
         cnsts = visa_wrap.constants
         super(MagnetController_SMC, self).__init__(address, parity=cnsts.Parity.none, flow_control=cnsts.VI_ASRL_FLOW_XON_XOFF,
@@ -429,8 +430,11 @@ class MagnetController_SMC(visaInstrument):
             rate:  sign of value is lost. in A/s.
             Tunit: True or False
             reverse: True or False
+            calibTpA: to T/A magnet value. You also need to provide a password with the
+                       password parameter.
         But reverse will only work if field and voltage are 0.
         """
+        password = value.pop('password', None)
         for k,v in value.iteritems():
             if k == 'rate':
                 self.write('A%.5f'%abs(v))
@@ -438,8 +442,15 @@ class MagnetController_SMC(visaInstrument):
                  self.write('T%i'%v)
             elif k == 'reverse':
                  self.write('D%i'%v)
+            elif k == 'calibTpA':
+                if password != self._passwd_check:
+                    raise ValueError('Invalid password.')
+                self.write('C%.6f'%v)
             else:
                 raise NotImplementedError('Changing %s is not implememented'%k)
+    _operating_parameters_setdev.__doc__ += """
+        The password to use is: %s
+        """%_passwd_check
     @_repeat_getdev_dec
     def _operating_parameters_getdev(self):
         s = self.ask('O')
@@ -660,7 +671,7 @@ class MagnetController_SMC(visaInstrument):
         self.ramp_wait_after = MemoryDevice(20., min=0.)
         self._devwrap('field', doc='units are Tesla')
         self._devwrap('operating_parameters', setget=True, allow_kw_as_dict=True,
-                      choices=ChoiceMultiple(['rate', 'reverse', 'Tunit'], [float, bool, bool], allow_missing_keys=True))
+                      choices=ChoiceMultiple(['rate', 'reverse', 'Tunit', 'calibTpA', 'password'], [float, bool, bool, float, str], allow_missing_keys=True))
         self._devwrap('setpoints', setget=True, allow_kw_as_dict=True,
                       choices=ChoiceMultiple(['lower', 'upper', 'voltLim', 'Tunit', 'password'], [float, float, float, bool, str], allow_missing_keys=True))
         self._devwrap('status', setget=True, allow_kw_as_dict=True,
