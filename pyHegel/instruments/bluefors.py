@@ -2201,6 +2201,10 @@ class bf_controller(BaseInstrument):
         self.lakeshore_input_filter_window = lakeshore_dev2('driver.lakeshore.settings.inputs.in{ch}.filter_window')
         self.lakeshore_scanner_en = bf_controller_dev('driver.lakeshore.status.scanner.autoscan', autoinit=False)
         self.lakeshore_scanner_ch = bf_controller_dev('driver.lakeshore.status.scanner.channel', autoinit=False)
+        self.lakeshore_meas_freq = bf_controller_dev('driver.lakeshore.settings.instrument.measurement_input_excitation_frequency',
+                                                     choices=ChoiceSimpleMap({1:9.8, 2:13.7, 3:16.2}, allow_keys=True),
+                                                     get_pre_update='driver.lakeshore.settings.instrument.read',
+                                                     set_post_update='driver.lakeshore.settings.instrument.write', autoinit=False)
         self.still_heater_en = bf_controller_dev('mapper.temperature_control.heaters.still.enabled')
         self.still_heater_power = bf_controller_dev('mapper.temperature_control.heaters.still.power', setget=True)
         self._devwrap('active_temp_ch')
