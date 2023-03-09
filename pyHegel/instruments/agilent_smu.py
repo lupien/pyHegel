@@ -1037,12 +1037,19 @@ class agilent_SMU(visaInstrumentAsync):
         For 'time', you provide the actual measurement time (max of 20 ms). Only valid for speed and pulse.
         """
         # OrderedDict to update mode before time, otherwise times are truncated.
-        para_dict = OrderedDict([('speed_mode', self.integration_high_speed_mode),
+        if self._isB1500:
+            para_dict = OrderedDict([('speed_mode', self.integration_high_speed_mode),
                          ('speed_time', self.integration_high_speed_time),
                          ('resol_mode', self.integration_high_resolution_mode),
                          ('resol_time', self.integration_high_resolution_time),
                          ('pulse_mode', self.integration_pulse_mode),
                          ('pulse_time', self.integration_pulse_time)])
+        else:
+            para_dict = OrderedDict([('speed_mode', self.integration_high_speed_mode),
+                         ('speed_time', self.integration_high_speed_time),
+                         ('resol_mode', self.integration_high_resolution_mode),
+                         ('resol_time', self.integration_high_resolution_time)])
+
         params = locals()
         if all(params.get(k) is None for k in para_dict):
             return {k:dev.get() for k, dev in para_dict.items()}
