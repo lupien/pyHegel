@@ -1119,11 +1119,13 @@ class _Sweep(instruments.BaseInstrument):
                     for i,v in enumerate(cycle_span):
                         sets[2] = [v]
                         if graph:
-                            beforewait = t_proxy.wait_time
-                        if iter_partial == 0 and first_wait is not None:
-                            sets[3] = [beforewait + first_wait]
+                            bfrwait = t_proxy.wait_time
                         else:
-                            sets[3] = [beforewait]
+                            bfrwait = beforewait
+                        if iter_partial == 0 and first_wait is not None:
+                            sets[3] = [bfrwait + first_wait]
+                        else:
+                            sets[3] = [bfrwait]
                         iter_partial += 1
                         iter_info = i+ioffset, iter_partial, npts_total, cfwd, [cfwd]
                         yield iter_info, cf, cformats, sets, clf
