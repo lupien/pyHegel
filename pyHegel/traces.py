@@ -862,3 +862,77 @@ def plot_time(x, *extrap, **extrak):
     pylab.draw()
     return ret
 
+def plot_time_stack(x, *ys, **kwargs):
+    """
+       Uses plot_time (so x is the time axis)
+       but plots vertically stacked graphs (all the same x axis).
+       Every ys argument is plotted in its own graph (from top to bottom).
+       The ys can be a single 2D numpy array (first dim is line index, second is pt index)
+        or a list of 1D array.
+       The last ys can be a fmt argument (like ".-")
+       other kargs are passed to plot_time.
+       you can provide a labels argument and it will be applied to the graph (same shape as the data,
+          use None to skip labels on an axes).
+       It plots in the current figure. If the current figure already has enough
+       axes, it reuses them, otherwise it creates new ones. You should clf() before changing the
+       number of axes.
+       title: providing this will put a figure title (title on the first axis).
+    """
+    labels = kwargs.pop('labels', None)
+    title = kwargs.pop('title', None)
+    if isinstance(ys[-1], str):
+        fmt = ys[-1]
+        ys = ys[:-1]
+        extra = [fmt]
+    else:
+        extra = []
+    Nr = len(ys)
+    if labels is None:
+        labels = [None]*Nr
+    if len(labels) < Nr:
+        labels = labels + [None]*(Nr-len(labels))
+    fig = pylab.gcf()
+    if len(fig.axes) < Nr:
+       fig1, axs1 = pylab.subplots(nrows=Nr, sharex=True, squeeze=True, gridspec_kw=dict(hspace=0), num=fig.number)
+       for ax in axs1[1:]:
+           ax.yaxis.get_major_locator().set_params(prune='upper')
+    else:
+       fig1, axs1 = fig, fig.axes
+    for i, (y, ax, lbls) in enumerate(zip(ys, axs1, labels)):
+        pylab.sca(ax)
+        if i == 0 and title is not None:
+            pylab.title(title)
+        if isinstance(y, (list, tuple)):
+            y = np.asarray(y)
+        lines = plot_time(x, y.T, *extra, **kwargs)
+        if lbls is not None:
+            if not isinstance(lbls, (list, tuple, np.ndarray)):
+                lbls = [lbls]
+            for l, lbl in zip(lines, lbls):
+                l.set_label(lbl)
+            pylab.legend().draggable()
+
+def plot_time_stack_qd(qdata, *indices, **kwargs):
+    """ like plot_time_stack except for Qd_Data.
+        Instead of providing x and ys you provide the Qd_Data
+        and the indices. It will generate the correct labels by default.
+        You can set raw=True if you want to use the raw indices instead.
+        The indices can be a single value, a list of indices or a slice.
+    """
+    raw = kwargs.pop('raw', False)
+    labels = kwargs.pop('labels', None)
+    data = qdata.vr if raw else qdata
+    if labels is None:
+        titles = qdata.titles_raw if raw else qdata.titles
+    if isinstance(indices[-1], str):
+        extra = [indices[-1]]
+        indices = indices[:-1]
+    else:
+        extra = []
+    ys = [data[sel] for sel in indices]
+    if labels is None:
+        labels = [titles[sel] for sel in indices]
+    kwargs['labels'] = labels
+    ys += extra
+    plot_time_stack(qdata.t, *ys, **kwargs)
+
