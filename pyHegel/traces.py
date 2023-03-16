@@ -862,6 +862,33 @@ def plot_time(x, *extrap, **extrak):
     pylab.draw()
     return ret
 
+def _plot_time_mouse(event):
+    if event.button != 1:
+        return
+    if event.canvas.toolbar.mode != u'':
+        # only work in selection mode, not u'pan/zoom', u'zoom rect'
+        return
+    axs = event.canvas.figure.axes
+    if len(axs) < 2:
+        return
+    #print event, event.name
+    if event.name == 'button_press_event':
+        def do_l(l):
+            l.set_visible(True)
+            l.set_xdata([event.xdata, event.xdata])
+    else: # button_release_event
+        def do_l(l):
+            l.set_visible(False)
+    for ax in event.canvas.figure.axes:
+        if len(ax.lines):
+            l = ax.lines[0]
+            ydata = l.get_ydata()
+            # detect for axvline
+            if isinstance(ydata, list) and ydata  == [0, 1]:
+                do_l(l)
+    event.canvas.draw()
+
+
 def plot_time_stack(x, *ys, **kwargs):
     """
        Uses plot_time (so x is the time axis)
@@ -877,6 +904,7 @@ def plot_time_stack(x, *ys, **kwargs):
        axes, it reuses them, otherwise it creates new ones. You should clf() before changing the
        number of axes.
        title: providing this will put a figure title (title on the first axis).
+       A vertical line on all axes is displayed when pressing the mouse button is pressed and no tool is selected.
     """
     labels = kwargs.pop('labels', None)
     title = kwargs.pop('title', None)
@@ -893,11 +921,19 @@ def plot_time_stack(x, *ys, **kwargs):
         labels = labels + [None]*(Nr-len(labels))
     fig = pylab.gcf()
     if len(fig.axes) < Nr:
-       fig1, axs1 = pylab.subplots(nrows=Nr, sharex=True, squeeze=True, gridspec_kw=dict(hspace=0), num=fig.number)
-       for ax in axs1[1:]:
-           ax.yaxis.get_major_locator().set_params(prune='upper')
+        fig1, axs1 = pylab.subplots(nrows=Nr, sharex=True, squeeze=True, gridspec_kw=dict(hspace=0), num=fig.number)
+        xo = time2date(x[0])
+        for ax in axs1[1:]:
+            ax.yaxis.get_major_locator().set_params(prune='upper')
+        for ax in axs1:
+            ax.axvline(x=xo, color='k', linewidth=.5, visible=False)
+        if any([c==_plot_time_mouse for c in fig.canvas.callbacks.callbacks['button_press_event'].values()]):
+            pass
+        else:
+            fig.canvas.mpl_connect('button_press_event', _plot_time_mouse)
+            fig.canvas.mpl_connect('button_release_event', _plot_time_mouse)
     else:
-       fig1, axs1 = fig, fig.axes
+        fig1, axs1 = fig, fig.axes
     for i, (y, ax, lbls) in enumerate(zip(ys, axs1, labels)):
         pylab.sca(ax)
         if i == 0 and title is not None:
@@ -912,8 +948,10 @@ def plot_time_stack(x, *ys, **kwargs):
                 l.set_label(lbl)
             pylab.legend().draggable()
 
+
+
 def plot_time_stack_qd(qdata, *indices, **kwargs):
-    """ like plot_time_stack except for Qd_Data.
+    """ like plot_time_stack except for QD_Data.
         Instead of providing x and ys you provide the Qd_Data
         and the indices. It will generate the correct labels by default.
         You can set raw=True if you want to use the raw indices instead.
