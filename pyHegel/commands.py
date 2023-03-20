@@ -1006,7 +1006,7 @@ class _Sweep(instruments.BaseInstrument):
                       filenames used.
                 rate: unused
                 close_after: automatically closes the figure after the sweep when True
-                graph: If graph is True, a figure is plotter while taking data. When
+                graph: If graph is True, a figure is plotted while taking data. When
                        False no figure is created. If graph is None (default) the value
                        from the sweep.graph device is used.
                 title: string used for window title
@@ -1014,6 +1014,8 @@ class _Sweep(instruments.BaseInstrument):
                      This has the same syntax and overrides sweep.out.
                      See sweep.out documentation for more advanced uses
                      (devices with options).
+                     Note that an extra data column is always added to the data file. It contains
+                     the clock time before the set operation are done for each iterations.
                 extra_conf: list (or a single element) of extra devices to dump configuration
                             headers at head of data file. Instead of a device, it can also be
                             a string that will be dumped as is in the header with a comment:= prefix.
@@ -1762,7 +1764,8 @@ def _record_execafter(command, i, vals, vals_full, iter_total):
 
 
 _record_trace_num = 0
-def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_conf=None, async=False, after=None):
+def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_conf=None,
+           async=False, after=None, close_after=False, graph=None):
     """
        record to filename (if not None) the values from devs
          uses sweep.path
@@ -1773,6 +1776,10 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
         on CTRL-C...
        filename, title, extra_conf and async behave the same way as for sweep.
        However filename will not handle the {start}, {stop}, {npts}, {updown} options.
+       close_after: automatically closes the figure after the sweep when True
+       graph: If graph is True, a figure is plotted while taking data. When
+              False no figure is created. If graph is None (default) the value
+              from the sweep.graph device is used.
 
        after is a string to be executed after every iteration.
        The variables i represent the current cycle index.
@@ -1802,7 +1809,10 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     # make sure devs is list like
     if not isinstance(devs, list):
         devs = [devs]
-    t = traces.Trace(time_mode=True, wait_time=interval)
+    if graph is None:
+        graph = sweep.graph.get()
+    if graph:
+        t = traces.Trace(time_mode=True, wait_time=interval)
     fullpath = None
     if filename is not None:
         fullpath = use_sweep_path(filename)
@@ -1813,14 +1823,16 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     if title is None:
         title = str(_record_trace_num)
     _record_trace_num += 1
-    t.setWindowTitle('Record: '+title)
+    if graph:
+        t.setWindowTitle('Record: '+title)
     hdrs, graphsel, formats, set_counts = _getheaders(getdevs=devs, root=fullpath, npts=npoints, extra_conf=extra_conf)
     if graphsel == []:
         # nothing selected to graph so pick first dev
         # It probably will be the loop index i
         graphsel=[0]
     gsel = _itemgetter(*graphsel)
-    t.setlegend(gsel(hdrs))
+    if graph:
+        t.setlegend(gsel(hdrs))
     try:
         f = None
         if filename is not None:
@@ -1828,7 +1840,8 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
             f = open(fullpath, 'w', 0)
             _write_conf(f, formats, extra_base='record options', async=async, interval=interval)
             writevec(f, ['time']+hdrs, pre_str='#')
-            t.set_comment_func(lambda text: _write_comment(f, text))
+            if graph:
+                t.set_comment_func(lambda text: _write_comment(f, text))
         i=0
         if checkmode():
             if npoints is not None and npoints > 2:
@@ -1843,30 +1856,41 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
                 after_ret = _record_execafter(after, i, [tme]+vals, [tme]+vals_full, npoints)
             else:
                 after_ret = True
-            t.addPoint(tme, gsel(vals))
+            if graph:
+                t.addPoint(tme, gsel(vals))
             if f:
                 writevec(f, [tme]+vals)
-            if t.abort_enabled or not after_ret:
+            if graph and t.abort_enabled:
+                break
+            if not after_ret:
                 break
             i += 1
             if npoints is None or i < npoints:
-                interval = t.wait_time
+                if graph:
+                    interval = t.wait_time
                 wait(interval)
-            _checkTracePause(t)
+            if graph:
+                _checkTracePause(t)
     except KeyboardInterrupt:
         #(exc_type, exc_value, exc_traceback) = sys.exc_info()
         #raise KeyboardInterrupt('Interrupted record'), None, exc_traceback
-        t.set_status(False, 'ctrl-c')
+        if graph:
+            t.set_status(False, 'ctrl-c')
         raise KeyboardInterrupt('Interrupted record'), None, sys.exc_info()[2]
     finally:
-        t.set_comment_func(None)
+        if graph:
+            t.set_comment_func(None)
         if f:
             f.close()
-    if t.abort_enabled:
-        t.set_status(False, 'abort')
-        raise KeyboardInterrupt('Aborted sweep_multi')
-    else:
-        t.set_status(False, 'completed')
+    if graph:
+        if t.abort_enabled:
+            t.set_status(False, 'abort')
+            raise KeyboardInterrupt('Aborted sweep_multi')
+        else:
+            t.set_status(False, 'completed')
+        if close_after:
+            t = t.destroy()
+            del t
 
 
 def trace(devs, interval=1, title=''):
