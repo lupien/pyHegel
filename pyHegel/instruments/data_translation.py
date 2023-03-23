@@ -113,8 +113,8 @@ class Ol_Device(scpiDevice):
 
 class Ol_ChoiceIndex(ChoiceIndex):
     def __init__(self, OlDataType, normalize=False):
-        names = list(OlDataType.GetNames(OlDataType))
-        values = list(OlDataType.GetValues(OlDataType))
+        values = list(OlDataType.GetNames(OlDataType))
+        names = list(OlDataType.GetValues(OlDataType))
         d = dict(zip(names, values))
         super(Ol_ChoiceIndex, self).__init__(d, normalize=normalize)
     def __getitem__(self, key_val):
