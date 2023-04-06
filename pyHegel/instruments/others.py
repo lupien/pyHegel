@@ -1142,6 +1142,7 @@ class agilent_twis_torr(visaInstrument):
         """ if data is None, creates a request for a value.
             possible types:
                 boolean
+                int1
                 real
                 integer
                 exp
@@ -1160,6 +1161,10 @@ class agilent_twis_torr(visaInstrument):
             rw = '\x31'
             if type == 'boolean':
                 data_str = '1' if data else '0'
+            elif type == 'int1':
+                if data<0 or data>9:
+                    raise ValueError(self.perror('Data is too large'))
+                data_str = '%d'%data
             elif type in ['real', 'integer']:
                 if data >=1e6 or data <=-1e-5:
                     raise ValueError(self.perror('Data is too large'))
@@ -1199,6 +1204,7 @@ class agilent_twis_torr(visaInstrument):
     def get_param(self, data_str, window, type='string'):
         """ possible type:
                 boolean
+                int1
                 string
                 integer
                 real
@@ -1209,7 +1215,7 @@ class agilent_twis_torr(visaInstrument):
             return bool(int(val))
         elif type in ['real', 'exp']:
             return float(val)
-        elif type == 'integer':
+        elif type in ['integer', 'int1']:
             return int(val)
         elif type in 'string':
             # I have seen responses of 10 and 12 bytes
@@ -1265,7 +1271,7 @@ class agilent_twis_torr(visaInstrument):
         self.vent_opening_delay = agilent_dev(126, 'integer', enable_set=True, time_scale=True, doc='in seconds')
         self.vent_opening_time = agilent_dev(147, 'integer', enable_set=True, time_scale=True, doc='in seconds. 0 is infinite')
         self.rotation_speed_reading_when_stopping_en = agilent_dev(167, 'boolean', enable_set=True)
-        self.control_mode = agilent_dev(8, 'boolean', enable_set=True, choices=ChoiceSimpleMap({False:'serial', True:'remote'}))
+        self.control_mode = agilent_dev(8, 'int1', enable_set=True, choices=ChoiceSimpleMap({0:'serial', 1:'remote', 2:'front'}))
         self.active_stop_en = agilent_dev(107, 'boolean', enable_set=True)
         # Field taken from Agilent T-plus program
         self.pump_status = agilent_dev(205, 'integer', doc="""\
