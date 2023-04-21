@@ -624,7 +624,7 @@ class SignalHound_SM200C(BaseInstrument):
             return scpiDevice(*arg, **kwarg)
         self.marker_en = devMkrOption(':CALCulate:MARKer:STATe', str_type=bool)
         self.marker_trace = devMkrOption(':CALCulate:MARKer:TRACe', str_type=int, min=1, max=6)
-        self.marker_mode = devMkrOption(':CALCulate:MARKer:MODE', choices=ChoiceStrings('POSition', 'NOISE', 'CHPower', 'NDB'))
+        self.marker_mode = devMkrOption(':CALCulate:MARKer:MODE', choices=ChoiceStrings('POSition', 'NOISE', 'CHPower', 'NDB', 'channel power', 'n db'))
         self.marker_update_en = devMkrOption(':CALCulate:MARKer:UPDate', str_type=bool)
         self.marker_delta_en = devMkrOption(':CALCulate:MARKer:DELTa', str_type=bool)
         self.marker_peak_search_tracking_en = devMkrOption(':CALCulate:MARKer:PKTRack', str_type=bool)
