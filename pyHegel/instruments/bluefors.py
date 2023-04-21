@@ -1372,7 +1372,7 @@ class bf_temperature_controller(BaseInstrument):
 
     def _fetch_getformat(self,  **kwarg):
         chs = kwarg.get('chs', None)
-        outchs = kwarg.get('chs', None)
+        outchs = kwarg.get('outchs', None)
         temperature = kwarg.get('temperature', True)
         resistance = kwarg.get('resistance', True)
         reactance = kwarg.get('reactance', True)
