@@ -64,7 +64,9 @@ class float_inf(ChoiceBase):
 #  tcp takes 250 ms, serial takes 16 ms
 # also Level and Level:last only return 4 digits after the dot (1e4 resolution)
 # like set(qd.level, 1.2345678901), get returned as 1.2346 for both level and level:last
+# That is fixed in 7-0.17.5, where they return 1.2345679 (level) and 1.2345655 (level_now)
 
+#@register_instrument('QDevil', 'QDAC-II', '7-0.17.5')
 #@register_instrument('QDevil', 'QDAC-II', '5-0.9.26')
 @register_instrument('QDevil', 'QDAC-II')
 class qdevil_qdac_ii(visaInstrument):
@@ -144,7 +146,9 @@ class qdevil_qdac_ii(visaInstrument):
             with mainStatusLine.new(priority=10, timed=True) as progress:
                 while True:
                     now_val = self.level_now.get(ch=ch)
-                    if target == now_val:
+                    #if target == now_val:
+                    # firmware 7-0.17.5 dpes not return exactly the same value for level and level_now
+                    if abs(round(target - now_val, 4)) < 2e-4:
                         break
                     wait(.05)
                     progress('ramp progress: %s -> %s'%(now_val, target))
@@ -249,7 +253,9 @@ class qdevil_qdac_ii(visaInstrument):
         self.output_filter = devChannelOption('SOURce{ch}:FILTer', choices=ChoiceStrings('DC', 'MEDium', 'HIGH'),
                                               doc="""DC is about 10 Hz, medium is about 10 kHz and high is about 230 kHz""")
         # fw 5-0.9.26 does not accept 0/1 for boolean
-        self.output_resolution_enhencement_en = devChannelOption('SOURce{ch}:RENHancement', choices=Choice_bool_OnOff)
+        # fixed in 7-0.17.5
+        #self.output_resolution_enhencement_en = devChannelOption('SOURce{ch}:RENHancement', choices=Choice_bool_OnOff)
+        self.output_resolution_enhencement_en = devChannelOption('SOURce{ch}:RENHancement', str_type=bool)
         self.dc_mode = devChannelOption('SOURce{ch}:VOLTage:MODE', choices=ChoiceStrings('FIXed', 'SWEep', 'LIST'))
         self.slew_dc = devChannelOption('SOURce{ch}:VOLTage:SLEW', choices=float_inf(min=20, max=2e7), doc='in V/s')
 
