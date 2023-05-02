@@ -1417,6 +1417,8 @@ class agilent_SMU(visaInstrumentAsync):
         first_check = True
         while self.read_status_byte() & 0x10 != 16:
             if first_check:
+                # E5270B does not return 16 until it is back to local state so force it.
+                self.control_remotelocal(False)
                 print 'The instrument is not ready. It could be executing a command or doing a calibration or self-test.\n  PLEASE WAIT'
                 first_check = False
             sleep(1)
