@@ -1765,6 +1765,9 @@ class bf_controller(BaseInstrument):
         write
         list_all_mappers
         get_value
+        find_temp_ch_num
+        lakeshore_reset
+        lakeshore_check_and_fix
     """
     def __init__(self, address='localhost', port=49099, timeout=3, secure=False, api_key=None, cert=True, **kwargs):
         """
@@ -2221,7 +2224,7 @@ class bf_controller(BaseInstrument):
         ret = []
         for ch in extra_ch:
             if isinstance(ch, (str, unicode)):
-                chn = self.lakeshore_find_ch_num(ch)
+                chn = self.find_temp_ch_num(ch)
                 if chn is None:
                     raise ValueError('Selected ch is not mapped: %s'%chn)
                 ch = chn
@@ -2234,7 +2237,7 @@ class bf_controller(BaseInstrument):
             if extra_ch is given, it will also disable and then reenable autorange on the single or multiple
             channels listed.
             extra_wait is the time between disable and enable of autorange. It can be a number or
-                   string, in which case lakeshore_find_ch_num will be used.
+                   string, in which case find_temp_ch_num will be used.
         """
         extra_ch = self._check_extra_ch(extra_ch)
         self.lakeshore_meas_freq.set(1)
@@ -2248,7 +2251,7 @@ class bf_controller(BaseInstrument):
             for ch in extra_ch:
                 self.lakeshore_input_resistance_autorange_en.set(True, ch=ch)
 
-    def lakeshore_find_ch_num(self, name='mixing'):
+    def find_temp_ch_num(self, name='mixing'):
         """ name can be 'mixing', 'still', '50k', '4k', 'magnet', 'fse'
             will return None if no channel is mapped.
         """
@@ -2271,12 +2274,12 @@ class bf_controller(BaseInstrument):
         """ This function wil block, checking that the temperature controller check_ch resistance stays
             between min_R and max_R. If it is no longer changing, or out of range, it will call
             lakeshore_reset with parameters extra_ch and extra_wait
-            check_ch is the channel to check, it can be a string, in which case lakeshore_find_ch_num
+            check_ch is the channel to check, it can be a string, in which case find_temp_ch_num
             is used to find the actual channel number.
             If scanning is disabled, the check channel needs to be the active channel, otherwise check is skipped.
         """
         if isinstance(check_ch, (str, unicode)):
-            check_ch = self.lakeshore_find_ch_num(check_ch)
+            check_ch = self.find_temp_ch_num(check_ch)
             if check_ch is None:
                 raise ValueError('Selected check_ch is not mapped')
         # pre check extra_ch if given:
