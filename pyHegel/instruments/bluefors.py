@@ -2212,3 +2212,93 @@ class bf_controller(BaseInstrument):
         self.alias = self.fetch
         # This needs to be last to complete creation
         super(bf_controller, self)._create_devs()
+
+    def _check_extra_ch(self, extra_ch=None):
+        if extra_ch is None:
+            return None
+        if not isinstance(extra_ch, (list, tuple, np.ndarray)):
+                extra_ch = [extra_ch]
+        ret = []
+        for ch in extra_ch:
+            if isinstance(ch, (str, unicode)):
+                chn = self.lakeshore_find_ch_num(ch)
+                if chn is None:
+                    raise ValueError('Selected ch is not mapped: %s'%chn)
+                ch = chn
+            ret.append(ch)
+        return ret
+
+    def lakeshore_reset(self, extra_ch=None, extra_wait=120):
+        """ This tries to reset the Lakeshore 370 temperature controller by
+            toggling the measurement frequency. It leaves it on the second choice (default)
+            if extra_ch is given, it will also disable and then reenable autorange on the single or multiple
+            channels listed.
+            extra_wait is the time between disable and enable of autorange. It can be a number or
+                   string, in which case lakeshore_find_ch_num will be used.
+        """
+        extra_ch = self._check_extra_ch(extra_ch)
+        self.lakeshore_meas_freq.set(1)
+        wait(5)
+        self.lakeshore_meas_freq.set(2)
+        if extra_ch is not None:
+            wait(5)
+            for ch in extra_ch:
+                self.lakeshore_input_resistance_autorange_en.set(False, ch=ch)
+            wait(extra_wait)
+            for ch in extra_ch:
+                self.lakeshore_input_resistance_autorange_en.set(True, ch=ch)
+
+    def lakeshore_find_ch_num(self, name='mixing'):
+        """ name can be 'mixing', 'still', '50k', '4k', 'magnet', 'fse'
+            will return None if no channel is mapped.
+        """
+        entry = 'mapper.bf.temperatures.t'+name
+        ret = self.ask(entry)
+        data = ret['data'][entry]
+        content = data.get('content')
+        if content is None:
+            return None
+        owner = content['owner']
+        st = u'mapper.temperature_control.sensors.t'
+        end = u'.temperature'
+        if owner.startswith(st) and owner.endswith(end):
+            ch = int(owner[len(st):-len(end)])
+            return ch
+        else:
+            raise ValueError('The string format was not as expected: %r'%owner)
+
+    def lakeshore_check_and_fix(self, check_ch='mixing', min_R=0.8e-3, max_R=25e3, extra_ch=None, extra_wait=120):
+        """ This function wil block, checking that the temperature controller check_ch resistance stays
+            between min_R and max_R. If it is no longer changing, or out of range, it will call
+            lakeshore_reset with parameters extra_ch and extra_wait
+            check_ch is the channel to check, it can be a string, in which case lakeshore_find_ch_num
+            is used to find the actual channel number.
+            If scanning is disabled, the check channel needs to be the active channel, otherwise check is skipped.
+        """
+        if isinstance(check_ch, (str, unicode)):
+            check_ch = self.lakeshore_find_ch_num(check_ch)
+            if check_ch is None:
+                raise ValueError('Selected check_ch is not mapped')
+        # pre check extra_ch if given:
+        extra_ch = self._check_extra_ch(extra_ch)
+        getR = lambda : self.get_value('mapper.temperature_control.sensors.t%d.resistance'%check_ch)
+        i = 0
+        prev = getR()
+        repeat = 0
+        print('\n---- Starting lakeshore Tcontrol check at %s'%time.ctime())
+        while True:
+            wait(60*5) # read every 5 min
+            if not self.lakeshore_scanner_en.get():
+                if self.lakeshore_scanner_ch.get() != check_ch:
+                    #print('\n skip ')
+                    continue
+            new = getR()
+            if new == prev or new > max_R or new < min_R:
+                repeat += 1
+            prev = new
+            if repeat > 2:
+                # we reset
+                repeat = 0
+                i += 1
+                self.lakeshore_reset(extra_ch=extra_ch, extra_wait=extra_wait)
+                print('\n!!!!   RESET TContol: %i, %s\n'%(i, time.ctime()))
