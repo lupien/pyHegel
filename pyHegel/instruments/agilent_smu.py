@@ -191,6 +191,7 @@ class agilent_SMU(visaInstrumentAsync):
         conf_ch
         set_mode
         conf_staircase
+        conf_pulse      Only for B1500
         conf_impedance      when an MFCMU board is installed
         conf_impedance_corr when an MFCMU board is installed, to perform a calibration.
     Other useful method:
@@ -506,7 +507,7 @@ class agilent_SMU(visaInstrumentAsync):
                 i += 1
             else:
                 multi.append(base)
-        if mode == 'stair':
+        if mode in ['stair', 'pulse']:
             graph = []
             if xaxis:
                 multi = ['force']+multi
@@ -545,7 +546,7 @@ class agilent_SMU(visaInstrumentAsync):
         if mode != 'spot':
             try:
                 data = self._async_trig_current_data.pop(0)
-                if mode == 'stair':
+                if mode in ['stair', 'pulse']:
                     x_data = self._x_axis
             except AttributeError:
                 raise RuntimeError(self.perror('No data is available. Probably prefer to use readval.'))
@@ -559,7 +560,7 @@ class agilent_SMU(visaInstrumentAsync):
             ret = np.array(ret)
             if status and mode == 'single':
                 ret.shape = (-1, 2)
-            elif mode == 'stair':
+            elif mode in ['stair', 'pulse']:
                 N = len(x_data)
                 ret.shape = (N, -1)
                 if xaxis:
@@ -1063,13 +1064,18 @@ class agilent_SMU(visaInstrumentAsync):
         This configures one of the instrument internal measurment mode.
         To use one of these mode, set measurement_spot_en to False.
         if no options are given, it returns the current setting
-        meas_mode can be 'single' or 'stair'
+        meas_mode can be 'single', 'stair' or 'pulse' (only for B1500)
         channels is a list of channels to read. When not specified it uses
           the current instrument set, and if never set, all the active channels.
         when using 'stair' extra keywords are passed to conf_staircase
+        when using 'pulse' extra keywords are passed to conf_pulse
         """
         res = self._get_tn_av_cm_fmt_mm()
         res_mode = res['meas_mode']
+        if res_mode == 'staircase':
+            res_mode = 'stair'
+        elif res_mode == 'multi channel pulse sweep':
+            res_mode = 'pulse'
         res_slots = [i+1 for i,v in enumerate(res['enabled']) if v and i+1 in self._smu_slots]
         if meas_mode == channels == None:
             meas_mode = res_mode
@@ -1077,10 +1083,14 @@ class agilent_SMU(visaInstrumentAsync):
             ret = dict_improved([('meas_mode', meas_mode), ('channels', channels)])
             if meas_mode == 'stair':
                 ret['stair'] = self.conf_staircase()
+            elif meas_mode == 'pulse':
+                ret['pulse'] = self.conf_pulse()
             return ret
         valid_modes = dict(single=1, stair=16)
+        if self._isB1500:
+            valid_modes['pulse'] = 28
         if meas_mode is None:
-            meas_mode = res['meas_mode']
+            meas_mode = res_mode
         elif meas_mode not in valid_modes:
             raise ValueError(self.perror('Selected an invalide meas_mode'))
         if channels is None:
@@ -1101,6 +1111,8 @@ class agilent_SMU(visaInstrumentAsync):
         N_kwargs = len(kwargs)
         if meas_mode == 'stair' and N_kwargs > 0:
             self.conf_staircase(**kwargs)
+        elif meas_mode == 'pulse' and N_kwargs > 0:
+            self.conf_pulse(**kwargs)
         elif N_kwargs > 0:
             raise ValueError(self.perror('extra arguments are invalid'))
 
@@ -1112,31 +1124,47 @@ class agilent_SMU(visaInstrumentAsync):
                             'linear_updown':(False, True),
                             'log_updown':(True, True)}
         isLog, isUpDown = sweep_mode_opt[conf.mode]
+        start = conf.start
+        stop = conf.stop
+        if isinstance(start, (list, tuple, np.ndarray)):
+            if len(start) == 0:
+                return
+            start = start[0]
+            stop = stop[0]
+            if stop is None:
+                stop = start
         if isLog:
-            x = np.logspace(np.log10(conf.start), np.log10(conf.stop), conf.nsteps)
+            x = np.logspace(np.log10(start), np.log10(stop), conf.nsteps)
         else:
-            x = np.linspace(conf.start, conf.stop, conf.nsteps)
+            x = np.linspace(start, stop, conf.nsteps)
         if isUpDown:
             x = np.concatenate( (x, x[::-1]) )
         self._x_axis = x
 
-    def conf_staircase(self, ch=None, start=None, stop=None, nsteps=None, mode=None, end_to=None, hold=None, delay=None, Icomp=None, Pcomp=None):
+    def _conf_WM(self, end_to):
+        end_to_ch = dict(start=1, stop=2)
+        # We also the automatic abort (in case of compliance limit reached or overflow or oscillation)
+        self.write('WM 1,%i'%end_to_ch[end_to])
+
+    def conf_staircase(self, ch=None, start=None, stop=None, nsteps=None, mode=None, end_to=None, hold=None, delay=None, comp=None, Pcomp=None):
         """
         call with no values to see current setup.
-        When setting it uses the current settings of ch for func, range and compliance.
-        When reading there are the values that will be used.
+        When setting it uses the current settings of ch for func and range.
+        When reading they are the values that will be used.
+        When reading, func and active_range are added. active_range is the range that fullfils the original range config and the start/stop values.
+          It is not the value that was set (that was the range_voltage or range_current of the channel.)
         WARNING: you probably don't want to change the settings of ch (func, range, compliance) after calling this function.
         end_to can be 'start' or 'stop'
         mode can be 'linear', 'log', 'linear_updown', 'log_updown'
           updown makes it go from start to stop then from stop to start.
         hold is extra wait delay for the first point.
         delay is the wait between changing the force and starting the measurement.
-        Icomp is the current compliance. None reuses the previous value. 'empty' will remove the setting.
-        Pcomp is the power compliance. None reuses the previous value. 'empty' will remove the setting.
+        comp is the current compliance. None reuses the previous value. 'empty' will remove the setting (which means using the current ch value). 'empty' is the default.
+        Pcomp is the power compliance. None reuses the previous value. 'empty' will remove the setting. 'empty' is the default.
         """
         func = None
         para_val = locals()
-        params = ['func', 'ch', 'start', 'stop', 'nsteps', 'mode', 'end_to', 'hold', 'delay', 'Icomp', 'Pcomp']
+        params = ['func', 'ch', 'start', 'stop', 'nsteps', 'mode', 'end_to', 'hold', 'delay', 'comp', 'Pcomp']
         params_prev = ['sweep_var', 'sweep_ch', 'start', 'stop', 'steps', 'mode', 'ending_value', 'hold_time', 'delay_time', 'compliance', 'power']
         conf = dict_improved([(p,para_val[p]) for p in params])
         allnone = False
@@ -1151,9 +1179,12 @@ class agilent_SMU(visaInstrumentAsync):
             else:
                 kp = params[params_prev.index(k)]
                 if conf[kp] is None:
-                    conf[kp] = prev_stair[k]
-        if conf['Icomp'] is None:
-            conf['Icomp'] = 'empty'
+                    data = prev_stair[k]
+                    if kp == 'ch':
+                        data = self._slot2smu[data]
+                    conf[kp] = data
+        if conf['comp'] is None:
+            conf['comp'] = 'empty'
         if conf['Pcomp'] is None:
             conf['Pcomp'] = 'empty'
         if allnone:
@@ -1179,15 +1210,14 @@ class agilent_SMU(visaInstrumentAsync):
                 rgdev = self.range_current
         range = rgdev.get()
         sRange = rgdev.choices.tostr(range)
-        compliance = self.compliance.get()
-        #base += "%i,%i,%s,%.7e,%.7e,%i,%.7e"
         base += "%i,%i,%s,%.7e,%.7e,%i"
+        max_steps = 10001 if self._isB1500 else 1001
         if not (-minmax <= conf.start <= minmax):
             raise ValueError(self.perror("Invalid start."))
         if not (-minmax <= conf.stop <= minmax):
             raise ValueError(self.perror("Invalid stop."))
-        if not (1 <= conf.nsteps <= 1001):
-            raise ValueError(self.perror("Invalid steps (must be 1-1001)."))
+        if not (1 <= conf.nsteps <= max_steps):
+            raise ValueError(self.perror("Invalid steps (must be 1-%d)."%max_steps))
         if not (0 <= conf.hold <= 655.35):
             raise ValueError(self.perror("Invalid hold (must be 0-655.35)."))
         if not (0 <= conf.delay <= 65.535):
@@ -1195,23 +1225,196 @@ class agilent_SMU(visaInstrumentAsync):
         mode_ch = {'linear':1, 'log':2, 'linear_updown':3, 'log_updown':4}
         if conf.mode not in mode_ch:
             raise ValueError(self.perror("Invalid mode (must be one of %r)."%mode_ch.keys()))
-        end_to_ch = dict(start=1, stop=2)
         mode = mode_ch[conf.mode]
         slot = self._smu2slot[conf.ch]
         base_str = base%(slot, mode, sRange, conf.start, conf.stop, conf.nsteps)
         Pcomp = conf.Pcomp
-        Icomp = conf.Icomp
-        if conf.Pcomp != 'empty' and Icomp == 'empty':
-            Icomp = 20e-3
-        if Icomp != 'empty':
-            base_str += ',%.7e'%Icomp
+        comp = conf.comp
+        if Pcomp != 'empty' and comp == 'empty':
+            Pcom = 'empty'
+        if comp != 'empty':
+            base_str += ',%.7e'%comp
         if Pcomp != 'empty':
             base_str += ',%.7e'%Pcomp
         self.write(base_str)
         self.write('WT %.7e,%.7e'%(conf.hold, conf.delay))
-        self.write('WM 1,%i'%end_to_ch[conf.end_to])
+        self._conf_WM(conf.end_to)
         self._reset_wrapped_cache(self._get_staircase_settings)
         conf.func = func
+        self._calc_x_axis(conf)
+
+    def conf_pulse(self, ch=None, start=None, stop=None, base=None, pulse_delay=None, pulse_width=None,
+                   nsteps=None, mode=None, end_to=None, hold=None, pulse_period=None, delay=None, avg=None, comp=None, Pcomp=None,
+                   clear=False):
+        """
+        call with no values to see current setup.
+        call with clear=True will force clearing the configuration (use in case you get errors).
+        When setting it uses the current settings of ch for func and range.
+        When reading func and range are added and they are the values that will be used.
+        ch, start, stop, base, pulse_delay, pulse_width, comp, Pcomp can all be a single value or list of values (all the same length) to
+         control multiple channels in parallel. When using multiple channels, the create x-axis is based on the first dimension.
+         pulse_delay needs to be 0 for HR, MP and HP SMU. pulse_width all need to be the same for HR, MP and HP SMU (will use
+         the largest if not given).
+        when base is None, the channel is simply changed as in stairs (not pulsed).
+        with a given base but stop is None, it will behave the same as stop=start.
+        WARNING: you probably don't want to change the settings of ch (func, range, compliance) after calling this element of the list.
+        end_to can be 'start' or 'stop'
+        mode can be 'linear', 'log', 'linear_updown', 'log_updown'
+          updown makes it go from start to stop then from stop to start.
+        hold is extra wait delay for the first point.
+        period is the pulse repetition period (it can be -1, or 0 for some automatic period calculation depending on the pulse_width and pulse_delay)
+        delay is the wait between changing the force and starting the measurement. It can be 0 (which should push it as far as possible).
+        avg is the number of measurements to average.
+        comp is the current compliance. None reuses the previous value. 'empty' will remove the setting (which means using the current ch value). 'empty' is the default.
+        Pcomp is the power compliance. None reuses the previous value. 'empty' will remove the setting. 'empty' is the default.
+        """
+        if not self._isB1500:
+            raise ValueError('Can only be used with a B1500 instrument')
+        if clear:
+            self.write('WNCC')
+        func = None
+        para_val = locals()
+        params_as_list = ['ch', 'func', 'start', 'stop', 'base', 'pulse_delay', 'pulse_width', 'comp', 'Pcomp', 'range']
+        params = ['func', 'ch', 'start', 'stop', 'base', 'pulse_delay', 'pulse_width', 'nsteps', 'mode', 'end_to', 'hold', 'pulse_period', 'delay', 'avg', 'comp', 'Pcomp']
+        params_prev = ['func', 'ch', 'start', 'stop', 'base', 'pulse_delay', 'pulse_width', 'steps', 'mode', 'ending_value', 'hold_time', 'pulse_period', 'meas_delay', 'meas_avg', 'compliance', 'power']
+        conf = dict_improved([(p, para_val[p]) for p in params])
+
+        allnone = False
+        if all(v is None for v in conf.values()):
+            allnone = True
+        prev_wm = self._get_staircase_settings() # only to obtain the end_to (and abort) entries
+        prev_base, prev_paras = self._get_pulse_settings()
+        for k in prev_wm.keys():
+            if k == 'abort':
+                continue
+            if k != 'ending_value':
+                continue
+            kp = params[params_prev.index(k)]
+            if conf[kp] is None:
+                conf[kp] = prev_wm[k]
+        for k in prev_base.keys():
+            kp = params[params_prev.index(k)]
+            if conf[kp] is None:
+                conf[kp] = prev_base[k]
+        N = 1
+        Np = len(prev_paras)
+        conf['range'] = None
+        for k in params_as_list:
+            if conf[k] is None:
+                if k == 'range':
+                    kp = k
+                else:
+                    kp = params_prev[params.index(k)]
+                cnvrt = lambda x: x
+                if k == 'ch':
+                    N = Np
+                    cnvrt = lambda x: self._slot2smu[x]
+                elif N != Np:
+                    # we can reuse old data, fill with empty stuff
+                    conf[k] = [None]*N
+                    continue
+                conf[k] = [cnvrt(p[kp]) for p in prev_paras]
+            else:
+                if not isinstance(conf[k], (list, tuple, np.ndarray)):
+                    conf[k] = [conf[k]]*N
+                else:
+                    new_N = len(conf[k])
+                    if k == 'ch':
+                        # this is the first iteration
+                        N = new_N
+                    elif new_N != N:
+                        raise ValueError('Your list parameters are not of the same length (or the previous length if reusing parameters)')
+                    elif N == Np:
+                        # try to replace a single None in a list with the values from prev_paras if possible
+                        kp = params_prev[params.index(k)]
+                        for i, val in enumerate(conf[k]):
+                            if val is None:
+                                conf[k][i] = prev_paras[i][kp]
+        for i,s in enumerate(conf.stop):
+            if conf.comp[i] is None:
+                conf.comp[i] = 'empty'
+            if conf.Pcomp[i] is None:
+                if not (s is None or s == conf.start[i]):
+                    conf.Pcomp[i] = 'empty'
+        if allnone:
+            # This will use the previous sweep_var as func if it was available.
+            self._calc_x_axis(conf)
+            return conf
+        del conf['func']
+        if any(v is None for v in conf.values()):
+            raise ValueError(self.perror('Some values (None) need to be specified: {conf}', conf=conf))
+        cmds = []
+        for i, c in enumerate(conf.ch):
+            if c not in self._valid_ch:
+                raise ValueError(self.perror("Invalid ch selection."))
+            slot = self._smu2slot[c]
+            f = self.function.get(ch=c)
+            if f not in ['voltage', 'current']:
+                raise ValueError(self.perror("Selected channel is disabled"))
+            if f == 'voltage':
+                rgdev = self.range_voltage
+                minmax = 100.
+            else:
+                rgdev = self.range_current
+                minmax = 0.1
+            rg = rgdev.get()
+            sRange = rgdev.choices.tostr(rg)
+            start = conf.start[i]
+            stop = conf.stop[i]
+            base = conf.base[i]
+            func = {'voltage':1, 'current':2}[f]
+            comp = conf.comp[i]
+            Pcomp = conf.Pcomp[i]
+            if start is None:
+                raise ValueError(self.perror('missing a start value (None): {conf}', conf=conf))
+            pulse_width = conf.pulse_width[i]
+            pulse_delay = conf.pulse_delay[i]
+            if comp is None:
+                comp = 'empty'
+            if Pcomp is None or comp == 'empty':
+                Pcomp = 'empty'
+            if not (-minmax <= start <= minmax):
+                raise ValueError(self.perror("Invalid start."))
+            if stop is not None and not (-minmax <= stop <= minmax):
+                raise ValueError(self.perror("Invalid stop."))
+            pulse_ok = False
+            if pulse_width is not None and pulse_delay is not None:
+                cmds.append('MCPNT{ch},{delay:.7e},{width:.7e}'.format(ch=slot, delay=pulse_delay, width=pulse_width))
+                pulse_ok = True
+            if base is None:
+                entry = 'WNX {N},{ch},{mode},{range},{start:.7e},{stop:.7e}{comp}{power}'
+            else:
+                if not pulse_ok:
+                    raise ValueError('missing pulse delay and width')
+                if stop is None or start==stop:
+                    entry = 'MCPNX {N},{ch},{mode},{range},{base:.7e},{start:.7e}{comp}'
+                else:
+                    entry = 'MCPWNX {N},{ch},{mode},{range},{base:.7e},{start:.7e},{stop:.7e}{comp}{power}'
+            comp_str = '' if comp=='empty' else ',%.7e'%comp
+            power_str = '' if Pcomp=='empty' else ',%.7e'%Pcomp
+            cmds.append(entry.format(N=i+1, ch=slot, mode=func, range=sRange, base=base, start=start, stop=stop, comp=comp_str, power=power_str))
+        if not (1 <= conf.nsteps <= 10001):
+            raise ValueError(self.perror("Invalid steps (must be 1-10001)."))
+        if not (0 <= conf.hold <= 655.35):
+            raise ValueError(self.perror("Invalid hold (must be 0-655.35)."))
+        if not ((0 <= conf.pulse_period <= 5) or conf != -1):
+            raise ValueError(self.perror("Invalid period (must be 0-5. or -1)."))
+        if not (1 <= conf.avg <= 1023):
+            raise ValueError(self.perror("Invalid avg (must be 1-1023)."))
+        mode_ch = {'linear':1, 'log':2, 'linear_updown':3, 'log_updown':4}
+        if conf.mode not in mode_ch:
+            raise ValueError(self.perror("Invalid mode (must be one of %r)."%mode_ch.keys()))
+        mode = mode_ch[conf.mode]
+        # Clear all entries:
+        self.write('WNCC')
+        self.write('MCPT %.7e,%.7e,%.7e,%d'%(conf.hold, conf.pulse_period, conf.delay, conf.avg))
+        self.write('MCPWS %d,%d'%(mode, conf.nsteps))
+        self._conf_WM(conf.end_to)
+        for c in cmds:
+            self.write(c)
+        self._reset_wrapped_cache(self._get_staircase_settings) # because of WM
+        self._reset_wrapped_cache(self._get_pulse_settings)
+        conf.func = True
         self._calc_x_axis(conf)
 
     def _check_cmu(self):
@@ -1611,7 +1814,7 @@ class agilent_SMU(visaInstrumentAsync):
             self.integration_pulse_mode = CommonDevice(self._get_avg_time_and_autozero,
                                                                  lambda v: v['pulse'][0],
                                                                  lambda self, val: self.instr._integration_set_helper(type='pulse', mode=val),
-                                                                 choices=self._integ_choices)
+                                                                 choices=pulse_integ)
             self.integration_pulse_time = CommonDevice(self._get_avg_time_and_autozero,
                                                                  lambda v: v['pulse'][1],
                                                                  lambda self, val: self.instr._integration_set_helper(type='pulse', time=val),
@@ -1948,7 +2151,7 @@ class agilent_SMU(visaInstrumentAsync):
         enabled = [False]*self._N_slots
         if N == 5:
             mm_modes = {1:'single', 2:'staircase', 3:'pulsed spot', 4:'pulsed sweep', 5:'staircase pulsed bias',
-                        9:'quasi-pulsed spot', 14:'linear search', 15:'binary search', 16:'stair'}
+                        9:'quasi-pulsed spot', 14:'linear search', 15:'binary search', 16:'stair', 28:'multi channel pulse sweep'}
             mm = self._parse_block_helper(rs[4], 'MM', [int]*9, Nv_min=1) # mode, chnum, chnum ... (max of 8 chnum)
             meas_mode = mm_modes[mm[0]]
             for m in mm[1:]:
@@ -2008,8 +2211,6 @@ class agilent_SMU(visaInstrumentAsync):
                 ch = stair[0]
                 ret_dict['sweep_var'] = 'current'
                 ret_dict['active_range'] = 10**(stair[2]-11-9)
-                ret_dict['compliance'] = stair[6]
-                ret_dict['power'] = stair[7]
             else:
                 stair = self._parse_block_helper(rs[2], 'WV', [int, int, int, float, float, int, float, float], Nv_min=6)
                 ch = stair[0]
@@ -2153,6 +2354,94 @@ class agilent_SMU(visaInstrumentAsync):
         rs = self._parse_block_helper(ret, 'ADJ%i,'%imp_slot, [choices])
         return rs
 
+    @cache_result
+    def _get_pulse_settings(self):
+        ret = self.ask("*LRN? 106")
+        rs = ret.split(';')
+        if not (2 <= len(rs)):
+            raise RuntimeError(self.perror('Invalid number of elements for lrn 106'))
+        hold, period, mdelay, average = self._parse_block_helper(rs[0], 'MCPT', [float, float, float, int])
+        mode, n_steps = self._parse_block_helper(rs[1], 'MCPWS', [int]*2)
+        mode_opt = {1:'linear', 2:'log', 3:'linear_updown', 4:'log_updown'}[mode]
+        base_para = dict_improved(hold_time=hold, pulse_period=period, meas_delay=mdelay, meas_avg=average, steps=n_steps, mode=mode_opt)
+        # other entries:
+        #  MCPNT chnum,delay,width
+        #  WNX n,chnum,mode,range,start,stop[,comp[,pcomp]]]
+        #  MCPNX n,chnum,mode,range,base,peak[,comp]]
+        #  MCPWNX n,chnum,mode,range,base,start,stop[,comp[,pcomp]]]]
+        # where WNX just sweeps the voltage, MCPNX pulses to always the same voltage and
+        #  MCPWNX pulses and sweeps.
+        pulse_ch_timing = {}
+        paras = [None]*10
+        Nsel = [False]*10
+        Nch = self._N_slots
+        smu_ch_used = [0]*Nch
+        for r in rs[2:]:
+            if r.startswith('MCNPT'): # Note that this is an error, it should be MCPNT
+                smu_ch, delay, width = self._parse_block_helper(r, 'MCNPT', [int, float, float])
+                if smu_ch in pulse_ch_timing:
+                    raise RuntimeError('Multiple MCPNT with same channel number')
+                pulse_ch_timing[smu_ch] = dict(pulse_delay=delay, pulse_width=width)
+                continue
+            elif r.startswith('WNX'):
+                result = self._parse_block_helper(r, 'WNX', [int, int, int, int, float, float, float, float], Nv_min=6)
+                N, smu_ch, mode, force_range, start, stop = result[:6]
+                comp = 'empty' if len(result) < 7 else result[6]
+                power = 'empty' if len(result) < 8 else result[7]/1e3 # /1e3 is to fix an error where the instruments seems to return mW
+                base = None
+            elif r.startswith('MCPNX'):
+                result = self._parse_block_helper(r, 'MCPNX', [int, int, int, int, float, float, float], Nv_min=6)
+                N, smu_ch, mode, force_range, base, start = result[:6]
+                comp = 'empty' if len(result) < 7 else result[6]
+                power = None
+                stop = None
+            elif r.startswith('MCPWNX'):
+                result = self._parse_block_helper(r, 'MCPWNX', [int, int, int, int, float, float, float, float, float], Nv_min=7)
+                N, smu_ch, mode, force_range, base, start, stop = result[:7]
+                comp = 'empty' if len(result) < 8 else result[7]
+                power = 'empty' if len(result) < 9 else result[8]/1e3 # /1e3 is to fix an error where the instruments seems to return mW
+                if start == stop:
+                    print('WARNING: found MCPWNX with start=stop. Should have used MCPNX instead.')
+            else:
+                raise RuntimeError('Unexpected entry for get pulse settings')
+            if smu_ch_used[smu_ch-1] == 0:
+                smu_ch_used[smu_ch-1] = N
+            else:
+                raise RuntimeError('Reusing the same smu_ch for different type of sweep.')
+            # The mcpnt entries happen before, so check if it is missing:
+            if base is not None and smu_ch not in pulse_ch_timing:
+                raise RuntimeError('Misssing pulse paramters for channel')
+            if Nsel[N-1]:
+                raise RuntimeError('Multiple entries with the same N index')
+            Nsel[N-1] = True
+            function = {1:'voltage', 2:'current'}[mode]
+            if force_range == 0:
+                force_range = 0.
+            else:
+                if function == 'voltage':
+                    force_range = force_range/10.
+                else:
+                    force_range = 10**(force_range-11-9)
+            entry = dict_improved(ch=smu_ch, func=function, range=force_range, start=start, stop=stop, base=base, compliance=comp, power=power, pulse_delay=None, pulse_width=None)
+            if smu_ch in pulse_ch_timing:
+                entry.update(pulse_ch_timing[smu_ch])
+            paras[N] = entry
+        i = 0
+        j = 0
+        begin = True
+        for n in Nsel:
+            if begin and n:
+                i += 1
+            elif begin and not n:
+                begin = False
+            elif not begin and n:
+                j += 1
+        if j > 0:
+            print('WARNING parsed a discontinuous setup of source number')
+        # clean up: remove empty slots
+        paras = [p for p in paras if p is not None]
+        return base_para, paras
+
 
 # When switching from DI to DV, The compliance is required
 # when switching from off to DI/DV the outputs first need to be enabled.
@@ -2172,6 +2461,7 @@ class agilent_SMU(visaInstrumentAsync):
 # *LRN? 56 returns AIT0,0,1;AIT1,0,6;AZ0
 # *LRN? 57 returns WAT1,1.0,0.0000;WAT2,1.0,0.0000
 # *LRN? 60 returns TSC0
+# *LRN? 106 returns MCPT0.00,0,0.000000,1;MCPWS1,1
 
 # When doing the calibration, the channels are openned and the settings are changed.
 # The output should be left floating. Voltage spikes of around +-400 mV  (100 us to 1 ms long) can be observed during calibration.
