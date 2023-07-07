@@ -256,7 +256,7 @@ class MainStatusLine(object):
             entries = self.users.values()
         entries = sorted(entries, key=lambda x: x[0], reverse=True) # sort on decreasing priority only
         outstr = ' '.join([e[1] for e in entries if e[1] != '']) # join the non-empty status
-        outstr = outstr if len(outstr)<=72 else outstr[:69]+'...'
+        #outstr = outstr if len(outstr)<=72 else outstr[:69]+'...'
         sys.stdout.write('\r%-72s'%outstr)
         sys.stdout.flush()
 
