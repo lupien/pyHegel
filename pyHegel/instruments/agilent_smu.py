@@ -2598,8 +2598,8 @@ class agilent_B2900_smu(visaInstrumentAsync):
         super(agilent_B2900_smu, self).init(full=full)
 
     def abort(self):
-        chs = ','.join(map(str, self._valid_ch))
-        self.write('ABORt (@2%s)'%chs)
+        chs = _encode_block(self._valid_ch, ',')
+        self.write('ABORt (@%s)'%chs)
 
     @locked_calling
     def reset(self):
@@ -2883,8 +2883,8 @@ class agilent_B2900_smu(visaInstrumentAsync):
             Use a positive value to set the autorange lower limit.
             Use a negative value for the fix manual range. Note that the ranges are limited (upper) to the compliance range,
             which is set by the compliance value.
-            Not that the default autorange is not the full range for current (1e-6 vs 1e-7 or 1e-8)
-           Changing the range for the force channel will not have an effect (the force range will be used)
+            Note that the default autorange is not the full range for current (1e-6 vs 1e-7 or 1e-8)
+           Changing the measurement range for the force channel will not have an effect (the force range will be used)
         """
         para_dict = OrderedDict([('meas_resistance_mode', self.meas_resistance_mode),
                                 ('function', self.src_function),
