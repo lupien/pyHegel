@@ -2235,7 +2235,7 @@ def _encode_block(v, sep=None):
     or into a sep separated string. Often sep is ',' for scpi
     """
     if sep is not None:
-        return ','.join(map(repr, v))
+        return sep.join(map(repr, v))
     if isinstance(v, basestring):
         s = v
     else:
