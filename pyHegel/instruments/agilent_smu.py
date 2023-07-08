@@ -3405,3 +3405,538 @@ class agilent_B2900_smu(visaInstrumentAsync):
 # Source wait works but is complicated in 2 channel modes. It adds time after a change before the next trans trigger can
 # can be sent.
 # Sense wait: I never saw it do anything.
+
+
+#######################################################
+##    Keysight M96xx SMU module
+#######################################################
+
+#@register_instrument('Keysight Technologies', 'M960x SCPI Server', "4.6.2428.0")
+@register_instrument('Keysight Technologies', 'M960x SCPI Server')
+class keysight_M96xx_smu(visaInstrumentAsync):
+    """\
+    This controls the Keysight M96xx module source mesure unit (SMU).
+    Important devices:
+     output_en
+     src_level
+     compliance
+     readval  same as initiating a measurement, waiting then fetch
+     fetch
+     meas_en_current, meas_en_voltage, meas_en_resistance
+    Useful method:
+     conf_ch
+     abort
+     reset
+     get_error
+    """
+    def __init__(self, visa_addr, ext_filter_attached=True, **kwargs):
+        """
+        ext_filter_attached is to specify that an external filter is attached.
+                       It can be a single value or a list per module
+        """
+        self._ext_filter_attached_init = ext_filter_attached
+        super(keysight_M96xx_smu, self).__init__(visa_addr, **kwargs)
+
+    def init(self, full=False):
+        # This empties the instrument buffers
+        self._dev_clear()
+        self.write('FORMat:BORDer SWAPped') # other option is NORMal.
+        self.write('FORMat ASCii') # other option is REAL,32 or REAL,64
+        #self.write('FORMat:ELEMents:SENSe VOLTage,CURRent,RESistance,STATus,SOURce')
+        self.write('FORMat:ELEMents:SENSe VOLTage,CURRent,RESistance,TIME,STATus,SOURce')
+        ext_filter_attached = self._ext_filter_attached_init
+        if not isinstance(ext_filter_attached, (list, tuple, np.ndarray)):
+            ext_filter_attached = [ext_filter_attached] * len(self._valid_mod)
+        for m, ext in zip(self._valid_mod, ext_filter_attached):
+            self.module_external_filter_en.set(ext)
+        self.current_module.set(1)
+        self._set_async_trigger_helper_string()
+        super(keysight_M96xx_smu, self).init(full=full)
+
+    def abort(self):
+        chs = _encode_block(self._valid_ch, ',')
+        self.write('ABORt (@%s)'%chs)
+
+    @locked_calling
+    def reset(self):
+        """ Reset the instrument to power on configuration """
+        self.write('*RST')
+        self.init(True)
+        self._enabled_chs_cache_reset()
+
+    def _set_async_trigger_helper_string(self, chs=None):
+        if chs is None:
+            chs = self._valid_ch
+        # make a clean ordered list (without repeats)
+        chs = sorted(list(set(chs)))
+        ch_string = _encode_block(chs, ',')
+        mode = 'ACQuire'
+        self._async_trigger_helper_string = 'INItiate:{} (@{});*OPC'.format(mode, ch_string)
+
+    def _async_select(self, devs=[]):
+        # This is called during init of async mode.
+        self._async_detect_setup(reset=True)
+        for dev, kwarg in devs:
+            if dev in [self.fetch, self.readval]:
+                chs = kwarg.get('chs', None)
+                auto = kwarg.get('auto', 'all')
+                status = kwarg.get('status', False)
+                self._async_detect_setup(chs=chs, auto=auto, status=status)
+
+    def _async_detect_setup(self, chs=None, auto=None, status=None, reset=False):
+        if reset:
+            # default to triggering everything
+            self._set_async_trigger_helper_string()
+            self._async_trigger_list = []
+            return
+        trigger_list = self._async_trigger_list
+        full_chs, chs_en = self._fetch_opt_helper(chs, auto, status)
+        trigger_list += chs_en
+        self._set_async_trigger_helper_string(trigger_list)
+
+    def _async_trigger_helper(self):
+        async_string = self._async_trigger_helper_string
+        self.write(async_string)
+
+    @locked_calling
+    def _current_config(self, dev_obj=None, options={}):
+        conf_ch = self.conf_ch()
+        opts = ['conf_ch=%s'%conf_ch]
+        opts += self._conf_helper('line_freq', 'interlock_not_ok', 'interlock_level')
+        # module_external_filter_en, module_power_supply_en, module_power_supply_source, module_temperature
+        orig_mod = self.current_module.get()
+        mod = {}
+        mod_map = {self.module_external_filter_en:'external_filter_en' , self.module_power_supply_en:'power_supply_en',
+                   self.module_power_supply_source:'power_supply_source', self.module_temperature:'temperature'}
+        for m in self._valid_mod:
+            self.current_module.set(m)
+            for k, v  in mod_map.iteritems():
+                if v not in mod:
+                    mod[v] = []
+                if v != 'temperature':
+                    val = k.getcache()
+                else:
+                    val = k.get()
+                mod[v].append(val)
+            self.module_external_filter_en
+        self.current_module.set(orig_mod)
+        opts += ['modules=%s'%mod]
+        opts += ['idn_full=%s'%self._idn_full]
+        return opts + self._conf_helper(options)
+
+    def _fetch_opt_helper(self, chs=None, auto='all', status=False):
+        auto = auto.lower()
+        if auto not in ['all', 'i', 'v', 'force', 'compliance']:
+            raise ValueError(self.perror("Invalid auto setting"))
+        if chs is None:
+            chs = self.enabled_chs()
+            if len(chs) == 0:
+                raise RuntimeError(self.perror('All channels are off so cannot fetch.'))
+        if not isinstance(chs, (list, tuple, np.ndarray)):
+            chs = [chs]
+        full_chs = []
+        conv_force = dict(voltage='v', current='i')
+        conv_compl = dict(voltage='i', current='v')
+        orig_ch = self.current_channel.get()
+        for ch in chs:
+            if isinstance(ch, basestring):
+                meas = ch[0].lower()
+                c = int(ch[1:])
+                if meas not in ['v', 'i', 'r', 's', 'f', 't']:
+                    raise ValueError(self.perror("Invalid measurement requested, should be 'i', 'v', 'r', 's', 't' or 'f'"))
+                if c not in self._valid_ch:
+                    raise ValueError(self.perror('Invalid channel requested'))
+                full_chs.append([c, meas])
+            else:
+                if ch not in self._valid_ch:
+                    raise ValueError(self.perror('Invalid channel requested'))
+                if auto in ['force', 'compliance']:
+                    func = self.src_mode.get(ch=ch)
+                    if auto == 'force':
+                        func = conv_force[func]
+                    else:
+                        func = conv_compl[func]
+                    full_chs.append([ch, func])
+                else:
+                    if auto in ['all', 'i']:
+                        full_chs.append([ch, 'i'])
+                    if auto in ['all', 'v']:
+                        full_chs.append([ch, 'v'])
+                    if status:
+                        full_chs.append([ch, 's'])
+        self.current_channel.set(orig_ch)
+        chs_en = sorted(list(set(c for c,f in full_chs)))
+        return full_chs, chs_en
+
+    def _fetch_getformat(self,  **kwarg):
+        chs = kwarg.get('chs', None)
+        auto = kwarg.get('auto', 'all')
+        status = kwarg.get('status', False)
+        full_chs, chs_en = self._fetch_opt_helper(chs, auto, status)
+        multi = []
+        graph = []
+        for i, (c, m) in enumerate(full_chs):
+            base = '%s%i'%(m, c)
+            multi.append(base)
+            if m != 's': # exclude status from graph
+                graph.append(i)
+        fmt = self.fetch._format
+        fmt.update(multi=multi, graph=graph)
+        return BaseDevice.getformat(self.fetch, **kwarg)
+
+    def _fetch_getdev(self, chs=None, auto='all', status=False):
+        """
+        auto can be: 'all' (both I and V), 'I' or 'V' to get just one,
+                     'force'/'compliance' to get the force value (source) or
+                       the compliance value
+        auto is used when chs is None (all enabled channels)
+           or chs is a list of channel numbers.
+        Otherwise, chs can also use strings like 'v1' to read the voltage of channel 1
+                     'i2' to read the current of channel 2,
+                     'r1' to read the resistance of ch1,
+                     's1' to read the status of ch1.
+                     'f1' to read the force value of ch1
+                     't1' to read the time value of ch1
+        status when True, adds the status of every channel reading to the return value with auto
+            The status is a bit field with the various bit representing:
+                 bit  0 (     1): Voltage source(0) or current source(1)
+                 bit  1 (     2): Compliance condition
+                 bit  2 (     4): Compliance condition
+                 bit 3-12:  Unused
+                 bit 13 (  8192): Measurement range overflow
+                 bit 14 ( 16384): Seamless ranging
+            Note thhe bit 1 and 2 both represent the compliance having reached its limit.
+            Both bits can be 1 (therefore decimal of 6). And it only applies to the measured channel.
+        """
+        full_chs, chs_en = self._fetch_opt_helper(chs, auto, status)
+        fetch_base = 'FETCh?'
+        # I always read all
+        v_raw = self.ask(fetch_base+' (@%s)'%(_encode_block(self._valid_ch, ',')))
+        v = _decode_block_auto(v_raw)
+        v.shape = (-1,6)
+        sel = dict(v=0, i=1, r=2, t=3, s=4, f=5)
+        # Because of elements selection in init, the data is voltage, current, resistance, status, source
+        data = []
+        for c, m in full_chs:
+            data.append(v[..., c-1, sel[m]])
+        return np.array(data)
+
+    def idn_full(self):
+        n = int(self.ask(':SYSTem:MODule:COUNt?'))
+        ret = []
+        qt = quoted_string()
+        for i in range(1, n+1):
+            vendor = qt(self.ask(':SYSTem:MODule%d:VENDor?'%i))
+            model = qt(self.ask(':SYSTem:MODule%d:MODel?'%i))
+            ch_count = int(self.ask(':SYSTem:MODule%d:CHANnel:COUNt?'%i))
+            serial = qt(self.ask(':SYSTem:MODule%d:SERial?'%i))
+            chassis = int(self.ask(':SYSTem:MODule%d:CHASsis?'%i))
+            manuf_num = qt(self.ask(':SYSTem:MODule%d:MNUMber?'%i))
+            slot = int(self.ask(':SYSTem:MODule%d:SLOT?'%i))
+            rev_core = self.ask(':SYSTem:MODule%d:REVision?'%i)
+            rev_core = map(int, rev_core.split(','))
+            rev_smu = self.ask(':SYSTem:MODule%d:REVision:SMU?'%i)
+            rev_smu = map(int, rev_smu.split(','))
+            ret.append(dict(vendor=vendor, model=model, serial=serial, chassis=chassis, slot=slot,
+                            ch_count=ch_count,
+                            manuf_num=manuf_num, rev_core=rev_core, rev_smu=rev_smu))
+        return ret
+
+    def _enabled_chs_cache_reset(self, val=None, dev_obj=None, **kwargs):
+        self._enabled_chs_cache = None
+
+    def enabled_chs(self):
+        v = self._enabled_chs_cache
+        if v is not None:
+            data, last_time = v
+            if time.time() - last_time < 1:
+                return data
+        orig_ch = self.current_channel.get()
+        chs = [c for c in self._valid_ch if self.output_en.get(ch=c)]
+        self.current_channel.set(orig_ch)
+        self._enabled_chs_cache = chs, time.time()
+        return chs
+
+    def _src_level_getdev(self, ch=None, func=None):
+        if ch is not None:
+            self.current_channel.set(ch)
+        ch = self.current_channel.get()
+        if func is not None:
+            self.src_function.set(func)
+        func = self.src_function.getcache()
+        return float(self.ask('SOURce{ch}:{func}?'.format(ch=ch, func=func)))
+    def  _src_level_checkdev(self, val, ch=None, func=None):
+        if ch is not None:
+            self.current_channel.set(ch)
+        ch = self.current_channel.get()
+        if func is not None:
+            self.src_function.set(func)
+        func = self.src_function.getcache()
+        autorange = self.src_range_auto_en.getcache()
+        # it is too complicated to find out the limit for each channel
+        # so just use a max overange of 20%
+        K = 1.2
+        if autorange:
+            # no error for autorange
+            return
+        else:
+            rnge = self.src_range.getcache()
+        if abs(val) > rnge*K:
+            raise ValueError, self.perror('level is well outside current range')
+    def _src_level_setdev(self, val, ch=None, func=None):
+        # these were set by checkdev.
+        func = self.src_function.getcache()
+        ch = self.current_channel.get()
+        self.write('SOURce{ch}:{func} {val!r}'.format(ch=ch, func=func, val=val))
+
+    def conf_ch(self, ch=None, function=None, level=None, range=None, compliance=None,
+                compliance_pos=None, compliance_neg=None, compliance_range=None,
+             output_en=None, output_mode=None, output_off_mode=None,
+             output_filter_auto_en=None, output_filter_freq=None, output_filter_en=None, shape=None,
+             Vmeas=None, Imeas=None, Rmeas=None, Vmeas_range=None, Imeas_range=None,
+             Imeas_seamless_range_en=None, Imeas_seamless_range_lower_limit=None,
+             filter_auto_en=None, filter_aperture=None, filter_nplc=None,
+             output_auto_on_en=None, output_auto_off_en=None,
+             ):
+        """\
+           When call with no parameters, returns all channels settings,
+           When called with only one ch selected, only returns its settings.
+           Otherwise only the ones that are not None are changed.
+           Use 0 for the range or compliance_range to enable default autorange.
+            For compliance_range, use a positive value to set a fix range.
+            For the range,
+                Use a positive value to set the autorange lower limit.
+                Use a negative value for the fix manual range.
+           Changing the measurement range for the force channel will not have an effect (the force range will be used)
+        """
+        para_dict = OrderedDict([('function', self.src_function),
+                                ('range', None),
+                                ('level', self.src_level),
+                                ('compliance', self.compliance),
+                                ('compliance_pos', self.compliance_pos),
+                                ('compliance_neg', self.compliance_neg),
+                                ('compliance_range', None),
+                                ('shape', self.src_shape),
+                                ('Vmeas', self.meas_en_voltage),
+                                ('Imeas', self.meas_en_current),
+                                ('Rmeas', self.meas_en_resistance),
+                                ('Vmeas_range', (self.meas_range, 'voltage')),
+                                ('Imeas_range', (self.meas_range, 'current')),
+                                ('Imeas_seamless_range_en', self.meas_current_seamless_range_en),
+                                ('Imeas_seamless_range_lower_limit', self.meas_current_seamless_range_lower_limit),
+                                ('filter_auto_en', self. meas_filter_auto_en),
+                                ('filter_aperture', self.meas_filter_aperture),
+                                ('filter_nplc', self.meas_filter_nplc),
+                                ('output_en', self.output_en),
+                                ('output_mode', self.output_mode),
+                                ('output_off_mode', self.output_off_mode),
+                                ('output_filter_auto_en', self.output_filter_auto_en),
+                                ('output_filter_freq', self.output_filter_freq),
+                                ('output_filter_en', self.output_filter_en),
+                                ('output_resistance_en', self.output_resistance_en),
+                                ('output_auto_on_en', self.output_auto_on_en),
+                                ('output_auto_off_en', self.output_auto_off_en)])
+        # Add None as third element if not there
+        for k, v in para_dict.items():
+            if not isinstance(v, tuple):
+                para_dict[k] = (v, None)
+        params = locals()
+        if all(params.get(k) is None for k in para_dict):
+            if ch is None:
+                ch = self._valid_ch
+            single_ch = None
+            if not isinstance(ch, (list, tuple)):
+                single_ch = ch
+                ch = [ch]
+            result_dict = {}
+            orig_meas_mode = self.meas_mode.get()
+            orig_ch = self.current_channel.get()
+            for c in ch:
+                result_c_dict = {}
+                func = self.src_mode.get(ch=c) # we set channel here and update mode as necessary
+                for k, (dev, meas_mode) in para_dict.items():
+                    if meas_mode is not None:
+                        self.meas_mode.set(meas_mode)
+                    if dev is None:
+                        if k == 'range':
+                            # source
+                            if self.src_range_auto_en.get():
+                                data = self.src_range_auto_lower_limit.get()
+                            else:
+                                data = -self.src_range.get()
+                        #elif k == 'compliance_range':
+                        else:
+                            # compliance_range
+                            if self.compliance_range_auto_en.get():
+                                data = 0
+                            else:
+                                data = self.compliance_range.get()
+                    else:
+                        data = dev.get()
+                    result_c_dict[k] = data
+                result_dict[c] = result_c_dict
+            self.current_channel.set(orig_ch)
+            self.meas_mode.set(orig_meas_mode)
+            if single_ch is not None:
+                result_dict = result_dict[single_ch]
+            return result_dict
+        else:
+            orig_meas_mode = self.meas_mode.get()
+            func = params.get('function', None)
+            if func is None:
+                func = self.src_function.get(ch=ch)
+            elif ch is None:
+                ch = self.current_channel.get()
+            else:
+                self.current_channel.set(ch)
+            for k, (dev, meas_mode) in para_dict.items():
+                val = params.get(k)
+                if val is not None:
+                    if meas_mode is not None:
+                        self.meas_mode.set(meas_mode)
+                    else:
+                        meas_mode = self.meas_mode.get()
+                    if dev is None:
+                        if k == 'range':
+                            # source
+                            if val == 0:
+                                # DEF is not the same as MIN for current ranges
+                                self.write('SOURCe{ch}:{func}:RANGe:AUTO:LLimit DEF'.format(ch=ch, func=func))
+                                self.src_range_auto_en.set(True)
+                            elif val > 0:
+                                self.src_range_auto_lower_limit.set(val)
+                                self.src_range_auto_en.set(True)
+                            else:
+                                self.src_range_auto_en.set(False)
+                                self.src_range.set(-val)
+                        else:
+                            # compliance_range
+                            if val == 0:
+                                self.compliance_range_auto_en.set(True)
+                            else:
+                                self.compliance_range_auto_en.set(False)
+                                self.compliance_range.set(abs(val))
+                    else:
+                        dev.set(val)
+            self.meas_mode.set(orig_meas_mode)
+
+    def _create_devs(self):
+        Nch = int(self.ask(':SYSTem:CHANnel:COUNt?'))
+        self._idn_full = self.idn_full()
+        ch_choice = list(range(1, Nch+1))
+        mod_choice = list(range(1, len(self._idn_full)+1))
+        self._valid_ch = ch_choice
+        self._valid_mod = mod_choice
+        self._enabled_chs_cache_reset()
+        self.current_channel = MemoryDevice(1, choices=ch_choice)
+        self.current_module = MemoryDevice(1, choices=mod_choice)
+        curr_range = [0, 100e-9, 1e-6, 10e-6, 100e-6, 1e-3, 10e-3, 100e-3, 300e-3, 500e-3, 1., 3., 3.5, 5, 10.]
+        volt_range = [0, 0.5, 2, 6, 20, 30, 40, 60, 200]
+        def modOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mod=self.current_module)
+            app = kwarg.pop('options_apply', ['mod'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        def chOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(ch=self.current_channel)
+            app = kwarg.pop('options_apply', ['ch'])
+            kwarg.update(options=options, options_apply=app)
+            return scpiDevice(*arg, **kwarg)
+        self.module_identify_en = modOption(':SYSTem:MODule{mod}:IDENtify', str_type=bool)
+        self.module_external_filter_en = modOption(':SYSTem:MODule{mod}:FILTer:EXTernal', str_type=bool)
+        self.module_power_supply_en = modOption(':SYSTem:MODule{mod}:PSUPply', str_type=bool)
+        self.module_power_supply_source = modOption(':SYSTem:MODule{mod}:PSUPply:SOURce', choices=ChoiceStrings('INT12V4A', 'INT12V6A'))
+        self.module_temperature = modOption(':SYSTem:MODule{mod}:TEMPerature', str_type=float)
+        self.module_interlock_not_ok = modOption(getstr=':SYStem:INTerlock:MODule{mod}:TRIPped?', str_type=bool, doc="Indicates state of interlock relay")
+
+        self.line_freq = scpiDevice(getstr='SYSTem:LFRequency?', str_type=float)
+        self.interlock_not_ok = scpiDevice(getstr='SYSTEM:INTerlock:TRIPped?', str_type=bool, doc="Indicates state of interlock relay")
+        self.interlock_level = scpiDevice(':SYSTem:INTerlock:VOLTage', str_type=float, min=0, max=42)
+
+        self.output_en = chOption('OUTPut{ch}', str_type=bool, extra_set_after_func=ProxyMethod(self._enabled_chs_cache_reset))
+        self.interlock_not_ok = scpiDevice(getstr='SYSTEM:INTerlock:TRIPped?', str_type=bool)
+        self.output_filter_auto_en = chOption('OUTPut{ch}:FILTer:AUTO', str_type=bool)
+        self.output_filter_freq = chOption('OUTPut{ch}:FILTer:FREQuency', str_type=float, min=31.830, max=31.831e3, doc='this is 1/2*pi*tc see output_filter_tc')
+        self.output_filter_tc = chOption('OUTPut{ch}:FILTer:TCONstant', str_type=float, min=5e-6, max=5e-3, doc='this is 1/2*pi*freq see output_filter_freq')
+        self.output_filter_en = chOption('OUTPut{ch}:FILTer', str_type=bool)
+        self.output_auto_on_en = chOption('OUTPut{ch}:ON:AUTO', str_type=bool)
+        self.output_auto_off_en = chOption('OUTPut{ch}:OFF:AUTO', str_type=bool)
+        self.output_mode = chOption('OUTPut{ch}:MODE', choices=ChoiceStrings('NORMal', 'PSUPply', 'HCAPacitance '))
+        self.output_off_mode = chOption('OUTPut{ch}:OFF:MODE', choices=ChoiceStrings('ZERO', 'HIZ', 'NORMal'), doc="""\
+                                        normal: output relay open (func=volt, level=0, compliance=100e-6)
+                                        hiz: output relay open (func=kept, level<40 V or <100 mA)
+                                        zero: output relay closed (func=volt, level=0, compliance=100e-6)
+                                        """)
+        self.output_resistance_en = chOption('OUTPut{ch}:RESistance', str_type=bool)
+
+        src_func_opt = ChoiceStrings('CURRent', 'VOLTage')
+        self.src_function = chOption('SOURce{ch}:FUNCtion:MODE', choices=src_func_opt, autoinit=20)
+        self.src_shape = chOption('SOURce{ch}:FUNCtion:SHAPe', choices=ChoiceStrings('PULSe', 'DC'))
+        self.meas_mode = MemoryDevice('current', choices=['current', 'voltage'])
+        def measDevOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(mode=self.meas_mode)
+            app = kwarg.pop('options_apply', ['ch', 'mode'])
+            options_conv = kwarg.pop('options_conv', {}).copy()
+            options_conv.update(dict(mode=lambda val, conv_val: val))
+            kwarg.update(options=options, options_apply=app, options_conv=options_conv)
+            return chOption(*arg, **kwarg)
+        def srcDevOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(func=self.src_function)
+            app = kwarg.pop('options_apply', ['ch', 'func'])
+            kwarg.update(options=options, options_apply=app)
+            return chOption(*arg, **kwarg)
+        limit_conv_d = {src_func_opt[['current']]:'voltage', src_func_opt[['voltage']]:'current'}
+        def limit_conv(val, conv_val):
+            for k, v in limit_conv_d.iteritems():
+                if val in k:
+                    return v
+            raise KeyError('Unable to find key in limit_conv')
+        def srcLimitDevOption(*arg, **kwarg):
+            options = kwarg.pop('options', {}).copy()
+            options.update(func=self.src_function)
+            app = kwarg.pop('options_apply', ['ch', 'func'])
+            options_conv = kwarg.pop('options_conv', {}).copy()
+            options_conv.update(dict(func=limit_conv))
+            kwarg.update(options=options, options_apply=app, options_conv=options_conv)
+            return chOption(*arg, **kwarg)
+        self._devwrap('src_level', setget=True)
+        #limit_choices = ChoiceDevDep(self.src_function, {src_func_opt[['voltage']]:ChoiceLimits(min_I, max_I), src_func_opt[['current']]:ChoiceLimits(min_V, max_V)})
+        #self.compliance = srcLimitDevOption('SENSe{ch}:{func}:PROTection', str_type=float, choices=limit_choices, setget=True)
+        self.compliance = srcLimitDevOption('SENSe{ch}:{func}:PROTection', str_type=float, setget=True)
+        src_range_choices = ChoiceDevDep(self.src_function, {src_func_opt[['CURRent']]:curr_range, src_func_opt[['voltage']]:volt_range})
+        comp_range_choices = ChoiceDevDep(self.src_function, {src_func_opt[['CURRent']]:volt_range, src_func_opt[['voltage']]:curr_range})
+        self.compliance_range = srcLimitDevOption('SENSe{ch}:{func}:PROTection:RANGe', str_type=float, choices=comp_range_choices, setget=True)
+        self.compliance_range_auto_en = srcLimitDevOption('SENSe{ch}:{func}:PROTection:RANGe:AUTO', str_type=bool, setget=True)
+        self.compliance_neg = srcLimitDevOption('SENSe{ch}:{func}:PROTection:NEGative', str_type=float, setget=True)
+        self.compliance_pos = srcLimitDevOption('SENSe{ch}:{func}:PROTection:POSitive', str_type=float, setget=True)
+        self.compliance_tripped = srcLimitDevOption(getstr='SENSe{ch}:{func}:PROTection:TRIPped?', str_type=bool)
+
+        self.src_range = srcDevOption('SOURce{ch}:{func}:RANGe', str_type=float, choices=src_range_choices, setget=True)
+        self.src_range_auto_en = srcDevOption('SOURce{ch}:{func}:RANGe:AUTO', str_type=bool)
+        self.src_range_auto_lower_limit = srcDevOption('SOURce{ch}:{func}:RANGe:AUTO:LLIMit', str_type=float, choices=src_range_choices, setget=True)
+        # This is useful for sweeps
+        #self.src_sweep_keep_last_en = chOption('SOURce{ch}:FUNCtion:TRIGgered:CONTinuous', str_type=bool)
+        self.src_mode = srcDevOption('SOURce{ch}:{func}:MODE', choices=ChoiceStrings('SWEep', 'LIST', 'FIXed'))
+
+        self.meas_en_voltage = chOption('SENSe{ch}:FUNCtion:{val} "voltage"', 'SENSe{ch}:FUNCtion:STATe? "voltage"', str_type=meas_en_type)
+        self.meas_en_current = chOption('SENSe{ch}:FUNCtion:{val} "current"', 'SENSe{ch}:FUNCtion:STATe? "current"', str_type=meas_en_type)
+        self.meas_en_resistance = chOption('SENSe{ch}:FUNCtion:{val} "resistance"', 'SENSe{ch}:FUNCtion:STATe? "resistance"', str_type=meas_en_type)
+        # apperture and nplc applies to current and volt measurement
+        self.meas_filter_auto_en = chOption('SENSe{ch}:CURRent:APERture:AUTO', str_type=bool)
+        self.meas_filter_aperture = chOption('SENSe{ch}:CURRent:APERture', str_type=float, min=8e-7, max=2, setget=True)
+        # The actual limits depend on the line frequency (50 or 60 Hz)
+        self.meas_filter_nplc = chOption('SENSe{ch}:CURRent:NPLCycles', str_type=float, min=4e-5, max=120, setget=True)
+        self.meas_current_seamless_range_en = chOption(':SENSe{ch}:CURRent:RANGe:SLESs', str_type=bool)
+        self.meas_current_seamless_range_lower_limit = chOption(':SENSe{ch}:CURRent:RANGe:SLESs:LLIMit', str_type=float, setget=True)
+        meas_range_choices = ChoiceDevDep(self.meas_mode, {'current':curr_range, 'voltage':volt_range})
+        self.meas_range = measDevOption('SENSe{ch}:{mode}:RANGe', str_type=float, choices=meas_range_choices, setget=True)
+
+        self._devwrap('fetch', autoinit=False, trig=True)
+        self.readval = ReadvalDev(self.fetch)
+        self.alias = self.readval
+        # This needs to be last to complete creation
+        super(keysight_M96xx_smu, self)._create_devs()
