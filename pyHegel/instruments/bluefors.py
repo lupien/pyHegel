@@ -2210,6 +2210,7 @@ class bf_controller(BaseInstrument):
                                                      set_post_update='driver.lakeshore.settings.instrument.write', autoinit=False)
         self.still_heater_en = bf_controller_dev('mapper.temperature_control.heaters.still.enabled')
         self.still_heater_power = bf_controller_dev('mapper.temperature_control.heaters.still.power', setget=True)
+        self.still_heater_setpoint_power = bf_controller_dev('mapper.temperature_control.heaters.still.setpoint_power', setget=True)
         self._devwrap('active_temp_ch')
         self._devwrap('fetch')
         self.alias = self.fetch
