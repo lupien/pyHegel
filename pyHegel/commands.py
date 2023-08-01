@@ -345,9 +345,15 @@ def _get_extra_confs(extra_conf):
                 f = dict(base_hdr_name='com ...', base_conf=l)
                 formats.append(f)
         else:
+            hdr_pre = None
+            if isinstance(x, list):
+                x, hdr_pre = x
             dev, kwarg = _get_dev_kw(x)
             dev.force_get()
-            hdr = dev.getfullname()
+            if hdr_pre is None:
+                hdr = dev.getfullname()
+            else:
+                hdr = hdr_pre
             f = dev.getformat(**kwarg)
             f['base_conf'] = instruments_base._get_conf_header(f)
             f['base_hdr_name'] = hdr
@@ -376,11 +382,14 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
         extra_conf = []
     else:
         extra_conf = extra_conf[:] # make a copy so we can change it locally
+    reuse_dict = {}
     if setdev is not None:
         if not isinstance(setdev, list):
             setdev = [setdev]
         for s in setdev:
             dev, kwarg = _get_dev_kw(s)
+            reuse = reuse_dict.get(dev, 0)
+            reuse_dict[dev] = reuse + 1
             f = dev.getformat(**kwarg)
             if f['file']:
                 raise ValueError('set devices can not have the file format True: %s'%dev)
@@ -388,15 +397,16 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
             if multi is True or isinstance(multi, tuple):
                 raise ValueError('set devices can not have multi True or a tuple: %s'%dev)
             hdr = dev.getfullname()
+            if reuse > 0:
+                hdr += '%i'%(reuse+1)
             hdr_list, c = _getheaders_multi_helper(f, hdr)
             hdrs.extend(hdr_list)
             count += c
             set_counts.append(c)
-            extra_conf.append(s)
-    reuse_dict = {}
+            extra_conf.append([s, hdr])
     for dev in getdevs:
         dev, kwarg = _get_dev_kw(dev)
-        reuse = reuse_dict.get(dev,0)
+        reuse = reuse_dict.get(dev, 0)
         reuse_dict[dev] = reuse + 1
         dev.force_get()
         hdr = dev.getfullname()
@@ -925,17 +935,24 @@ class _Sweep(instruments.BaseInstrument):
         vv = []
         iv = []
         bwait = 0.
-        for dev, dev_opt, v, beforewait, doset, count in zip(*sets):
+        next_set_cache = []
+        for dev, dev_opt, v, beforewait, doset, count, prev_set_cache in zip(*sets):
             vv.append(v)
             if doset:
                 dev.set(v, **dev_opt) # TODO replace with move
                 bwait = max(bwait, beforewait)
-            val = dev.getcache() # in case the instrument changed the value
+                val = dev.getcache() # in case the instrument changed the value
+            else:
+                # Recall previous value
+                val = prev_set_cache
+            next_set_cache.append(val)
             val = _writevec_flatten_list([val])
             l = len(val)
             if l != count:
                 raise RuntimeError('Got wrong number of values for set(%s). Expected %i, got %i.'%(dev, count, l))
             iv.extend(val)
+        # remember for next iteration
+        sets[-1] = next_set_cache
         if printit:
             printit('Sweep part: %3i/%-3i   %s'%(iter_part, iter_total, vv))
         self.execbefore(iter_n, cfwd, v, vv, iv, other_options)
@@ -1107,8 +1124,8 @@ class _Sweep(instruments.BaseInstrument):
                 iter_partial = 0
                 ioffset = 0
                 clf = False
-                #dev, dev_opt, v, beforewait, doset, set_counts
-                sets = [[dev], [dev_opt], [], [], [True], set_counts]
+                #dev, dev_opt, v, beforewait, doset, set_counts, prev_set_cache (never used for this type of sweep)
+                sets = [[dev], [dev_opt], [], [], [True], set_counts, [None]]
                 cycle_list = [(fwd, f, formats)]
                 if updown == True:
                     cycle_list = [(True, f, formats), (False, frev, formatsrev)]
@@ -1331,8 +1348,8 @@ class _Sweep(instruments.BaseInstrument):
             ###############################
             if parallel:
                 def iterator():
-                    #dev, dev_opt, v, beforewait, doset, set_counts
-                    sets = [devl, dev_optl, [], [], [True]*multiN, set_counts]
+                    #dev, dev_opt, v, beforewait, doset, set_counts, prev_set_cache
+                    sets = [devl, dev_optl, [], [], [True]*multiN, set_counts, [None]*len(devl)]
                     for i in range(npts_total):
                         vs = []
                         fwd_all = []
@@ -1371,8 +1388,8 @@ class _Sweep(instruments.BaseInstrument):
                                 break
 
                 def iterator():
-                    #dev, dev_opt, v, beforewait, doset, set_counts
-                    sets = [devl, dev_optl, [], [], [], set_counts]
+                    #dev, dev_opt, v, beforewait, doset, set_counts, prev_set_cache
+                    sets = [devl, dev_optl, [], [], [], set_counts, [None]*len(devl)]
                     i = 0
                     js = [0]*multiN
                     prev_js = [-1]*multiN
