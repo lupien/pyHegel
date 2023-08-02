@@ -939,9 +939,8 @@ class _Sweep(instruments.BaseInstrument):
         for dev, dev_opt, v, beforewait, doset, count, prev_set_cache in zip(*sets):
             vv.append(v)
             if doset:
-                dev.set(v, **dev_opt) # TODO replace with move
+                val = dev.set_ret_cache(v, **dev_opt) # TODO replace with move
                 bwait = max(bwait, beforewait)
-                val = dev.getcache() # in case the instrument changed the value
             else:
                 # Recall previous value
                 val = prev_set_cache
