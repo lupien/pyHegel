@@ -950,6 +950,10 @@ class BaseDevice(object):
                 val = self._set_delayed_cache
         # only change cache after succesfull _setdev
         self.setcache(val)
+    @locked_calling_dev
+    def set_ret_cache(self, *val, **kwarg):
+        self.set(*val, **kwarg)
+        return self.getcache()
     def _get_para_checked(self, *val):
         get_para_checked(*val)
     @locked_calling_dev
