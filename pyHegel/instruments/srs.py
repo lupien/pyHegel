@@ -32,7 +32,8 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceMultiple, ChoiceIndex, make_choice_list,\
                             ChoiceDevDep, ChoiceLimits,\
                             decode_float64, _decode_block_base, visa_wrap, locked_calling,\
-                            wait, resource_info, ProxyMethod, float_as_fixed
+                            wait, resource_info, ProxyMethod, float_as_fixed,\
+                            _fromstr_helper, _tostr_helper
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -838,6 +839,103 @@ class sr384_rf(visaInstrument):
         """
         return int(self.ask('LERR?'))
 
+
+#######################################################
+##    Stanford Research DS345 generator
+#######################################################
+
+class float_unit(object):
+    def __init__(self, unit='VR'):
+        """ unit is added on write, stripped on read
+        """
+        self.unit = unit
+    def __call__(self,  input_str):
+        if not input_str.lower().endswith(self.unit.lower()):
+            raise RuntimeError('Unexpexed string ending')
+        in_str = input_str[:-len(self.unit)]
+        return _fromstr_helper(in_str, float)
+    def tostr(self, val):
+        return _tostr_helper(val, float) + self.unit
+
+
+#@register_instrument('StanfordResearchSystems', 'DS345', '1.04')
+@register_instrument('StanfordResearchSystems', 'DS345')
+class sr_ds345(visaInstrument):
+    """
+    This controls a DS345 generator.
+    Useful devices:
+        freq
+        amplitude_Vpp
+        amplitude_Vrms
+        offset
+    """
+    def __init__(self, visa_addr, *args, **kwargs):
+        # This is required, otherwise, with the default write_termination of '\r\n'
+        # it does not set the IFC bit in the serial status.
+        kwargs['write_termination'] = '\n'
+        kwargs['read_termination'] = '\n'
+        rsrc_info = resource_info(visa_addr)
+        if rsrc_info.interface_type == visa_wrap.constants.InterfaceType.asrl:
+            if 'parity' not in kwargs:
+                kwargs['parity'] = visa_wrap.constants.Parity.none
+            kwargs['data_bits'] = 8
+            if 'baud_rate' not in kwargs:
+                kwargs['baud_rate'] = 9600
+            if 'flow_control' not in kwargs:
+                kwargs['flow_control'] = visa_wrap.constants.VI_ASRL_FLOW_NONE
+            if 'stop_bits' not in kwargs:
+                kwargs['stop_bits'] = visa_wrap.constants.StopBits.two
+            kwargs['read_termination'] = '\r\n'
+        super(sr_ds345, self).__init__(visa_addr, *args, **kwargs)
+
+    @locked_calling
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper('freq', 'amplitude_Vrms', 'amplitude_Vpp', 'offset', 'phase_deg',
+                                 'invert_en', 'function', 'mod_en', 'mod_type',
+                                 'dds_status', options)
+
+    def _create_devs(self):
+        self.freq = scpiDevice('freq', str_type=float, setget=True)
+        self.offset = scpiDevice('offs', str_type=float, setget=True) #volts
+        self.amplitude_Vrms = scpiDevice('ampl {val}', 'ampl? VR', str_type=float_unit(), setget=True)
+        self.amplitude_Vpp = scpiDevice('ampl {val}', 'ampl? VP', str_type=float_unit('VP'), setget=True)
+        self.phase_deg = scpiDevice('phse', str_type=float, setget=True)
+        self.invert_en = scpiDevice('invt', str_type=bool)
+        self.function = scpiDevice('func', choices=ChoiceIndex(['sine', 'square', 'triangle', 'ramp', 'noise', 'arbitrary']))
+        self.mod_en = scpiDevice('mena', str_type=bool)
+        self.mod_type = scpiDevice('mtyp', choices=ChoiceIndex(['lin_sweep', 'log_sweep', 'internal_am', 'fm', 'phase', 'burst']))
+        self.dds_status = scpiDevice(getstr='stat?', str_type=int, doc=
+            """
+            Status bit values:
+                0 (  1):  Burst or sweep triggered
+                1 (  2):  Trigger error
+                2 (  4):  External clock used
+                3 (  8):  External clock error
+                4 ( 16):  Warmup period expired
+                5 ( 32):  Self Test error
+                6 ( 64):  Self cal error
+                7 (128):  Stored setting were corrupt on power up
+            """)
+        self.alias = self.freq
+        # This needs to be last to complete creation
+        super(sr_ds345, self)._create_devs()
+
+    def get_error(self):
+        err = int(self.ask('*esr?'))
+        if err in [0, 64]:
+            return 'No Errors'
+        ret = ['esr=%d'%err]
+        if err&4:
+            ret.append('Querry Error')
+        if err&16:
+            ret.append('Execution Error')
+        if err&32:
+            ret.append('Command Error')
+#        if err&64:
+#            ret.append('Key press')
+        if err&128:
+            ret.append('Power on')
+        return ', '.join(ret)
 
 #######################################################
 ##    Stanford Research SR780 2 channel network analyzer
