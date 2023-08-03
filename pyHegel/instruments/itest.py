@@ -131,6 +131,7 @@ class iTest_be2102(visaInstrument):
             kwargs['read_termination'] = '\n'
         kwargs['keep_alive'] = 'auto'
         kwargs['keep_alive_time'] = 15*60 # 15 min. The instrument seems to timeout after 25 min when using a socket
+        # Check that the maximum number of bilt loaded is not exceeded
         super(iTest_be2102, self).__init__(visa_addr, *args, **kwargs)
 
     def idn_remote(self):

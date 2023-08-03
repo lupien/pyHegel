@@ -29,6 +29,7 @@ import time
 import scipy
 from scipy.optimize import brentq as brentq_rootsolver
 import codecs
+import types
 
 from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
@@ -2847,3 +2848,139 @@ class loop(BaseInstrument):
         self.alias = self.loop1
         # This needs to be last to complete creation
         super(type(self),self)._create_devs()
+
+
+@register_instrument('pyHegel_Instrument', 'virtual_instr', '1.0')
+class virtual_instr(BaseInstrument):
+    """ This is define a virtual instrument.
+    Useful devices:
+        - '<virt_dev_name>' (created for each vdev in the virt_names parameters, with the according name)
+        - virtual
+        - real
+    Attributes:
+        - CC matrix
+        - CCinv matrix
+
+    This instrument take a list of virtual devices names and create them with a memory device.
+    When setting a virtual device, it sets the real device to:  real = CC-1 @ values
+    You can either give CC or CC-1, by adjusting the 'is_cc' parameter.
+    CC must be squared because the inverse is calculated.
+    CCinv must have the shape: (nb_real, nb_virt)
+    
+    You can then use vinstr.<virtual_device_name> as a normal device.
+    The device 'virtual' sets all virtual devs at the same time given a list of values and updates the 'reals'.
+    The device 'real' sets all real devs at the same time given a list of values and updates the 'virtuals'.
+        (iff there is a CC matrix, else, only the real are set).
+    """
+    def __init__(self, virt_names=[], real_devs=[], matrix=[], is_cc=True, **kwargs):
+        self.nb_real = len(real_devs)
+        self.nb_virt = len(virt_names)
+        self._virt_names = virt_names
+        self._real_devs = real_devs
+        self._virt_devs = []
+
+        super(virtual_instr, self).__init__(**kwargs)
+        self.setMatrix(matrix, is_cc)
+        self._update_virt() # init virtual values
+
+    def idn(self):
+        return 'pyHegel_Instrument,virtual_instr,00000,1.0'
+
+    def setMatrix(self, matrix, is_cc=True):
+        matrix = np.array(matrix)
+        matrixInv = None
+        if matrix.shape[0] == matrix.shape[1]:
+            matrixInv = np.linalg.inv(matrix)
+        if is_cc:
+            self.CC.set(matrix)
+            if matrix.shape[0] != matrix.shape[1]:
+                raise ValueError, self.perror('Matrix should be squared. Unless it is CC-1, then you must set is_cc to False.')
+            self.CCinv.set(matrixInv)
+        else:
+            #TODO: check dimensions if not squared
+            self.CC.set(matrixInv)
+            self.CCinv.set(matrix)
+        
+    def _real_checkdev(self, val, update_virt=True):
+        BaseDevice._checkdev(self.real, val)
+    def _real_getdev(self):
+        ret = dict_improved(_allow_overwrite=False) # (allow_overwrite does not seems to work)
+        for dev in self._real_devs:
+            name = dev.getfullname()
+            while name in ret:
+                name += '_'
+            ret[name] = dev.get()
+        return ret
+    def _real_setdev(self, values, update_virt=True):
+        if len(values) != self.nb_real:
+            raise ValueError('The number of values must be the same as the number of real devices.')
+        for dev, val in zip(self._real_devs, values):
+            dev.set(val) 
+        if update_virt:
+            self._update_virt()
+
+    def _virtual_checkdev(self, val, update_real=True):
+        BaseDevice._checkdev(self.virtual, val)
+    def _virtual_getdev(self):
+        ret = dict_improved()
+        for name, dev in zip(self._virt_names, self._virt_devs):
+            ret[name] = dev.get()
+        return ret
+    def _virtual_setdev(self, values, update_real=True):
+        if len(values) != self.nb_virt:
+            raise ValueError('The number of values must be the same as the number of virtual devices.')
+        [dev.set(val, update_real=False) for dev, val in zip(self._virt_devs, values)]
+        if update_real:
+            self._update_real()
+
+    def _update_virt(self):
+        if self.CC is None:
+            print 'No CC matrix define, updating virtual values from real is disabled (real devices may be changed, but virtual will not be updated).'
+            return
+        real_vals = self.real.get().values()
+        real_vals = [val[0] if isinstance(val, (tuple, list)) else val for val in real_vals]
+        virt_vals = np.matmul(self.CC.get(), real_vals)
+        self.virtual.set(virt_vals, update_real=False)
+            
+    def _update_real(self):
+        virt_vals = self.virtual.get().values()
+        virt_vals = [val[0] if isinstance(val, (tuple, list)) else val for val in virt_vals]
+        real_vals = np.matmul(self.CCinv.get(), virt_vals)
+        self.real.set(real_vals, update_virt=False)
+
+    @locked_calling
+    def _current_config(self, dev_obj=None, options={}):
+        return self._conf_helper(options)
+
+    def _init_devs_mem(self):
+        return MemoryDevice(0, doc='This represent a virtual device. It has it\'s own virtual value. When set, it uses the CCinv matrix and the current values of others virtual devices to set the right value to the real devices.')
+    def _init_devs_set_wrapper(self, orig_set):
+        def new_setter(val, update_real=True):
+            orig_set(val)
+            if update_real:
+                self._update_real()
+        return new_setter
+
+    def _init_devs(self, names):
+        devs = []
+        for n in names:
+            mem = self._init_devs_mem()
+            mem.set = self._init_devs_set_wrapper(mem.set)
+            setattr(self, n, mem)
+            self._create_devs_helper()
+            devs.append(mem)
+        self._virt_devs = devs
+
+    def _create_devs(self):
+        self._init_devs(self._virt_names)
+        self._devwrap('virtual', doc='Get returns a dict of the names and values of virtual devices.\n Set with a vector to set real devices to:  devs = CC@vector')
+        self._devwrap('real', doc='Get returns a dict of the names and values of real devices.\n Set with a vector to set virtual devices to:  vdevs = CC-1@vector' )
+        self.alias = self.virtual
+        
+        self.CC = MemoryDevice()
+        self.CCinv = MemoryDevice()
+        self.virtnames = MemoryDevice(self._virt_names, doc='set not supported.') 
+        self.realdevs = MemoryDevice(self._real_devs, doc='set not supported.') 
+
+        # This needs to be last to complete creation
+        super(virtual_instr ,self)._create_devs()
