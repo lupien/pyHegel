@@ -212,7 +212,8 @@ def strResult(func, p, pe, extra={}, signif=2):
     return ret
 
 def printResult(func, p, pe, extra={}, signif=2):
-    print '\n'.join(strResult(func, p, pe, extra, signif))
+    s = u'\n'.join(strResult(func, p, pe, extra, signif))
+    print s.encode('utf8')
 
 def _get_axis_bgcolor(axis):
     # get_axis_bgcolor cot depracated in matplotlib 2.0 and removed in 2.2
