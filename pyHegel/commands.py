@@ -848,6 +848,11 @@ class _Sweep(instruments.BaseInstrument):
                 if stop < 0:
                     raise ValueError('Both start and stop need to have the same sign when using logspace for dev=%s.'%dev)
                 span = np.logspace(np.log10(start), np.log10(stop), npts)
+                # The above can change the start and stop values so override them
+                # otherwise will could have checked a value that is now not allowed.
+                # for example 10**np.log10(4e6) = 4000000.000000001
+                span[0] = start
+                span[-1] = stop
                 if negative:
                     span *= -1.
             else:
