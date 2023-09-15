@@ -27,8 +27,8 @@ from __future__ import absolute_import
 
 # make sure that new versions numbers compare properly when using
 # pkg_resources.parse_version
-__version__ = '1.1.0'
-__copyright__ = '2011-2019  Christian Lupien'
+__version__ = '1.2.0'
+__copyright__ = '2011-2023  Christian Lupien'
 
 def start_pyHegel():
     """ This is the recommanded way to start pyHegel.
