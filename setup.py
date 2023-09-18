@@ -27,6 +27,7 @@
 # and documentation from
 #   http://pythonhosted.org/setuptools/setuptools.html
 
+from __future__ import print_function
 import sys
 
 try:
@@ -116,7 +117,7 @@ post_script = 'pyHegel_postinstall.py'
 def _post_install(cmd='install'):
     if not do_post:
         return
-    print 'Running post install'
+    print('Running post install')
     from subprocess import call
     if cmd == 'install':
         call([sys.executable, post_script, '-install'])
