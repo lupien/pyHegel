@@ -130,11 +130,19 @@ However you can install it either in develop mode ::
 
     python setup.py develop
 
+or with newer versions (where setup is deprecated) ::
+
+    pip install -e .
+
 which will keep the current directory the active one (so the code can be
 modified there) but updates python so it finds the module correctly and creates
 the pyHegel command so you can start a session. Or use a full install ::
 
     python setup.py install
+
+or with newer versions (where setup is deprecated) ::
+
+    pip install .
 
 Documentation
 --------------
