@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2018-2018  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2018-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -25,7 +25,7 @@
 ##    Rohde & Schwarz instruments
 #######################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import sys
@@ -143,7 +143,7 @@ def pp(o, align=20, base='', nmax=None):
     fmt = '%%-%is %%s'%align
     dicts = (dict, dict_improved)
     if isinstance(o, list) and (len(o) == 0 or (len(o)>0 and not isinstance(o[0], (Structure, list)+dicts))):
-        print fmt%(base, o)
+        print(fmt%(base, o))
         return
     elif isinstance(o, (Array, list)):
         if nmax is None:
@@ -154,7 +154,7 @@ def pp(o, align=20, base='', nmax=None):
     if len(base):
         base += '.'
     if isinstance(o, dicts):
-        elements = o.keys()
+        elements = list(o.keys())
         get_val = lambda o, k: o[k]
     else:
         elements = o.__slots__
@@ -174,7 +174,7 @@ def pp(o, align=20, base='', nmax=None):
                         v = [ e[:] for e in v ]
                 else:
                     v = v[:]
-            print fmt%(n, v)
+            print(fmt%(n, v))
 
 def ppdict(o, nmax=None):
     """ Takes the returned Structure or Array and turn it into dicts and lists """
@@ -206,7 +206,7 @@ def get_memory():
     try:
         import psutil
     except ImportError:
-        print 'Unable to find the computer memory size. Requires the psutil module. using 128 GiB'
+        print('Unable to find the computer memory size. Requires the psutil module. using 128 GiB')
         return 128*GiS
     return psutil.virtual_memory().total
 
@@ -244,10 +244,10 @@ class guzik_adp7104(BaseInstrument):
                 break
             full_lib_version += chr(i)
         self._gsa_sys_cfg = SDK.GSA_SYS_CFG(version=SDK.GSA_SDK_VERSION)
-        print 'Starting instrument initialization. This could take some time (20s)...'
+        print('Starting instrument initialization. This could take some time (20s)...')
         if SDK.GSA_SysInit(self._gsa_sys_cfg) != SDK.GSA_TRUE:
             raise RuntimeError(self.perror('Initialization problem!'))
-        print 'Finished instrument initialization.'
+        print('Finished instrument initialization.')
         c_n_avail_analyzer = ctypes.c_int()
         def check_error(func_call_result, error_message='Error!'):
             if func_call_result == SDK.GSA_FALSE:
@@ -301,15 +301,15 @@ class guzik_adp7104(BaseInstrument):
         res_arr = self._gsa_data_res_arr
         for j in range(Nch):
             res = res_arr[j]
-            print 'Channel %s'%res.common.used_input_label
+            print('Channel %s'%res.common.used_input_label)
             n = res.common.timestamps_len
             ts = self._gsa_data_res_ts[j]
             tf = self._gsa_data_res_tf[j]
             to = ts[0]+tf[0]*1e-15
-            print 'Start time: ', time.ctime(to), ' + %i fs'%tf[0]
+            print('Start time: ', time.ctime(to), ' + %i fs'%tf[0])
             for i in range(n):
                 t = (ts[i] - ts[0]) + (tf[i]-tf[0])*1e-15
-                print 'Delta= %.15f s'%t
+                print('Delta= %.15f s'%t)
 
     def _destroy_op(self):
         SDK = self._gsasdk
@@ -538,7 +538,7 @@ class guzik_adp7104(BaseInstrument):
             dtype = np.uint8
         data = np.empty(dims, dtype)
         #data[...] = 1
-        #print 'data init done!'
+        #print('data init done!')
         data_2d = data if Nch>1 else data.reshape((1, -1))
         for i in range(Nch):
             #res_arr[i].common.data.arr = data_2d[i].ctypes.data_as(POINTER(c_ubyte))
@@ -630,12 +630,12 @@ class guzik_adp7104(BaseInstrument):
             ret = SDK.GSA_ErrorHandleStr(SDK.GSA_ERR_PRINT_FULL, SDK.String(s), len(s))
         if ret == SDK.GSA_TRUE: # = -1
             if printit:
-                print s.value
+                print(s.value)
             else:
                 return s.value
         else:
             if printit:
-                print 'No errors'
+                print('No errors')
             else:
                 return None
 
