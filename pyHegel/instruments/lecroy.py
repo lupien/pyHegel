@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 from collections import OrderedDict, namedtuple
@@ -36,6 +36,8 @@ from ..instruments_base import visaInstrumentAsync, visaInstrument,\
 from ..instruments_registry import register_instrument
 
 from ..types import StructureImproved
+
+from ..comp2to3 import string_bytes_types
 
 _ChoiceStrings = ChoiceStrings
 
@@ -76,11 +78,11 @@ class lecroy_dict(ChoiceBase):
         Based on ChoiceMultiple
         """
         def make_tuple(val):
-            if isinstance(val, basestring):
+            if isinstance(val, string_bytes_types):
                 return (val, val)
             else:
                 return val
-        field_names = map(make_tuple, field_names)
+        field_names = list(map(make_tuple, field_names))
         self.field_names_sn = [sn.lower() for sn,dn in field_names]
         cnt = 0
         maxlen = len(field_names)
@@ -132,7 +134,7 @@ class lecroy_dict(ChoiceBase):
         N = self.repeats[1]+1-self.repeats[0]
         full_elem = 2*len(self.field_names) - self.nosn_cnt
         if N!=0:
-            Ncycles = (len(v_base) - (full_elem-N))/N
+            Ncycles = (len(v_base) - (full_elem-N))//N
             if Ncycles < 1:
                 Ncycles = 1
         else:
@@ -165,7 +167,7 @@ class lecroy_dict(ChoiceBase):
             if isinstance(fmt, ChoiceMultipleDep):
                 fmt.set_current_vals(dict(zip(v_names, v_conv)))
             if isinstance(val, list):
-                v_conv.append(map(lambda v: _fromstr_helper(v, fmt), val))
+                v_conv.append([_fromstr_helper(v, fmt) for v in val])
             else:
                 v_conv.append(_fromstr_helper(val, fmt))
             v_names.append(k)
@@ -189,7 +191,7 @@ class lecroy_dict(ChoiceBase):
                     break
             s = _tostr_helper(val, self.fmts_type[i])
             ret.append(s)
-        for k,v in fromdict.iteritems():
+        for k,v in fromdict.items():
             i = self.field_names_dn.index(k)
             fmt = self.fmts_type[i]
             name = self.field_names_sn[i]
@@ -201,7 +203,7 @@ class lecroy_dict(ChoiceBase):
             key = self.field_names_dn[i]
             if key not in x:
                 raise KeyError_Choices('The field with key "%s" is always required'%key)
-        for k, v in x.iteritems():
+        for k, v in x.items():
             try:
                 i = self.field_names_dn.index(k)
             except ValueError:
@@ -284,7 +286,7 @@ IST? IST? Individual STatus reads the current state of IEEE 488.
   STST STORE_SETUP Sets up waveform storage
 """
 
-# get structure with print osc.ask('TeMPLate?')
+# get structure with print(osc.ask('TeMPLate?'))
 
 class time_stamp(StructureImproved):
     _fields_=[("seconds", c_double),
@@ -444,7 +446,7 @@ class ChoiceDict(ChoiceBase):
             conv = lambda s: s.lower()
         else:
             conv = lambda s: s
-        self.rev_choices = {conv(v):k for k,v in choices_dict.iteritems()}
+        self.rev_choices = {conv(v):k for k,v in choices_dict.items()}
     def __call__(self, input_str):
         if self.normalize:
             input_str = input_str.lower()
@@ -452,7 +454,7 @@ class ChoiceDict(ChoiceBase):
     def tostr(self, val):
         return self.choices_dict[val]
     def __repr__(self):
-        return repr(self.choices_dict.keys())
+        return repr(list(self.choices_dict.keys()))
     def __contains__(self, val):
         return val in self.choices_dict.keys()
 
@@ -723,7 +725,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         # PRINTER to give printer name for PRINTER dest only
         # DIR/FILE for dir and file for FILE dest only. Note that file is autoincremented
         oldsetup = self.ask('HardCopy_SetUp?')
-        #print oldsetup
+        #print(oldsetup)
         cmd = 'HardCopy_SetUp DEST,"FILE",DEV,{dev}, BCKG,{bckg}, DIR,"{dir}", FILE,"{file}", AREA,{area}'
         dirname = r'D:\HARDCOPY'
         filename = '__pyHegel__.png'
@@ -743,7 +745,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         self.write('HardCopy_SetUp '+oldsetup)
         # Download the file
         data = self.ask("TRansfer_FiLe? DISK,HDD,FILE,'%s'"%fullpath, raw=True)
-        #print 'CRC, A%sA'%data[-9:-1]
+        #print('CRC, A%sA'%data[-9:-1])
         return _decode_block_base(data)[:-8] # remove CRC at end of data block
     def force_cal(self):
         self.ask('*cal?')
@@ -795,7 +797,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
             extra = ',' + data_fmt
         ret = self.ask('%s:INSPect? %s%s'%(ch, info, extra))
         if do_print:
-            print ret
+            print(ret)
         else:
             return ret
     _trigmodes = ['Normal', 'Auto', 'NormalStop', 'AutoStop', 'Single', 'SingleForce']
@@ -812,9 +814,9 @@ class lecroy_wavemaster(visaInstrumentAsync):
         if not quiet:
             if avgn > 1:
                 ch = self._trigmode_avgn_ch
-                print 'mode is %s, avgn is %i, acqn channel is %s'%(mode, avgn, ch)
+                print('mode is %s, avgn is %i, acqn channel is %s'%(mode, avgn, ch))
             else:
-                print 'mode is %s, avgn is %i'%(mode, avgn)
+                print('mode is %s, avgn is %i'%(mode, avgn))
     set_trigmode.__doc__ =         """
         mode: one of %s
               where for all modes except Normal and Auto the acquisition is stopped before transferring
@@ -845,7 +847,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
     def _async_trigger_helper(self):
         mode = self._trigmode_mode
         if self._trigmode_mode is None or self._trigmode_avgn is None:
-            print 'set_trigmode was not executed. Using default values.'
+            print('set_trigmode was not executed. Using default values.')
             self.set_trigmode(quiet=False)
         mode = self._trigmode_mode
         clearit = True
@@ -922,7 +924,7 @@ class lecroy_wavemaster(visaInstrumentAsync):
         # Note that C,F and Z channels that can't count, always return 1 (even after a clear sweep)
         if ch is None:
             ch = self._trigmode_avgn_ch
-        if not isinstance(ch, basestring) or len(ch) < 2:
+        if not isinstance(ch, string_bytes_types) or len(ch) < 2:
             raise RuntimeError(self.perror('The channel used for async detect of acquisition number is invalid'))
         if ch[0] in ['C', 'F', 'Z']:
             return self.data_header.get(ch=ch).SWEEPS_PER_ACQ
