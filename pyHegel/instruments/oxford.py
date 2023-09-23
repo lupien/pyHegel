@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2020  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import time
@@ -38,6 +38,8 @@ from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 from .logical import ScalingDevice
+
+from ..comp2to3 import string_bytes_types
 
 #register_idn_alias('Oxfortd instruments', '???')
 
@@ -90,7 +92,7 @@ def _ramp_setdev_factory(isTesla):
         """
         def print_if(s):
             if not quiet:
-                print s
+                print(s)
         ps_installed = self.status.getcache().pers_switch_installed
         if wait is None:
             wait = self.ramp_wait_after.getcache()
@@ -206,7 +208,7 @@ class oxford_ips120_10(visaInstrument):
             Necessary after a timeout caused by a button being pressed
             on the instrument.
         """
-        #print 'CLEAR'
+        #print('CLEAR')
         # for gpib could use self.visa.clear()
         # However I can hang the instrument communication when I do that.
         # And for serial that does not work.
@@ -241,7 +243,7 @@ class oxford_ips120_10(visaInstrument):
             self.clear_buffers()
             status = self.status.get()
             if status.locrem == 'local locked':
-                print 'Unlocking'
+                print('Unlocking')
                 self.control_mode(remote=False, locked=False)
 
     def control_remotelocal(self, *args, **kwargs):
@@ -267,7 +269,7 @@ class oxford_ips120_10(visaInstrument):
              the instrument isobus and use None.
         """
         if not no_clear and self._last_read_exception_timeout:
-            print 'Clearing buffers!'
+            print('Clearing buffers!')
             self.clear_buffers(isobus=isobus)
         iso = self._isobus_helper(isobus)
         val = iso + val
@@ -325,7 +327,7 @@ class oxford_ips120_10(visaInstrument):
         with mainStatusLine.new(priority=10, timed=True) as progress:
             while True:
                 try:
-                    #print 'Reading %i'%repeats
+                    #print('Reading %i'%repeats)
                     ret = super(oxford_ips120_10, self).read(raw=raw, count=count, chunk_size=chunk_size)
                     self._last_read_exception_timeout = False
                     return ret
@@ -363,7 +365,7 @@ class oxford_ips120_10(visaInstrument):
         """
         acts = {'hold':0, 'to setpoint':1, 'to zero':2, 'clamp':4}
         if act not in acts:
-            raise ValueError('Invalid activity. Needs to be one of %s'%acts.keys())
+            raise ValueError('Invalid activity. Needs to be one of %s'%list(acts.keys()))
         self.write('A%d'%acts[act])
 
     def set_persistent(self, enable, force=False, password=None):
@@ -464,7 +466,7 @@ class oxford_ips120_10(visaInstrument):
             else:
                 prog_base = 'Magnet Ramping {current:.3f}/0 %s'%unit
 
-        if isinstance(stay_states, basestring):
+        if isinstance(stay_states, string_bytes_types):
             stay_states = [stay_states]
         with release_lock_context(self):
             with mainStatusLine.new(priority=10, timed=True) as progress:
@@ -484,7 +486,7 @@ class oxford_ips120_10(visaInstrument):
             if extra_wait:
                 wait(extra_wait, progress_base='Magnet wait')
         if end_states is not None:
-            if isinstance(end_states, basestring):
+            if isinstance(end_states, string_bytes_types):
                 end_states = [end_states]
             if self._get_states() not in end_states:
                 raise RuntimeError(self.perror('The magnet state did not change to %s as expected'%end_states))
@@ -499,7 +501,7 @@ class oxford_ips120_10(visaInstrument):
         """
         def print_if(s):
             if not quiet:
-                print s
+                print(s)
         status = self.status.get()
         if not status.pers_switch_installed:
             return True
