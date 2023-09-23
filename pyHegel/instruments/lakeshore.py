@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2020  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import time
@@ -40,6 +40,8 @@ from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 from .logical import FunctionDevice, ScalingDevice
+
+from ..comp2to3 import string_bytes_types
 
 register_idn_alias('Lake Shore Cryotronics', 'LSCI')
 
@@ -76,7 +78,7 @@ class dotted_quad(object):
     def __call__(self, read_str):
         return read_str
     def tostr(self, input_str):
-        if isinstance(input_str, basestring):
+        if isinstance(input_str, string_bytes_types):
             m = re.match(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$', input_str)
             if m is None:
                 raise ValueError('Invalid string. Needs to be in 000.000.000.000 format.')
@@ -234,7 +236,7 @@ class lakeshore_325(visaInstrument):
 #    err =  t.get_error()
 #    wait(.1)
 #    i=v.shape[1]+1
-#    print all(v == vals/array([[100.],[10]])), err, v.shape, i, t.curve_data_point.get(ch=31, i=i)
+#    print(all(v == vals/array([[100.],[10]])), err, v.shape, i, t.curve_data_point.get(ch=31, i=i))
 #t.curve_delete(31, password=t._passwd_check)
 
 # For serial read_write, write_write of 0., 0.07 seems to work fine.
@@ -274,7 +276,7 @@ class lakeshore_325(visaInstrument):
 #        else:
 #           rd = float(dev.ask('setp? 1'))
 #        iseq = '==' if rd == v else '!='
-#        print '%.3f %s %.3f'%(v, iseq, rd)
+#        print('%.3f %s %.3f'%(v, iseq, rd))
 # All tcpip, gpib, usb return lots of != here
 # To prevent errors I needed a delay of 85 ms for gpib, 65 ms for tcpip, 80 ms for usb
 #   this was using the opc mode for tcpip, serial.
@@ -869,7 +871,7 @@ class lakeshore_336(visaInstrument):
                                            7: module error
                                            8: acquiring address
                                            9: ethernet disabled.""", autoinit=False)
-        self.current_crv = MemoryDevice(1, choices=range(1, 60))
+        self.current_crv = MemoryDevice(1, choices=list(range(1, 60)))
         self.curve_hdr = scpiDevice_lk('CRVHDR {ch},{val}', 'CRVHDR? {ch}', allow_kw_as_dict=True, allow_missing_dict=True,
                                     options=dict(ch=self.current_crv, password=None), options_apply=['ch'],
                                     extra_check_func=ProxyMethod(self._check_password),
@@ -1080,7 +1082,7 @@ class lakeshore_340(visaInstrument):
         maxI = limits['max_current']
         htr = self.htr_raw.get()/100. # fraction of full scale
         full_range_power = self._full_range_power(htr_range, maxI, resistance)['full_scale']
-        #print htr_range, maxI, resistance, htr, full_range_power
+        #print(htr_range, maxI, resistance, htr, full_range_power)
         self.current_loop.set(prev_ch)
         if unit == 'current':
             htr = htr**2 # to power
@@ -1141,7 +1143,7 @@ class lakeshore_340(visaInstrument):
         self.ramp_control = devLoopOption('RAMP {loop},{val}', 'RAMP? {loop}', allow_kw_as_dict=True, allow_missing_dict=True,
                                        choices=ChoiceMultiple(['en', 'rate'], [bool, (float_fix3,(0.0, 100))]), doc="Activates the sweep mode. rate is in K/min.", setget=True)
         self.ramp_sweeping_status = devLoopOption(getstr='RAMPST? {loop}', str_type=bool)
-        htr_ranges = ChoiceIndex(range(5+1))
+        htr_ranges = ChoiceIndex(list(range(5+1)))
         self.heater_range = scpiDevice('RANGE', choices=htr_ranges, doc='See manual 6.12.1 to describe range. range 0 is power off. Only for loop 1.')
         self.control_filter = devLoopOption('CFILT {loop},{val}', 'CFILT? {loop}', str_type=bool)
         csetup = ChoiceMultiple(['channel', 'units', 'loop_en', 'loop_powerup_en'],
@@ -1632,9 +1634,9 @@ class lakeshore_370(visaInstrument):
                     scanner = True
             self._scanner_present = scanner
         if self._scanner_present:
-            ch_opt_sel = range(1, 17)
+            ch_opt_sel = list(range(1, 17))
         else:
-            ch_opt_sel = range(1, 2)
+            ch_opt_sel = list(range(1, 2))
         self.current_ch = MemoryDevice(1, choices=ch_opt_sel)
         def devChOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
@@ -1765,7 +1767,7 @@ class lakeshore_372(lakeshore_370):
 #            dev.write('setv %.4f'%v)
 #        last = float(dev.ask('setv?'))
 #        iseq = '==' if abs(last - v)<1e-5 else '!='
-#        print '%.4f %s %.4f'%(v, iseq, last)
+#        print('%.4f %s %.4f'%(v, iseq, last))
 #write_test = lambda dev, n: ([dev.write('setv %.3f'%((100+i)/100.)) for i in range(n)], dev.ask('*opc?'))
 #def wr_test(n, dev, delay=0., usesetget=False):
 #    for i in range(n):
@@ -1781,7 +1783,7 @@ class lakeshore_372(lakeshore_370):
 #        else:
 #            rd = float(dev.ask('setv?'))
 #        iseq = '==' if rd == v else '!='
-#        print '%.3f %s %.3f'%(v, iseq, rd)
+#        print('%.3f %s %.3f'%(v, iseq, rd))
 
 
 #@register_instrument('LSCI', 'MODEL625', '1.3/1.1')
@@ -2107,7 +2109,7 @@ class lakeshore_625(visaInstrument):
             prog_base = 'Magnet Heating switch: {time}/%.1f'%switch_time
         else: # ramping
             prog_base = 'Magnet Ramping {current:.3f}/%.3f A'%self.target_current.getcache()
-        if isinstance(stay_states, basestring):
+        if isinstance(stay_states, string_bytes_types):
             stay_states = [stay_states]
         with release_lock_context(self):
             with mainStatusLine.new(priority=10, timed=True) as progress:
@@ -2119,7 +2121,7 @@ class lakeshore_625(visaInstrument):
             if extra_wait:
                 wait(extra_wait, progress_base='Magnet wait')
         if end_states is not None:
-            if isinstance(end_states, basestring):
+            if isinstance(end_states, string_bytes_types):
                 end_states = [end_states]
             if self._get_states() not in end_states:
                 raise RuntimeError(self.perror('The magnet state did not change to %s as expected'%end_states))
@@ -2134,7 +2136,7 @@ class lakeshore_625(visaInstrument):
         """
         def print_if(s):
             if not quiet:
-                print s
+                print(s)
         if not self.persistent_conf.getcache().psh_present:
             return True
         state = self._get_states()
@@ -2197,7 +2199,7 @@ class lakeshore_625(visaInstrument):
         """
         def print_if(s):
             if not quiet:
-                print s
+                print(s)
         ps_installed = self.persistent_conf.getcache().psh_present
         if wait is None:
             wait = self.ramp_wait_after.getcache()
