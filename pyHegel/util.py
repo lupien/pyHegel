@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -60,7 +60,7 @@ Conversion functions and time constants calculation helpers:
 Note that savefig is initially disabled.
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import datetime
 import time
@@ -90,6 +90,7 @@ import pylab
 import glob
 import csv
 import re
+from .comp2to3 import string_bytes_types, open_universal
 
 ##################################################
 
@@ -111,7 +112,7 @@ def read_comments(filename, comments='#', pick=None, before=False, skiprows=0, e
         skiprows is to skip lines at the start.
         encoding is the encoding used to convert to unicode.
     """
-    if isinstance(comments, (basestring, bytes)):
+    if isinstance(comments, string_bytes_types):
         comments = [comments]
     comments = [re.escape(c) for c in comments]
     time_re = False
@@ -121,7 +122,7 @@ def read_comments(filename, comments='#', pick=None, before=False, skiprows=0, e
         pick_re = re.compile('(' + '|'.join(pick) + ')')
         time_re = re.compile(r'\#C\:(%s)\# $'%numeric_const_pattern)
     else:
-        if isinstance(pick, (basestring, bytes)):
+        if isinstance(pick, string_bytes_types):
             pick = [pick]
         pick_re = re.compile('(' + '|'.join(re.escape(c) for c in pick) + ')')
     # use a group to return the group in the split
@@ -179,7 +180,7 @@ def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0, skiprows=0, **kwar
     # The docs says to use mode 'rb' but if the file uses mac termination it will fail
     # (should be rare). So instead use 'rU' (the parser can always deal with newline)
     # see http://bugs.python.org/issue8387
-    with open(filename, 'rU') as f:
+    with open_universal(filename, 'r') as f:
         reader = csv.reader(f, **kwargs)
         skip_count = 0
         for line in reader:
@@ -190,7 +191,7 @@ def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0, skiprows=0, **kwar
                 if line[-1] is '':
                     # some files have an ending , sep which produces an empty last field
                     line = line [:-1]
-                conv = map(dtype, line)
+                conv = list(map(dtype, line))
             except ValueError:
                 # skip this line
                 continue
@@ -241,11 +242,11 @@ def _reshape_helper(data, shape, force=False, force_def=np.nan, file=None):
                 nd_flat = new_data.reshape((ncol, -1)).T
                 nd_flat[:len(data_flat)] = data_flat
                 data = new_data
-                print pre+'Forced shape from %s to %s.'%(old_shape, new_shape)
+                print(pre+'Forced shape from %s to %s.'%(old_shape, new_shape))
             else:
-                print pre+'Unable to convert shape from %s to %s (probably an incomplet sweep). Shape unadjusted.'%(old_shape, new_shape)
+                print(pre+'Unable to convert shape from %s to %s (probably an incomplet sweep). Shape unadjusted.'%(old_shape, new_shape))
         else:
-            print pre+'Converted shape from %s to %s.'%(old_shape, new_shape)
+            print(pre+'Converted shape from %s to %s.'%(old_shape, new_shape))
     return data
 
 _readfile_lastnames = []
@@ -344,10 +345,10 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
         filelist.extend(fl)
     _readfile_lastnames[:] = filelist
     if len(filelist) == 0:
-        print 'No file found'
+        print('No file found')
         return
     elif len(filelist) > 1:
-        print 'Found %i files'%len(filelist)
+        print('Found %i files'%len(filelist))
         multi = True
     else:
         multi = False
@@ -464,7 +465,7 @@ def readfile(filename, prepend=None, getnames=False, getheaders=False, csv='auto
         if firstdim is not False:
             # old code was
             # ret = ret.swapaxes(0,1).copy()
-            a = range(ndim+1) # +1 for file index
+            a = list(range(ndim+1)) # +1 for file index
             indx = [firstdim] + a[:firstdim] + a[firstdim+1:]
             ret = ret.transpose(indx).copy()
     if do_comments and do_comment_reshape:
@@ -497,16 +498,16 @@ def merge_pdf(filelist, outname):
       !/cygwin/bin/pdftk file1.pdf file2.pdf file3.pdf cat output file123.pdf
     """
     if not pyPdf_loaded:
-        raise ImportError, 'Missing PyPDF2 or pyPdf package. You need to install one of them.'
+        raise ImportError('Missing PyPDF2 or pyPdf package. You need to install one of them.')
     output = PdfFileWriter()
     in_files = []
     for f in filelist:
-        in_file = file(f, 'rb')
+        in_file = open(f, 'rb')
         in_files.append(in_file)
         input = PdfFileReader(in_file)
         for page in input.pages:
             output.addPage(page)
-    of = file(outname, 'wb')
+    of = open(outname, 'wb')
     output.write(of)
     for f in in_files:
         f.close()
@@ -544,7 +545,7 @@ def merge_all(outname):
     """
     global _savefig_list
     if not savefig_enabled():
-        print 'Skipping merge all to', outname
+        print('Skipping merge all to', outname)
         return
     merge_pdf(_savefig_list, outname)
 
@@ -556,7 +557,7 @@ def savefig(filename, *args, **kwarg):
     """
     global _savefig_list
     if not savefig_enabled():
-        print 'Skipping savefig to', filename
+        print('Skipping savefig to', filename)
         return
     pylab.savefig(filename, *args, **kwarg)
     _savefig_list.append(filename)
@@ -604,7 +605,7 @@ def list_printers():
     lists the available printers (local and connected for windows)
     """
     default = _get_default_printer()
-    print 'System default printer is: %r'%default
+    print('System default printer is: %r'%default)
     if _is_windows():
         import win32print
         plist = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL|win32print.PRINTER_ENUM_CONNECTIONS, None, 4)
@@ -669,7 +670,7 @@ def blueforsTlog(data, time_data, channels=[1,2,5,6], logdir='C:/BlueFors/Logs',
     N = len(channels)
     N = N if onlyT else 2*N
     if data.shape[0] != N:
-        raise ValueError, 'Invalid number of columns in data vs channels'
+        raise ValueError('Invalid number of columns in data vs channels')
     prevdir = ''
     prevfile = [('', None, '')]*N
     for d, t in zip(data.T, time_data):
@@ -690,7 +691,7 @@ def blueforsTlog(data, time_data, channels=[1,2,5,6], logdir='C:/BlueFors/Logs',
                 exfn = ''
                 if ex:
                     exfn = fullname
-                print 'appending to ', fullname, '(exist=%s)'%ex
+                print('appending to ', fullname, '(exist=%s)'%ex)
                 f = open(fullname, 'ab') # use binary access to properly terminate lines
                 prevfile[i] = (fn, f, exfn)
             else:
@@ -712,7 +713,7 @@ def sort_file(filename, uniq=True, cleanup=False):
     lines=[]
     # we try to keep the line termination of the files, irrespective of OS
     term = None
-    with open(filename, 'rU') as f:
+    with open_universal(filename, 'r') as f:
         lines = f.readlines()
         term = f.newlines
     if term is None:
@@ -752,9 +753,9 @@ def read_bluefors(filename):
     To have them converted use read_blueforsRTF or read_blueforsGauges
     """
     ret = []
-    with open(filename, 'rU') as f:
+    with open_universal(filename, 'r') as f:
         for line in f:
-            #   print line
+            #   print(line)
             splits = line.lstrip(' ').split(',')
             if len(splits)<3:
                 continue
@@ -776,7 +777,7 @@ def read_blueforsRTF(filename, missing_as_empty=False, quiet=False):
     if missing_as_empty:
         if not os.path.isfile(filename):
             if not quiet:
-                print 'Skipping: %s'%filename
+                print('Skipping: %s'%filename)
             return np.zeros((2,0))
     v = read_bluefors(filename)
     v = [(t, float(val[0])) for t, val in v]
@@ -789,7 +790,7 @@ def _parse_day(date):
     """
     if date is None:
         return datetime.date.today()
-    if isinstance(date, basestring):
+    if isinstance(date, string_bytes_types):
         parts = date.split('-')
         if len(parts) != 3:
             parts = date.split('/')
@@ -877,11 +878,11 @@ def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:
                 Rs = set(Rvals[0])
                 Us = Ts.union(Rs)
                 if len(Ts.intersection(Rs)) == 0:
-                    print 'Merging data with no intersection between R and T (%i, %s)'%(ch, dirname)
+                    print('Merging data with no intersection between R and T (%i, %s)'%(ch, dirname))
                 elif len(Us) != max(len(Ts), len(Rs)):
-                    print 'Merging data with no complete set between R and T (%i, %s)'%(ch, dirname)
+                    print('Merging data with no complete set between R and T (%i, %s)'%(ch, dirname))
                 else:
-                    print 'Merging data with partial overlap between R and T (%i, %s)'%(ch, dirname)
+                    print('Merging data with partial overlap between R and T (%i, %s)'%(ch, dirname))
                 # make sure the values are in increasing time order
                 Tvals = Tvals[:,Tvals[0].argsort()]
                 Rvals = Rvals[:,Rvals[0].argsort()]
@@ -915,7 +916,7 @@ def read_blueforsTlog(start_date, stop_date=None, channels=[1,2,5,6], logdir='C:
     if merge_if_possible:
         for i in range(len(channels)-1):
             if results[i+1].shape != results[0].shape or np.all(results[i+1][0] != results[0][0]):
-                print 'WARNING: unable to merge the data. Returning a list instead of a numpy array.'
+                print('WARNING: unable to merge the data. Returning a list instead of a numpy array.')
                 break
         else:
             # did not break so all times are the same
@@ -1001,7 +1002,7 @@ def find_closest_times(data_set, times_to_search_for, max_delta=60*10.):
         ret.append(ar)
     if max_delta:
         if dmax > max_delta:
-            print 'WARNING: found values outside of requested range (max_delta found = %r)'%dmax
+            print('WARNING: found values outside of requested range (max_delta found = %r)'%dmax)
     if ret_one:
         return ret[0]
     return ret
@@ -1014,7 +1015,7 @@ def read_blueforsChannels(filename):
     Power out or local lockout produces  all valves open.
     """
     v = read_bluefors(filename)
-    d = [(t,dict(zip(s[1::2], map(lambda ss: bool(int(ss.strip())), s[2::2])))) for t,s in v]
+    d = [(t,dict(zip(s[1::2], [bool(int(ss.strip())) for ss in s[2::2]]))) for t,s in v]
     main_st = {1:'PROG', 4:'manual', 8:'PANEL ', 9:'GLITCH'}
     for i in range(len(v)):
         d[i][1]['main'] = main_st.get(int(v[i][1][0]), '!! UNKNOWN !!')
@@ -1026,7 +1027,7 @@ def read_blueforsStatus(filename):
     Returns a list of (time, dict) tuples.
     """
     v = read_bluefors(filename)
-    d = [(t,dict(zip(s[0::2], map(lambda ss: float(ss.strip()), s[1::2])))) for t,s in v]
+    d = [(t,dict(zip(s[0::2], [float(ss.strip()) for ss in s[1::2]]))) for t,s in v]
     return d
 
 def read_blueforsGauges(filename):
@@ -1056,7 +1057,7 @@ def _filename_build_check(file_base, logdir, dirname, quiet=False, missing_ok=Tr
     # did not find it.
     if missing_ok:
         if not quiet:
-            print 'Skipping: %s'%filename
+            print('Skipping: %s'%filename)
         return None
     return filename
 
@@ -1144,12 +1145,12 @@ class ICEoxford_Data(object):
         self.full_columns = columns
         if not isinstance(names2index, dict):
             names = names2index
-            index = range(len(names))
+            index = list(range(len(names)))
             names2index = dict( zip(names, index) )
         self._names2index = names2index
         self.d = data
         # added them as (hidden) attribute so tab expansion can find them
-        for n in names2index.iterkeys():
+        for n in names2index.keys():
             setattr(self, n, None)
         if tz_offset is None:
             tz_offset = time.timezone
@@ -1211,7 +1212,7 @@ def read_iceoxford(filenames_or_glob, prepend=None, tz_offset=None):
     if not all([c == c0  for c in all_columns_clean]):
             raise RuntimeError("The files don't have all the same data structure")
     if c0 != _full_columns:
-        print "read_iceoxford: the full_columns name are not the expected ones. Column assignment is probably wrong."
+        print("read_iceoxford: the full_columns name are not the expected ones. Column assignment is probably wrong.")
     data = np.concatenate(all_data_clean, axis=-1)
     return ICEoxford_Data(data, c0, filelist, [f for s, f in zip(all_sel, filelist) if s], tz_offset=tz_offset)
 
@@ -1468,7 +1469,7 @@ def filter_to_fraction(n_time_constant, n_filter=1):
     old = n_filter
     n_filter = int(n_filter) # makes sure n_filter is an integer
     if old != n_filter:
-        print 'n_filter was not an integer (%r). Converted it to %i'%(old, n_filter)
+        print('n_filter was not an integer (%r). Converted it to %i'%(old, n_filter))
     if n_filter <= 0 or n_filter > 100:
         raise ValueError('n_filter to be positive and non-zero (and not greater than 100)')
     et = np.exp(-t)
@@ -1503,7 +1504,7 @@ def fraction_to_filter(frac=0.99, n_filter=1):
     if n_filter != int(n_filter):
         old = n_filter
         n_filter = int(n_filter)
-        print 'n_filter was not an integer (%r). Converted it to %i'%(old, n_filter)
+        print('n_filter was not an integer (%r). Converted it to %i'%(old, n_filter))
     if n_filter <= 0 or n_filter > 100:
         raise ValueError('n_filter to be positive and non-zero (and not greater than 100)')
     func = lambda x: filter_to_fraction(x, n_filter)-frac
