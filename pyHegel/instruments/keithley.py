@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2017  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import time
@@ -34,6 +34,8 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             locked_calling, visa_wrap, _decode_block_auto, ChoiceSimpleMap,\
                             ChoiceMultiple
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
+
+from ..comp2to3 import string_bytes_types
 
 #hex(1510) = 0x05E6
 register_usb_name('Keithley Instruments Inc.', 0x05E6)
@@ -51,7 +53,7 @@ class ChoiceMultipleStrings(ChoiceBase):
     def __init__(self, choice_strings):
         self.choice_strings = choice_strings
     def __contains__(self, x): # performs x in y; with y=Choice()
-        if isinstance(x, basestring):
+        if isinstance(x, string_bytes_types):
             if x == 'all':
                 return True
             x = [x]
@@ -68,7 +70,7 @@ class ChoiceMultipleStrings(ChoiceBase):
         return ret
     def tostr(self, input_choice):
         # this is called by dev._tostr to convert a choice to the format needed by instrument
-        if isinstance(input_choice, basestring):
+        if isinstance(input_choice, string_bytes_types):
             if input_choice == 'all':
                 input_choice = self.choice_strings
             else:
@@ -327,8 +329,8 @@ class keithley_2450_smu(visaInstrumentAsync):
             filtern = 'off'
             filter = 1
         if nplc < 1.:
-            print 'WARNING: nplc is small, timing is very approximative'
-        print 'nplc=%f, filter=%s'%(nplc, filtern)
+            print('WARNING: nplc is small, timing is very approximative')
+        print('nplc=%f, filter=%s'%(nplc, filtern))
         meas_time = line_period * nplc * filter
         factor = 1.
         if self.src_readback_en.get() and not same:
@@ -340,7 +342,7 @@ class keithley_2450_smu(visaInstrumentAsync):
             count = self.meas_count.get()
             time = count*meas_time
             total_time = time*factor
-            print 'Mode is %s, count=%i (time=%f, total_time=%f)'%(mode, count, time, total_time)
+            print('Mode is %s, count=%i (time=%f, total_time=%f)'%(mode, count, time, total_time))
         else:
             # trigger
             d = self._trig_data
@@ -351,16 +353,16 @@ class keithley_2450_smu(visaInstrumentAsync):
                 total_time = delay
                 count = int(np.ceil(total_time/(meas_time*factor)))
                 time = count*meas_time
-                print 'Mode is %s, total_time=%f, limit_time=True (count=%i, time=%f)'%(mode, total_time, count, time)
+                print('Mode is %s, total_time=%f, limit_time=True (count=%i, time=%f)'%(mode, total_time, count, time))
             else:
                 time = count*inner_count*meas_time
                 total_time = count*(inner_count*meas_time*factor + delay)
                 if delay==0 and count>1:
-                    print 'Mode is %s, count=%i, inner_count=%i, delay=%f (total_time=%f, time=%f, total_count=%i, only setupable with set_avg_count)'%(
-                        mode, count, inner_count, delay, total_time, time, count*inner_count)
+                    print('Mode is %s, count=%i, inner_count=%i, delay=%f (total_time=%f, time=%f, total_count=%i, only setupable with set_avg_count)'%(
+                        mode, count, inner_count, delay, total_time, time, count*inner_count))
                 else:
-                    print 'Mode is %s, count=%i, inner_count=%i, delay=%f (total_time=%f, time=%f, total_count=%i)'%(
-                        mode, count, inner_count, delay, total_time, time, count*inner_count)
+                    print('Mode is %s, count=%i, inner_count=%i, delay=%f (total_time=%f, time=%f, total_count=%i)'%(
+                        mode, count, inner_count, delay, total_time, time, count*inner_count))
         return time
 
     def clear_system(self):
@@ -640,7 +642,7 @@ class keithley_2450_smu(visaInstrumentAsync):
         # So could end up with extra wait without data
         buffer = self._handle_buffer(buffer)
         algo = 1
-        if isinstance(inner_count, basestring):
+        if isinstance(inner_count, string_bytes_types):
             algo = 2
             inner_count = inner_count.lower()
             if inner_count != 'inf':
@@ -740,7 +742,7 @@ class keithley_2450_smu(visaInstrumentAsync):
             return scpiDevice(*arg, **kwarg)
         limit_conv_d = {src_mode_opt[['current']]:'CURRent:VLIMit', src_mode_opt[['voltage']]:'VOLTage:ILIMit'}
         def limit_conv(val, conv_val):
-            for k, v in limit_conv_d.iteritems():
+            for k, v in limit_conv_d.items():
                 if val in k:
                     return v
             raise KeyError('Unable to find key in limit_conv')
@@ -868,7 +870,7 @@ class keithley_2450_smu(visaInstrumentAsync):
         # This takes about 1 ms on usb
         self.trigger_blocks_list = scpiDevice(getstr='TRIGger:BLOCk:LIST?', str_type=str)
 
-        self.current_ioch = MemoryDevice(1, choices=range(1, 6+1))
+        self.current_ioch = MemoryDevice(1, choices=list(range(1, 6+1)))
         def ioCH_Device(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(ioch=self.current_ioch)
@@ -919,7 +921,7 @@ class keithley_2450_smu(visaInstrumentAsync):
         else:
             rnge = self.src_range.getcache()
         if abs(val) > rnge*1.05:
-            raise ValueError, self.perror('level is outside current range')
+            raise ValueError(self.perror('level is outside current range'))
     def _src_level_setdev(self, val, mode=None):
         mode = self.src_mode.getcache()
         self.write('SOURce:{mode} {val!r}'.format(mode=mode, val=val))
@@ -1144,12 +1146,12 @@ class keithley_2400_smu(visaInstrumentAsync):
             count = 1
         if count == 1:
             if not quiet:
-                print "Filter disabled"
+                print("Filter disabled")
             self.meas_filter_en.set(False)
             self.meas_nplc.set(nplc_val)
         else:
             if not quiet:
-                print "Filter enabled"
+                print("Filter enabled")
             self.meas_filter_en.set(True)
             self.meas_filter_type.set('repeat')
             self.meas_filter_count.set(count)
@@ -1167,14 +1169,14 @@ class keithley_2400_smu(visaInstrumentAsync):
             filter_type = self.meas_filter_type.get()
             if filter_type.lower() == 'moving':
                 if not quiet:
-                    print 'WARNING: Filter is of moving type. It should probably be in repeat.'
+                    print('WARNING: Filter is of moving type. It should probably be in repeat.')
             else:
                 if not quiet:
-                    print 'Repeat filter enabled (count is %i)'%filter_count
+                    print('Repeat filter enabled (count is %i)'%filter_count)
             val = one_val*filter_count
         else:
             if not quiet:
-                print 'Filter disabled.'
+                print('Filter disabled.')
             val = one_val
         return val
 
@@ -1401,7 +1403,7 @@ class keithley_2400_smu(visaInstrumentAsync):
             return scpiDevice(*arg, **kwarg)
         limit_conv_d = {src_mode_opt[['current']]:'voltage', src_mode_opt[['voltage']]:'current'}
         def limit_conv(val, conv_val):
-            for k, v in limit_conv_d.iteritems():
+            for k, v in limit_conv_d.items():
                 if val in k:
                     return v
             raise KeyError('Unable to find key in limit_conv')
@@ -1528,7 +1530,7 @@ class keithley_2400_smu(visaInstrumentAsync):
         else:
             rnge = self.src_range.getcache()
         if abs(val) > rnge*K:
-            raise ValueError, self.perror('level is outside current range')
+            raise ValueError(self.perror('level is outside current range'))
     def _src_level_setdev(self, val, mode=None):
         mode = self.src_mode.getcache()
         self.write('SOURce:{mode} {val!r}'.format(mode=mode, val=val))
