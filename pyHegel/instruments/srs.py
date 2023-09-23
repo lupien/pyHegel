@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2019  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import time
@@ -89,11 +89,11 @@ class sr830_lia(visaInstrument):
         self._dev_clear()
     def _check_snapsel(self,sel):
         if not (2 <= len(sel) <= 6):
-            raise ValueError, 'snap sel needs at least 2 and no more thant 6 elements'
+            raise ValueError('snap sel needs at least 2 and no more thant 6 elements')
     def _snap_getdev(self, sel=[1,2], norm=False, autogain=None):
         # sel must be a list
         self._check_snapsel(sel)
-        sel = map(str, sel)
+        sel = list(map(str, sel))
         if autogain is not None and autogain is not False:
             if autogain is True:
                 autogain = {}
@@ -108,9 +108,9 @@ class sr830_lia(visaInstrument):
         self._check_snapsel(sel)
         headers = [ self._snap_type[i] for i in sel]
         if norm:
-            headers = map(lambda x: x+'_norm', headers) + headers
+            headers = [x+'_norm' for x in headers] + headers
         d = self.snap._format
-        d.update(multi=headers, graph=range(len(sel)))
+        d.update(multi=headers, graph=list(range(len(sel))))
         return BaseDevice.getformat(self.snap, sel=sel, norm=norm, **kwarg)
 
     def auto_gain_soft(self, limit=None, verbose=False):
@@ -124,34 +124,34 @@ class sr830_lia(visaInstrument):
             i += 1
             if i > 10:
                 if verbose:
-                    print 'Aborting autogain, too many iterations'
+                    print('Aborting autogain, too many iterations')
                 break
             overload = self.status_byte.get() & 7 # any overload
             R = self.r.get()
             tc_factor = 2.
             if verbose:
-                print 'Current R value, sens:', R, curr_sens
+                print('Current R value, sens:', R, curr_sens)
             if overload:
                 if curr_sens == 1.:
                     if verbose:
-                        print 'Aborting autogain due to overload on 1V'
+                        print('Aborting autogain due to overload on 1V')
                     break
                 # Go up at most a factor of 1000.
                 ind = sensesl.index(curr_sens)
                 new_sens = sensesl[min(ind+9, len(sensesl)-1)]
                 tc_factor = 4.
                 if verbose:
-                    print 'Autoranging to 1 because of overload to', new_sens
+                    print('Autoranging to 1 because of overload to', new_sens)
             elif R > 0.95*curr_sens:
                 if curr_sens == 1.:
                     if verbose:
-                        print 'Aborting up autogain because already at 1V'
+                        print('Aborting up autogain because already at 1V')
                     break
                 # Go up one
                 ind = sensesl.index(curr_sens)
                 new_sens = sensesl[ind+1]
                 if verbose:
-                    print 'Autogain going up to', new_sens
+                    print('Autogain going up to', new_sens)
             else:
                 # find the best gain.
                 frac = 0.8
@@ -163,7 +163,7 @@ class sr830_lia(visaInstrument):
                         # This is to generate some hysteresis, we will only go up
                         # if >0.95*curr_sens
                         if verbose:
-                            print 'Autoranging prevented from going up.'
+                            print('Autoranging prevented from going up.')
                         break
                 if curr_sens/new_sens >= 1000.:
                     # limit to a change of 1000.
@@ -172,10 +172,10 @@ class sr830_lia(visaInstrument):
                     tc_factor = 4.
                 if new_sens == curr_sens:
                     if verbose:
-                        print 'Autogain reached best target of', new_sens
+                        print('Autogain reached best target of', new_sens)
                     break
                 if verbose:
-                    print 'Autogain going down to', new_sens
+                    print('Autogain going down to', new_sens)
             self.sens.set(new_sens)
             changed = True
             curr_sens = self.sens.getcache()
@@ -433,7 +433,7 @@ class sr865_lia(visaInstrument):
 
     def _check_snapsel(self, sel):
         if not (2 <= len(sel) <= 3):
-            raise ValueError, 'snap sel needs at least 1 and no more thant 3 elements'
+            raise ValueError('snap sel needs at least 1 and no more thant 3 elements')
         if not isinstance(sel, (np.ndarray, list, tuple)):
             sel = [sel]
         return sel
@@ -464,11 +464,11 @@ class sr865_lia(visaInstrument):
         sel = self._check_snapsel(sel)
         headers = sel
         if norm:
-            headers = map(lambda x: x+'_norm', headers) + headers
+            headers = [x+'_norm' for x in headers] + headers
         d = self.snap._format
         if len(headers) == 1:
             headers = False
-        d.update(multi=headers, graph=range(len(sel)))
+        d.update(multi=headers, graph=list(range(len(sel))))
         return BaseDevice.getformat(self.snap, sel=sel, **kwarg)
 
     def _input_conf_setdev(self, val):
@@ -1057,7 +1057,7 @@ class sr780_analyzer(visaInstrumentAsync):
         disp_st = self.get_display_status()
         self._cum_display_status |= disp_st
         tocheck = self._async_tocheck
-        #print 'tocheck %0x %0x %0x'%(tocheck, self._cum_display_status, disp_st)
+        #print('tocheck %0x %0x %0x'%(tocheck, self._cum_display_status, disp_st))
         if self._cum_display_status&tocheck == tocheck:
             self.write('DSPE 0')
             self._cum_display_status = 0
@@ -1099,7 +1099,7 @@ class sr780_analyzer(visaInstrumentAsync):
         return ret
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
-        if options.has_key('disp'):
+        if 'disp' in options:
             self.current_display.set(options['disp'])
         want_ch = 1
         meas = self.meas.getcache()
@@ -1149,7 +1149,7 @@ class sr780_analyzer(visaInstrumentAsync):
         self.input_mode = devChOption('I{ch}MD', choices=ChoiceIndex(['Analog', 'Capture']))
         self.input_grounding = devChOption('I{ch}GD', choices=ChoiceIndex(['Float', 'Ground']))
         self.input_coupling = devChOption('I{ch}CP', choices=ChoiceIndex(['DC', 'AC', 'ICP']))
-        self.input_range_dBV = devChOption('I{ch}RG', str_type=int, choices=range(-50, 36, 2))
+        self.input_range_dBV = devChOption('I{ch}RG', str_type=int, choices=list(range(-50, 36, 2)))
         self.input_autorange_en = devChOption('A{ch}RG', str_type=bool)
         self.input_autorange_mode = devChOption('I{ch}AR', choices=ChoiceIndex(['Normal', 'Tracking']))
         self.input_antialiasing_en = devChOption('I{ch}AF', str_type=bool)
