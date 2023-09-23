@@ -90,13 +90,13 @@ def test_plot(n=100, m=100000, trace='new', newfig=True, proc_time_ms=20, drawit
                      Therefore the actual time can be shorter (event 0) if
                      no events are pending. And longer if emptying the queue
                      takes a long time (try:
-                         foo=plot(randn(1000000)); to=time.time(); QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 20); print time.time()-to)
+                         foo=plot(randn(1000000)); to=time.time(); QtGui.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 20); print(time.time()-to))
                      Use a negative value (like -1) to disable this call.
                      Without this call, no widget update will happen (no paint
                      no response to mouse, ...)
     """
     if not collect:
-        print 'auto collect enable: ', gc.isenabled(), ' thesholds: ', gc.get_threshold()
+        print('auto collect enable: ', gc.isenabled(), ' thesholds: ', gc.get_threshold())
     for i in range(n):
         if newfig:
             if trace:
@@ -123,16 +123,16 @@ def test_plot(n=100, m=100000, trace='new', newfig=True, proc_time_ms=20, drawit
                 QtGui.QApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
         if not close_before and closeit:
             do_close(f, trace)
-        print 'i=%03i'%i,'memory(rss: %.3f, vms: %.3f)'%get_memory(), 'garbage:', gc.get_count(),
+        print('i=%03i'%i,'memory(rss: %.3f, vms: %.3f)'%get_memory(), 'garbage:', gc.get_count(), end=' ')
         if trace:
             # refecount -1 for the temporary. So if it is 1, the next del will really remove it
             # from memory
-            print 'Traces len',len(traces._figlist), 'ref_count', sys.getrefcount(f)-1,
+            print('Traces len',len(traces._figlist), 'ref_count', sys.getrefcount(f)-1, end=' ')
         del f
         if collect:
-            print 'Collecting:', gc.collect()
+            print('Collecting:', gc.collect())
         else:
-            print
+            print()
 
 #close() calls:
 # f.canvas.manager.toolbar.destroy() # this does not seem necessary to me, I did some tests without it
