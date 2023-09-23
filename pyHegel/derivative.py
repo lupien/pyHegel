@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -38,7 +38,7 @@ For smoothing curves (not derivatives) you might also try the external package s
 In particular, statsmodels.nonparametric.smoothers_lowess.lowess
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 from numpy import diff
 from scipy.misc import central_diff_weights
@@ -54,11 +54,11 @@ def D1(x, y, axis=-1):
     return x[:-1]+dx/2, dy/dx
 
 def _do_strip(x, y, Np, axis=-1):
-    first = Np/2
+    first = Np//2
     if Np%2: #odd
-        last = - (Np/2)
+        last = - (Np//2)
     else:
-        last = - (Np/2) + 1
+        last = - (Np//2) + 1
     if last == 0:
         last = None
     ind = [slice(None)]*x.ndim
