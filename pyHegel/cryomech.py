@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -25,7 +25,7 @@
 Code to communicate with the Cryomech compressor
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import datetime
 import os
@@ -33,6 +33,7 @@ import serial
 import sys
 import time
 
+from .comp2to3 import string_bytes_types
 
 def do_escape(message):
     ret = ''
@@ -65,7 +66,7 @@ def undo_escape(message):
             elif c == '2':
                 c = '\07'
             else:
-                raise ValueError, 'Invalid escape character: %r'%c
+                raise ValueError('Invalid escape character: %r'%c)
         ret += c
     return ret
 
@@ -153,7 +154,7 @@ class Cryomech(object):
             self.com_obj.Close()
         else:
             self.dev.close()
-        print 'device erased!'
+        print('device erased!')
     def flush(self):
         if self.active_x:
             pass
@@ -166,16 +167,16 @@ class Cryomech(object):
         while True:
             r=self.dev.read()
             if r=='':
-                raise ValueError, 'timedout while reading. current string %r'%ret
+                raise ValueError('timedout while reading. current string %r'%ret)
             ret += r
             if r == '\r':
                 if started:
                     return ret
                 else:
-                    raise ValueError, 'Invalid input sequence: %r'%ret
+                    raise ValueError('Invalid input sequence: %r'%ret)
             if r == '\x02':
                 if started:
-                    raise ValueError, 'Received multiple start. current string %r'%ret
+                    raise ValueError('Received multiple start. current string %r'%ret)
                 started = True
                 ret = r
     def _incr_serialno(self):
@@ -198,7 +199,7 @@ class Cryomech(object):
         if self.do_timestamp:
             serialno = self._serialno
             if serialno < 0x10 or serialno > 0xff:
-                raise ValueError, 'Serial out of range (%i)'%serialno
+                raise ValueError('Serial out of range (%i)'%serialno)
             chksum_base = 0x40
             extra = chr(serialno)
         chksum = self.calc_chksum(message, serialno=serialno)
@@ -264,20 +265,20 @@ class Cryomech(object):
         elif question == 10:
             cmd = 0xa
             if index&0x13:
-                raise ValueError, 'Invalid button to push'
+                raise ValueError('Invalid button to push')
             message = chr(index)
         elif question == 14:
             if index<0 or index>0x1a:
-                raise ValueError, 'index out of 0-0x1a range'
+                raise ValueError('index out of 0-0x1a range')
             cmd = 0xe
             message = '\x4d\x00'+chr(index)
-        elif isinstance(question, basestring):
+        elif isinstance(question, string_bytes_types):
             if val is None:
                 cmd, message = self.cryo_readdict_messsage(self.HASHES[question], index=index)
             else:
                 cmd, message = self.cryo_writedict_messsage(self.HASHES[question], val, index=index)
         else:
-            raise ValueError, 'Unknown command'
+            raise ValueError('Unknown command')
         if self.active_x:
             response, RSPFflag = self.com_obj.DoTransaction(self.addr, cmd-1, message)
             # encode to mbcs means to use the default windows encoding.
@@ -293,29 +294,29 @@ class Cryomech(object):
         return answer
     def smdp_parse_input(self, message):
         if message == '':
-            raise ValueError, 'Empty message'
+            raise ValueError('Empty message')
         stx = '\x02'
         cr = '\r'
         if len(message) < 6 or message[0] != stx or message[-1] != cr:
-            raise ValueError, 'Invalid message: %r'%message
+            raise ValueError('Invalid message: %r'%message)
         chk1=ord(message[-3])
         chk2=ord(message[-2])
         addr=ord(message[1])
         cmd_rsp=ord(message[2])
         message = message[3:-3] # remove stx and cr delimiters and addr, cmd and checksums
         if (chk1>>4) != (chk2>>4) or (chk1>>4) not in (0x3, 0x4):
-            raise ValueError,'Invalid chk sums %i,%i. %r'%(chk1,chk2, message)
+            raise ValueError('Invalid chk sums %i,%i. %r'%(chk1,chk2, message))
         chksum = ((chk1&0x0f)<<4) + (chk2&0x0f)
         serialno = None
         if (chk1>>4) == 0x4:
             serialno = ord(message[-1])
             message = message[:-1] # remove serial from message
             if serialno != self._serialno:
-                raise ValueError, 'Invalid serial number (%i), excected %i'%(serialno, self._serialno)
+                raise ValueError('Invalid serial number (%i), excected %i'%(serialno, self._serialno))
         message = undo_escape(message)
         calc_sum = self.calc_chksum(message, cmd_rsp, serialno)
         if calc_sum != chksum:
-            raise ValueError, 'checksum error. message=%i, calc=%i'%(chksum, calc_sum)
+            raise ValueError('checksum error. message=%i, calc=%i'%(chksum, calc_sum))
         cmd = cmd_rsp>>4
         rsp = cmd_rsp&0x07
         if rsp not in (1, 6):
@@ -327,7 +328,7 @@ class Cryomech(object):
                       'inhibited',
                       'Obsolete command (nop)',
                       'Reserved']
-            raise ValueError, 'return code not OK, instead rsp=%i: %s'%(rsp, errors[rsp])
+            raise ValueError('return code not OK, instead rsp=%i: %s'%(rsp, errors[rsp]))
         powerfail = ((cmd_rsp&0x08) != 0)
         ret = self.smdp_parse_message(cmd, message)
         ret.update(powerfail=powerfail, serialno=serialno, chksum=chksum, addr=addr, rsp=rsp)
@@ -346,17 +347,17 @@ class Cryomech(object):
             dict_hash = (ord(message[1])<<8) + ord(message[2])
             index = ord(message[3])
             data = (ord(message[4])<<24) + (ord(message[5])<<16) + (ord(message[6])<<8) + (ord(message[7]))
-            if dict_hash not in self.HASHES.values():
-                raise ValueError, 'Unknow hash %0x, index=%i, data=%i'%(dict_hash, index, data)
+            if dict_hash not in list(self.HASHES.values()):
+                raise ValueError('Unknow hash %0x, index=%i, data=%i'%(dict_hash, index, data))
             else:
-                for k,v in self.HASHES.iteritems():
+                for k,v in self.HASHES.items():
                     if dict_hash == v:
                         dict_hash = k
                         break
         elif cmd == 8 and len(message)==0:
             data = message
         else:
-            raise ValueError, 'Unknown command (%i): data=%r'%(cmd, message)
+            raise ValueError('Unknown command (%i): data=%r'%(cmd, message))
         return dict(data=data, index=index, dict_hash=dict_hash, cmd=cmd)
     def get_all(self):
         lask = lambda q: self.ask(q)['data']
@@ -468,7 +469,7 @@ def do_log(com_obj, path, wait=5*60.):
             wait_left = max(0.1, wait-wait_done) # at least 0.1 s
             time.sleep(wait_left)
         except ValueError as exc:
-            print 'Problem', exc
+            print('Problem', exc)
             com_obj.flush()
             time.sleep(30)
 
