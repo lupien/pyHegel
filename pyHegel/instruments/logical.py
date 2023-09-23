@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import os
 import subprocess
@@ -39,7 +39,7 @@ def _asDevice(dev):
     if isinstance(dev, BaseInstrument):
         dev = dev.alias
         if dev is None:
-            raise ValueError, 'We required a device, but the given instrument has no alias'
+            raise ValueError('We required a device, but the given instrument has no alias')
     return dev
 
 class _dummy_delay_Dev(object):
@@ -129,7 +129,7 @@ class LogicalDevice(BaseDevice):
         basedevs_kwarg=[]
         if basedevs is not None:
             if basedev is not None:
-                print 'You should not use basedev and basedevs at the same time. basedev is now basedevs[0]'
+                print('You should not use basedev and basedevs at the same time. basedev is now basedevs[0]')
             basedevs = basedevs[:] # make a copy of the list so we don't change the original
             for i, dev in enumerate(basedevs):
                 if isinstance(dev, tuple):
@@ -176,7 +176,7 @@ class LogicalDevice(BaseDevice):
         self.name = self.__class__.__name__ # this should not be used
     def __del__(self):
         if not self._quiet_del:
-            print 'Deleting logical device:', self
+            print('Deleting logical device:', self)
     def _get_docstring(self, added=''):
         added += '\nbasedev=%r\nbasedevs=%r\n'%(self._basedev_orig, self._basedevs_orig)
         return super(LogicalDevice, self)._get_docstring(added=added)
@@ -237,25 +237,25 @@ class LogicalDevice(BaseDevice):
                 if kw is None:
                     kw = {}
                 if not isinstance(kw, dict):
-                    raise ValueError, "kw option needs to be a dictionnary"
+                    raise ValueError("kw option needs to be a dictionnary")
                 base_kwarg.update(kw)
                 kwargs = [base_kwarg]
         else:
             if kw is None:
                 kw = [{}]*len(self._basedevs)
             if not isinstance(kw, list):
-                raise ValueError, "kw option needs to be a list of dictionnary"
+                raise ValueError("kw option needs to be a list of dictionnary")
             if len(kw) != self._basedevs_N:
-                raise ValueError, self.perror('When using kw, it needs to have the correct number of elements. Was %i, should have been %i.'%(len(kw), self._basedevs_N))
+                raise ValueError(self.perror('When using kw, it needs to have the correct number of elements. Was %i, should have been %i.'%(len(kw), self._basedevs_N)))
             for dev, base_kwarg, subkw, a_get in zip(self._basedevs, self._basedevs_kwarg, kw, autoget):
                 if a_get:
                     if not isinstance(subkw, dict):
-                        raise ValueError, "kw option needs to be a list of dictionnary"
+                        raise ValueError("kw option needs to be a list of dictionnary")
                     devs.append(dev)
                     base_kwarg, kwarg_clean = self._combine_kwarg(kwarg, base_kwarg, op)
                     base_kwarg.update(subkw)
                     kwargs.append(base_kwarg)
-        return zip(devs, kwargs), kwarg_clean
+        return list(zip(devs, kwargs)), kwarg_clean
     @locked_calling_dev
     def force_get(self):
         gl, kwarg = self._get_auto_list(autoget='all')
@@ -285,27 +285,27 @@ class LogicalDevice(BaseDevice):
         return ret
     def _async_detect(self, max_time=.5): # 0.5 s max by default
         return wait_on_event(self._async_done_event, max_time=max_time)
-    def getasync(self, async, **kwarg):
+    def getasync(self, async_st, **kwarg):
         gl, kwarg = self._get_auto_list(kwarg)
         autoget = self._autoget != False
-        if async == 0:
+        if async_st == 0:
             if autoget:
                 self._async_done_event.clear()
                 self._cached_data = [None]*len(gl)
             else:
                 self._async_done_event.set()
         if autoget:
-            if async <= 2:
+            if async_st <= 2:
                 for i, (dev, base_kwarg) in enumerate(gl):
-                    val = dev.getasync(async, **base_kwarg)
-                    if async == 2:
+                    val = dev.getasync(async_st, **base_kwarg)
+                    if async_st == 2:
                         self._cached_data[i] = dev.getasync(3, **base_kwarg)
-            if async == 2:
+            if async_st == 2:
                 self._async_done_event.set()
-        return super(LogicalDevice, self).getasync(async, **kwarg)
+        return super(LogicalDevice, self).getasync(async_st, **kwarg)
     def _check_empty_kwarg(self, kwarg, set_check_cache=True):
         if len(kwarg) != 0:
-            raise ValueError(self.perror('Invalid kwarg: %r')%kwarg.keys())
+            raise ValueError(self.perror('Invalid kwarg: %r')%list(kwarg.keys()))
         self._check_cache['set_kwarg'] = kwarg
     def _combine_kwarg(self, kwarg_dict, base=None, op='get'):
         # this combines the kwarg_dict with a base.
@@ -383,8 +383,8 @@ class ScalingDevice(LogicalDevice):
                 graph = [0]
             else:
                 if multi_r is None:
-                    multi_r = map(lambda x: x+'_raw', multi_c)
-                multi = map(lambda x: x+'_scale', multi_c) + multi_r
+                    multi_r = [x+'_raw' for x in multi_c]
+                multi = [x+'_scale' for x in multi_c] + multi_r
         else:
             if multi_c is not None:
                 multi = multi_c
@@ -536,8 +536,8 @@ class FunctionDevice(LogicalDevice):
         conv = np.array([self.from_raw(p) for p in points])
         roundtrip = np.array([self.to_raw(p) for p in conv])
         diff = np.abs(roundtrip - points)
-        print 'Largest absolute difference:', diff.max()
-        print 'Largest relative difference:', (diff/maxpt).max()
+        print('Largest absolute difference:', diff.max())
+        print('Largest relative difference:', (diff/maxpt).max())
         if ret:
             return points, roundtrip, conv
 
@@ -554,7 +554,7 @@ class LimitDevice(LogicalDevice):
     """
     def __init__(self, basedev, min=None, max=None, doc='', **extrak):
         if min is None or max is None:
-            raise ValueError, 'min and max need to be specified for LimitDevice'
+            raise ValueError('min and max need to be specified for LimitDevice')
         doc+= 'min,max=%g,%g (initial)'%(min, max)
         super(type(self), self).__init__(basedev=basedev, min=min, max=max, doc=doc, **extrak)
         self._setdev_p = True # needed to enable BaseDevice Check, set (Checking mode)
@@ -640,7 +640,7 @@ class CopyDevice(LogicalDevice):
     def _combine_kwarg(self, kwarg_dict, base=None, op='get'):
         if op in ['set', 'check']:
             if kwarg_dict != {}:
-                raise TypeError,'Invalid Parameter for CopyDevice.set: %r'%kwarg_dict
+                raise TypeError('Invalid Parameter for CopyDevice.set: %r'%kwarg_dict)
             else:
                 base_kwarg, kwarg_clean = {}, {}
         base_kwarg, kwarg_clean = super(CopyDevice, self)._combine_kwarg(kwarg_dict, base, op)
@@ -690,7 +690,7 @@ class ExecuteDevice(LogicalDevice):
         self._multi = multi
         if multi is not None:
             self._format['multi'] = multi
-            self._format['graph'] = range(len(multi))
+            self._format['graph'] = list(range(len(multi)))
         self._getdev_p = True
     def getformat(self, **kwarg):
         ((basedev, base_kwarg),), kwarg_clean = self._get_auto_list(kwarg)
@@ -901,9 +901,9 @@ class Average(LogicalDevice):
             diff = np.diff(vals, axis=0)
             w = np.where( np.abs(diff) < 1e-10)[-1]
             if len(w) == 0:
-                print 'Number of repeats: None'
+                print('Number of repeats: None')
             else:
-                print 'Number of repeats: ', np.bincount(w, minlength=vals.shape[-1])
+                print('Number of repeats: ', np.bincount(w, minlength=vals.shape[-1]))
         avg = vals.mean(axis=0)
         std = vals.std(axis=0, ddof=1)
         N = vals.shape[0]
@@ -960,7 +960,7 @@ class RampDevice(LogicalDevice):
         if self._mode_is_rate:
             return self._rate
         else:
-            print 'Mode is currently in interval'
+            print('Mode is currently in interval')
     @rate.setter
     def rate(self, rate):
         self._rate = np.abs(rate)
@@ -968,7 +968,7 @@ class RampDevice(LogicalDevice):
     @property
     def interval(self):
         if self._mode_is_rate:
-            print 'Mode is currently in rate'
+            print('Mode is currently in rate')
         else:
             return self._interval
     @interval.setter
@@ -1012,7 +1012,7 @@ class RampDevice(LogicalDevice):
                     too += fix_too
                     self._accumulated_fix += fix_too
                     if self._accumulated_fix > 10 and not self._accumulated_fix_warned:
-                        print self.perror('The dt time is probably too small. Many dt*3 overruns.')
+                        print(self.perror('The dt time is probably too small. Many dt*3 overruns.'))
                         self._accumulated_fix_warned = True
                 dval_next = (tf-too)*rate*np.sign(dval_total)
                 if np.abs(dval_next) < np.abs(dval_total):
