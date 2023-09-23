@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,15 +21,16 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
-import ConfigParser
 import imp
 import glob
 import os
 import os.path
 from os.path import join as pjoin, isdir, isfile
 import re
+
+from .comp2to3 import configparser
 
 CONFIG_DIR = 'pyHegel'
 CONFIG_DOT_DIR = '.pyHegel'
@@ -164,11 +165,11 @@ def load_local_config():
         if isfile(p):
             return imp.load_source(LOCAL_CONFIG, p)
     # no file found, so load the default template
-    print '\n'+'-'*30
-    print 'WARNING: using %s template. You should create your own %s file.'%(
-            LOCAL_CONFIG, LOCAL_CONFIG_FILE)
-    print 'see the pyHegel/local_config_template.py for more information'
-    print '-'*30+'\n'
+    print('\n'+'-'*30)
+    print('WARNING: using %s template. You should create your own %s file.'%(
+            LOCAL_CONFIG, LOCAL_CONFIG_FILE))
+    print('see the pyHegel/local_config_template.py for more information')
+    print('-'*30+'\n')
     return imp.load_source(LOCAL_CONFIG, DEFAULT_LOCAL_CONFIG_PATH)
 
 
@@ -192,7 +193,7 @@ def load_instruments(exclude=None):
                 raise RuntimeError('Trying to load "%s" but the name is invalid (should only contain letters, numbers and _)'%
                                     f)
             if name in loaded:
-                print 'Skipping loading "%s" because a module with that name is already loaded from %s'%(f, loaded[name])
+                print('Skipping loading "%s" because a module with that name is already loaded from %s'%(f, loaded[name]))
             fullname = INSTRUMENTS_BASE+'.'+name
             # instead of imp.load_source, could do
             #  insert path in sys.path
@@ -207,11 +208,11 @@ def load_instruments(exclude=None):
 
 class PyHegel_Conf(object):
     def __init__(self):
-        self.config_parser = ConfigParser.SafeConfigParser()
+        self.config_parser = configparser.SafeConfigParser()
         paths = get_conf_dirs()
         paths = [pjoin(d, CONFIG_NAME) for d in paths]
         paths.append(DEFAULT_CONFIG_PATH)
-        # ConfigParser.SafeConfigParser.read reads the files in the order given
+        # configparser.SafeConfigParser.read reads the files in the order given
         # so if multiple files are present, later ones overide settings in
         # earlier ones. Therefore we need the more important files last
         # however paths is in the order of more important first. So inverse.
