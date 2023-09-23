@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -27,7 +27,7 @@ see also the module fit_functions for many examples of functions to
 use in fitting.
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import inspect
@@ -37,8 +37,8 @@ import matplotlib.pylab as plt
 import matplotlib.colors
 import matplotlib.text
 import collections
-import __builtin__
 
+from .comp2to3 import string_bytes_types, builtins_set, inspect_getargspec, is_py2
 
 def getVarNames(func):
     """
@@ -51,7 +51,7 @@ def getVarNames(func):
            paramters. They are None if not present.
           defaults are the default values for the kwpara
     """
-    (args, varargs, varkw, defaults) = inspect.getargspec(func)
+    (args, varargs, varkw, defaults) = inspect_getargspec(func)
     if defaults is None:
         Nkw = 0
     else:
@@ -63,7 +63,7 @@ def getVarNames(func):
     return (para, kwpara, varargs, varkw, defaults)
 
 def toEng(p, pe, signif=2):
-    if isinstance(p, (str, unicode)):
+    if isinstance(p, string_bytes_types):
         raise NotImplementedError
     if not np.isscalar(p): # lists and arrays:
         raise NotImplementedError
@@ -79,10 +79,10 @@ def toEng(p, pe, signif=2):
     p10f = int(np.floor(p10))
     #For pe make the rescaled value
     # between 9.9 and 0.010
-    pe10Eng = (int(np.floor(pe10+2))/3)*3.
+    pe10Eng = (int(np.floor(pe10+2))//3)*3.
     #For p make the rescaled value
     # between 499 and 0.5
-    p10Eng = (int(np.floor(p10 - np.log10(.5)))/3)*3.
+    p10Eng = (int(np.floor(p10 - np.log10(.5)))//3)*3.
     if pe != 0:
         expEng = max(pe10Eng, p10Eng)
         frac_prec = signif-1 - (pe10f-expEng)
@@ -146,7 +146,7 @@ def _splitResult(names, ps, pes, signif=2):
             full_i.append(i)
         r = [name, pstr_l, pstr_r, pestr_l, pestr_r, expstr]
         ret_str.append(r)
-        ret_len.append( map(len,r) )
+        ret_len.append( list(map(len,r)) )
         i += 1
     ret_len = np.array(ret_len)
     if len(full_i) > 0:
@@ -173,11 +173,11 @@ def strResult(func, p, pe, extra={}, signif=2):
     Npara = len(para) -1
     para = para[1:] # first para is X
     if len(pe) != N:
-        raise ValueError, "p and pe don't have the same dimension"
+        raise ValueError("p and pe don't have the same dimension")
     if Npara > N:
-        raise ValueError, "The function has too many positional parameters"
+        raise ValueError("The function has too many positional parameters")
     if Npara < N and varargs is None and kwpara is None:
-        raise ValueError, "The function has too little positional parameters"
+        raise ValueError("The function has too little positional parameters")
     if Npara < N and varargs is not None:
         # create extra names par1, par2, for all needed varargs
         para.extend(['par%i'%(i+1) for i in range(N-Npara)])
@@ -186,11 +186,11 @@ def strResult(func, p, pe, extra={}, signif=2):
         kwpara = kwpara[N-Npara:]
         defaults = defaults[N-Npara:]
     if defaults is not None:
-        kw = collections.OrderedDict(zip(kwpara, defaults))
+        kw = collections.OrderedDict(list(zip(kwpara, defaults)))
     else:
         kw = {}
     kw.update(extra)
-    splits, maxlen, maxlen_noerr = _splitResult(para+kw.keys(), list(p)+kw.values(), list(pe)+[0]*len(kw), signif=signif)
+    splits, maxlen, maxlen_noerr = _splitResult(para+list(kw.keys()), list(p)+list(kw.values()), list(pe)+[0]*len(kw), signif=signif)
     maxlen[0] += 1 # because of += ':'
     # unicode: plus-minus = 00B1, multiplication(times) = 00D7
     err_len = maxlen[2]+maxlen[3]+maxlen[4]+4 # +4 is for ' ± ' and the '.'
@@ -213,7 +213,10 @@ def strResult(func, p, pe, extra={}, signif=2):
 
 def printResult(func, p, pe, extra={}, signif=2):
     s = u'\n'.join(strResult(func, p, pe, extra, signif))
-    print s.encode('utf8')
+    if is_py2:
+        print(s.encode('utf8'))
+    else:
+        print(s)
 
 def _get_axis_bgcolor(axis):
     # get_axis_bgcolor cot depracated in matplotlib 2.0 and removed in 2.2
@@ -264,7 +267,7 @@ def plotResult(func, p, pe, extra={}, signif=2, loc='upper right', ax=None, form
             C : (.5, .5, 'center', 'center')
             }
     if not isinstance(loc, tuple):
-        if isinstance(loc, basestring):
+        if isinstance(loc, string_bytes_types):
             loc = codes[loc]
         x, y, ha, va = loc_para[loc]
         loc = x, y
@@ -282,7 +285,7 @@ def _handle_adjust(func, p0, adjust, noadjust):
     if adjust is None and noadjust is None:
         return slice(None)
     Np = len(p0)
-    all_index = range(Np)
+    all_index = list(range(Np))
     para, kwpara, varargs, varkw, defaults = getVarNames(func)
     names = para
     Npara = len(para)
@@ -297,17 +300,17 @@ def _handle_adjust(func, p0, adjust, noadjust):
     if noadjust is None:
         noadjust = []
     #s = set() # This fails when running under pyHegel (not on import).
-    s = __builtin__.set()
+    s = builtins_set()
     # cleanup adjust. Remove duplicates, handle named variables.
     for a in adjust:
-        if isinstance(a, basestring):
+        if isinstance(a, string_bytes_types):
             s.add(names.index(a)-1) # -1 to remove the x parameter of f(x, p1, ...)
         else:
             s.add(a)
     # Now cleanup noadjust
-    sna = __builtin__.set()
+    sna = builtins_set()
     for na in noadjust:
-        if isinstance(na, basestring):
+        if isinstance(na, string_bytes_types):
             sna.add(names.index(na)-1)
         else:
             sna.add(na)
@@ -486,7 +489,7 @@ def fitcurve(func, x, y, p0, yerr=None, extra={}, errors=True, adjust=None, noad
     if not skip:
         p, cov_x, infodict, mesg, ier = leastsq(f, p0[adj], args=(x, y, yerra), full_output=True, **kwarg)
         if ier not in [1, 2, 3, 4]:
-            print 'Problems fitting:', mesg
+            print('Problems fitting:', mesg)
     else:
         p = p0[adj]
     chi2 = np.sum(f(p, x, y, yerra)**2)
@@ -612,10 +615,14 @@ def fitplot(func, x, y, p0, yerr=None, extra={}, sel=None, fig=None, skip=False,
         # This is a bit of a hack, a matplotlib update could break this.
         # Another way would be to create a plot, use get_color() on it and remove the plot.
         try:
-            # new in matplotlib 1.5
-            col_data = ax1._get_lines.prop_cycler.next()['color']
+            # This works from 2.1
+            col_data = ax1._get_lines.get_next_color()
         except AttributeError:
-            col_data = ax1._get_lines.color_cycle.next()
+            try:
+                # new in matplotlib 1.5
+                col_data = ax1._get_lines.prop_cycler.next()['color']
+            except AttributeError:
+                col_data = ax1._get_lines.color_cycle.next()
     if col_fit is None:
         try:
             # new in matplotlib 1.5
@@ -713,8 +720,8 @@ if __name__ == "__main__":
     res2 = fitplot(noiseRFfit, x, y,[.05, -.003,4.,.01e-3], extra=dict(N=10,f=20e9), fig=2)
     res3 = fitplot(noiseRFfit, x, y,[.05, -.003,4.,.01e-3], extra=dict(N=10,f=20e9), yerr=1e-5, fig=3)
     res4 = fitplot(noiseRFfit, x, y,[.05, -.003,4.,.01e-3], extra=dict(N=10,f=20e9), yerr=1e-6, fig=4)
-    print '-----------------------------------------'
-    print ' Comparison with poly fit'
+    print('-----------------------------------------')
+    print(' Comparison with poly fit')
     linfunc = lambda x, b, m, c:   c*x**2 + m*x + b
     yl = linfunc(x, 1.e-3,2,3.e3)
     yl += np.random.randn(N) * 2e-5
@@ -723,8 +730,8 @@ if __name__ == "__main__":
     #yerr = None
     resnl = fitcurve(linfunc, x, yl,[1,1,1], yerr=yerr)
     fitplot(linfunc, x, yl,[1e-3,2.,3.e3],fig=5, yerr=yerr, skip=True)
-    print resnl
+    print(resnl)
     resp = gen_poly.gen_polyfit(x, yl, 3, s=yerr)
-    print resp
-    print '-----------------------------------------'
+    print(resp)
+    print('-----------------------------------------')
     plt.show()
