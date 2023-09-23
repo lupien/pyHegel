@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import os.path
@@ -63,7 +63,7 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         self._last_comm = time.time()
 
     def __del__(self):
-        print 'deleting SignalHound_SM200C_listen_thread'
+        print('deleting SignalHound_SM200C_listen_thread')
 
     def cancel(self):
         self._stop = True
@@ -72,7 +72,7 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         # This print is needed on anaconda 2019.10 on windows 10 to prevent
         #  a windows error exeption when later trying to print in the thread (status_line)
         # Doing a print at the beginning of the thread fixes that problem.
-        print 'Listen Thread started'
+        print('Listen Thread started')
         readers = [self.control._socket]
         while True:
             if self._stop:
@@ -818,7 +818,7 @@ class SignalHound_SM200C(BaseInstrument):
             i = db_list.index(from_unit)
             in_ref = db_ref[i]
             if in_ref == 0:
-                raise ValueError, self.perror("Don't know how to convert from antenna unit %s"%from_unit)
+                raise ValueError(self.perror("Don't know how to convert from antenna unit %s"%from_unit))
         else: # V, W and A
             in_db = False
             # convert to W
@@ -831,7 +831,7 @@ class SignalHound_SM200C(BaseInstrument):
         to_db_list = ['dBm', 'dBm_Hz']
         to_lin_list = ['W', 'W_Hz', 'V', 'V_Hz', 'V2', 'V2_Hz']
         if to_unit not in to_db_list+to_lin_list:
-            raise ValueError, self.perror("Invalid conversion unit: %s"%to_unit)
+            raise ValueError(self.perror("Invalid conversion unit: %s"%to_unit))
         if not to_unit.endswith('_Hz'):
             bw = 0
         if to_unit in to_db_list:
