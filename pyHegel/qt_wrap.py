@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -118,7 +118,7 @@ If none are loaded, a default set is tried in order.
 #        ID.forbid('PyQt4')
 #        ID.forbid('PySide')
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import sip
 import sys
@@ -146,7 +146,7 @@ def fix_ipython_241():
     from IPython.external.qt_loaders import ID, loaded_api
     id_forb = ID._ImportDenier__forbidden
     if loaded_api() == 'pyqtv1' and 'PyQt4' in id_forb:
-        print 'fixing IPython 2.4.1 import denier'
+        print('fixing IPython 2.4.1 import denier')
         id_forb.remove('PyQt4')
         ID.forbid('PyQt5')
         # need to reimport so that from import work
@@ -205,7 +205,7 @@ def processEvents(events_flags=None, max_time_ms=None):
         if max_time_ms is None: # process all events_flags events
             QtGui.QApplication.processEvents(events_flags)
         else:
-            QtGui.QApplication.processEvents(events_flags, max_time_ms)
+            QtGui.QApplication.processEvents(events_flags, int(max_time_ms))
 
 # processEvents is for the current Thread.
 # if a thread does not have and event loop, this does nothing (not an error)
