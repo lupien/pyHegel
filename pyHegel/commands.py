@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -25,7 +25,7 @@
 # All the commands used in pyHegel
 #
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import ctypes
 import os
@@ -37,7 +37,6 @@ import textwrap
 import threading
 import operator
 import numpy as np
-import StringIO
 from gc import collect as collect_garbage
 
 from . import traces
@@ -56,6 +55,8 @@ from .instruments_base import _writevec as writevec, _normalize_usb, _normalize_
                              time_check as _time_check, CHECKING as checkmode, wait
 from .util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
 from .gui_tools import sleep
+from .comp2to3 import is_py3, warn_deprecation, comp_execfile, reload, string_types, string_bytes_types,\
+                        StringIO, open_utf8, fu
 
 __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'instruments_registry',
            'util', 'help_pyHegel', 'reset_pyHegel', 'clock', 'sweep', 'sweep_multi', 'wait',
@@ -67,7 +68,7 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
            'task', 'top', 'kill', '_init_pyHegel_globals', '_faster_timer', 'quiet_KeyboardInterrupt',
            'Loop_Control', '_Snap',
            'Sequencer', 'Seq_Wait_i', 'Seq_Wait', 'Seq_Func', 'Seq_Funcs', 'Seq_Keep_Going', 'Seq_End',
-           'rsrc_manager_reload', 'rsrc_manager_get_object', 'rsrc_manager_info']
+           'rsrc_manager_reload', 'rsrc_manager_get_object', 'rsrc_manager_info', 'fix_auto_suggestions']
 
 # not in __all__: local_config _globaldict
 #             _Clock _update_sys_path writevec _get_dev_kw _getheaders
@@ -85,6 +86,22 @@ try:
 except NameError:
     _globaldict = {}
     instruments_base._globaldict = _globaldict
+
+def fix_auto_suggestions():
+    # Now fix problem with some ipyton (8.9 and 8.12 for exemple) that return only partial line
+    # when using arrow history search.
+    # This is the same as using the --TerminalInteractiveShell.autosuggestions_provider=None
+    # command line option
+    if is_py3:
+        import IPython
+        ip = IPython.get_ipython()
+        if hasattr(ip, 'autosuggestions_provider'):
+            ip.autosuggestions_provider = None
+            #print('Fixing auto suggestions')
+        else:
+            #print('Not fixing auto suggestions')
+            pass
+
 
 def _init_pyHegel_globals(g=None, show_greet=True):
     """ Call this from main interactive module as
@@ -111,16 +128,16 @@ def _init_pyHegel_globals(g=None, show_greet=True):
 
 def _greetings():
     import pyHegel
-    print '\n\n---------'
-    print textwrap.dedent("""\
+    print('\n\n---------')
+    print(textwrap.dedent("""\
             pyHegel {} Copyright (C) {}
             This program comes with ABSOLUTELY NO WARRANTY.
             This is free software, and you are welcome to redistribute it
             under certain conditions.
             See files COPYING and COPYING.LESSER for detail or see
-            <http://www.gnu.org/licenses/>.""".format(pyHegel.__version__, pyHegel.__copyright__))
-    print '\nFor available commands, type "help_pyHegel()"'
-    print '---------\n\n'
+            <http://www.gnu.org/licenses/>.""".format(pyHegel.__version__, pyHegel.__copyright__)))
+    print('\nFor available commands, type "help_pyHegel()"')
+    print('---------\n\n')
 
 
 def help_pyHegel():
@@ -219,7 +236,7 @@ def help_pyHegel():
         exit()
         # or type CTRL-D
     """
-    print help_pyHegel.__doc__
+    print(help_pyHegel.__doc__)
 
 def reset_pyHegel():
     """
@@ -228,8 +245,10 @@ def reset_pyHegel():
        after calling this.
 
        can be called in ipython command line like:
-         /reset_pyNoise
+         /reset_pyHegel
     """
+    import pyHegel.comp2to3
+    reload(pyHegel.comp2to3)
     reload(traces.config)
     reload(traces.qt_wrap.kbint_util)
     reload(traces.qt_wrap)
@@ -262,7 +281,7 @@ def reset_pyHegel():
 # sys.last_value are not updated by IPython in this case)
 
 def _quiet_KeyboardInterrupt_Handler(self, exc_type, exc_value, traceback, tb_offset=None):
-    print '\n ----- KeyboardInterrupt:', exc_value
+    print('\n ----- KeyboardInterrupt:', exc_value)
 
 def quiet_KeyboardInterrupt(quiet=True):
     """
@@ -293,13 +312,13 @@ def _faster_timer(stop=False, period='min'):
         dat_struct = (ctypes.c_uint*2)()
         lib.timeGetDevCaps(dat_struct, ctypes.sizeof(dat_struct))
         period = dat_struct[0]
-        print 'Using minimal period of ', period, ' ms'
+        print('Using minimal period of ', period, ' ms')
     if stop:
         ret = lib.timeEndPeriod(period)
     else:
         ret = lib.timeBeginPeriod(period)
     if ret != 0:
-        print 'Error(%i) in setting period'%ret
+        print('Error(%i) in setting period'%ret)
 
 
 
@@ -335,7 +354,7 @@ def _get_extra_confs(extra_conf):
         extra_conf = [extra_conf]
     formats = []
     for x in extra_conf:
-        if isinstance(x, basestring):
+        if isinstance(x, string_bytes_types):
             lines = x.split('\n')
             f = dict(base_hdr_name='comment', base_conf=lines[0])
             formats.append(f)
@@ -426,7 +445,7 @@ def _getheaders(setdev=None, getdevs=[], root=None, npts=None, extra_conf=None):
             graph = []
         elif graph is True:
             if isinstance(multi, list):
-                graph = range(len(multi))
+                graph = list(range(len(multi)))
             else:
                 graph = [0]
         elif not isinstance(graph, list):
@@ -459,7 +478,7 @@ def _dev_filename(root, dev_name, npts, reuse, append=False):
     n = int(np.log10(maxn))+1
     return root + '_'+ dev_name+'_%0'+('%ii'%n)+ext
 
-def _readall(devs, formats, i, async=None, noflat=False, extra_kw={}, output_full=False):
+def _readall(devs, formats, i, async_st=None, noflat=False, extra_kw={}, output_full=False):
     if devs == []:
         if output_full:
             return [], []
@@ -473,15 +492,15 @@ def _readall(devs, formats, i, async=None, noflat=False, extra_kw={}, output_ful
             filename = filename % i
         if fmt['file']:
             kwarg['filename'] = filename
-        if async is not None:
+        if async_st is not None:
             # we perform async 3 immediately after async 2
             # this is needed for logical device that require the results from other ones (for example).
-            if async == 3:
-                raise ValueError('_readall does not accept async=3 (it does it internally)')
-            val = dev.getasync(async=async, **kwarg)
-            if async == 2:
-                val = dev.getasync(async=3, **kwarg)
-            if async != 2:
+            if async_st == 3:
+                raise ValueError('_readall does not accept async_st=3 (it does it internally)')
+            val = dev.getasync(async_st=async_st, **kwarg)
+            if async_st == 2:
+                val = dev.getasync(async_st=3, **kwarg)
+            if async_st != 2:
                 continue
         else:
             val = dev.get(**kwarg)
@@ -495,7 +514,7 @@ def _readall(devs, formats, i, async=None, noflat=False, extra_kw={}, output_ful
                 val = [val.real, val.imag]
             if isinstance(val, (list, tuple, np.ndarray, dict)):
                 if isinstance(val, dict):
-                    val = val.values()
+                    val = list(val.values())
                 if not isinstance(fmt['multi'], list):
                     instruments_base._write_dev(val, filename, format=fmt, first= i==0)
                     val = i
@@ -509,12 +528,12 @@ def _readall(devs, formats, i, async=None, noflat=False, extra_kw={}, output_ful
 
 def _readall_async(devs, formats, i, noflat=False, extra_kw={}, output_full=False):
     try:
-        _readall(devs, formats, i, async=0, noflat=noflat, extra_kw=extra_kw, output_full=output_full)
-        _readall(devs, formats, i, async=1, noflat=noflat, extra_kw=extra_kw, output_full=output_full)
-        return _readall(devs, formats, i, async=2, noflat=noflat, extra_kw=extra_kw, output_full=output_full) # includes async3
+        _readall(devs, formats, i, async_st=0, noflat=noflat, extra_kw=extra_kw, output_full=output_full)
+        _readall(devs, formats, i, async_st=1, noflat=noflat, extra_kw=extra_kw, output_full=output_full)
+        return _readall(devs, formats, i, async_st=2, noflat=noflat, extra_kw=extra_kw, output_full=output_full) # includes async3
     except KeyboardInterrupt:
-        print 'Rewinding async because of keyboard interrupt'
-        _readall(devs, formats, i, async=-1, noflat=noflat, extra_kw=extra_kw, output_full=output_full)
+        print('Rewinding async because of keyboard interrupt')
+        _readall(devs, formats, i, async_st=-1, noflat=noflat, extra_kw=extra_kw, output_full=output_full)
         raise
 
 def _checkTracePause(trace):
@@ -582,7 +601,7 @@ def _itemgetter(*args):
     return ig
 
 def _rm_nl_cr(s):
-    return s.replace('\n', '\\n').replace('\r', '\\r')
+    return s.replace(u'\n', u'\\n').replace(u'\r', u'\\r')
 
 def _write_conf(f, formats, extra_base=None, **kwarg):
     if extra_base is not None:
@@ -593,13 +612,13 @@ def _write_conf(f, formats, extra_base=None, **kwarg):
         conf = fmt['base_conf']
         hdr = fmt['base_hdr_name']
         if conf:
-            f.write('#'+hdr.encode('utf8')+':=')
+            f.write(u'#' + fu(hdr) + u':=')
             if isinstance(conf, list):
                 for c in conf:
-                    f.write(' '+_rm_nl_cr(c.encode('utf8'))+';')
+                    f.write(u' ' + _rm_nl_cr(fu(c)) + u';')
             else:
-                f.write(' '+_rm_nl_cr(conf.encode('utf8')))
-            f.write('\n')
+                f.write(u' ' + _rm_nl_cr(fu(conf)))
+            f.write(u'\n')
 
 def dump_conf(f, setdevs=None, getdevs=[], extra_conf=None):
     """ This functions dumps the settings of the list of devices and extra_conf
@@ -619,7 +638,7 @@ def _write_comment(f, text):
     # This the old way.
     #writevec(f, [_rm_nl_cr(text.encode('utf_8'))], pre_str='#C# ')
     # This is the new way.
-    writevec(f, [_rm_nl_cr(text.encode('utf_8'))], pre_str='#C:%r# '%time.time())
+    writevec(f, [_rm_nl_cr(fu(text))], pre_str=u'#C:%r# '%time.time())
 
 class Loop_Control(object):
     def __init__(self):
@@ -631,6 +650,17 @@ class Loop_Control(object):
     def reset_all(self):
         self.reset()
         self.pause_enabled = False
+
+def _handle_async_en(self, async_en, **kwargs):
+    async_en2 = kwargs.pop('async', None)
+    if async_en2:
+        if is_py3:
+            raise TypeError('async is not allowed when using python 3.')
+        async_en = async_en2
+        warn_deprecation('async is deprecated and cannot be used in python 3. Use async_en instead.')
+    if len(kwargs) != 0:
+        raise TypeError('Got unexpected arguments: %s'%(', '.join(kwargs.keys())))
+    return async_en
 
 
 class _Sweep(instruments.BaseInstrument):
@@ -766,7 +796,7 @@ class _Sweep(instruments.BaseInstrument):
         if b is None:
             b = self.before.get()
         if b:
-            if isinstance(b, basestring):
+            if isinstance(b, string_bytes_types):
                 exec (b, _globaldict, locals())
             else:
                 info = dict(i=i, fwd=fwd, fwd_all=fwd_all, v=v, ask_vals=vv, set_vals=iv, iter_part=iter_part, iter_total=iter_total)
@@ -779,7 +809,7 @@ class _Sweep(instruments.BaseInstrument):
         if b is None:
             b = self.after.get()
         if b:
-            if isinstance(b, basestring):
+            if isinstance(b, string_bytes_types):
                 exec (b, _globaldict, locals())
             else:
                 info = dict(i=i, fwd=fwd, fwd_all=fwd_all, v=v, ask_vals=vv, set_vals=iv, iter_part=iter_part, iter_total=iter_total,
@@ -836,7 +866,7 @@ class _Sweep(instruments.BaseInstrument):
             stop = span[-1]
         npts = int(npts)
         if npts < 1:
-            raise ValueError, 'npts needs to be at least 1'
+            raise ValueError('npts needs to be at least 1')
         if dolinspace:
             if logspace:
                 if start == 0. or stop == 0.:
@@ -926,7 +956,7 @@ class _Sweep(instruments.BaseInstrument):
             t.set_xlogscale()
         return t, gsel
 
-    def _do_inner_loop(self, iter_info, sets, devs, cformats, fobj, async, trace_obj, negative, gsel, clf=False, printit=False, other_options={}):
+    def _do_inner_loop(self, iter_info, sets, devs, cformats, fobj, async_en, trace_obj, negative, gsel, clf=False, printit=False, other_options={}):
         # iter_n is used for filenames and exec_before/after (could depend on separate fwd/rev files)
         # iter_partial between 1 and iter_total: they are both used for progress update.
         #   iter_partial can sometimes be iter_n+1
@@ -961,7 +991,7 @@ class _Sweep(instruments.BaseInstrument):
             printit('Sweep part: %3i/%-3i   %s'%(iter_part, iter_total, vv))
         self.execbefore(iter_n, cfwd, v, vv, iv, other_options)
         wait(bwait)
-        if async:
+        if async_en:
             vals, vals_full = _readall_async(devs, cformats, iter_n, output_full=True)
         else:
             vals, vals_full = _readall(devs, cformats, iter_n, output_full=True)
@@ -993,8 +1023,8 @@ class _Sweep(instruments.BaseInstrument):
 # TODO deal with dev set that return multiple values (like some logical devices)
     def __call__(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
                   close_after=False, graph=None, title=None, out=None, extra_conf=None,
-                  async=False, reset=False, logspace=False, updown=False, first_wait=None, beforewait=None,
-                  progress=True, exec_before=None, exec_after=None, loop_control=None):
+                  async_en=False, reset=False, logspace=False, updown=False, first_wait=None, beforewait=None,
+                  progress=True, exec_before=None, exec_after=None, loop_control=None, **kwargs):
         """
             Usage:
                 dev is the device to sweep. For more advanced uses (devices with options),
@@ -1042,8 +1072,9 @@ class _Sweep(instruments.BaseInstrument):
                             a string that will be dumped as is in the header with a comment:= prefix.
                             (The configuration for the sweep device and all the out
                              devices is automatically inserted).
-                async: When True, enables async mode (waiting on devices is done in
+                async_en: When True, enables async mode (waiting on devices is done in
                         parallel instead of consecutivelly.) This saves time.
+                        Note that in older pyHegel version it used to be called async.
                 reset: After the sweep is completed, the dev is returned to the
                        first value in the sweep list if set to True. If a value is given it
                        is set to that value. When False (default) or None the last value of
@@ -1076,6 +1107,7 @@ class _Sweep(instruments.BaseInstrument):
         """
         span, start, stop, npts, dev_orig, dev, dev_opt, negative = self._find_span(dev, logspace, start, stop, npts)
         filename, fullpath, fullpathrev, fwd, updown_same = self._get_filenames(filename, updown, start, stop, npts)
+        async_en = _handle_async_en(async_en, kwargs)
         if beforewait is None:
             beforewait = self.beforewait.get()
         reset_raw = reset
@@ -1107,14 +1139,13 @@ class _Sweep(instruments.BaseInstrument):
             f = None
             frev = None
             if filename is not None:
-                # Make it unbuffered, windows does not handle line buffer correctly
-                f = open(fullpath, 'w', 0)
-                _write_conf(f, formats, extra_base='sweep_options', async=async, reset=reset_raw, start=start, stop=stop,
+                f = open_utf8(fullpath, 'w', 1)
+                _write_conf(f, formats, extra_base='sweep_options', async_en=async_en, reset=reset_raw, start=start, stop=stop,
                             updown=updown, beforewait=beforewait, first_wait=first_wait)
                 writevec(f, hdrs+['time'], pre_str='#')
                 if fullpathrev is not None:
-                    frev = open(fullpathrev, 'w', 0)
-                    _write_conf(frev, formatsrev, extra_base='sweep_options', async=async, reset=reset_raw, start=start, stop=stop,
+                    frev = open_utf8(fullpathrev, 'w', 1)
+                    _write_conf(frev, formatsrev, extra_base='sweep_options', async_en=async_en, reset=reset_raw, start=start, stop=stop,
                                 updown=updown, beforewait=beforewait, first_wait=first_wait)
                     writevec(frev, hdrs+['time'], pre_str='#')
                 else:
@@ -1161,7 +1192,7 @@ class _Sweep(instruments.BaseInstrument):
                 loop_control.reset()
             other_options = dict(before=exec_before, after=exec_after, loop_control=loop_control)
             for iter_info, cf, cformats, sets, clf in iterator():
-                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negative, gsel, clf, progress, other_options)
+                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async_en, t, negative, gsel, clf, progress, other_options)
                 if dobreak == 'break':
                     break
         except KeyboardInterrupt:
@@ -1169,7 +1200,8 @@ class _Sweep(instruments.BaseInstrument):
             #raise KeyboardInterrupt('Interrupted sweep'), None, exc_traceback
             if graph:
                 t.set_status(False, 'ctrl-c')
-            raise KeyboardInterrupt('Interrupted sweep'), None, sys.exc_info()[2]
+            #raise KeyboardInterrupt('Interrupted sweep'), None, sys.exc_info()[2]
+            raise KeyboardInterrupt('Interrupted sweep').with_traceback(sys.exc_info()[2])
         finally:
             if progress and isinstance(progress, instruments_base.UserStatusLine):
                 # This is important when using quiet_KeyboardInterrupt(True)
@@ -1201,8 +1233,8 @@ class _Sweep(instruments.BaseInstrument):
 
     def sweep_multi(self, dev, start, stop=None, npts=None, filename='%T.txt', rate=None,
                   close_after=False, graph=None, title=None, out=None, extra_conf=None,
-                  async=False, reset=False, logspace=False, updown=False, first_wait=None, beforewait=None,
-                  progress=True, exec_before=None, exec_after=None, loop_control=None, parallel=False):
+                  async_en=False, reset=False, logspace=False, updown=False, first_wait=None, beforewait=None,
+                  progress=True, exec_before=None, exec_after=None, loop_control=None, parallel=False, **kwargs):
         """
         The settings for sweep_multi have the same meaning as for the sweep command (see its documention).
         However, many of the settings now require lists (dev, start, stop, npts, logspace, reset, close_after
@@ -1225,6 +1257,7 @@ class _Sweep(instruments.BaseInstrument):
         parallel: when True, all the devs are called for each cycle. All the pts are changed in parallel
             so they need to have the same number of elements.
         """
+        async_en = _handle_async_en(async_en, kwargs)
         multiN = len(dev)
         def mklist(v):
             v = v if isinstance(v, (list, tuple, np.ndarray)) else [v]*multiN
@@ -1284,7 +1317,7 @@ class _Sweep(instruments.BaseInstrument):
         both_updown = []
         data_row_shape = []
         for ud, span in zip(updown, spanl):
-            if isinstance(ud, basestring) and ud != 'alternate':
+            if isinstance(ud, string_types) and ud != 'alternate':
                 raise ValueError("Invalid updown option: needs to be one of True, False, -1, 'alternate'")
             if ud == 'alternate' and parallel:
                 raise ValueError("updown 'alternate' option is not available with parallel.")
@@ -1336,9 +1369,8 @@ class _Sweep(instruments.BaseInstrument):
         try:
             f = None
             if filename is not None:
-                # Make it unbuffered, windows does not handle line buffer correctly
-                f = open(fullpath, 'w', 0)
-                _write_conf(f, formats, extra_base='sweep_multi_options', async=async, reset=reset_raw, start=start, stop=stop,
+                f = open_utf8(fullpath, 'w', 1)
+                _write_conf(f, formats, extra_base='sweep_multi_options', async_en=async_en, reset=reset_raw, start=start, stop=stop,
                                 updown=updown, beforewait=beforewait, first_wait=first_wait, parallel=parallel)
                 # This needs to match the line in util.readfile
                 read_dims = 'readback numpy shape for line part: '+(', '.join([str(n) for n in data_row_shape]))
@@ -1451,7 +1483,7 @@ class _Sweep(instruments.BaseInstrument):
                 loop_control.reset()
             other_options = dict(before=exec_before, after=exec_after, loop_control=loop_control)
             for iter_info, cf, cformats, sets, clf in iterator():
-                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async, t, negativel[-1], gsel, clf, progress, other_options)
+                dobreak = self._do_inner_loop(iter_info, sets, devs, cformats, cf, async_en, t, negativel[-1], gsel, clf, progress, other_options)
                 if dobreak == 'break':
                     break
         except KeyboardInterrupt:
@@ -1459,7 +1491,8 @@ class _Sweep(instruments.BaseInstrument):
             #raise KeyboardInterrupt('Interrupted sweep_multi'), None, exc_traceback
             if graph:
                 t.set_status(False, 'ctrl-c')
-            raise KeyboardInterrupt('Interrupted sweep_multi'), None, sys.exc_info()[2]
+            #raise KeyboardInterrupt('Interrupted sweep_multi'), None, sys.exc_info()[2]
+            raise KeyboardInterrupt('Interrupted sweep_multi').with_traceback(sys.exc_info()[2])
         finally:
             if progress and isinstance(progress, instruments_base.UserStatusLine):
                 # This is important when using quiet_KeyboardInterrupt(True)
@@ -1564,22 +1597,22 @@ def spy(devs, interval=1):
             for dev in devs:
                 dev, kwarg = _get_dev_kw(dev)
                 v.append(dev.get(**kwarg))
-            print >>sys.stderr, v
+            print(v, file=sys.stderr)
             wait(interval)
     except KeyboardInterrupt:
-        print 'Interrupting spy'
+        print('Interrupting spy')
 
 class _Snap(object):
     def __init__(self):
         self.filename = None
         self.out = None
-        self.async = False
+        self.async_en = False
         self.cycle = 0
         self.formats = None
         self._lock_instrument = instruments_base.Lock_Instruments()
         self._lock_extra = instruments_base.Lock_Extra()
     @instruments_base.locked_calling
-    def __call__(self, out=None, filename=None, async=None, append=True):
+    def __call__(self, out=None, filename=None, async_en=None, append=True, *kwargs):
         """
         This command dumps a bunch of values to a file.
         The first call initializes a filename, list of devices
@@ -1587,7 +1620,7 @@ class _Snap(object):
         devices will be appended to the filename.
         Changing the device list, will append a new header and change the following calls.
         The filename uses the sweep.path directory.
-        Async unset (None) will use the last one async mode (which starts at False)
+        Async_en unset (None) will use the last one async mode (which starts at False)
         With append=True and opening an already existing file, the data is appended
         otherwise the file is truncated
 
@@ -1600,12 +1633,13 @@ class _Snap(object):
             snap1()
             snap2()
         """
+        async_en = _handle_async_en(async_en, kwargs)
         new_out = False
         new_file = False
-        if async is None:
-            async = self.async
+        if async_en is None:
+            async_en = self.async_en
         else:
-            self.async = async
+            self.async_en = async_en
         new_file_mode = 'w'
         if append:
             new_file_mode = 'a'
@@ -1614,7 +1648,7 @@ class _Snap(object):
         elif out != self.out:
             new_out = True
         if out is None:
-            raise ValueError, 'Snap. No devices set for out'
+            raise ValueError('Snap. No devices set for out')
         if not isinstance(out, list):
             out = [out]
         if filename is not None:
@@ -1627,15 +1661,15 @@ class _Snap(object):
             new_out = True
             self.cycle = 0
         if filename is None:
-            raise ValueError, 'Snap. No filename selected'
+            raise ValueError('Snap. No filename selected')
         if new_file:
-            f = open(filename, new_file_mode, 0)
+            f = open_utf8(filename, new_file_mode, 1)
         else:
-            f = open(filename, 'a', 0)
+            f = open_utf8(filename, 'a', 1)
         if new_out:
             hdrs, graphsel, formats, set_counts = _getheaders(getdevs=out, root=filename)
             self.formats = formats
-            _write_conf(f, formats, extra_base='snap_options', async=async)
+            _write_conf(f, formats, extra_base='snap_options', async_en=async_en)
             writevec(f, ['time']+hdrs, pre_str='#')
             self.out = out
             self.filename = filename
@@ -1643,7 +1677,7 @@ class _Snap(object):
             formats = self.formats
         tme = clock.get()
         i = self.cycle
-        if async:
+        if async_en:
             vals = _readall_async(out, formats, i)
         else:
             vals = _readall(out, formats, i)
@@ -1774,7 +1808,7 @@ class Sequencer(object):
 
 def _record_execafter(command, i, vals, vals_full, iter_total):
     iter_part = i+1
-    if isinstance(command, basestring):
+    if isinstance(command, string_bytes_types):
         keep_going = True
         exec (command, _globaldict, locals())
         return keep_going
@@ -1786,7 +1820,7 @@ def _record_execafter(command, i, vals, vals_full, iter_total):
 
 _record_trace_num = 0
 def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_conf=None,
-           async=False, after=None, close_after=False, graph=None):
+           async_en=False, after=None, close_after=False, graph=None, **kwargs):
     """
        record to filename (if not None) the values from devs
          uses sweep.path
@@ -1795,7 +1829,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
        interval is in seconds
        npoints is max number of points. If None, it will only stop
         on CTRL-C...
-       filename, title, extra_conf and async behave the same way as for sweep.
+       filename, title, extra_conf and async_en behave the same way as for sweep.
        However filename will not handle the {start}, {stop}, {npts}, {updown} options.
        close_after: automatically closes the figure after the sweep when True
        graph: If graph is True, a figure is plotted while taking data. When
@@ -1827,6 +1861,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
        dev.getcache()
     """
     global _record_trace_num
+    async_en = _handle_async_en(async_en, kwargs)
     # make sure devs is list like
     if not isinstance(devs, list):
         devs = [devs]
@@ -1857,9 +1892,8 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
     try:
         f = None
         if filename is not None:
-            # Make it unbuffered, windows does not handle line buffer correctly
-            f = open(fullpath, 'w', 0)
-            _write_conf(f, formats, extra_base='record options', async=async, interval=interval)
+            f = open_utf8(fullpath, 'w', 1)
+            _write_conf(f, formats, extra_base='record options', async_en=async_en, interval=interval)
             writevec(f, ['time']+hdrs, pre_str='#')
             if graph:
                 t.set_comment_func(lambda text: _write_comment(f, text))
@@ -1869,7 +1903,7 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
                 npoints = 2
         while npoints is None or i < npoints:
             tme = clock.get()
-            if async:
+            if async_en:
                 vals, vals_full = _readall_async(devs, formats, i, output_full=True)
             else:
                 vals, vals_full = _readall(devs, formats, i, output_full=True)
@@ -1897,7 +1931,8 @@ def record(devs, interval=1, npoints=None, filename='%T.txt', title=None, extra_
         #raise KeyboardInterrupt('Interrupted record'), None, exc_traceback
         if graph:
             t.set_status(False, 'ctrl-c')
-        raise KeyboardInterrupt('Interrupted record'), None, sys.exc_info()[2]
+        #raise KeyboardInterrupt('Interrupted record'), None, sys.exc_info()[2]
+        raise KeyboardInterrupt('Interrupted record').with_traceback(sys.exc_info()[2])
     finally:
         if graph:
             t.set_comment_func(None)
@@ -2037,7 +2072,7 @@ def _process_filename(filename, now=None, next_i=None, start_i=0, search=True, *
             changed = True
             si_changed = True
         if changed:
-            print 'Using filename: '+filename
+            print('Using filename: '+filename)
         if ni_present or (auto_si and si_changed):
             sweep.next_file_i.set(ni+1)
         return filename, filename_i
@@ -2083,7 +2118,7 @@ def get(dev, filename=None, extra_conf=None, skip_force_get=False, **kwarg):
     dev, kwarg = _get_dev_kw(dev, **kwarg)
     if extra_conf:
         formats = _get_extra_confs(extra_conf)
-        f = StringIO.StringIO()
+        f = StringIO()
         _write_conf(f, formats)
         kwarg['extra_conf'] = f.getvalue()
         f.close()
@@ -2111,7 +2146,7 @@ def getasync(devs, filename=None, **kwarg):
     Does not handle a filename. See record or snap for that.
     """
     if filename is not None:
-        raise ValueError, 'getasync does not currently handle the filename option'
+        raise ValueError('getasync does not currently handle the filename option')
     if not isinstance(devs, list):
         devs = [devs]
     fmts = [dict(basename='%i', append=False, file=False, multi=False)]*len(devs)
@@ -2141,7 +2176,7 @@ def iprint(instrument, force=False):
        If force is True, use get instead of getcache for
        all autoinit devices.
     """
-    print instrument.iprint(force=force)
+    print(instrument.iprint(force=force))
 
 def ilist():
     """
@@ -2154,17 +2189,17 @@ def ilist():
          /ilist
     """
     lst = []
-    for name, value in _globaldict.iteritems():
+    for name, value in _globaldict.items():
         if name[0] == '_':
             continue
         if isinstance(value, instruments.BaseInstrument):
-            print name
+            print(name)
             lst += name
     #return lst
 
 def dlist():
     """
-       print the list of devices
+       print(the list of devices)
         this will not include instruments
        see ilist for those
 
@@ -2172,11 +2207,11 @@ def dlist():
          /dlist
     """
     lst = []
-    for name, value in _globaldict.iteritems():
+    for name, value in _globaldict.items():
         if name[0] == '_':
             continue
         if isinstance(value, instruments.BaseDevice):
-            print name
+            print(name)
             lst += name
     #return lst
 
@@ -2227,9 +2262,9 @@ def batch(batchfile):
          unless the names ends with a .ipy
     """
     try:
-        execfile(batchfile, _globaldict)
+        comp_execfile(batchfile, _globaldict)
     except IOError:
-        execfile(batchfile+'.py', _globaldict)
+        comp_execfile(batchfile+'.py', _globaldict)
 
 def _load_helper(entry):
     # we will accept a single Instrument or any of the lists
@@ -2275,18 +2310,18 @@ def load(names=None, newnames=None):
        For GPIB address you can enter just the address as an integer or the
        full visa name like those returned from find_all_instruments()
     """
-    if names is None or (isinstance(names, basestring) and names == ''):
+    if names is None or (isinstance(names, string_types) and names == ''):
         for name, entry in sorted(local_config.conf.items()):
             instr, para, kwargs = _load_helper(entry)
             if kwargs != {}:
                 para = '%s, %s'%(para, kwargs)
             instr = instr.__name__
-            print '{:>10s}: {:25s} {:s}'.format(name, instr, para)
+            print('{:>10s}: {:25s} {:s}'.format(name, instr, para))
         return
-    if isinstance(names, basestring):
+    if isinstance(names, string_types):
         # this always returns list
         names = names.split(' ')
-    if isinstance(newnames, basestring):
+    if isinstance(newnames, string_types):
         newnames = newnames.split(' ')
     if newnames is None:
         newnames = [None]
@@ -2309,15 +2344,15 @@ def load_all_usb():
     found_instr = find_all_instruments(False)
     found_usb = [_normalize_usb(instr) for instr in found_instr if instr.upper().startswith('USB')]
     # pick only USB instruments in local_config
-    conf_norm = {k:_load_helper(v)[1] for k,v in local_config.conf.iteritems()}
+    conf_norm = {k:_load_helper(v)[1] for k,v in local_config.conf.items()}
     usb_instr = { _normalize_usb(para[0])[0]:name
-                    for name, para in conf_norm.iteritems()
-                    if len(para)>0 and isinstance(para[0], basestring) and para[0].upper().startswith('USB')}
+                    for name, para in conf_norm.items()
+                    if len(para)>0 and isinstance(para[0], string_types) and para[0].upper().startswith('USB')}
     for usb, manuf, model in found_usb:
         try:
             name = usb_instr[usb]
             load(name)
-            print '  Loaded: %6s   (%s)'%(name, usb)
+            print('  Loaded: %6s   (%s)'%(name, usb))
         except KeyError:
             guess_manuf = instruments_registry.find_usb_name(manuf)
             guess_model = instruments_registry.find_usb_name(manuf, model)
@@ -2328,12 +2363,12 @@ def load_all_usb():
                 pass
             else:
                 extra = ', instruments class=%s'%instr_class.__name__
-            print '  Unknown instrument: %s (guess manuf=%s, model=%s%s)'%(usb, guess_manuf, guess_model, extra)
+            print('  Unknown instrument: %s (guess manuf=%s, model=%s%s)'%(usb, guess_manuf, guess_model, extra))
         except instruments_base.visa_wrap.VisaIOError as exc:
             if exc.error_code == instruments_base.visa_wrap.constants.VI_ERROR_NCIC:
                 guess_manuf = instruments_registry.find_usb_name(manuf)
                 guess_model = instruments_registry.find_usb_name(manuf, model)
-                print '  Instrument not present (Keysight IO cache): %s (guess manuf=%s, model=%s)'%(usb, guess_manuf, guess_model)
+                print('  Instrument not present (Keysight IO cache): %s (guess manuf=%s, model=%s)'%(usb, guess_manuf, guess_model))
             else:
                 raise
 
@@ -2361,7 +2396,7 @@ def load_all_gpib(all_ids=True):
               less descriptive (will not show the id).
     """
     def check(instr):
-        if isinstance(instr, basestring) and instr.upper().startswith('GPIB'):
+        if isinstance(instr, string_types) and instr.upper().startswith('GPIB'):
             return True
         if isinstance(instr, int):
             if 0 <= instr < 31: # address 31 is untalk command
@@ -2369,9 +2404,9 @@ def load_all_gpib(all_ids=True):
         return False
     found_instr = find_all_instruments(False)
     found_gpib = [_normalize_gpib(instr) for instr in found_instr if check(instr)]
-    conf_norm = {k:_load_helper(v) for k,v in local_config.conf.iteritems()}
+    conf_norm = {k:_load_helper(v) for k,v in local_config.conf.items()}
     gpib_instr = { name: (para[0], _normalize_gpib(para[1][0]))
-                    for name, para in conf_norm.iteritems()
+                    for name, para in conf_norm.items()
                     if len(para[1]) >= 1 and check(para[1][0])}
     for instr in found_gpib:
         if all_ids:
@@ -2379,11 +2414,11 @@ def load_all_gpib(all_ids=True):
             if idns is not None:
                 id = (idns['vendor'], idns['model'], idns['firmware'])
             else:
-                print '  Instrument not present (Keysight IO cache): %s'%instr
+                print('  Instrument not present (Keysight IO cache): %s'%instr)
                 continue
         else:
             idns = None
-        correct_addr = {name: para for name, para in gpib_instr.iteritems()
+        correct_addr = {name: para for name, para in gpib_instr.items()
                             if para[1] == instr}
         not_found = True
         if len(correct_addr):
@@ -2392,12 +2427,12 @@ def load_all_gpib(all_ids=True):
                 if idns is not None:
                     id = (idns['vendor'], idns['model'], idns['firmware'])
                 else:
-                    print '  Instrument not present (Keysight IO cache): %s'%instr
+                    print('  Instrument not present (Keysight IO cache): %s'%instr)
                     continue
-            for name, para in correct_addr.iteritems():
+            for name, para in correct_addr.items():
                 if instruments_registry.check_instr_id(para[0], id):
                     load(name)
-                    print '  Loaded: %6s   (%s)'%(name, instr)
+                    print('  Loaded: %6s   (%s)'%(name, instr))
                     not_found = False
                     break
         if not_found:
@@ -2409,9 +2444,9 @@ def load_all_gpib(all_ids=True):
                     pass
                 else:
                     extra = ', instruments class=%s'%instr_class.__name__
-                print '  Unknown instrument: %s (id vendor=%s, model=%s%s)'%(instr, idns['vendor'], idns['model'], extra)
+                print('  Unknown instrument: %s (id vendor=%s, model=%s%s)'%(instr, idns['vendor'], idns['model'], extra))
             else:
-                print '  Unknown instrument: %s'%(instr)
+                print('  Unknown instrument: %s'%(instr))
 
 
 class _Hegel_Task(threading.Thread):
@@ -2468,7 +2503,7 @@ def top(all=False):
     # All threads count: threading.active_count()
     for t in threading.enumerate():
         if all==True or isinstance(t, _Hegel_Task):
-            print '%5i %s'%(t.ident, t)
+            print('%5i %s'%(t.ident, t))
 
 def kill(n, force=False):
     """ Stops thread number n and wait for it to end.
@@ -2486,17 +2521,17 @@ def kill(n, force=False):
                 if force:
                     from ctypes import c_long, py_object, pythonapi
                     pythonapi.PyThreadState_SetAsyncExc(c_long(n), py_object(KeyboardInterrupt))
-                    print 'Interrupting task and waiting'
+                    print('Interrupting task and waiting')
                 else:
                     t.stop()
-                    print 'Stopping task and waiting'
+                    print('Stopping task and waiting')
                 # we use a the context manager because join uses sleep.
                 with instruments_base._sleep_signal_context_manager():
                     while t.is_alive():
                         t.join(0.5)
-                print 'Stopped task'
+                print('Stopped task')
     except KeyboardInterrupt:
-        print 'Breaking out of kill. Task could still finish...'
+        print('Breaking out of kill. Task could still finish...')
 
 def rsrc_manager_reload(lib=None):
     """ Load a new resource manager.
