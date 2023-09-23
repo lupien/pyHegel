@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2020-2020  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2020-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 from ..instruments_base import BaseInstrument,\
@@ -91,7 +91,7 @@ class liquef_flow_meters(BaseInstrument):
                 self._dstp = Dstp_Client(address=self._default_address, variable_path=self._default_variable, max_buf_entries=1, quiet_del=self._ni_quiet_del)
             except Exception as e:
                 if self._connect_last_fail_n == 0:
-                    print self.perror("Failed to connect to %s server. Will keep trying."%self._default_address)
+                    print(self.perror("Failed to connect to %s server. Will keep trying."%self._default_address))
                 self._connect_last_fail_n += 1
                 self._connect_last_fail_time = time.time()
                 self._dstp = None
@@ -110,7 +110,7 @@ class liquef_flow_meters(BaseInstrument):
                 self._variable_retry += 1
                 # The data is not present and we can't create it. We have to wait until somebody creates it.
                 if self._variable_retry == 1:
-                    print self.perror('The data is not yet available (waiting for it to created). Will keep trying.')
+                    print(self.perror('The data is not yet available (waiting for it to created). Will keep trying.'))
                 return
             except Exception as e:
                 # something else went wrong (no permission, error writing to socket, no response)
@@ -133,14 +133,14 @@ class liquef_flow_meters(BaseInstrument):
                     self._dstp.proto_close_var()
                 except Exception as exc:
                     if not _internal:
-                        print self.perror("Exception during close var: %s"%exc)
+                        print(self.perror("Exception during close var: %s"%exc))
                 self._variable_opened = False
                 self._variable_retry = 0
             try:
                 self._dstp.close(quiet=True)
             except Exception as exc:
                 if not _internal:
-                    print self.perror("Exception during close: %s"%exc)
+                    print(self.perror("Exception during close: %s"%exc))
             self._dstp = None
         if not _internal:
             # so that a next open forces an immediate reconnection attempt.
