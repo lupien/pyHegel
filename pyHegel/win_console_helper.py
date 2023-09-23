@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import xml.etree.ElementTree as ET
 import copy
@@ -29,7 +29,11 @@ import os
 import os.path
 import sys
 import subprocess
-from _winreg import QueryValue, HKEY_LOCAL_MACHINE
+from .comp2to3 import is_py2
+if is_py2:
+    from _winreg import QueryValue, HKEY_LOCAL_MACHINE
+else:
+    from winreg import QueryValue, HKEY_LOCAL_MACHINE
 from os.path import join as pjoin, isfile
 # moved win32com import within the functions that need them
 # This prevents an error when running under the installer for bdist_wininst
@@ -215,7 +219,7 @@ def check_newer(dest):
     dest_time = os.path.getmtime(dest)
     this_time = os.path.getmtime(__file__)
     #import time
-    #print 'Base:', time.ctime(base_time), '  ---- Dest: ', time.ctime(dest_time)
+    #print('Base:', time.ctime(base_time), '  ---- Dest: ', time.ctime(dest_time))
     return base_time > dest_time or this_time > dest_time
 
 def find_destination():
@@ -228,7 +232,7 @@ def update_if_needed(dest=None):
         dest = find_destination()
     conf_dir = os.path.dirname(dest)
     if not os.path.isdir(conf_dir):
-        os.mkdir(conf_dir, 0755)
+        os.mkdir(conf_dir, 0o755)
     if check_newer(dest):
         update_console_xml(dest)
 
