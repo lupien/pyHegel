@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2019  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import random
@@ -29,6 +29,7 @@ import time
 import scipy
 from scipy.optimize import brentq as brentq_rootsolver
 import codecs
+from functools import reduce
 
 from ..instruments_base import BaseInstrument, visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
@@ -43,6 +44,8 @@ from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 from .logical import FunctionDevice, ScalingDevice
+
+from ..comp2to3 import string_bytes_types, unicode_type
 
 # for pfeiffer
 import threading
@@ -121,7 +124,7 @@ class yokogawa_gs200(visaInstrument):
         if self.function.getcache()=='CURR' and rnge>.2:
             rnge = .2
         if abs(val) > rnge:
-            raise ValueError, self.perror('level is invalid')
+            raise ValueError(self.perror('level is invalid'))
     def _level_getdev(self):
         return float(self.ask(':source:level?'))
     def _level_setdev(self, val):
@@ -435,7 +438,7 @@ class MagnetController_SMC(visaInstrument):
         But reverse will only work if field and voltage are 0.
         """
         password = value.pop('password', None)
-        for k,v in value.iteritems():
+        for k,v in value.items():
             if k == 'rate':
                 self.write('A%.5f'%abs(v))
             elif k == 'Tunit':
@@ -471,7 +474,7 @@ class MagnetController_SMC(visaInstrument):
         Tunit = values.pop('Tunit', None)
         if Tunit is not None:
             self.write('T%i'%Tunit)
-        for k,v in values.iteritems():
+        for k,v in values.items():
             v = abs(v)
             if k == 'lower':
                 self.write('L%f'%v)
@@ -479,7 +482,7 @@ class MagnetController_SMC(visaInstrument):
                 self.write('Y%f'%v)
             elif k == 'upper':
                 if password == '!NoPasswordUsed!':
-                    print 'Password not given, changing upper skipped.'
+                    print('Password not given, changing upper skipped.')
                     continue
                 if password != 'IReallyKnowWhatIAmDoing':
                     raise ValueError(self.setpoints.perror('Invalid password provided, which is required to change upper.'))
@@ -513,7 +516,7 @@ class MagnetController_SMC(visaInstrument):
         #self.write('H9')
         pass
     def _status_setdev(self, value):
-        for k,v in value.iteritems():
+        for k,v in value.items():
             if k == 'target':
                 ch=ChoiceIndex(['zero', 'lower','upper'])
                 self.write('R%s'%ch.tostr(v))
@@ -566,7 +569,7 @@ class MagnetController_SMC(visaInstrument):
             prog_base = 'Magnet Ramping {field:.3f}/%.3f T'%(self.setpoints.getcache().lower*factor)
         else: # zeroing field
             prog_base = 'Magnet Ramping {field:.3f}/0 T'
-        if isinstance(stay_states, basestring):
+        if isinstance(stay_states, string_bytes_types):
             stay_states = [stay_states]
         with release_lock_context(self):
             with mainStatusLine.new(priority=10, timed=True) as progress:
@@ -596,7 +599,7 @@ class MagnetController_SMC(visaInstrument):
             if extra_wait:
                 wait(extra_wait, progress_base='Magnet wait')
         if end_states is not None:
-            if isinstance(end_states, basestring):
+            if isinstance(end_states, string_bytes_types):
                 end_states = [end_states]
             if self.status.get().rampstate not in end_states:
                 raise RuntimeError(self.perror('The magnet state did not change to %s as expected'%end_states))
@@ -649,7 +652,7 @@ class MagnetController_SMC(visaInstrument):
         """
         def print_if(s):
             if not quiet:
-                print s
+                print(s)
         if wait is None:
             wait = self.ramp_wait_after.getcache()
         reverse_en = self.operating_parameters.get().reverse
@@ -777,19 +780,19 @@ class pfeiffer_turbo_log(visaInstrument):
         try:
             chksum = int(chksum)
         except ValueError:
-            print 'Invalid Checksum value', string
+            print('Invalid Checksum value', string)
             return None
         if np.sum(bytearray(string[:-3]))%256 != chksum:
-            print 'Invalid Checksum', string
+            print('Invalid Checksum', string)
             return None
         addr = string[:3]
         if addr != '001':
-            print 'Invalid address', string
+            print('Invalid address', string)
             return None
         action = string[3:5]
         if action != '10':
             if action != '00':
-                print 'Invalid action', string
+                print('Invalid action', string)
             return None
         # action == '00' is for a question
         param = int(string[5:8])
@@ -876,7 +879,7 @@ class pfeiffer_turbo_log(visaInstrument):
             val = self._alldata.get(param)
             self._alldata_lock.release()
             if val is None:
-                print 'Data not available yet'
+                print('Data not available yet')
                 return None
             val, last = val
         else:
@@ -1193,7 +1196,7 @@ class agilent_twis_torr(visaInstrument):
             if c == '\x02':
                 # start
                 if ret != '':
-                    print 'We are loosing some reply: %r'% ret
+                    print('We are loosing some reply: %r'% ret)
                 ret = c
             elif c == '\x03': # end
                 cksum = self.visa.read_raw_n_all(2)
@@ -1389,7 +1392,7 @@ class inficon_dev(BaseDevice):
                 multi = False
             else:
                 multi = ['ch%i'%i for i in range(1, nch+1)]
-                graph = range(3)
+                graph = list(range(3))
         else:
             multi = False
         fmt = self._format
@@ -1611,7 +1614,7 @@ class inficon_vgc50x(visaInstrument):
         self.continous_output_disable()
         nch = int(self.idn_split()['model'].split('_')[0][-1])
         self._nchannels = nch
-        self.current_ch = MemoryDevice('all', choices=['all']+range(1, nch+1))
+        self.current_ch = MemoryDevice('all', choices=['all']+list(range(1, nch+1)))
         pressure_doc = """
             see pressure_unit device for unit used.
             Some special values are returned for the following conditions:
@@ -1888,7 +1891,7 @@ class delft_BIAS_DAC(visaInstrument):
             raise RuntimeError('Unexpected return value header length')
         if error != 0:
             if error & 0x20:
-                print "WARNING: The controller was reset (watchdog) (%i)"%error
+                print("WARNING: The controller was reset (watchdog) (%i)"%error)
                 #raise RuntimeError('The controller was reset (watchdog) (%i)'%error)
             if error & 0x40:
                 raise RuntimeError('Invalid dac channel (%i)'%error)
@@ -1916,7 +1919,7 @@ class delft_BIAS_DAC(visaInstrument):
         now = time.time()
         if last is None or last+0.5 < now:
             # force a read after a set, or after more than 0.5s since last read
-            #print 'READING DAC'
+            #print('READING DAC')
             data = self._base_command('read_dacs')
             self._last_dac_read_time = now
             self._last_dac_read_vals = data
@@ -1972,10 +1975,10 @@ class delft_BIAS_DAC(visaInstrument):
         blocks = self._dac_modes_blocks
         if do_return:
             return blocks
-        print 'Current dac mode is:'
+        print('Current dac mode is:')
         for i in range(4):
             mode = blocks[i]
-            print '   DAC mode %2i - %2i: %s'%(i*4+1, i*4+4, mode)
+            print('   DAC mode %2i - %2i: %s'%(i*4+1, i*4+4, mode))
     def _level_helper(self, ch):
         if ch is None:
             return self.current_ch.get()
@@ -2009,7 +2012,7 @@ class delft_BIAS_DAC(visaInstrument):
         base = ['modes=%r'%modes, 'values=%r'%values]
         return base+self._conf_helper('current_ch', options)
     def _create_devs(self):
-        self.current_ch = MemoryDevice(1, choices=range(1,17))
+        self.current_ch = MemoryDevice(1, choices=list(range(1,17)))
         self._devwrap('level', autoinit=False, setget=True, doc='option ch: it is the channel to use (1-16). When not given it reuses the last one.')
         titles = ['dac_%02i'%i for i in range(1, 17)]
         self._devwrap('level_all', setget=True, autoinit=False, multi=titles)
@@ -2040,7 +2043,7 @@ class micro_lambda_mlbf(BaseInstrument):
             usbdev = hid.device()
             usb_kwargs = {}
             if usb is not True:
-                usb_kwargs['serial_number'] = unicode(usb)
+                usb_kwargs['serial_number'] = unicode_type(usb)
             usbdev.open(0x04d8, 0x003f, **usb_kwargs)
             usbdev.set_nonblocking(True) # just to be safe. Probably unecessary since I used read timeouts.
             self._usbdev = usbdev
@@ -2365,8 +2368,8 @@ class ah_2550a_capacitance_bridge(visaInstrumentAsync):
             self.write(cmd)
         d = self.ask('SHow DAte')
         t = self.ask('SHow TIme')
-        d = map(int, d.split(','))
-        t = map(int, t.split(','))
+        d = list(map(int, d.split(',')))
+        t = list(map(int, t.split(',')))
         runtime_hours = int(self.ask('SHow STAtus'))
         return dict(date='%04i-%02i-%02i %02i:%02i:%02i'%tuple(d+t), runtime_hours=runtime_hours)
 
@@ -2504,7 +2507,7 @@ class ah_2550a_capacitance_bridge(visaInstrumentAsync):
             self.write('COntinuous %s'%Choice_bool_OnOff.tostr(state))
         else:
             data = self.ask('SHow COntinuous').split('\n')
-            data = map(lambda x: x[0](x[1]), zip([float, int, int], data))
+            data = [x[0](x[1]) for x in zip([float, int, int], data)]
             return dict(zip(['interval', 'stop_count', 'count'], data))
 
     def _fetch_getdev(self):
