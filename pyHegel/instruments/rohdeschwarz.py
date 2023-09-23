@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2018-2018  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2018-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -25,7 +25,7 @@
 ##    Rohde & Schwarz instruments
 #######################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import scipy
@@ -43,6 +43,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             locked_calling, quoted_list, quoted_dict, decode_complex128, Block_Codec
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
+from ..comp2to3 import string_bytes_types
 
 # The usb name can be (rs.idn_usb()):
 #    'Rohde & Schwarz GmbH & Co. KG'
@@ -87,7 +88,7 @@ class rs_sgma(visaInstrument):
             self.power_level_dbm._doc = 'Range is affected by offset. With offset=0 it is min=%f, max=%f'%(min, max)
 
     def _internal_othergen(self, freq, power):
-        print "Other gen should be at %r Hz, %r dBm"%(freq, power)
+        print("Other gen should be at %r Hz, %r dBm"%(freq, power))
 
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
@@ -115,7 +116,7 @@ class rs_sgma(visaInstrument):
         if not self._is_SGS:
             self.write('SETTings:APPLy')
         else:
-            print 'Only useful for SGU devices.'
+            print('Only useful for SGU devices.')
 
     def reset_tripped_state(self):
         self.write('OUTPut:PROTection:CLEar')
@@ -123,7 +124,7 @@ class rs_sgma(visaInstrument):
     def conf_traits(self):
         """ For SGU only: Return a dictionnary of information about all the frequency bands """
         if self._is_SGS:
-            print 'Only useful for SGU devices.'
+            print('Only useful for SGU devices.')
             return
         traits_name = ['upper_edge', 'freq_mult', 'bypass_mode_en', 'pulse_modulation_in_LO', 'AM_allowed', 'PM_PhiM_allowed']
         traits_type = [float, int, bool, bool, bool, bool]
@@ -163,7 +164,7 @@ class rs_sgma(visaInstrument):
         # SGS and SGU don't use quoted string in the same way. So quietly remove if needed.
         qs = quoted_string(quiet=True)
         split = lambda s: s.split(',')
-        clean = lambda s: map(qs, split(s))
+        clean = lambda s: list(map(qs, split(s)))
         common_assembly = {}
         rf_assembly = {}
         common_assembly['name'] = clean(self.ask('SYSTem:HARDware:ASSembly1:NAME?'))
@@ -180,7 +181,7 @@ class rs_sgma(visaInstrument):
         # SGS and SGU don't use quoted string in the same way. So quietly remove if needed.
         qs = quoted_string(quiet=True)
         split = lambda s: s.split(',')
-        clean = lambda s: map(qs, split(s))
+        clean = lambda s: list(map(qs, split(s)))
         common_assembly = {}
         rf_assembly = {}
         common_assembly['name'] = clean(self.ask('SYSTem:SOFTware:OPTion1:NAME?'))
@@ -196,7 +197,7 @@ class rs_sgma(visaInstrument):
     def conf_extension(self):
         """ Returns information about the extension module. Only useful on SGS """
         if not self._is_SGS:
-            print 'Only useful for SGS devices.'
+            print('Only useful for SGS devices.')
             return
         connected = _fromstr_helper(self.ask('EXTension:REMote:STATe?'), bool)
         name = self.ask('EXTension:INSTruments:NAME?')
@@ -210,7 +211,7 @@ class rs_sgma(visaInstrument):
     @locked_calling
     def extension_write(self, command, ch=1):
         if not self._is_SGS:
-            print 'Only useful for SGS devices.'
+            print('Only useful for SGS devices.')
             return
         self.write('EXTension:SELect %i'%ch)
         self.write('EXTension:SEND "%s"'%command)
@@ -225,7 +226,7 @@ class rs_sgma(visaInstrument):
             Useful queries: SYSTem:ERRor, SYSTem:SERRor
         """
         if not self._is_SGS:
-            print 'Only useful for SGS devices.'
+            print('Only useful for SGS devices.')
             return
         self.write('EXTension:SELect %i'%ch)
         return self.ask('EXTension:SEND? "%s"'%query)
@@ -403,7 +404,7 @@ class rs_rto_scope(visaInstrumentAsync):
         ch_wf_opts = []
         for c in range(1, 5):
             self.current_channel.set(c)
-            wf_range =  range(1, 4) if self.channel_multiple_waveforms_en.get() else [1]
+            wf_range =  list(range(1, 4)) if self.channel_multiple_waveforms_en.get() else [1]
             for wf in wf_range:
                 self.current_channel_waveform.set(wf)
                 ch_wf_opt = ['channel_waveform=C%iW%i'%(c, wf)]
@@ -592,10 +593,10 @@ class rs_rto_scope(visaInstrumentAsync):
         #self.waveform_history_index.set(0, ch=ch, wf=wf)
         date = self.ask('CHANnel{ch}:WAVeform{wf}:HISTory:TSDate?'.format(ch=ch, wf=wf))
         time_str = self.ask('CHANnel{ch}:WAVeform{wf}:HISTory:TSABsolute?'.format(ch=ch, wf=wf))
-        date = map(int, date.split(':'))
+        date = list(map(int, date.split(':')))
         hrmn, sec, uni = time_str.split(' ')
-        hr, mn = map(int, hrmn.split(':'))
-        sec, ns = map(float, sec.replace('.', '').split(','))
+        hr, mn = list(map(int, hrmn.split(':')))
+        sec, ns = list(map(float, sec.replace('.', '').split(',')))
         datetime = time.mktime( (date[0], date[1], date[2], hr, mn, int(sec), -1, -1, -1) )
         return datetime, ns*1e-9
 
@@ -645,7 +646,7 @@ class rs_rto_scope(visaInstrumentAsync):
         cur_ch = self.current_channel.get()
         cur_wf = self.current_channel_waveform.get()
         chl = []
-        wf_rg = range(1,4) if self.channel_multiple_waveforms_en.get() else [1]
+        wf_rg = list(range(1,4)) if self.channel_multiple_waveforms_en.get() else [1]
         for c in range(1,5):
             for w in wf_rg:
                 if self.channel_en.get(ch=c, wf=w):
@@ -660,7 +661,7 @@ class rs_rto_scope(visaInstrumentAsync):
         if not isinstance(ch, (list)):
             ch = [ch]
         allowed_map = {'C1':'C1W1', 1:'C1W1', 'C2':'C2W1', 2:'C2W1', 'C3':'C3W1', 3:'C3W1', 'C4':'C4W1', 4:'C4W1'}
-        ch = map(lambda c: allowed_map.get(c, c), ch)
+        ch = [allowed_map.get(c, c) for c in ch]
         return ch
     def _fetch_getformat(self, **kwarg):
         xaxis = kwarg.get('xaxis', True)
@@ -702,7 +703,7 @@ class rs_rto_scope(visaInstrumentAsync):
         cur_ch = self.current_channel.get()
         cur_wf = self.current_channel_waveform.get()
         if history == 'all':
-            history = range(-self.acquire_navailable.get()+1, 0+1)
+            history = list(range(-self.acquire_navailable.get()+1, 0+1))
         else:
             history = [history]
         N_hist = len(history)
@@ -790,7 +791,7 @@ class rs_rto_scope(visaInstrumentAsync):
             cache_time, meas = self._meas_names_cache.get(c, (0,[]))
             now = time.time()
             if now-cache_time > 5: # recheck after 5s have elapsed
-                #print 'obtaining proper header'
+                #print('obtaining proper header')
                 self.write('MEASurement%i:ARNames ON'%c)
                 data_str = self.ask('MEASurement{ch}:ARES?'.format(ch=c))
                 # data_str can look like:
@@ -1059,7 +1060,7 @@ class rs_rto_scope(visaInstrumentAsync):
         self.roll_auto_time = scpiDevice('TIMebase:ROLL:MTIMe', str_type=float, setget=True, auto_min_max=True)
         self.roll_is_active = scpiDevice(getstr='TIMebase:ROLL:STATe?', str_type=bool)
 
-        self.current_measurement = MemoryDevice(initval=1, choices=range(1,9))
+        self.current_measurement = MemoryDevice(initval=1, choices=list(range(1,9)))
         def Meas(*args, **kwargs):
             options = kwargs.pop('options', {}).copy()
             options.update(ch=self.current_measurement)
@@ -1220,7 +1221,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
 
     def _match_sweep_count_navg(self):
         orig_ch = self.current_channel.get()
-        chs = self.active_channels_list.get().keys()
+        chs = list(self.active_channels_list.get().keys())
         for ch in chs:
             avg_en = self.sweep_average_en.get(ch=ch)
             if avg_en:
@@ -1248,7 +1249,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         """
         if ch == 'all':
             orig_ch = self.current_channel.get()
-            chs = self.active_channels_list.get().keys()
+            chs = list(self.active_channels_list.get().keys())
         elif ch is None:
             #sets ch if necessary
             chs = [self.current_channel.get()]
@@ -1275,9 +1276,9 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
               It can be a number, like 1, in which case it is transformed to 'Trc1'
         param: Any S parameter as S11 or any other format allowed (see Analyzer documentation)
         """
-        trace_all = self.trace_list_all.get().values()
+        trace_all = list(self.trace_list_all.get().values())
         exist = False
-        if not isinstance(trace, basestring):
+        if not isinstance(trace, string_bytes_types):
             trace = 'Trc%i'%trace
         if trace in trace_all:
             exist = True
@@ -1286,7 +1287,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         else:
             self.current_channel.set(ch)
         if ch in self.active_channels_list.get().keys():
-            trc_list = self.trace_meas_list_in_ch.get().keys()
+            trc_list = list(self.trace_meas_list_in_ch.get().keys())
         else:
             trc_list = []
         if exist and trace not in trc_list:
@@ -1358,7 +1359,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
                         db.append(d)
             return [n+'=['+','.join(d)+']' for n, d in zip(names, data_all)]
 
-        ports = range(1, self.current_phys_port.max+1)
+        ports = list(range(1, self.current_phys_port.max+1))
         o_s = []
         for p in ports:
             self.current_phys_port.set(p)
@@ -1371,7 +1372,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         opts += reorg(o_s)
         opts += self._conf_helper('port_power_sweep_end', 'port_power_sweep_end_delay')
 
-        traces = self.trace_meas_list_in_ch.get().keys()
+        traces = list(self.trace_meas_list_in_ch.get().keys())
         o_s = []
         for t in traces:
             self.select_trace.set(t)
@@ -1537,8 +1538,8 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
             raise RuntimeError(self.perror('remote_ls check error. One of the files probably contains ", "'))
         if (not extra) and (not only_files):
             return names
-        is_dir = map(lambda x: x=='<DIR>', is_dir)
-        file_size = map(lambda x: -1 if x=='' else int(x), file_size)
+        is_dir = [x=='<DIR>' for x in is_dir]
+        file_size = [-1 if x=='' else int(x) for x in file_size]
         # cross check
         for d,s in zip(is_dir, file_size):
             s = s == -1
@@ -1549,7 +1550,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
             file_size = [s for s,d in zip(file_size, is_dir) if not d]
         if not extra:
             return names
-        return used_space, free_space, zip(names, file_size)
+        return used_space, free_space, list(zip(names, file_size))
 
     @locked_calling
     def send_file(self, dest_file, local_src_file=None, src_data=None, overwrite=False):
@@ -1565,7 +1566,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
             directory, filename = os.path.split(dest_file)
             ls = self.remote_ls(directory, only_files=True)
             if ls:
-                ls = map(lambda s: s.lower(), ls)
+                ls = [s.lower() for s in ls]
                 if filename.lower() in ls:
                     raise RuntimeError('Destination file already exists. Will not overwrite.')
         if src_data is local_src_file is None:
@@ -1640,7 +1641,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         if self._firmware_version < 3. and color not in [True, False]:
             raise ValueError(self.snap_png.perror('Invalid color. Use one of %s'%([True, False])))
         elif color not in color_sel:
-            raise ValueError(self.snap_png.perror('Invalid color. Use one of %s'%(color_sel.keys())))
+            raise ValueError(self.snap_png.perror('Invalid color. Use one of %s'%(list(color_sel.keys()))))
         handle_option(logo, 'HCOPy:ITEM:LOGO')
         # marker info is a separate window where the markers information can be moved to
         # when enabling its output, it is added to another page.
@@ -1785,7 +1786,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
                 ret = [self.calib_data_xaxis.get()]
             else:
                 if traces is None:
-                    tr = self.trace_meas_list_in_ch.get().keys()[0]
+                    tr = list(self.trace_meas_list_in_ch.get().keys())[0]
                 else:
                     tr = traces[0]
                 # get the x axis of the first trace selected
@@ -1849,7 +1850,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         df = freq[ratio[1]] - freq[ratio[0]]
         if delay == 0.:
             delay = -dp/df/360.
-            print 'Using delay=', delay
+            print('Using delay=', delay)
         return phase_deg + delay*freq*360.
 
     def get_xscale(self, ch=None, trace=None):
