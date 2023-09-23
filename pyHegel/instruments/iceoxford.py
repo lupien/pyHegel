@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2022-2022  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2022-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import struct
 import types
@@ -81,7 +81,7 @@ class iceoxford_dev(scpiDevice):
         self._noset_last = kwargs.pop('noset', False)
         super(iceoxford_dev, self).check(*val, **kwargs)
     #def __del__(self):
-    #    print 'Releasing iceoxford dev', self._getdev_p
+    #    print('Releasing iceoxford dev', self._getdev_p)
 
 def sensor_return(valstr):
     if valstr == '':
@@ -392,7 +392,7 @@ class iceoxford_temperature_controller(visaInstrument):
         """
         t1k = self._get_t1k()
         if t1k < 5:
-            print "\n!!! Please wait for the Helium to boil off before proceeding !!!\n Starting at: %s\n"%time.ctime()
+            print("\n!!! Please wait for the Helium to boil off before proceeding !!!\n Starting at: %s\n"%time.ctime())
             if not skip_prep:
                 self._do_warmup_prep()
             # might have some liquid, need to boil it off
@@ -421,9 +421,9 @@ class iceoxford_temperature_controller(visaInstrument):
                     i = 0
                 wait(10)
             self.nv_pid.set(p=1000, i=1, d=0)
-            print "\n Boil off finished at:", time.ctime()
+            print("\n Boil off finished at:", time.ctime())
         else:
-            print "\n Already warm enough. There should be no liquid He present. Boil off skipped.\n"
+            print("\n Already warm enough. There should be no liquid He present. Boil off skipped.\n")
 
     def cooldown_fast(self, cooldown_nv_sp=8):
         """ Cool down fast. First set the setpoint and pid you want for both nv and heater2. """
@@ -431,7 +431,7 @@ class iceoxford_temperature_controller(visaInstrument):
         t1ksp = self.heater_setpoint.get(outch=2)
         hr = self.heater_range.get()
         if t1k-2 > t1ksp or (hr == 'off' and t1k > 4.0):
-            print "\n!!! Please wait for the temperature to reach the setpoint\n"
+            print("\n!!! Please wait for the temperature to reach the setpoint\n")
             nv_setpoint = self.nv_setpoint.get()
             nv_pid = self.nv_pid.get()
             self.nv_setpoint.set(cooldown_nv_sp, noset=True)
@@ -443,7 +443,7 @@ class iceoxford_temperature_controller(visaInstrument):
             self.nv_pid.set(nv_pid)
             self.heater_range.set(hr)
         else:
-            print "\n !! Fast cooldown skipped because temperature is not above Setpoint by more than 2K\n"
+            print("\n !! Fast cooldown skipped because temperature is not above Setpoint by more than 2K\n")
 
     def do_warmup(self):
         """ Setup the ICEoxford program so it starts the warmup.
@@ -478,7 +478,7 @@ class iceoxford_temperature_controller(visaInstrument):
         self.heater_setpoint_ramp_en.set(True)
         self.heater_range.set('high')
         self.heater_setpoint.set(295)
-        print "\n ***  You can now shut off the compressor.  ***\n"
+        print("\n ***  You can now shut off the compressor.  ***\n")
 
     def finish_warmup(self):
         """ Setup the ICEoxford program so it stops the warmup.
