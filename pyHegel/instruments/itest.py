@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2018  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseInstrument,\
                             scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
@@ -88,7 +88,7 @@ class Choice_float_extra(ChoiceLimits):
             return [k for k,v in self.others.items() if v==val][0]
         return super(Choice_float_extra, self).tostr(val)
     def __repr__(self):
-        extra = ' Also can use one of %s'%self.others.values()
+        extra = ' Also can use one of %s'%list(self.others.values())
         return super(Choice_float_extra, self).__repr__() + extra
     def __contains__(self, val):
         if val in self.others.values():
@@ -351,7 +351,7 @@ class iTest_be2102(visaInstrument):
         extra_check_level = ProxyMethod(self._extra_check_level)
         self.level = scpiDevice(pre+'VOLTage', str_type=float, extra_check_func=extra_check_level)
 
-        range_list = map(float, self.ask(pre+'VOLTage:RANGe:LIST?').split(','))
+        range_list = list(map(float, self.ask(pre+'VOLTage:RANGe:LIST?').split(',')))
         extra_check_output_en = ProxyMethod(self._extra_check_output_en)
         range_doc = """
         The range can only be changed when the output is disabled.
@@ -705,7 +705,7 @@ class iTest_be214x(visaInstrument):
 
         # Technically VOLTage:RANGe:LIST? is addressed to a specific channel, however they all return the same result (from email).
         #  email refers to Mathieu PANEL <m.panel@itest.fr>, Re: Fwd: problèmes avec BE2142, 2019-05-28
-        range_list = map(float, self.ask(pre+'VOLTage:RANGe:LIST?').split(','))
+        range_list = list(map(float, self.ask(pre+'VOLTage:RANGe:LIST?').split(',')))
         extra_check_output_en = ProxyMethod(self._extra_check_output_en)
         range_doc = """
         The range can only be changed when the output is disabled.
