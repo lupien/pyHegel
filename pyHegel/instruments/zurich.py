@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -35,7 +35,7 @@
 #      significantly. I will put it in out ticket system. It is however not clear
 #      when I can offer a solution.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 #import zhinst.ziPython as zi
@@ -52,6 +52,8 @@ from ..instruments_base import ChoiceIndex as _ChoiceIndex
 from ..instruments_registry import register_instrument
 from .logical import FunctionDevice, ScalingDevice
 from scipy.special import gamma
+
+from ..comp2to3 import string_bytes_types, is_py2
 
 def _get_zi_python_version(dev=None, host='localhost', port=8004):
     if dev is None:
@@ -91,7 +93,7 @@ def _tostr_helper(val, t):
         return float(val)
     if t == int:
         return int(val)
-    if type(t) == type and issubclass(t, basestring):
+    if type(t) == type and issubclass(t, string_bytes_types):
         return t(val)
     return t.tostr(val)
 
@@ -105,7 +107,7 @@ def _fromstr_helper(valstr, t):
         return float(valstr)
     if t == int:
         return int(valstr)
-    if type(t) == type and issubclass(t, basestring):
+    if type(t) == type and issubclass(t, string_bytes_types):
         return t(valstr)
     return t(valstr)
 
@@ -154,7 +156,7 @@ class ziDev(scpiDevice):
             t = input_type
             if t == 'auto':
                 if input_src == 'main':
-                    t = {None:None, bool:'int', float:'double', int:'int', str:'byte', unicode:'byte'}[str_type]
+                    t = {None:None, bool:'int', float:'double', int:'int', type(''):'byte', type(u''):'byte'}[str_type]
                 else:
                     t = None
             ask_write_opt = dict(t=t, src=input_src)
@@ -182,7 +184,7 @@ class ziDev(scpiDevice):
         return val
     def _setdev(self, val, **kwarg):
         if self._setdev_p is None:
-            raise NotImplementedError, self.perror('This device does not handle _setdev')
+            raise NotImplementedError(self.perror('This device does not handle _setdev'))
         options = self._combine_options(**kwarg)
         command = self._setdev_p
         repeat = self._input_repeat
@@ -196,7 +198,7 @@ class ziDev(scpiDevice):
             self.instr.write(cmd, v, **self._ask_write_opt)
     def _getdev(self, **kwarg):
         if self._getdev_p is None:
-            raise NotImplementedError, self.perror('This device does not handle _getdev')
+            raise NotImplementedError(self.perror('This device does not handle _getdev'))
         try:
             options = self._combine_options(**kwarg)
         except InvalidAutoArgument:
@@ -368,11 +370,11 @@ class zurich_UHF(BaseInstrument):
         if zi_dev is None:
             try:
                 zi_dev = self._zi_devs[0]
-                print 'Using zi device ', zi_dev
+                print('Using zi device ', zi_dev)
             except IndexError:
-                raise ValueError, 'No devices are available'
+                raise ValueError('No devices are available')
         elif zi_dev not in self._zi_devs:
-            raise ValueError, 'Device "%s" is not available'%zi_dev
+            raise ValueError('Device "%s" is not available'%zi_dev)
         self._zi_dev = zi_dev
         self._current_mode = 'lia'
         super(zurich_UHF, self).__init__()
@@ -516,9 +518,9 @@ class zurich_UHF(BaseInstrument):
             ret = self._zi_zoomFFT
             pre = 'zoomFFT'
         else:
-            raise ValueError, 'Invalid src'
+            raise ValueError('Invalid src')
         if ret is None:
-            raise ValueError, 'Requested src is not available'
+            raise ValueError('Requested src is not available')
         return ret, pre
     def list_nodes(self, base='/', src='main', recursive=True, absolute=True, leafs_only=True, settings_only=False):
         """
@@ -578,10 +580,10 @@ class zurich_UHF(BaseInstrument):
         if root:
             pre = sep
         out_dict = {}
-        for k,v in in_dict.iteritems():
+        for k,v in in_dict.items():
             if isinstance(v, dict):
                 v = self._flat_dict(v, False)
-                for ks, vs in v.iteritems():
+                for ks, vs in v.items():
                     out_dict[pre+k+sep+ks] = vs
             else:
                 out_dict[pre+k] = v
@@ -640,7 +642,7 @@ class zurich_UHF(BaseInstrument):
             else:
                 src.set(pre+'/'+command, val)
         else:
-            raise ValueError, 'Invalid value for t=%r'%t
+            raise ValueError('Invalid value for t=%r'%t)
     @locked_calling
     def ask(self, question, src='main', t=None, strip_timestamp=True, settings_only=True):
         """
@@ -694,9 +696,9 @@ class zurich_UHF(BaseInstrument):
                 ret = self._flat_dict(src.get(pre+'/'+question), False)
             if t == 'dict' or len(ret) != 1:
                 return ret
-            return ret.values()[0]
+            return list(ret.values())[0]
         else:
-            raise ValueError, 'Invalid value for t=%r'%t
+            raise ValueError('Invalid value for t=%r'%t)
     def zi_help(self, path):
         """\
         Shows the zi help. The path can contain wildcards. It will show the help for all sub paths.
@@ -858,7 +860,7 @@ class zurich_UHF(BaseInstrument):
         # z=get(zi.demod_data); tzo = z['timestamp']
         # while True:
         #    z=get(zi.demod_data); t=zi.timestamp_to_s(z['timestamp']-tzo)
-        #    print ((2*pi*t*z['frequency'] - z['phase'] + 2*pi)%(2*pi))[0]
+        #    print(((2*pi*t*z['frequency'] - z['phase'] + 2*pi)%(2*pi))[0])
         #For sweep mode there is also a timestamp value. It is a single value and represents
         # the end in raw clock ticks: 1.8 GHz
         # with multiple enable channel, one of the timestamp is the same as the last nexttimestamp
@@ -893,7 +895,7 @@ class zurich_UHF(BaseInstrument):
                 except KeyError:
                     raise RuntimeError("Selected data is not available (can't use fetch with sweep): %s"%name)
                 if len(d) > 1 and not multi_data:
-                    print 'More than one sweep data set, using the latest one only'
+                    print('More than one sweep data set, using the latest one only')
                     multi_data = True
                 d = d[-1]
                 if len(d) != 1:
@@ -904,8 +906,8 @@ class zurich_UHF(BaseInstrument):
                     main_x =x
                     ret.append(x)
                 if not xaxis_differ and xaxis and not np.all(np.isclose(main_x, x, rtol=1e-8, atol=1e-15)):
-                    #print np.abs((x-main_x)/x)
-                    print 'Not all x-axis are the same, returned only the first one'
+                    #print(np.abs((x-main_x)/x))
+                    print('Not all x-axis are the same, returned only the first one')
                     xaxis_differ = True
                 for v in vals:
                     ret.append(d[v])
@@ -927,17 +929,17 @@ class zurich_UHF(BaseInstrument):
         self.clockbase = ziDev(getstr='clockbase', str_type=float)
         self.fpga_core_temp = ziDev(getstr='stats/physical/fpga/temp', str_type=float)
         self.calib_required = ziDev(getstr='system/calib/required', str_type=bool)
-        #self.mac_addr = ziDev('system/nics/0/mac/{rpt_i}', input_repeat=range(6), str_type=int)
+        #self.mac_addr = ziDev('system/nics/0/mac/{rpt_i}', input_repeat=list(range(6)), str_type=int)
         self.mac_addr = ziDev('system/nics/0/mac')
-        self.current_demod = MemoryDevice(0, choices=range(8))
+        self.current_demod = MemoryDevice(0, choices=list(range(8)))
         if mf_present:
-            osc_choices = range(8)
+            osc_choices = list(range(8))
         else:
-            osc_choices = range(2)
+            osc_choices = list(range(2))
         self.current_osc = MemoryDevice(0, choices=osc_choices)
-        self.current_sigins = MemoryDevice(0, choices=range(2))
-        self.current_sigouts = MemoryDevice(0, choices=range(2))
-        self.current_auxouts = MemoryDevice(0, choices=range(4))
+        self.current_sigins = MemoryDevice(0, choices=list(range(2)))
+        self.current_sigouts = MemoryDevice(0, choices=list(range(2)))
+        self.current_auxouts = MemoryDevice(0, choices=list(range(4)))
         def ziDev_ch_gen(ch, *arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(ch=ch)
@@ -961,7 +963,7 @@ class zurich_UHF(BaseInstrument):
             self.demod_osc_src = ziDev_ch_demod('demods/{ch}/oscselect', str_type=int, choices=osc_choices)
         else:
             self.demod_osc_src = ziDev_ch_demod(getstr='demods/{ch}/oscselect', str_type=int, choices=osc_choices)
-        self.demod_adc_src = ziDev_ch_demod('demods/{ch}/adcselect', str_type=int, choices=range(13))
+        self.demod_adc_src = ziDev_ch_demod('demods/{ch}/adcselect', str_type=int, choices=list(range(13)))
         self.demod_rate = ziDev_ch_demod('demods/{ch}/rate', str_type=float, setget=True, doc="""
             The rate are power of 2 fractions of the base sampling rate.
             With the base of 1.8 GS/s, the web interface has a max rate of
@@ -972,7 +974,7 @@ class zurich_UHF(BaseInstrument):
             sufficient antialiasing suppression.
         """)
         self.demod_tc = ziDev_ch_demod('demods/{ch}/timeconstant', str_type=float, setget=True)
-        self.demod_order = ziDev_ch_demod('demods/{ch}/order', str_type=int, choices=range(1,9))
+        self.demod_order = ziDev_ch_demod('demods/{ch}/order', str_type=int, choices=list(range(1,9)))
         self.demod_phase = ziDev_ch_demod('demods/{ch}/phaseshift', str_type=float, setget=True)
         self.demod_trigger = ziDev_ch_demod('demods/{ch}/trigger', str_type=int)
         self.demod_data = ziDev_ch_demod(getstr='demods/{ch}/sample', input_type='sample', doc='It will wait for the next available samples (depends on rate). X and Y are in RMS')
@@ -1001,7 +1003,7 @@ class zurich_UHF(BaseInstrument):
         # Without MF: Because of the override, current_sigouts_demod is not kept up to date, however that values
         # ends up never to be used.
         if mf_present:
-            all_ch = range(8)
+            all_ch = list(range(8))
             out_demod_def = 0
             out_demod = ChoiceDevDep(self.current_sigouts, {0:all_ch, 1:all_ch})
             demod_name = 'demod'
@@ -1380,7 +1382,7 @@ def _time_poll(za):
     return time.time()-to,n,r
 # za.poll() # first empty the poll buffer
 # timeit instruments_ZI._time_poll(za)
-# timeit print instruments_ZI._time_poll(za)
+# timeit print(instruments_ZI._time_poll(za))
 #  This is always 100 ms (version 13.10). For version 14.02 it is now ~6 ms, version 14.08 it is 6.9 ms
 #        version 15.05:  6.6 ms
 #  When subscribing to something like
@@ -1482,7 +1484,7 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
         zi.demod_tc.set(start)
         tc_start = zi.demod_tc.getcache()
     #if tc_start<start:
-    #    print 'tc<'
+    #    print('tc<')
     #    return []
     if skip_stop:
         tc_stop = stop
@@ -1490,15 +1492,15 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
         zi.demod_tc.set(stop)
         tc_stop = zi.demod_tc.getcache()
     if tc_start == tc_stop:
-        print start, stop, (stop-start), tc_start, tc_stop
+        print(start, stop, (stop-start), tc_start, tc_stop)
         return [tc_start]
     df = stop-start
     mid = start+df/2.
     zi.demod_tc.set(mid)
     tc_mid = zi.demod_tc.getcache()
-    print start, stop, df, tc_start, tc_mid, tc_stop,
+    print(start, stop, df, tc_start, tc_mid, tc_stop, end=' ')
     if tc_start == tc_mid:
-        print 'A'
+        print('A')
         t1 = [tc_start]
         if skip_start==True and skip_stop==False:
             # previously tc_mid == tc_stop, so no other points in between
@@ -1506,7 +1508,7 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
         else:
             t2 = _find_tc(zi, mid, tc_stop, False, True)
     elif tc_mid == tc_stop:
-        print 'B'
+        print('B')
         if skip_start==False and skip_stop==True:
             # previously tc_mid == tc_start, so no other points in between
             t1 = [tc_start]
@@ -1514,7 +1516,7 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
             t1 = _find_tc(zi, tc_start, mid, True, False)
         t2 = [tc_stop]
     else:
-        print 'C'
+        print('C')
         t1 = _find_tc(zi, tc_start, tc_mid, True, True)
         t2 = _find_tc(zi, tc_mid, tc_stop, True, True)
     if t1[-1] == t2[0]:
@@ -1593,17 +1595,17 @@ def _find_tc(zi, start, stop, skip_start=False, skip_stop=False):
 #  For 14.08 sync=True: 6.2ms, False: 4.6 ms
 # Compare
 # s='/dev2021/demods/0/enable'
-# za.set_async(s,1); print za.getI(s); time.sleep(.1); print za.getI(s)
+# za.set_async(s,1); print(za.getI(s)); time.sleep(.1); print(za.getI(s))
 #   returns 1 1
-# za.set_async(s,0); print za.getI(s); time.sleep(.1); print za.getI(s)
+# za.set_async(s,0); print(a.getI(s)); time.sleep(.1); print(za.getI(s))
 #   returns 1 0
-# za.set_sync(s,0); print za.getI(s); time.sleep(.1); print za.getI(s)
+# za.set_sync(s,0); print(za.getI(s)); time.sleep(.1); print(za.getI(s))
 #   returns 0 0
-# za.set_sync(s,1); print za.getI(s); time.sleep(.1); print za.getI(s)
+# za.set_sync(s,1); print(za.getI(s)_; time.sleep(.1); print(za.getI(s))
 #   returns 1 1
-# za.set(s,1); print za.getI(s); time.sleep(.1); print za.getI(s)
+# za.set(s,1); print(za.getI(s)); time.sleep(.1); print(za.getI(s))
 #   returns 1 1
-# za.set(s,0); print za.getI(s); time.sleep(.1); print za.getI(s)
+# za.set(s,0); print(za.getI(s)); time.sleep(.1); print(za.getI(s))
 #   returns 0 0
 # timeit za.set(s,0)
 #  100 loops, best of 3: 5.63 ms per loop
@@ -1657,7 +1659,7 @@ from ..types import StructureImproved
 
 try:
     warnings
-    #print "We are reloading this module, no need to add the filter again"
+    #print("We are reloading this module, no need to add the filter again")
 except NameError:
     import warnings
     # The RE are done with match (they have to match from the start of the string)
@@ -1721,6 +1723,7 @@ AsyncReply_commands = {1: 'ziAPIAsyncSetDoubleData', 2: 'ziAPIAsyncSetIntegerDat
 # ctypes in Python 2.6.2 at least has a bug that prevents
 # subclassing arrays unless _length_ and _type_ are redefined
 # create a metaclass to automatically do that transformation
+# I think this problem was fixed in 3.3 but not in 2.7
 _ctypes_array_metabase = (c_uint8*4).__class__
 class _ctypes_array_metabase_fix(_ctypes_array_metabase):
     def __new__(mcls, name, bases, d):
@@ -1756,7 +1759,7 @@ class StructureImproved_extend(StructureImproved):
     _mask_char_raw = False
     @staticmethod
     def _normalize_mask(mask):
-        if isinstance(mask, basestring):
+        if isinstance(mask, string_bytes_types):
             mask = (mask, 'mask_default')
         return mask
     def __setattr__(self, name, value):
@@ -1810,7 +1813,7 @@ class StructureImproved_extend(StructureImproved):
         newsize = max(minsize, newsize)
         resize(self, newsize)
     def _mask_default_get(self):
-        #print 'Get called'
+        #print)'Get called')
         cnt = self._mask_get_count()
         #cnt = min(cnt, 1024*1024)
         newtype = self._mask_basetype * cnt
@@ -1826,7 +1829,7 @@ class StructureImproved_extend(StructureImproved):
         cdata = newtype.from_address(addressof(self) + offset)
         return self._mask_get_conv(cdata)
     def _mask_default_set(self, val):
-        #print 'set called'
+        #print('set called')
         self._mask_default_get()[:] = val
 
 class ByteArrayData(StructureImproved_extend):
@@ -1867,19 +1870,24 @@ class ByteArrayDataTS(StructureImproved_extend):
     _mask_char_raw = True
 
 
+# metaclass is only needed in python 2. It would do nothing in python 3 but
+# I use the is_py2 to make it clearer.
 # These will display the data instead of the class name
 class c_uint8x4(c_uint8*4):
-    __metaclass__ = _ctypes_array_metabase_fix
+    if is_py2:
+        __metaclass__ = _ctypes_array_metabase_fix
     def __repr__(self):
         return repr(self[:])
 
 class c_floatx4(c_float*4):
-    __metaclass__ = _ctypes_array_metabase_fix
+    if is_py2:
+        __metaclass__ = _ctypes_array_metabase_fix
     def __repr__(self):
         return repr(self[:])
 
 class c_doublex4(c_double*4):
-    __metaclass__ = _ctypes_array_metabase_fix
+    if is_py2:
+        __metaclass__ = _ctypes_array_metabase_fix
     def __repr__(self):
         return repr(self[:])
 
@@ -2087,7 +2095,7 @@ class ziEvent(StructureImproved):
         else:
             ret = '%s(%s)'%(self.__class__.__name__, ', '.join(strs))
         if show:
-            print ret
+            print(ret)
         else:
             return ret
 
@@ -2211,9 +2219,9 @@ class ziAPI(object):
             return
         else:
             if result<ZI_ERROR_GENERAL:
-                raise RuntimeWarning, 'Warning: %s'%zi_result_dic[result]
+                raise RuntimeWarning('Warning: %s'%zi_result_dic[result])
             else:
-                raise RuntimeError, 'ERROR: %s'%zi_result_dic[result]
+                raise RuntimeError('ERROR: %s'%zi_result_dic[result])
     def _makefunc(self, f, argtypes, prepend_con=True):
         rr = r = getattr(self._ziDll, f)
         r.restype = ZIResult_enum
@@ -2247,7 +2255,7 @@ class ziAPI(object):
         setattr(self, 'get'+f, newfunc)
     def __del__(self):
         # can't use the redirected functions because weakproxy no longer works here
-        print 'Running del on ziAPI:', self
+        print('Running del on ziAPI:', self)
         del self._ziAPIDisconnect.errcheck
         del self._ziAPIDestroy.errcheck
         self._ziAPIDisconnect(self._conn)
@@ -2269,7 +2277,7 @@ class ziAPI(object):
         # before 14.08, to reconnect required: first disconnect, then destroy
         # then init, before trying connect. Now just disconnect first is necessary
         self._Connect(hostname, port)
-        print 'Connected'
+        print('Connected')
     def disconnect(self):
         self._Disconnect()
     def get_revision(self):
@@ -2278,7 +2286,7 @@ class ziAPI(object):
         return rev.value
     def connect_ex(self, hostname=_default_host, port=_default_port, version=5, implementation=None):
         self._ConnectEx(hostname, port, version, implementation)
-        print 'Connected ex'
+        print('Connected ex')
     def list_implementation(self):
         buf = create_string_buffer(1024)
         self._ziAPIListImplementations(buf, len(buf))
@@ -2315,25 +2323,25 @@ class ziAPI(object):
         buf = c_char_p()
         base = c_int()
         self._ziAPIGetError(result, byref(buf), byref(base))
-        print 'Message:', buf.value, '\nBase:', hex(base.value)
+        print('Message:', buf.value, '\nBase:', hex(base.value))
     def set(self, path, val):
         if isinstance(val, int):
             self._SetValueI(path, val)
         elif isinstance(val, float):
             self._SetValueD(path, val)
-        elif isinstance(val, basestring):
+        elif isinstance(val, string_bytes_types):
             self._SetValueB(path, val, len(val))
         else:
-            raise TypeError, 'Unhandled type for val'
+            raise TypeError('Unhandled type for val')
     def set_async(self, path, val):
         if isinstance(val, int):
             self._AsyncSetIntegerData(path, val)
         elif isinstance(val, float):
             self._AsyncSetDoubleData(path, val)
-        elif isinstance(val, basestring):
+        elif isinstance(val, string_bytes_types):
             self._AsyncSetByteArray(path, val, len(val))
         else:
-            raise TypeError, 'Unhandled type for val'
+            raise TypeError('Unhandled type for val')
     def set_sync(self, path, val):
         if isinstance(val, int):
             val = ziIntegerType(val)
@@ -2341,11 +2349,11 @@ class ziAPI(object):
         elif isinstance(val, float):
             val = c_double(val)
             self._SyncSetValueD(path, byref(val))
-        elif isinstance(val, basestring):
+        elif isinstance(val, string_bytes_types):
             l = c_uint(len(val))
             self._SyncSetValueB(path, val, byref(l), l)
         else:
-            raise TypeError, 'Unhandled type for val'
+            raise TypeError('Unhandled type for val')
     def sync(self):
         """ Make sure all changes have been propagated
         """
@@ -2365,7 +2373,7 @@ class ziAPI(object):
 #import pefile
 #pe = pefile.PE(r"\Program Files\Zurich Instruments\LabOne\API\C\lib\ziAPI-win32.dll")
 #for x in pe.DIRECTORY_ENTRY_EXPORT.symbols:
-#   print '%5i: %s'%(x.ordinal, x.name)
+#   print('%5i: %s'%(x.ordinal, x.name))
 #
 #        or use cygwin objdump
 # objdump -x "\Program Files\Zurich Instruments\LabOne\API\C\lib\ziAPI-win32.dll" | less
