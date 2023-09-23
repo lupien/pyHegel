@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2021-2021  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2021-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 from ..instruments_base import visaInstrument,\
                             scpiDevice, MemoryDevice, ReadvalDev, BaseDevice,\
@@ -117,7 +117,7 @@ class qdevil_qdac_ii(visaInstrument):
         measI_apertures = []
         def get_append(quest_base, conv):
             vals_str = self.ask(quest_base+' (@1:24)')
-            vals = map(conv, vals_str.split(','))
+            vals = list(map(conv, vals_str.split(',')))
             return vals
         levels = get_append('SOURce:VOLTage:LAST?', float)
         ranges = get_append('SOURce:RANGe?', self.output_range.choices)
@@ -167,7 +167,7 @@ class qdevil_qdac_ii(visaInstrument):
         chs = self._fetch_ch_helper(chs)
         headers = ['ch_%i'%ch for ch in chs]
         d = self.fetch._format
-        d.update(multi=headers, graph=range(len(chs)))
+        d.update(multi=headers, graph=list(range(len(chs))))
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_ch_helper_check(self, ch):
         if ch not in range(1, 24+1):
@@ -196,7 +196,7 @@ class qdevil_qdac_ii(visaInstrument):
         return vals
 
     def _read_limits(self):
-        conv = lambda s: map(float, s.split(','))
+        conv = lambda s: list(map(float, s.split(',')))
         low_min = conv(self.ask('SOURce:RANGe:LOW:MINimum? (@1:24)'))
         low_max = conv(self.ask('SOURce:RANGe:LOW:MAXimum? (@1:24)'))
         high_min = conv(self.ask('SOURce:RANGe:HIGH:MINimum? (@1:24)'))
@@ -237,7 +237,7 @@ class qdevil_qdac_ii(visaInstrument):
         return results
     def _create_devs(self):
         self._limits = self._read_limits()
-        self.current_channel = MemoryDevice(1, choices=range(1, 24+1))
+        self.current_channel = MemoryDevice(1, choices=list(range(1, 24+1)))
         def devChannelOption(*arg, **kwarg):
             options = kwarg.pop('options', {}).copy()
             options.update(ch=self.current_channel)
