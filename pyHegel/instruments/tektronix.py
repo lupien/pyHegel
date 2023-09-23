@@ -3,7 +3,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2022-2022  Claude Rohrbacher & Benjamin Bureau
+# Copyright 2022-2023  Claude Rohrbacher & Benjamin Bureau
 #  <claude.rohrbacher@usherbrooke.ca>                                        #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
@@ -22,7 +22,7 @@
 # along with pyHegel.  If not, see <http://www.gnu.org/licenses/>.           #
 #                                                                            #
 ##############################################################################
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import scipy
@@ -195,12 +195,12 @@ class tektronix_AWG(visaInstrumentAsync):
         if wfname in self.list_waveforms.get():
             if force:
                 self.waveform_delete(wfname)
-                print "Waveform {} was deleted".format(wfname)
+                print("Waveform {} was deleted".format(wfname))
             else:
                 raise RuntimeError('Destination waveform name already exists. Add the option "force=True" to overwrite')
                 return 1
         self.write('wlist:wav:new "{}",{}'.format(wfname,len(wav)))
-        print "Waveform {} was created".format(wfname)
+        print("Waveform {} was created".format(wfname))
         self.write('wlist:wav:data "{}",{}'.format(wfname,Block_Codec(np.float32).tostr(wav)))
         if sample_rate is not None:
             self.waveform_sample_rate.set(sample_rate, wfname=wfname)
