@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -39,7 +39,7 @@
 
 # if you need to access the commands in a script/import import pyHegel.commands
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 import sys
 import pkgutil
 
@@ -53,7 +53,6 @@ def fix_scipy():
     import os
     if os.name == 'nt':
         from . import scipy_fortran_fix
-
 
 def get_parent_globals(n=2):
     """
@@ -89,6 +88,7 @@ import scipy.constants as C
 
 from pyHegel.commands import *
 _init_pyHegel_globals()
+fix_auto_suggestions()
 """
 
 _start_code = """
@@ -144,14 +144,14 @@ def main_start():
     qt = which_qt()
     start_code = _start_code%qt
     while g is not None:
-        if g.has_key('get_ipython'):
+        if 'get_ipython' in g:
             # execute start_code in the already running ipython session.
-            #print 'Under ipython', n
+            #print('Under ipython', n)
             exec(start_code, g)
             return
         n += 1
         g = get_parent_globals(n)
-    #print 'Outside ipython', n
+    #print('Outside ipython', n)
     # We are not running in under an ipython session, start one.
     # need to fix before importing IPython (which imports time...)
     fix_scipy()
@@ -162,7 +162,10 @@ def main_start():
            IPython.terminal.interactiveshell.TerminalInteractiveShell.display_completions.default_value = 'readlinelike'
     except AttributeError: # display_completion not present
         pass
-    IPython.start_ipython(argv=['--matplotlib=%s'%qt, '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
+    if sys.version_info[0] == 2:
+        IPython.start_ipython(argv=['--matplotlib=%s'%qt, '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
+    else:
+        IPython.start_ipython(argv=['--matplotlib=%s'%qt] + ['--InteractiveShellApp.exec_lines=%s'%c for c in start_code.split('\n')])
     #IPython.start_ipython(argv=['--matplotlib=qt', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     #IPython.start_ipython(argv=['--matplotlib=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     #IPython.start_ipython(argv=['--pylab=qt', '--autocall=1', '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
@@ -170,12 +173,11 @@ def main_start():
     #TerminalIPythonApp.exec_lines is inherited from InteractiveShellApp.exec_lines
 
 
-
 def reset_start(globals_env):
     """ You need to provide the global environment where the code will be executed
         you can obtain it from running globals() in the interactive env.
     """
-    if globals_env.has_key('get_ipython'):
+    if 'get_ipython' in globals_env:
         exec(_start_code%which_qt(), globals_env)
     else:
         exec(_base_start_code, globals_env)
