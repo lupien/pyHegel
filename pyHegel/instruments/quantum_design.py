@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2021-2021  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2021-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import os.path
 import sys
@@ -457,7 +457,7 @@ class QuantumDesign_PPMS(BaseInstrument):
         """ This returns position of limit switch and the maximum travel limit.
             This is only for PPMS instruments """
         ret = self.send_ppms_command('MOVELIM?')
-        return map(float, ret.split(','))
+        return list(map(float, ret.split(',')))
 
     # These values are from the multivu GUI in steps unit.
     _move_slowdown = [225, 210, 195, 180, 165, 150, 135, 120, 105, 90, 75, 60, 45, 30, 15]
