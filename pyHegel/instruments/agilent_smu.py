@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2019-2019  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2019-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import time
@@ -41,6 +41,8 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             OrderedDict, _decode_block_auto, ChoiceSimpleMap
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
+from ..comp2to3 import string_bytes_types, is_py2
+
 #######################################################
 ##    Agilent E5270B mainframe with E5281B precision medium power SMU modules
 #######################################################
@@ -51,7 +53,7 @@ def cache_result(func):
         last, cache, prev_args, prev_kwargs = self._wrapped_cached_results.get(func, (None, None, None, None))
         now = time.time()
         if last is None or now - last > 1. or args != prev_args or kwargs != prev_kwargs:
-            #print 'Updating cache'
+            #print('Updating cache')
             cache = func(self, *args, **kwargs)
             self._wrapped_cached_results[func] = (now, cache, args, kwargs)
         return cache
@@ -107,7 +109,8 @@ class MemoryDevice_update(MemoryDevice):
 
 def func_or_proxy(func):
     if isinstance(func, types.MethodType):
-        if func.im_self is not None:
+        func_self = func.im_self if is_py2 else func.__self__
+        if func_self is not None:
             return ProxyMethod_cached(func)
     return func
 
@@ -130,7 +133,7 @@ class CommonDevice(BaseDevice):
         self._getfunc = func_or_proxy(getfunc)
         self._subfunc = func_or_proxy(subfunc)
         super(CommonDevice, self).__init__(*args, **kwargs)
-        if not isinstance(setstr, basestring):
+        if not isinstance(setstr, string_bytes_types):
             setstr = func_or_proxy(setstr)
         self._setdev_p = setstr
         self._getdev_p = True
@@ -151,7 +154,7 @@ class CommonDevice(BaseDevice):
         return self._getfunc(*args)
     def _setdev(self, val, ch=None):
         ch, args = self._ch_helper(None) # Channel already changed in check
-        if isinstance(self._setdev_p, basestring):
+        if isinstance(self._setdev_p, string_bytes_types):
             kwargs = dict(val=_tostr_helper(val, self.type))
             if ch is not None:
                 kwargs['ch'] = '%i'%ch
@@ -342,7 +345,7 @@ class agilent_SMU(visaInstrumentAsync):
         while self.read_status_byte()&0x40:
 #            i += 1
             pass
-#        print 'skipped %i'%i
+#        print('skipped %i'%i)
         super(agilent_SMU, self)._async_trig()
 
     def _get_esr(self):
@@ -437,7 +440,7 @@ class agilent_SMU(visaInstrumentAsync):
         conv_compl = dict(voltage='i', current='v')
         conv_z = dict(z='Z', l='level', b='bias')
         for ch in chs:
-            if isinstance(ch, basestring):
+            if isinstance(ch, string_bytes_types):
                 meas = ch[0].lower()
                 if meas == 'c':
                     # handle CMU
@@ -552,11 +555,11 @@ class agilent_SMU(visaInstrumentAsync):
                 raise RuntimeError(self.perror('No data is available. Probably prefer to use readval.'))
             data = data.split(',')
             # _parse_data returns: value, channel, status, type
-            ret = map(self._parse_data, data)
+            ret = list(map(self._parse_data, data))
             if status:
-                ret = map(lambda x: [x[0], x[2]], ret)
+                ret = list(map(lambda x: [x[0], x[2]], ret))
             else:
-                ret = map(lambda x: x[0], ret)
+                ret = list(map(lambda x: x[0], ret))
             ret = np.array(ret)
             if status and mode == 'single':
                 ret.shape = (-1, 2)
@@ -1224,7 +1227,7 @@ class agilent_SMU(visaInstrumentAsync):
             raise ValueError(self.perror("Invalid delay (must be 0-65.535)."))
         mode_ch = {'linear':1, 'log':2, 'linear_updown':3, 'log_updown':4}
         if conf.mode not in mode_ch:
-            raise ValueError(self.perror("Invalid mode (must be one of %r)."%mode_ch.keys()))
+            raise ValueError(self.perror("Invalid mode (must be one of %r)."%list(mode_ch.keys())))
         mode = mode_ch[conf.mode]
         slot = self._smu2slot[conf.ch]
         base_str = base%(slot, mode, sRange, conf.start, conf.stop, conf.nsteps)
@@ -1521,7 +1524,7 @@ class agilent_SMU(visaInstrumentAsync):
             for i in range(1, N+1):
                 data_str = self.ask(base+'%i'%i)
                 d_s = data_str.split(',')
-                r = map(float, d_s)
+                r = list(map(float, d_s))
                 ret.append(r)
             return np.array(ret)
         sh = data.shape
@@ -1545,7 +1548,7 @@ class agilent_SMU(visaInstrumentAsync):
         slot = self._check_cmu()
         if open is None and short is None and load is None:
             base = 'DCORR? %i,'%slot
-            conv = lambda s: map(float, s.split(','))
+            conv = lambda s: list(map(float, s.split(',')))
             open_d = conv(self.ask(base+'1'))
             short_d = conv(self.ask(base+'2'))
             load_d = conv(self.ask(base+'3'))
@@ -1600,7 +1603,7 @@ class agilent_SMU(visaInstrumentAsync):
         if mode not in mode_map:
             raise ValueError('Invalid mode selected.')
         if mode == 'perform':
-            print 'Wait for phase adjust. It will take about 30s...'
+            print('Wait for phase adjust. It will take about 30s...')
         ret = self._call_and_wait('ADJ? %i,%i'%(slot, mode_map[mode]))
         result = int(ret[0])
         if result == 0:
@@ -1622,7 +1625,7 @@ class agilent_SMU(visaInstrumentAsync):
             if first_check:
                 # E5270B does not return 16 until it is back to local state so force it.
                 self.control_remotelocal(False)
-                print 'The instrument is not ready. It could be executing a command or doing a calibration or self-test.\n  PLEASE WAIT'
+                print('The instrument is not ready. It could be executing a command or doing a calibration or self-test.\n  PLEASE WAIT')
                 first_check = False
             sleep(1)
         self.empty_buffer() # make sure to empty output buffer
@@ -1640,7 +1643,7 @@ class agilent_SMU(visaInstrumentAsync):
         if self._smu_channel_map is None:
             self._smu_channel_map = {s:(i+1) for i,s in enumerate(smu_slots)}
         if len(self._smu_channel_map) != len(smu_slots):
-            print "Warning: missing some channels in the smu_channel_map"
+            print("Warning: missing some channels in the smu_channel_map")
         if [s for s in self._smu_channel_map.keys() if s not in smu_slots] != []:
             raise ValueError('smu_channel_map is using slots which are not smus.')
         self._slot2smu = self._smu_channel_map
@@ -1648,11 +1651,11 @@ class agilent_SMU(visaInstrumentAsync):
         self._valid_ch = sorted(self._smu_channel_map.values())
         self._Nvalid_ch = len(self._valid_ch)
         smu_chs = self._valid_ch
-        smu_slots = self._smu2slot.items()
+        smu_slots = list(self._smu2slot.items())
         # now handle MFCMU presence
         if len(cmu_slots) > 0:
             if len(cmu_slots) > 1:
-                print 'Unexpected number of MFCMU cards. Will only enable the first one'
+                print('Unexpected number of MFCMU cards. Will only enable the first one')
             self._cmu_slot = cmu_slots[0]
             cmu_present = True
         else:
@@ -2671,8 +2674,8 @@ class agilent_B2900_smu(visaInstrumentAsync):
         else:
             date_str = self.ask('SYSTem:DATE?')
             time_str = self.ask('SYSTem:TIME?')
-            date = map(float, date_str.split(','))
-            timed = map(float, time_str.split(','))
+            date = list(map(float, date_str.split(',')))
+            timed = list(map(float, time_str.split(',')))
             return '%i-%02i-%02i %02i:%02i:%02f '%tuple(date+timed)
 
     @locked_calling
@@ -2712,7 +2715,7 @@ class agilent_B2900_smu(visaInstrumentAsync):
         is_stairs = self._trigger_mode[0] == 'stairs'
         orig_ch = self.current_channel.get()
         for ch in chs:
-            if isinstance(ch, basestring):
+            if isinstance(ch, string_bytes_types):
                 meas = ch[0].lower()
                 c = int(ch[1:])
                 if meas not in ['v', 'i', 'r', 's', 'f', 't']:
@@ -3275,7 +3278,7 @@ class agilent_B2900_smu(visaInstrumentAsync):
             return chOption(*arg, **kwarg)
         limit_conv_d = {src_func_opt[['current']]:'voltage', src_func_opt[['voltage']]:'current'}
         def limit_conv(val, conv_val):
-            for k, v in limit_conv_d.iteritems():
+            for k, v in limit_conv_d.items():
                 if val in k:
                     return v
             raise KeyError('Unable to find key in limit_conv')
@@ -3375,7 +3378,7 @@ class agilent_B2900_smu(visaInstrumentAsync):
                 K = 1.
                 rnge = {1.5:1.515, 3.:3.03, 10:10.5}
         if abs(val) > rnge*K:
-            raise ValueError, self.perror('level is outside current range')
+            raise ValueError(self.perror('level is outside current range'))
     def _src_level_setdev(self, val, ch=None, func=None):
         # these were set by checkdev.
         func = self.src_function.getcache()
@@ -3510,7 +3513,7 @@ class keysight_M96xx_smu(visaInstrumentAsync):
                    self.module_power_supply_source:'power_supply_source', self.module_temperature:'temperature'}
         for m in self._valid_mod:
             self.current_module.set(m)
-            for k, v  in mod_map.iteritems():
+            for k, v  in mod_map.items():
                 if v not in mod:
                     mod[v] = []
                 if v != 'temperature':
@@ -3539,7 +3542,7 @@ class keysight_M96xx_smu(visaInstrumentAsync):
         conv_compl = dict(voltage='i', current='v')
         orig_ch = self.current_channel.get()
         for ch in chs:
-            if isinstance(ch, basestring):
+            if isinstance(ch, string_bytes_types):
                 meas = ch[0].lower()
                 c = int(ch[1:])
                 if meas not in ['v', 'i', 'r', 's', 'f', 't']:
@@ -3634,9 +3637,9 @@ class keysight_M96xx_smu(visaInstrumentAsync):
             manuf_num = qt(self.ask(':SYSTem:MODule%d:MNUMber?'%i))
             slot = int(self.ask(':SYSTem:MODule%d:SLOT?'%i))
             rev_core = self.ask(':SYSTem:MODule%d:REVision?'%i)
-            rev_core = map(int, rev_core.split(','))
+            rev_core = list(map(int, rev_core.split(',')))
             rev_smu = self.ask(':SYSTem:MODule%d:REVision:SMU?'%i)
-            rev_smu = map(int, rev_smu.split(','))
+            rev_smu = list(map(int, rev_smu.split(',')))
             ret.append(dict(vendor=vendor, model=model, serial=serial, chassis=chassis, slot=slot,
                             ch_count=ch_count,
                             manuf_num=manuf_num, rev_core=rev_core, rev_smu=rev_smu))
@@ -3682,7 +3685,7 @@ class keysight_M96xx_smu(visaInstrumentAsync):
         else:
             rnge = self.src_range.getcache()
         if abs(val) > rnge*K:
-            raise ValueError, self.perror('level is well outside current range')
+            raise ValueError(self.perror('level is well outside current range'))
     def _src_level_setdev(self, val, ch=None, func=None):
         # these were set by checkdev.
         func = self.src_function.getcache()
@@ -3891,7 +3894,7 @@ class keysight_M96xx_smu(visaInstrumentAsync):
             return chOption(*arg, **kwarg)
         limit_conv_d = {src_func_opt[['current']]:'voltage', src_func_opt[['voltage']]:'current'}
         def limit_conv(val, conv_val):
-            for k, v in limit_conv_d.iteritems():
+            for k, v in limit_conv_d.items():
                 if val in k:
                     return v
             raise KeyError('Unable to find key in limit_conv')
