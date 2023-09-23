@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,11 +21,13 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import scipy.linalg as la
 import types
+
+from .comp2to3 import xrange
 
 # TODO error handling
 
@@ -60,9 +62,9 @@ def twoDpoly(X,m=3,rank=None):
                ex^2 + fy^2 and this gives the 2nd rank 2D polynomial
 
     """
-    if rank is not None: m= (rank+1)*(rank+2)/2
+    if rank is not None: m= (rank+1)*(rank+2)//2
     maxp=int(np.ceil(np.sqrt(m)))
-    mr=range(maxp)
+    mr= list(range(maxp))
     powercomb = [[px,py] for px in mr for py in mr]
     # Sort in place first with the smallest sum of power
     # then with the smallest max power first i.e
@@ -270,7 +272,7 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
             s=s.reshape((-1, nfits))
             needloop = True
         else:
-            raise ValueError, 'shape mismatch: s is not a valid shape'
+            raise ValueError('shape mismatch: s is not a valid shape')
     if adjust is not None:
         pind = np.arange(m)
         adjust = pind[adjust] # in case adjust is a selector
@@ -282,7 +284,7 @@ def gen_polyfit(X,Y,m,s=None,func=None, param=None,adjust=None, p0=None, filter=
         if p0 is not None:
             p0 = np.asarray(p0) # if necessary, turn list into array
             if p0.shape[0] != m:
-                raise ValueError, 'shape mismatch: p0 is not a valid shape'
+                raise ValueError('shape mismatch: p0 is not a valid shape')
             # move the unadjusted parameters from left handside to right
             # hanside of equation
             unsel = np.setdiff1d(pind, adjust)
@@ -400,7 +402,7 @@ def rankdata(x, avg=True):
             for b,e in zip(begi,endi):
                 sel = ind[b:e+1]
                 val = (b+e)/2.+1
-                print b,e,val
+                print(b,e,val)
                 rank[sel,i] = val
     return rank.reshape(xshapeOrg)
 
@@ -652,12 +654,12 @@ if __name__ == "__main__":
     p0 = pf[0]*2.
     rr=leastsq(fn, p0, args=(x,y,ss), full_output=True)
     pre = np.sqrt(rr[1].diagonal())
-    print '========== non linear fit start ========='
+    print('========== non linear fit start =========')
     pprint (( 'polyfit', pf[0], pe, extras['covar'], (extras['covar']*pe*pe[:,None]).round(4) ))
     pprint ( report(x,y,pf,s=ss) )
     pprint (( 'non linear', rr[0],pre, rr[1]/pre/pre[:,None], rr[1].round(4) ))
     pprint ( report(x,y,rr[0],s=ss,func=lambda x,p,param=None:gen_polyeval(x,(p,oneDpoly))) )
-    print '========== non linear fit end ========='
+    print('========== non linear fit end =========')
 
     figure(2)
     clf()
