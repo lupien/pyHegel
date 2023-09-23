@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import scipy
@@ -268,7 +268,7 @@ class agilent_rf_33522A(visaInstrument):
             directory, filename = os.path.split(dest_file)
             ls = self.remote_ls(directory)
             if ls:
-                ls = map(lambda s: s.lower(), ls)
+                ls = [s.lower() for s in ls]
                 if filename.lower() in ls:
                     raise RuntimeError('Destination file already exists. Will not overwrite.')
         if src_data is local_src_file is None:
@@ -337,7 +337,7 @@ class agilent_rf_33522A(visaInstrument):
         else:
             if floats is None:
                 raise ValueError('Unknown data type and floats is not specified')
-            print 'Unknown data type in arb_send_data. Trying anyway...'
+            print('Unknown data type in arb_send_data. Trying anyway...')
         if csv:
             data_str = data
         else:
@@ -773,7 +773,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
         full_list = [v for v in baselist + math_extra + extra if hasattr(self, v)]
         if show_removed:
             removed_list = [v for v in baselist + math_extra + extra if not hasattr(self, v)]
-            print removed_list
+            print(removed_list)
         ret = self._conf_helper(*full_list)
         ret += ['installed_options=%s'%m['options']]
         ret += self._conf_helper(options)
@@ -822,7 +822,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
         if count > 1:
             count_str = ', sample_count=%i'%count
         width = width*count
-        print 'The full avg time is %f s (%s%s)'%(width, width_str, count_str)
+        print('The full avg time is %f s (%s%s)'%(width, width_str, count_str))
         return width
     def _ptp_clear(self):
         self.write('DATA2:CLEar')
@@ -1148,8 +1148,8 @@ class agilent_multi_34410A(visaInstrumentAsync):
         #dmm1.read_status_byte()
         #dmm1.ask('*stb?;*esr?')
         #  For installing handler (only seems to work with USB not GPIB for NI visa library. Seems to work fine with Agilent IO visa)
-        #   def event_handler(vi, event_type, context, use_handle): stb = visa.vpp43.read_stb(vi);  print 'helo 0x%x'%stb, event_type==visa.vpp43.VI_EVENT_SERVICE_REQ, context, use_handle; return visa.vpp43.VI_SUCCESS
-        #   def event_handler(vi, event_type, context, use_handle): stb = visa.vpp43.read_stb(vi);  print 'HELLO 0x%x'%stb,vi; return visa.vpp43.VI_SUCCESS
+        #   def event_handler(vi, event_type, context, use_handle): stb = visa.vpp43.read_stb(vi);  print('helo 0x%x'%stb, event_type==visa.vpp43.VI_EVENT_SERVICE_REQ, context, use_handle); return visa.vpp43.VI_SUCCESS
+        #   def event_handler(vi, event_type, context, use_handle): stb = visa.vpp43.read_stb(vi);  print('HELLO 0x%x'%stb,vi); return visa.vpp43.VI_SUCCESS
         #   visa.vpp43.install_handler(dmm1.visa.vi, visa.vpp43.VI_EVENT_SERVICE_REQ, event_handler)
         #   visa.vpp43.enable_event(dmm1.visa.vi, visa.vpp43.VI_EVENT_SERVICE_REQ, visa.vpp43.VI_HNDLR)
         #   The handler is called for all srq on the bus (not necessarily the instrument we want)
@@ -1691,9 +1691,9 @@ class agilent_EXA_mode_SA(agilent_EXA_mode_base):
     @locked_calling
     def _current_config(self, dev_obj=None, options={}):
         # Assume SA instrument mode, SAN measurement (config)
-        if options.has_key('trace'):
+        if 'trace' in options:
             self.current_trace.set(options['trace'])
-        if options.has_key('mkr'):
+        if 'mkr' in options:
             self.current_mkr.set(options['mkr'])
         extra = []
         base_pre, base_post = self._current_config_base_helper()
@@ -1850,7 +1850,7 @@ class agilent_EXA_mode_SA(agilent_EXA_mode_base):
             i = db_list.index(from_unit)
             in_ref = db_ref[i]
             if in_ref == 0:
-                raise ValueError, self.perror("Don't know how to convert from antenna unit %s"%from_unit)
+                raise ValueError(self.perror("Don't know how to convert from antenna unit %s"%from_unit))
         else: # V, W and A
             in_db = False
             # convert to W
@@ -1861,7 +1861,7 @@ class agilent_EXA_mode_SA(agilent_EXA_mode_base):
         to_db_list = ['dBm', 'dBm_Hz']
         to_lin_list = ['W', 'W_Hz', 'V', 'V_Hz', 'V2', 'V2_Hz']
         if to_unit not in to_db_list+to_lin_list:
-            raise ValueError, self.perror("Invalid conversion unit: %s"%to_unit)
+            raise ValueError(self.perror("Invalid conversion unit: %s"%to_unit))
         if not to_unit.endswith('_Hz'):
             bw = 0
         if to_unit in to_db_list:
@@ -1933,7 +1933,7 @@ class agilent_EXA_mode_SA(agilent_EXA_mode_base):
         if mkr is None:
             mkr = self.current_mkr.getcache()
         if mkr<1 or mkr>12:
-            raise ValueError, self.perror('mkr need to be between 1 and 12')
+            raise ValueError(self.perror('mkr need to be between 1 and 12'))
         if next == True:
             next = ':NEXT'
         elif next:
@@ -1945,7 +1945,7 @@ class agilent_EXA_mode_SA(agilent_EXA_mode_base):
         if mkr is None:
             mkr = self.current_mkr.getcache()
         if mkr<1 or mkr>12:
-            raise ValueError, self.perror('mkr need to be between 1 and 12')
+            raise ValueError(self.perror('mkr need to be between 1 and 12'))
         self.write('CALCulate:MARKer{mkr}:CENTer'.format(mkr=mkr))
     @locked_calling
     def get_xscale(self):
@@ -2159,7 +2159,7 @@ class agilent_EXA_mode_noise_figure(agilent_EXA_mode_base):
         # marker dependent
         if dev_obj in [self.marker_x, self.marker_y]:
             orig_mrk = self.current_mkr.get()
-            if options.has_key('mkr'):
+            if 'mkr' in options:
                 self.current_mkr.set(options['mkr'])
             extra = self._conf_helper('current_mkr', 'marker_mode', 'marker_x', 'marker_y', 'marker_ref', 'marker_trace',
                                       'peak_search_continuous')
@@ -2181,7 +2181,7 @@ class agilent_EXA_mode_noise_figure(agilent_EXA_mode_base):
             multi = tuple(multi)
             graph = []
         else:
-            graph = range(len(traces))
+            graph = list(range(len(traces)))
         fmt.update(multi=multi, graph=graph, xaxis=xaxis)
         return BaseDevice.getformat(self.fetch, **kwarg)
     def _fetch_traces_helper(self, traces):
@@ -2267,7 +2267,7 @@ class agilent_EXA_mode_noise_figure(agilent_EXA_mode_base):
         if mkr is None:
             mkr = self.current_mkr.getcache()
         if mkr<1 or mkr>4:
-            raise ValueError, self.perror('mkr need to be between 1 and 4')
+            raise ValueError(self.perror('mkr need to be between 1 and 4'))
         if next not in [False, True, 'left', 'right']:
             raise ValueError('Invalid next value')
         if next == True:
@@ -2489,7 +2489,7 @@ class agilent_PNAL(visaInstrumentAsync):
             # The newer firmware does not have a trace selected from the start
             # So pick one.
             lst = self.channel_list.getcache()
-            self.select_trace.set(lst.keys()[0])
+            self.select_trace.set(list(lst.keys())[0])
         super(agilent_PNAL, self).init(full=full)
     @locked_calling
     def _async_trig(self):
@@ -2560,7 +2560,7 @@ class agilent_PNAL(visaInstrumentAsync):
         ch=self.current_channel.getcache()
         if name is not None:
             if name not in ch_list:
-                raise ValueError, self.perror('Invalid Trace name')
+                raise ValueError(self.perror('Invalid Trace name'))
             command = 'CALCulate{ch}:PARameter:DELete "{name}"'.format(ch=ch, name=name)
         else:
             command = 'CALCulate{ch}:PARameter:DELete:ALL'.format(ch=ch)
@@ -2614,7 +2614,7 @@ class agilent_PNAL(visaInstrumentAsync):
             directory, filename = os.path.split(dest_file)
             ls = self.remote_ls(directory)
             if ls:
-                ls = map(lambda s: s.lower(), ls)
+                ls = [s.lower() for s in ls]
                 if filename.lower() in ls:
                     raise RuntimeError('Destination file already exists. Will not overwrite.')
         if src_data is local_src_file is None:
@@ -2693,7 +2693,7 @@ class agilent_PNAL(visaInstrumentAsync):
             if cal:
                 traces = ch_list
             else:
-                traces = ch_list.keys()
+                traces = list(ch_list.keys())
         return traces
     def _fetch_getdev(self, ch=None, traces=None, unit='default', mem=False, xaxis=True, cook=False, cal=False):
         """
@@ -2754,7 +2754,7 @@ class agilent_PNAL(visaInstrumentAsync):
                     # This next check is required for ENA1 at least
                     if v.size == 2*self.npoints.get():
                         if not np.all(v[1::2] == 0):
-                            print self.perror("WARNING: Discarding non-null data")
+                            print(self.perror("WARNING: Discarding non-null data"))
                         v = v[::2]
                     ret.append(v)
                     continue
@@ -2793,7 +2793,7 @@ class agilent_PNAL(visaInstrumentAsync):
         df = freq[ratio[1]] - freq[ratio[0]]
         if delay == 0.:
             delay = -dp/df/360.
-            print 'Using delay=', delay
+            print('Using delay=', delay)
         return phase_deg + delay*freq*360.
     def get_xscale(self):
         return self.x_axis.get()
@@ -2802,11 +2802,11 @@ class agilent_PNAL(visaInstrumentAsync):
     def _current_config(self, dev_obj=None, options={}):
         # These all refer to the current channel
         # calib_en depends on trace
-        if options.has_key('ch'):
+        if 'ch' in options:
             self.current_channel.set(options['ch'])
-        if options.has_key('trace'):
+        if 'trace' in options:
             self.select_trace.set(options['trace'])
-        if options.has_key('mkr'):
+        if 'mkr' in options:
             self.current_mkr.set(options['mkr'])
         extra = []
         if dev_obj in [self.marker_x, self.marker_y]:
@@ -3154,11 +3154,11 @@ class agilent_ENA(agilent_PNAL):
     def _current_config(self, dev_obj=None, options={}):
         # These all refer to the current channel
         # calib_en depends on trace
-        if options.has_key('ch'):
+        if 'ch' in options:
             self.current_channel.set(options['ch'])
-        if options.has_key('trace'):
+        if 'trace' in options:
             self.select_trace.set(options['trace'])
-        if options.has_key('mkr'):
+        if 'mkr' in options:
             self.current_mkr.set(options['mkr'])
         extra = []
         if dev_obj in [self.marker_x, self.marker_y]:
@@ -3216,7 +3216,7 @@ class agilent_ENA(agilent_PNAL):
             raise NotImplementedError('cal=True is not implemented for ena1')
         count = self.select_trace_count.getcache()
         trace_orig = self.select_trace.getcache()
-        all_tr = range(1,count+1)
+        all_tr = list(range(1,count+1))
         # First create the necessary entries, so that select_trace works
         self.select_trace.choices = {i:('%i'%i, 'empty') for i in all_tr}
         # Now fill them properly (trace_meas, uses select_trace and needs to access them)
@@ -3410,9 +3410,9 @@ class agilent_FieldFox(agilent_PNAL):
     def _current_config(self, dev_obj=None, options={}):
         # These all refer to the current channel
         # calib_en depends on trace
-        if options.has_key('trace'):
+        if 'trace' in options:
             self.select_trace.set(options['trace'])
-        if options.has_key('mkr'):
+        if 'mkr' in options:
             self.current_mkr.set(options['mkr'])
         extra = []
         if dev_obj in [self.marker_x, self.marker_y]:
@@ -3454,8 +3454,8 @@ class agilent_FieldFox(agilent_PNAL):
         self.write(command)
     def _channel_list_getdev(self):
         """ returns the list of available channels """
-        #return range(1, self.select_trace_count.getcache() +1)
-        lst = range(1, self.select_trace_count.get() +1)
+        #return list(range(1, self.select_trace_count.getcache() +1))
+        lst = list(range(1, self.select_trace_count.get() +1))
         return {k:self.trace_meas.get(trace=k) for k in lst}
     def get_file(self, remote_file, local_file=None):
         """
@@ -3509,7 +3509,7 @@ class agilent_FieldFox(agilent_PNAL):
         self.available_modes = scpiDevice(getstr='INSTrument:CATalog?', str_type=quoted_list(sep='","'))
         # INSTRUMENT only accepts the upper version CAT and NA (not cat or na)
         if self.ask('INSTrument?') != '"NA"':
-            raise ValueError, "This instruments only works if the FieldFox is in NA (network analyzer) mode. Not it SA or CAT mode."
+            raise ValueError("This instruments only works if the FieldFox is in NA (network analyzer) mode. Not it SA or CAT mode.")
         self.current_mode = scpiDevice('INSTrument', choices=['CAT', 'NA'], str_type=quoted_string())
         self.ext_ref = scpiDevice(getstr='SENSe:ROSCillator:SOURce?', str_type=str)
         self.cont_trigger = scpiDevice('INITiate:CONTinuous', str_type=bool)
