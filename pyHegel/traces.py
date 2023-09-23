@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -25,7 +25,7 @@
 # python-matplotlib-0.99.1.2-4.fc13.i686 QT backend is missing many
 # key codes compared to gtk so add missing ones needed for FigureManagerQT
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import time
 import functools
@@ -39,6 +39,8 @@ import matplotlib
 from matplotlib import pylab, rcParams, __version__ as mpl_version
 import dateutil
 from . import config
+
+from .comp2to3 import is_py3, string_types, string_bytes_types, unicode_type
 
 # same as in fullmpcanvas.py
 # follows new_figure_manager
@@ -68,12 +70,17 @@ if LooseVersion('2.2.0') <= mpl_version < LooseVersion('2.2.4') or \
                points = np.array(points)
            return self._transform_non_affine_cl_org(points)
        BGT = matplotlib.transforms.BlendedGenericTransform
-       #print 'About to fix mpl_toolkit log scale transform bug of 2.2.x'
+       #print('About to fix mpl_toolkit log scale transform bug of 2.2.x')
        if not hasattr(BGT, '_transform_non_affine_cl_org'):
-           print 'Fixing mpl_toolkit log scale transform bug of 2.2.x'
+           print('Fixing mpl_toolkit log scale transform bug of 2.2.x')
            BGT._transform_non_affine_cl_org = BGT.transform_non_affine
            BGT.transform_non_affine = transform_non_affine_wrapper
 
+def set_draggable(legend):
+    try:
+        legend.set_draggable(True)
+    except AttributeError:
+        legend.draggable()
 
 _figlist = []
 
@@ -183,7 +190,7 @@ def str_epoch2num(s):
     To enter a timezone you can use UTC, GMT,Z or something like
     -0500. It also knows about EST and DST.
     """
-    if isinstance(s, basestring):
+    if isinstance(s, string_types):
         # we replace pylab.datestr2num to better handle local timezone
         dt = dateutil.parser.parse(s, tzinfos=_TZOFFSETS)
         if dt.tzinfo is None:
@@ -245,7 +252,7 @@ def time_stripdate(x, first=None):
 
 class _Trace_Cleanup(object):
     def __del__(self):
-        #print 'Trace cleanup (garbage collect)'
+        #print('Trace cleanup (garbage collect)')
         gc.collect()
 
 class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class so need object to make it new one (so super works properly for childs)
@@ -489,14 +496,14 @@ class Trace(TraceBase):
     def comment_entry_edited(self, text=None):
         self.comment_entry.setStyleSheet('color: red;')
     def comment_entry_press(self):
-        t = unicode(self.comment_entry.text())
+        t = unicode_type(self.comment_entry.text())
         self.comment_entry.setStyleSheet('color: green;')
         f = self._comment_func
         if f is not None:
             f(t)
         else:
-            print 'Unable to save comment: %s'%t
-        #print 'Got:', t
+            print('Unable to save comment: %s'%t)
+        #print('Got:', t)
     def rescale_button_press(self):
         # TODO tell toolbar that a new set of scales exists
         for i,ax in enumerate(self.axs):
@@ -620,7 +627,8 @@ class Trace(TraceBase):
                 self.crvs.append(plt)
             else:
                 self.crvs[i].set_data(x, y)
-        self.axs[0].legend(loc='upper left', bbox_to_anchor=(0, 1.10)).draggable()
+        leg = self.axs[0].legend(loc='upper left', bbox_to_anchor=(0, 1.10))
+        set_draggable(leg)
         for ax in self.axs:
             ax.relim()
             ax.autoscale(enable=None)
@@ -666,11 +674,11 @@ class TraceLots(TraceBase):
         ax = self.fig.add_subplot(111)
         self.ax = ax
         self.fh.seek(0, 2) # go to end of file
-        self.nbpoints = self.fh.tell() / self.byte_per_point
+        self.nbpoints = self.fh.tell() // self.byte_per_point
         self.readit() # sets self.vals
         self.mainplot = ax.plot(self.vals)[0]
         self.bar = QtGui.QScrollBar(QtCore.Qt.Horizontal)
-        self.bar.setMaximum(self.nbpoints/block_size*2 -1) # every step is half a block size
+        self.bar.setMaximum(self.nbpoints//block_size*2 -1) # every step is half a block size
         self.bar_label = QtGui.QLabel()
         self.central_widget = QtGui.QWidget()
         self.central_layout = QtGui.QVBoxLayout()
@@ -684,7 +692,7 @@ class TraceLots(TraceBase):
         self.bar.valueChanged.connect(self.bar_update)
         self.bar_update(0)
     def bar_update(self, val):
-        offset = val * self.block_nbpoints /2
+        offset = val * self.block_nbpoints //2
         self.bar_label.setText('offest: {:,}'.format(offset))
         self.readit(offset)
         self.update()
@@ -871,7 +879,7 @@ def _plot_time_mouse(event):
     axs = event.canvas.figure.axes
     if len(axs) < 2:
         return
-    #print event, event.name
+    #print(event, event.name)
     if event.name == 'button_press_event':
         def do_l(l):
             l.set_visible(True)
@@ -946,7 +954,8 @@ def plot_time_stack(x, *ys, **kwargs):
                 lbls = [lbls]
             for l, lbl in zip(lines, lbls):
                 l.set_label(lbl)
-            pylab.legend().draggable()
+            leg = pylab.legend()
+            set_draggable(leg)
 
 
 
