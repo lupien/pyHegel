@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -29,9 +29,11 @@ a database of information for them.
 Non-Visa instruments can register idn, but they will not be used.
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 from collections import defaultdict
+
+from .comp2to3 import string_bytes_types
 
 #from . import instruments
 # importing instrument is delayed to the functions that require it
@@ -57,12 +59,12 @@ def _add_to_instruments(some_object, name=None):
     if name is None:
         # this works for classes and functions
         name = some_object.__name__
-    if _instruments_add.has_key(name):
+    if name in _instruments_add:
         if _instruments_add[name] is some_object:
             # already installed
             return name
-        print 'Warning: There is already a different entry "%s"=%s, overriding it with %s'%(
-            name, _instruments_add[name], some_object)
+        print('Warning: There is already a different entry "%s"=%s, overriding it with %s'%(
+            name, _instruments_add[name], some_object))
     else:
         # not installed yet
         if hasattr(instruments, name):
@@ -240,11 +242,11 @@ def register_instrument(manuf=None, product=None, firmware_version=None, usb_ven
                 raise ValueError("product can't contain ',' for %s"%instr_class)
             key = (manuf, product, firmware_version)
             do_append = True
-            if _instruments_ids.has_key(key):
+            if key in _instruments_ids:
                 if _instruments_ids[key] is not instr_class:
                     if not quiet:
-                        print ' Warning: Registering %s with %s to override %s'%(
-                                key, instr_class, _instruments_ids[key])
+                        print(' Warning: Registering %s with %s to override %s'%(
+                                key, instr_class, _instruments_ids[key]))
                 else:
                     do_append = False
             _instruments_ids[key] = instr_class
@@ -259,10 +261,10 @@ def register_instrument(manuf=None, product=None, firmware_version=None, usb_ven
             if pid is not None and (pid<0 or pid>0xffff):
                 raise ValueError('Out of range product id for %s'%instr_class)
             key = (vid, pid)
-            if _instruments_usb.has_key(key):
+            if key in _instruments_usb:
                 if not quiet and _instruments_usb[key] is not instr_class:
-                    print ' Warning: Registering usb %s with %s to override %s'%(
-                            tuple(hex(k) for k in key), instr_class, _instruments_usb[key])
+                    print(' Warning: Registering usb %s with %s to override %s'%(
+                            tuple(hex(k) for k in key), instr_class, _instruments_usb[key]))
             _instruments_usb[key] = instr_class
             if not skip_alias:
                 if alias:
@@ -293,7 +295,7 @@ def add_to_instruments(name=None):
          @add_to_instruments
          some_object....
     """
-    if isinstance(name, basestring) or name is None:
+    if isinstance(name, string_bytes_types) or name is None:
         def _internal_add(some_object):
             _add_to_instruments(some_object, name)
             return some_object
