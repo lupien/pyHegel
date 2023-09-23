@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import os.path
 import sys
@@ -156,9 +156,9 @@ class DataTranslation(BaseInstrument):
             try:
                 name, info = all_Ol[all_names.index(dev_name)]
             except ValueError:
-                raise IndexError, 'The device requested is not there. dev_name string not found'
+                raise IndexError('The device requested is not there. dev_name string not found')
         except IndexError:
-            raise IndexError, 'The device requested is not there. dev_name too large (or no box detected).'
+            raise IndexError('The device requested is not there. dev_name too large (or no box detected).')
         self._name = name
         self.info = info
         dev = devmgr.GetDevice(name)
@@ -166,7 +166,7 @@ class DataTranslation(BaseInstrument):
         self._idn_string = 'Data Translation,%s,%s,%s'%(dev.BoardModelName, dev.GetHardwareInfo().BoardId, dev.DriverVersion)
         self._num_in = dev.GetNumSubsystemElements(OlBase.SubsystemType.AnalogInput)
         if self._num_in < 1:
-            raise ValueError, 'No input available for ', name
+            raise ValueError('No input available for %s'%name)
         self._coupling_type = Ol_ChoiceIndex(OlBase.CouplingType)
         self._cursrc_type = Ol_ChoiceIndex(OlBase.ExcitationCurrentSource)
         self._dataflow_type = Ol_ChoiceIndex(OlBase.DataFlow)
@@ -210,7 +210,7 @@ class DataTranslation(BaseInstrument):
         # But changing it directly does not seem to have any effect.
         self._num_out = dev.GetNumSubsystemElements(OlBase.SubsystemType.AnalogOutput)
         if self._num_out < 1:
-            raise ValueError, 'No output available for ', name
+            raise ValueError('No output available for %s'%name)
         # We hard code the first element here. TODO check _num_in
         ao = dev.AnalogOutputSubsystem(0)
         self._analog_out = ao
@@ -248,7 +248,7 @@ class DataTranslation(BaseInstrument):
                 info['coupling'] = self._coupling_type[ch.Coupling]
                 info['current_src'] = self._cursrc_type[ch.ExcitationCurrentSource]
     def __del__(self):
-        print 'Deleting DataTranslation', self
+        print('Deleting DataTranslation', self)
         try:
             self._inbuffer.Dispose()
         except AttributeError:
@@ -306,12 +306,12 @@ class DataTranslation(BaseInstrument):
         return clist
     @staticmethod
     def _delegate_handler(source, args):
-        print 'My handler Called!', source, args
+        print('My handler Called!', source, args)
     @locked_calling
     def run(self):
         clist = self._clean_channel_list()
         if len(clist) == 0:
-            raise ValueError, 'You need to have at least one channel selected (see channel_list)'
+            raise ValueError('You need to have at least one channel selected (see channel_list)')
         if CHECKING():
             return
         self._analog_in.ChannelList.Clear()
@@ -324,7 +324,7 @@ class DataTranslation(BaseInstrument):
         wanted_size = int(self.nb_samples.getcache() * len(clist))
         if self._inbuffer is not None:
             if self._inbuffer.BufferSizeInSamples != wanted_size:
-                #print 'Erasing bnuffer'
+                #print('Erasing bnuffer')
                 self._inbuffer.Dispose()
                 self._inbuffer = None
         if self._inbuffer is None:
@@ -352,7 +352,7 @@ class DataTranslation(BaseInstrument):
             multi.append(self.all_channels_info[c]['name'])
         fmt = self.fetch._format
         if self.nb_samples.getcache() == 1:
-            fmt.update(multi=multi, graph=range(len(clist)))
+            fmt.update(multi=multi, graph=list(range(len(clist))))
         else:
             fmt.update(multi=tuple(multi), graph=[])
         #fmt.update(multi=multi, graph=[], xaxis=xaxis)
@@ -434,14 +434,14 @@ class DataTranslation(BaseInstrument):
         self.nb_samples.set(nb_samples)
         if clock == 'max':
             clock = self.in_clock.max
-            print 'Clock set to', clock, 'Hz'
+            print('Clock set to', clock, 'Hz')
         elif clock == 'min':
             clock = self.in_clock.min
-            print 'Clock set to', clock, 'Hz'
+            print('Clock set to', clock, 'Hz')
         if clock is not None:
             self.in_clock.set(clock)
         if channel_list is None:
-            channel_list = range(self.in_info['Nchan'])
+            channel_list = list(range(self.in_info['Nchan']))
         if type(channel_list) != list:
             channel_list = [channel_list]
         self.channel_list.set(channel_list)
