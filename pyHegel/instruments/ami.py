@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync, BaseInstrument,\
                             scpiDevice, MemoryDevice, Dict_SubDevice, ReadvalDev,\
@@ -36,10 +36,11 @@ from ..types import dict_improved
 
 
 import time
-from numpy import sign, abs, sqrt, sin, cos, pi
+import numpy as np
+from numpy import sign, abs, sqrt, sin, cos, pi, arctan2
 from scipy.optimize import brentq
 
-
+from ..comp2to3 import string_bytes_types
 
 #######################################################
 ##    American Magnetics, Inc. Power Supply
@@ -367,12 +368,12 @@ class AmericanMagnetics_model430(visaInstrument):
             prog_base = 'Magnet Ramping {current:.3f}/%.3f A'%self.current_target.getcache()
         else: # zeroing field
             prog_base = 'Magnet Ramping {current:.3f}/0 A'
-        if isinstance(stay_states, basestring):
+        if isinstance(stay_states, string_bytes_types):
             stay_states = [stay_states]
         with release_lock_context(self):
             with mainStatusLine.new(priority=10, timed=True) as progress:
                 while self.state.get() in stay_states:
-                    #print self.state.getcache(), self.current.get(), self.current_magnet.get(), self.current_target.getcache(), self.persistent_switch_en.get()
+                    #print(self.state.getcache(), self.current.get(), self.current_magnet.get(), self.current_target.getcache(), self.persistent_switch_en.get())
                     wait(.1)
                     progress(prog_base.format(current=self.current.get(), time=time.time()-to))
             if self.state.get() == 'quench':
@@ -380,7 +381,7 @@ class AmericanMagnetics_model430(visaInstrument):
             if extra_wait:
                 wait(extra_wait, progress_base='Magnet wait')
         if end_states is not None:
-            if isinstance(end_states, basestring):
+            if isinstance(end_states, string_bytes_types):
                 end_states = [end_states]
             if self.state.get() not in end_states:
                 raise RuntimeError(self.perror('The magnet state did not change to %s as expected'%end_states))
@@ -399,7 +400,7 @@ class AmericanMagnetics_model430(visaInstrument):
         #   going persistent:   turn heat swithc off, ramps to zero
         def print_if(s):
             if not quiet:
-                print s
+                print(s)
         if not self.persistent_switch_installed.getcache():
             return True
         state = self.state.get()
@@ -468,7 +469,7 @@ class AmericanMagnetics_model430(visaInstrument):
         """
         def print_if(s):
             if not quiet:
-                print s
+                print(s)
         ps_installed = self.persistent_switch_installed.getcache()
         if wait is None:
             wait = self.ramp_wait_after.getcache()
@@ -621,7 +622,7 @@ def to_cartesian(self, rtp, deg=True):
         p = p*pi/180
     x = r * sin(t) * cos(p)
     y = r * sin(t) * sin(p)
-    z = r * np.cos(t)
+    z = r * cos(t)
     return np.array([x, y, z])
 
 def to_spherical(self, xyz, deg=True, no_phi=False):
@@ -652,8 +653,8 @@ def approx_equal(v1, v2):
 def normalize(v1):
     # v1 is arrays of dimension (3, ...) where 3 is for x,y,z
     v1_length = length(v1)
-    v1_length1 = where(v1_length < _Abs_Tol, 1., v1_length)
-    norm = where(v1_length < _Abs_Tol, v1*0., v1/v1_length1)
+    v1_length1 = np.where(v1_length < _Abs_Tol, 1., v1_length)
+    norm = np.where(v1_length < _Abs_Tol, v1*0., v1/v1_length1)
     return norm
 
 
@@ -689,20 +690,20 @@ class AmericanMagnetics_vector(BaseInstrument):
         current_rate = [np.nan]*3
         def adjust_mnmx1(func, base, val, index=None):
             if index is not None:
-                mnmx[base_str][i] = val
-            s = base_str+'_global'
+                mnmx[base][i] = val
+            s = base+'_global'
             mnmx[s] = func(mnmx[s], val)
         for i, (magnet, name) in enumerate(zip(self._magnets, self._magnets_name)):
             if magnet:
                 self._magnets_enable[i] = True
                 if not isinstance(magnet, (AmericanMagnetics_model430, MagnetSimul)):
                     raise ValueError('magnet%s_ is of the wrong type (should be AmericanMagnetics_model430)'%name)
-                if mangnet.ramp_rate_segment_count.get() > 1:
+                if magnet.ramp_rate_segment_count.get() > 1:
                     raise ValueError('magnet%s_ should only have one ramp_rate segment.'%name)
-                adjust_mnmx1(max, 'min_field', instr.field_target_T.min, i)
-                adjust_mnmx1(min, 'max_field', instr.field_target_T.max, i)
-                adjust_mnmx1(max, 'min_rate', instr.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].min)
-                adjust_mnmx1(min, 'max_rate', instr.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].max)
+                adjust_mnmx1(max, 'min_field', magnet.field_target_T.min, i)
+                adjust_mnmx1(min, 'max_field', magnet.field_target_T.max, i)
+                adjust_mnmx1(max, 'min_rate', magnet.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].min)
+                adjust_mnmx1(min, 'max_rate', magnet.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].max)
                 current_rate[i] = magnet.ramp_rate_field_T.get(unit='min')
         self._magnets_lims = dict_improved(mnmx)
         super(AmericanMagnetics_vector, self).__init__(**kwargs)
@@ -743,7 +744,7 @@ class AmericanMagnetics_vector(BaseInstrument):
                 raise ValueError(self.perror('Request of an invalid field'))
         mg_lims = self._magnets_lims
         if np.sum(all_zeros) == 2:
-            i = all_zeroes.index(False)
+            i = all_zeros.index(False)
             mn, mx = mg_lims.min_field[i], mg_lims.max_field[i]
             if np.any(xyz[i] > mx) or np.any(xyz[i] < mn):
                 raise ValueError(self.perror('Requested field bigger than axis min/max'))
@@ -781,12 +782,12 @@ class AmericanMagnetics_vector(BaseInstrument):
 
 
     def _rotation_max_error_internal(xyz_start, xyz_end, r):
-        L = lenght(xyz_end - xyz_start)
+        L = length(xyz_end - xyz_start)
         return r - sqrt(r**2 - (L/2.)**2)
 
     def _rotation_max_error_xyz(self, xyz_start, xyz_end):
-        r_start = lenght(xyz_start)
-        r_end = lenght(xyz_end)
+        r_start = length(xyz_start)
+        r_end = length(xyz_end)
         if not approx_equal(r_start, r_end):
             raise ValueError('_rotation_max_error_xyz needs both vector to be the same length')
         return self._rotation_max_error_internal(xyz_start, xyz_end, r_start)
@@ -834,7 +835,7 @@ class AmericanMagnetics_vector(BaseInstrument):
             N = np.ceil(1./x)
         if half:
             N *= 2
-        steps = arange(1, N+1)/N
+        steps = np.arange(1, N+1)/N
         th_phi = th_phi_start + th_phi_diff * steps[:, None]
         # rt = rot_angle * steps
         # xyz_s = r*(unit1*cos(rt) + unit_perp*sin(rt))
@@ -842,8 +843,8 @@ class AmericanMagnetics_vector(BaseInstrument):
 
     def _ramp_it_helper(self, target, last=False):
         if last:
-            print 'Last ramp'
-        print 'Going to:', target
+            print('Last ramp')
+        print('Going to:', target)
         
         
     def _ramp_it_rtp(self, start, stop, only_rotation=True):
@@ -886,13 +887,13 @@ class AmericanMagnetics_vector(BaseInstrument):
                 for j, target in enumerate(targets):
                     is_last2 = is_last and j == N2 - 1
                     self.ramp_it_helper(target, is_last2)
-                    print 'Iter i,j=%i,%i  error=%.8f'%(i,j, self._line_max_error(target-prev, real_rate))
+                    print('Iter i,j=%i,%i  error=%.8f'%(i,j, self._line_max_error(target-prev, real_rate)))
                     prev = target
             else:
                 self.ramp_it_helper(point, is_last)
-                print 'Iter i=%i  error=%.8f'%(i, self._line_max_error(point-all_points[0], real_rate))
+                print('Iter i=%i  error=%.8f'%(i, self._line_max_error(point-all_points[0], real_rate)))
             if only_rotation:
-                print 'rotation error=%.8f'%(self._rotation_max_error_xyz(all_points[0], point))
+                print('rotation error=%.8f'%(self._rotation_max_error_xyz(all_points[0], point)))
 
         
     def _create_devs(self):
