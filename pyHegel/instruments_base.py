@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import string
@@ -32,8 +32,6 @@ import os
 import signal
 import sys
 import time
-import inspect
-import thread
 import threading
 import weakref
 from collections import OrderedDict  # this is a subclass of dict
@@ -43,6 +41,12 @@ from .kbint_util import _sleep_signal_context_manager, _delayed_signal_context_m
 from . import visa_wrap
 from . import instruments_registry
 from .types import dict_improved
+from .comp2to3 import is_py2, string_bytes_types, thread_error, get_ident, string_upper,\
+                        write_unicode_byte, fu
+if is_py2:
+    translate_del_lower = lambda s: s.translate(None, string.ascii_lowercase)
+else:
+    translate_del_lower = lambda s: s.translate(s.maketrans('', '', string.ascii_lowercase))
 
 rsrc_mngr = None
 
@@ -54,7 +58,7 @@ def _load_resource_manager(path=None):
 try:
     _load_resource_manager()
 except ImportError as exc:
-    print 'Error loading visa resource manager. You will have reduced functionality.'
+    print('Error loading visa resource manager. You will have reduced functionality.')
 
 try:
     _globaldict # keep the previous values (when reloading this file)
@@ -253,7 +257,7 @@ class MainStatusLine(object):
             return
         # This locking might not be necessary but lets do it to be sure.
         with self._lock:
-            entries = self.users.values()
+            entries = list(self.users.values())
         entries = sorted(entries, key=lambda x: x[0], reverse=True) # sort on decreasing priority only
         outstr = ' '.join([e[1] for e in entries if e[1] != '']) # join the non-empty status
         outstr = outstr if len(outstr)<=72 else outstr[:69]+'...'
@@ -315,14 +319,18 @@ def test_gpib_srq_state(bus=0):
     return rsrc_mngr.get_gpib_intfc_srq_state()
 
 def _repr_or_string(val):
-    if isinstance(val, basestring):
+    if isinstance(val, string_bytes_types):
         return val
     else:
         ret = repr(val)
         # clean up long int (python 2)
-        if isinstance(val, long):
-            ret = ret.rstrip('L')
+        if is_py2:
+            if isinstance(val, long):
+                ret = ret.rstrip('L')
         return ret
+
+def _repr_or_string_unicode(val):
+    return fu(_repr_or_string(val))
 
 def _writevec_flatten_list(vals_list):
     ret = []
@@ -344,15 +352,15 @@ def _writevec(file_obj, vals_list, pre_str=''):
     pre_str is prepended to every line. Can use '#' when adding comments.
     """
     vals_list = _writevec_flatten_list(vals_list)
-    strs_list = map(_repr_or_string, vals_list)
-    file_obj.write(pre_str+'\t'.join(strs_list)+'\n')
+    strs_list = list(map(_repr_or_string_unicode, vals_list))
+    file_obj.write(fu(pre_str)+fu(u'\t'.join(strs_list))+u'\n')
 
 
 def _get_conf_header_util(header, obj, options):
     if callable(header):
         header = header(obj, options)
     if header: # if either is not None or not ''
-        if isinstance(header, basestring):
+        if isinstance(header, string_bytes_types):
             header=[header]
     return header
 
@@ -415,7 +423,7 @@ def _write_dev(val, filename, format=format, first=False):
         elif bin =='.npz':
             np.savez_compressed(f, val)
         elif bin:
-            if isinstance(val, basestring):
+            if isinstance(val, string_bytes_types):
                 f.write(val)
             else:
                 val.tofile(f)
@@ -511,18 +519,21 @@ class Lock_Instruments(threading._RLock):
             if exc.message != "cannot release un-acquired lock":
                 raise
         if n:
-            print 'Released Intrument lock', n, 'time(s)'
+            print('Released Intrument lock', n, 'time(s)')
         else:
-            print 'Instrument lock was not held'
+            print('Instrument lock was not held')
         try:
             self._RLock__block.release()
-        except thread.error as exc:
+        except thread_error as exc:
             if exc.message != 'release unlocked lock':
                 raise
         else:
-            print 'Inner lock was still locked, now released.'
+            print('Inner lock was still locked, now released.')
 
 
+# This whole section is replaced by newer code that works in both recent python 2 and python 3
+# Rewriting the function was needed with old version of ipython and python (before __wrapped__ was used)
+'''
 # This functions was moved out of _locked_calling_helper
 # because it was causing different errors in python < 2.7.9
 #     SyntaxError: unqualified exec is not allowed in function 'locked_calling' it contains a nested function with free variables
@@ -532,6 +543,7 @@ class Lock_Instruments(threading._RLock):
 #     SyntaxError: function 'locked_calling' uses import * and bare exec, which are illegal because it contains a nested function with free variables
 #      which is because I kept the exec in an if else statement. (I need to keep the exec in function form for
 #       future upgrade to python 3)
+import inspect
 def _locked_calling_helper(argspec, extra):
     (args, varargs, varkw, defaults) = argspec
     # find and replace class (like float), functions in defaults
@@ -580,6 +592,32 @@ def locked_call_wrapper{def_arg}:
     ### note that for doc, ipython tests for getdoc method
     locked_call_wrapper.__wrapped__ = func
     return locked_call_wrapper
+'''
+
+# Use this as a decorator
+def locked_calling(func, extra=''):
+    """ This function is to be used as a decorator on a class method.
+        It will wrap func with
+          with self._lock_instrument, self._lock_extra:
+        Only use on method in classes derived from BaseInstrument
+    """
+    if extra == '':
+        @functools.wraps(func)
+        def locked_call_wrapper(self, *args, **kwargs):
+            " locked_call_wrapper is a wrapper that executes func with the instrument locked."
+            with self._lock_instrument, self._lock_extra:
+                return func(self, *args, **kwargs)
+    elif extra == '.instr':
+        @functools.wraps(func)
+        def locked_call_wrapper(self, *args, **kwargs):
+            " locked_call_wrapper is a wrapper that executes func with the instrument locked."
+            with self.instr._lock_instrument, self.instr._lock_extra:
+                return func(self, *args, **kwargs)
+    else:
+        raise ValueError('Invalid extra argument')
+    # This is needed in python 2
+    locked_call_wrapper.__wrapped__ = func
+    return locked_call_wrapper
 
 def locked_calling_dev(func):
     """ Same as locked_calling, but for a BaseDevice subclass. """
@@ -604,13 +642,25 @@ class release_lock_context(object):
             self.instr._lock_acquire()
 
 # Taken from python threading 2.7.2
-class FastEvent(threading._Event):
-    def __init__(self, verbose=None):
-        threading._Verbose.__init__(self, verbose)
-        self._Event__cond = FastCondition(threading.Lock())
-        self._Event__flag = False
+if is_py2:
+    _base_event = threading._Event
+    _base_cond = threading._Condition
+else:
+    _base_event = threading.Event
+    _base_cond = threading.Condition
 
-class FastCondition(threading._Condition):
+class FastEvent(_base_event):
+    def __init__(self, verbose=None):
+        if is_py2:
+            threading._Verbose.__init__(self, verbose)
+            self._Event__cond = FastCondition(threading.Lock())
+            self._Event__flag = False
+        else:
+            self._cond = FastCondition(threading.Lock())
+            self._flag = False
+
+# modified 2023-09-18 to also match python 3.11
+class FastCondition(_base_cond):
     def wait(self, timeout=None, balancing=True): # Newer version of threading have added balencing
                                                   # the old code is the same as balencing=True which is implemented here
         if balancing is not True:
@@ -619,31 +669,57 @@ class FastCondition(threading._Condition):
             raise RuntimeError("cannot wait on un-acquired lock")
         waiter = threading._allocate_lock()
         waiter.acquire()
-        self._Condition__waiters.append(waiter)
+        if is_py2:
+            self._Condition__waiters.append(waiter)
+        else:
+            self._waiters.append(waiter)
         saved_state = self._release_save()
+        gotit = False
         try:    # restore state no matter what (e.g., KeyboardInterrupt)
             if timeout is None:
                 waiter.acquire()
                 if __debug__:
                     self._note("%s.wait(): got it", self)
+                gotit = True
             else:
                 # Balancing act:  We can't afford a pure busy loop, so we
                 # have to sleep; but if we sleep the whole timeout time,
                 # we'll be unresponsive.
-                func = lambda : waiter.acquire(0)
+                if is_py2:
+                    func = lambda : waiter.acquire(0)
+                else:
+                    func = lambda : waiter.acquire(False)
                 gotit = _retry_wait(func, timeout, delay=0.01)
                 if not gotit:
                     if __debug__:
                         self._note("%s.wait(%s): timed out", self, timeout)
-                    try:
-                        self._Condition__waiters.remove(waiter)
-                    except ValueError:
-                        pass
                 else:
                     if __debug__:
                         self._note("%s.wait(%s): got it", self, timeout)
+            return gotit
         finally:
             self._acquire_restore(saved_state)
+            if not gotit:
+                try:
+                    if is_py2:
+                        self._Condition__waiters.remove(waiter)
+                    else:
+                        self._waiters.remove(waiter)
+                except ValueError:
+                    pass
+
+    if not is_py2:
+        def _note(self, format, *args):
+            format = format % args
+            ident = get_ident()
+            try:
+                name = threading._active[ident].name
+            except KeyError:
+                name = "<OS thread %d>" % ident
+            format = "%s: %s\n" % (name, format)
+            sys.stderr.write(format)
+
+
 
 #To implement async get:
 #    need multi level get
@@ -708,7 +784,7 @@ class asyncThread(threading.Thread):
         try:
             if self._async_trig and not CHECKING():
                 self._async_trig()
-            #print 'Thread ready to detect ', time.time()-t0
+            #print('Thread ready to detect ', time.time()-t0)
             if self._async_detect is not None:
                 while not self._async_detect():
                     if self._stop:
@@ -718,10 +794,10 @@ class asyncThread(threading.Thread):
         finally:
             if self._async_cleanup and not CHECKING():
                 self._async_cleanup()
-        #print 'Thread ready to read ', time.time()-t0
+        #print('Thread ready to read ', time.time()-t0)
         for func, kwarg in self._operations:
             self.results.append(func(**kwarg))
-        #print 'Thread finished in ', time.time()-t0
+        #print('Thread finished in ', time.time()-t0)
     def cancel(self):
         self._stop = True
     def wait(self, timeout=None):
@@ -959,7 +1035,7 @@ class BaseDevice(object):
     @locked_calling_dev
     def get(self, **kwarg):
         if self._getdev_p is None:
-            raise NotImplementedError, self.perror('This device does not handle _getdev')
+            raise NotImplementedError(self.perror('This device does not handle _getdev'))
         if not CHECKING() or self._get_has_check:
             if self._setget_delay is not None:
                 last = getattr(self._local_data, 'last_set_time', 0)
@@ -1030,22 +1106,22 @@ class BaseDevice(object):
         while obj._redir_async:
             obj = obj._redir_async
         return obj
-    def getasync(self, async, **kwarg):
+    def getasync(self, async_st, **kwarg):
         obj = self._do_redir_async()
-        if async != 3 or self == obj:
-            ret = obj.instr._get_async(async, obj,
+        if async_st != 3 or self == obj:
+            ret = obj.instr._get_async(async_st, obj,
                            trig=obj._trig, **kwarg)
         # now make sure obj._cache and self._cache are the same
-        else: # async == 3 and self != obj:
+        else: # async_st == 3 and self != obj:
             # async thread is finished, so lock should be available
             with self.instr._lock_instrument: # only local data, so don't need _lock_extra
                 #_get_async blocks if it is not in the correct thread and is not
                 #complete. Here we just keep the lock until setcache is complete
                 # so setcache does not have to wait for a lock.
-                ret = obj.instr._get_async(async, obj, **kwarg)
+                ret = obj.instr._get_async(async_st, obj, **kwarg)
                 self.setcache(ret)
                 self._last_filename = obj._last_filename
-        if async == 3:
+        if async_st== 3:
             # update the obj local thread cache data.
             obj._local_data.cache = ret
         return ret
@@ -1058,23 +1134,23 @@ class BaseDevice(object):
                 self._cache = val
         self._local_data.cache = val # thread local, requires no lock
     def __call__(self, val=None):
-        raise SyntaxError, """Do NOT call a device directly, like instr.dev().
+        raise SyntaxError("""Do NOT call a device directly, like instr.dev().
         Instead use set/get on the device or
-        functions that use set/get like sweep or record."""
+        functions that use set/get like sweep or record.""")
     def __repr__(self):
         gn, cn, p = self.instr._info()
         return '<device "%s" of %s=(class "%s" at 0x%08x)>'%(self.name, gn, cn, p)
     def __set__(self, instance, val):
-        #print instance
+        #print(instance)
         self.set(val)
     def perror(self, error_str='', **dic):
         dic.update(name=self.name, instr=self.instr, gname=self.instr.find_global_name())
         return ('{gname}.{name}: '+error_str).format(**dic)
     # Implement these in a derived class
     def _setdev(self, val, **kwarg):
-        raise NotImplementedError, self.perror('This device does not handle _setdev')
+        raise NotImplementedError(self.perror('This device does not handle _setdev'))
     def _getdev(self, **kwarg):
-        raise NotImplementedError, self.perror('This device does not handle _getdev')
+        raise NotImplementedError(self.perror('This device does not handle _getdev'))
     def _general_check(self, val, min=None, max=None, choices=None, lims=None, msg_src=None, str_return=False):
         # This wraps the _general_check function to wrap the error message with perror
         # with str_return, it either returns a error string or None instead of producting an exception
@@ -1105,7 +1181,7 @@ class BaseDevice(object):
         fnct_str = 'set' if in_set else 'check'
         self._check_cache = {'fnct_set':  in_set, 'fnct_str': fnct_str}
         if self._setdev_p is None:
-            raise NotImplementedError, self.perror('This device does not handle %s'%fnct_str)
+            raise NotImplementedError(self.perror('This device does not handle %s'%fnct_str))
         nval = len(val)
         if nval == 1:
             val = val[0]
@@ -1202,7 +1278,7 @@ class BaseDevice(object):
 class wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, checkdev=None, getformat=None, **extrak):
         # auto insert documentation if setdev or getdev has one.
-        if not extrak.has_key('doc'):
+        if 'doc' not in extrak:
             if setdev is not None and setdev.__doc__:
                 extrak['doc'] = setdev.__doc__
             elif getdev is not None and getdev.__doc__:
@@ -1231,7 +1307,7 @@ class wrapDevice(BaseDevice):
 class cls_wrapDevice(BaseDevice):
     def __init__(self, setdev=None, getdev=None, checkdev=None, getformat=None, **extrak):
         # auto insert documentation if setdev or getdev has one.
-        if not extrak.has_key('doc'):
+        if 'doc' not in extrak:
             if setdev is not None and setdev.__doc__:
                 extrak['doc'] = setdev.__doc__
             elif getdev is not None and getdev.__doc__:
@@ -1260,9 +1336,19 @@ class cls_wrapDevice(BaseDevice):
 def _find_global_name(obj):
     dic = _globaldict
     try:
-        return [k for k,v in dic.iteritems() if v is obj and k[0]!='_'][0]
+        return [k for k,v in dic.items() if v is obj and k[0]!='_'][0]
     except IndexError:
         return "name_not_found"
+
+"""
+# 2023-09-22
+# This is not used so might as well disable it.
+# Note that the inst.dev=2 syntax does not allow for extra options like set/get do.
+# Also, since those devices are only created onces, multiple instance of the class
+# will all use the same object, hence it will only talk to the most recent one (passed
+#  with the last instr attribute). This is not easily fixed.
+# It works for the inst.dev=2 because the __set__ is provided the owener instance but
+# it will not work for the other uses like get(inst.dev)
 
 # Using this metaclass, the class method
 # _add_class_devs will be executed at class creation.
@@ -1275,7 +1361,7 @@ class MetaClassInit(type):
         cls._add_class_devs()
         type.__init__(cls, name, bases, dct)
 #TODO: maybe override classmethod, automatically call _add_class_devs for all devices...
-
+"""
 
 #######################################################
 ##    Base Instrument
@@ -1302,7 +1388,7 @@ class MetaClassInit(type):
 #   and by ReadvalDev
 
 class BaseInstrument(object):
-    __metaclass__ = MetaClassInit
+#    __metaclass__ = MetaClassInit
     alias = None
     # add _quiet_delete here in case we call __del__ before __init__ because of problem in subclass
     _quiet_delete = False
@@ -1328,7 +1414,7 @@ class BaseInstrument(object):
         self._quiet_load = False
     def __del__(self):
         if not (self._quiet_delete or self._quiet_load):
-            print 'Destroying '+repr(self)
+            print('Destroying '+repr(self))
     def _async_select(self, devs):
         """ It receives a list of devices to help decide how to wait.
             The list entries can be in the form (dev, option_dict) or just dev
@@ -1358,7 +1444,7 @@ class BaseInstrument(object):
         self._async_statusLine('')
     def _async_wait_check_helper(self):
         if self._async_wait_check and self.async_wait.getcache() == 0.:
-            print self.perror('***** WARNING You should give a value for async_wait *****')
+            print(self.perror('***** WARNING You should give a value for async_wait *****'))
             self._async_wait_check = False
     @locked_calling
     def wait_after_trig(self):
@@ -1403,22 +1489,22 @@ class BaseInstrument(object):
             return self._async_running_task.is_alive()
         except AttributeError:
             return False
-    def _get_async(self, async, obj, trig=False, **kwarg):
+    def _get_async(self, async_st, obj, trig=False, **kwarg):
         # get_async should note change anything about the instrument until
         # we run the asyncThread. Should only change local thread data.
         # we are not protected by a lock until that.
         data = self._get_async_local_data()
-        if async == -1: # we reset task
+        if async_st == -1: # we reset task
             if data.async_level > 1:
                 data.async_task.cancel()
             data.async_level = -1
-        if async != 3 and not (async == 2 and data.async_level == -1) and (
-          async < data.async_level or async > data.async_level + 1):
+        if async_st != 3 and not (async_st == 2 and data.async_level == -1) and (
+          async_st < data.async_level or async_st > data.async_level + 1):
             if data.async_level > 1:
                 data.async_task.cancel()
             data.async_level = -1
-            raise ValueError, 'Async in the wrong order. Reseting order. Try again..'
-        if async == 0:  # setup async task
+            raise ValueError('Async in the wrong order. Reseting order. Try again..')
+        if async_st == 0:  # setup async task
             if data.async_level == -1: # first time through
                 data.async_list = []
                 data.async_select_list = []
@@ -1434,19 +1520,19 @@ class BaseInstrument(object):
             data.async_list.append((obj.get, kwarg))
             data.async_list.append((lambda: obj._last_filename, {}))
             data.async_select_list.append((obj, kwarg))
-        elif async == 1:  # Start async task (only once)
-            #print 'async', async, 'self', self, 'time', time.time()
+        elif async_st == 1:  # Start async task (only once)
+            #print('async_st', async_st, 'self', self, 'time', time.time())
             if data.async_level == 0: # First time through
                 data.async_task.start()
                 data.async_level = 1
-        elif async == 2:  # Wait for task to finish
-            #print 'async', async, 'self', self, 'time', time.time()
+        elif async_st == 2:  # Wait for task to finish
+            #print('async_st', async_st, 'self', self, 'time', time.time())
             if data.async_level == 1: # First time through (no need to wait for subsequent calls)
                 wait_on_event(data.async_task)
                 data.async_level = -1
                 data.async_counter = 0
-        elif async == 3: # get values
-            #print 'async', async, 'self', self, 'time', time.time()
+        elif async_st == 3: # get values
+            #print('async_st', async_st, 'self', self, 'time', time.time())
             #return obj.getcache()
             ret = data.async_task.results[data.async_counter]
             # Need to copy the _last_filename item because it is thread local
@@ -1594,11 +1680,11 @@ class BaseInstrument(object):
         self._conf_helper_cache = no_default, add_to
         return ret
     def read(self):
-        raise NotImplementedError, self.perror('This instrument class does not implement read')
+        raise NotImplementedError(self.perror('This instrument class does not implement read'))
     def write(self, val):
-        raise NotImplementedError, self.perror('This instrument class does not implement write')
+        raise NotImplementedError(self.perror('This instrument class does not implement write'))
     def ask(self, question):
-        raise NotImplementedError, self.perror('This instrument class does not implement ask')
+        raise NotImplementedError(self.perror('This instrument class does not implement ask'))
     def ask_write(self, command):
         """
         Automatically selects between ask or write depending on the presence of a ?
@@ -1616,16 +1702,16 @@ class BaseInstrument(object):
         pass
     # This allows instr.get() ... to be redirected to instr.alias.get()
     def __getattr__(self, name):
-        if name in ['get', 'set', 'check', 'getcache', 'setcache', 'instr',
+        if name in ['get', 'set', 'check', 'getcache', 'setcache', 'set_ret_cache', 'instr',
                     'name', 'getformat', 'getasync', 'getfullname']:
             if self.alias is None:
-                raise AttributeError, self.perror('This instrument does not have an alias for {nm}', nm=name)
+                raise AttributeError(self.perror('This instrument does not have an alias for {nm}', nm=name))
             return getattr(self.alias, name)
         else:
-            raise AttributeError, self.perror('{nm} is not an attribute of this instrument', nm=name)
+            raise AttributeError(self.perror('{nm} is not an attribute of this instrument', nm=name))
     def __call__(self):
         if self.alias is None:
-            raise TypeError, self.perror('This instrument does not have an alias for call')
+            raise TypeError(self.perror('This instrument does not have an alias for call'))
         return self.alias()
     @locked_calling
     def force_get(self):
@@ -1642,7 +1728,7 @@ class BaseInstrument(object):
         for s, obj in self.devs_iter():
             if obj._autoinit:
                 l.append( (float(obj._autoinit), obj) )
-        l.sort(reverse=True)
+        l.sort(reverse=True, key=lambda x: x[0])
         for flag,obj in l:
             try:
                 obj.get()
@@ -1757,7 +1843,7 @@ def _tostr_helper(val, t):
         return repr(val)
     if t == complex:
         return '%r,%r'%(val.real, val.imag)
-    if t is None or (type(t) == type and issubclass(t, basestring)):
+    if t is None or (type(t) == type and issubclass(t, string_bytes_types)):
         return val
     return t.tostr(val)
 
@@ -1779,9 +1865,9 @@ def _fromstr_helper(valstr, t):
         return t(valstr)
     if t == complex:
         vals = valstr.split(',')
-        vals = map(float, vals)
+        vals = list(map(float, vals))
         return complex(*vals)
-    if t is None or (type(t) == type and issubclass(t, basestring)):
+    if t is None or (type(t) == type and issubclass(t, string_bytes_types)):
         return valstr
     return t(valstr)
 
@@ -1867,7 +1953,7 @@ class scpiDevice(BaseDevice):
 
         """
         if setstr is None and getstr is None:
-            raise ValueError, 'At least one of setstr or getstr needs to be specified'
+            raise ValueError('At least one of setstr or getstr needs to be specified')
         if auto_min_max not in [False, True, 'min', 'max']:
             raise ValueError('Invalid auto_min_max values')
         self._auto_min_max = auto_min_max
@@ -1878,7 +1964,7 @@ class scpiDevice(BaseDevice):
             str_type = choices
         if autoinit == True:
             autoinit = 10
-            test = [ True for k,v in options.iteritems() if isinstance(v, BaseDevice)]
+            test = [ True for k,v in options.items() if isinstance(v, BaseDevice)]
             if len(test):
                 autoinit = 1
         BaseDevice.__init__(self, doc=doc, autoinit=autoinit, choices=choices, get_has_check=True, **kwarg)
@@ -1948,7 +2034,7 @@ class scpiDevice(BaseDevice):
         # we don't include options starting with _
         if len(self._options) > 0:
             added += '---------- Optional Parameters\n'
-            for optname, optval in self._options.iteritems():
+            for optname, optval in self._options.items():
                 basedev = False
                 if isinstance(optval, BaseDevice):
                     basedev = True
@@ -1983,7 +2069,7 @@ class scpiDevice(BaseDevice):
         return _fromstr_helper(valstr, t)
     def _get_option_values(self, extradict={}):
         opt = self._options.copy()
-        d = {k:v.getcache() for k, v in opt.iteritems() if isinstance(v, BaseDevice)}
+        d = {k:v.getcache() for k, v in opt.items() if isinstance(v, BaseDevice)}
         opt.update(d)
         opt.update(extradict)
         return opt
@@ -2004,7 +2090,7 @@ class scpiDevice(BaseDevice):
           If everything is fine, return None
         """
         if option not in self._options.keys():
-            raise KeyError, self.perror('This device does not handle option "%s".'%option)
+            raise KeyError(self.perror('This device does not handle option "%s".'%option))
         lim = self._options_lim.get(option)
         # if no limits were given but this is a device, use the limits from the device.
         # TODO use dev.check (trap error)
@@ -2019,8 +2105,8 @@ class scpiDevice(BaseDevice):
         # The list of correct values could be a subset so push them to kwarg
         # for testing.
         # clean up kwarg by removing all None values
-        kwarg = { k:v for k, v in kwarg.iteritems() if v is not None}
-        for k, v in kwarg.iteritems():
+        kwarg = { k:v for k, v in kwarg.items() if v is not None}
+        for k, v in kwarg.items():
             ck = self._check_option(k, v)
             if ck is not None:
                 # in case of error, raise it
@@ -2035,7 +2121,7 @@ class scpiDevice(BaseDevice):
                     opt_dev.set(v)
         # Now get default values and check them if necessary
         options = self._get_option_values(kwarg)
-        for k,v in options.iteritems():
+        for k,v in options.items():
             if k not in kwarg:
                 ck = self._check_option(k, v)
                 if ck is not None:
@@ -2045,7 +2131,7 @@ class scpiDevice(BaseDevice):
         # everything checks out so use those kwarg
         options.update(kwarg)
         self._option_cache = options.copy()
-        for k in options.iterkeys():
+        for k in options.keys():
             val = options[k]
             option_dev  = self._options[k]
             option_lim = self._options_lim.get(k, None)
@@ -2092,7 +2178,7 @@ class scpiDevice(BaseDevice):
             if kwarg == {}:
                 return self.getcache()
             else:
-                raise SyntaxError, self.perror('This device does not handle _getdev with optional arguments')
+                raise SyntaxError(self.perror('This device does not handle _getdev with optional arguments'))
         try:
             options = self._combine_options(**kwarg)
         except InvalidAutoArgument:
@@ -2187,15 +2273,15 @@ def _decode_block_base(s, skip=None):
     lb = len(block)
     if nb != -1:
         if lb < nb :
-            raise IndexError, 'Missing data for decoding. Got %i, expected %i'%(lb, nb)
+            raise IndexError('Missing data for decoding. Got %i, expected %i'%(lb, nb))
         elif lb > nb :
             if lb-nb == 1 and (s[-1] in '\r\n'):
                 return block[:-1]
             elif lb-nb == 2 and s[-2:] == '\r\n':
                 return block[:-2]
-            raise IndexError, 'Extra data in for decoding. Got %i ("%s ..."), expected %i'%(lb, block[nb:nb+10], nb)
+            raise IndexError('Extra data in for decoding. Got %i ("%s ..."), expected %i'%(lb, block[nb:nb+10], nb))
     elif skip:
-        if isinstance(skip, basestring):
+        if isinstance(skip, string_bytes_types):
             if block.endswith(skip):
                 return block[:-len(skip)]
             else:
@@ -2240,7 +2326,7 @@ def _encode_block(v, sep=None):
     """
     if sep is not None:
         return sep.join(map(repr, v))
-    if isinstance(v, basestring):
+    if isinstance(v, string_bytes_types):
         s = v
     else:
         s = np.asarray(v).tostring()
@@ -2270,7 +2356,11 @@ class Block_Codec(object):
         return ret
     def tostr(self, array):
         dtype = self._dtype
-        if isinstance(array, (int, long, float)):
+        if is_py2:
+            num_type = (int, long, float)
+        else:
+            num_type = (int, float)
+        if isinstance(array, num_type):
             array = np.array([array], dtype=dtype)
         elif isinstance(array, (list, tuple)):
             array = np.array(array, dtype=dtype)
@@ -2356,7 +2446,7 @@ class quoted_string(object):
     def __call__(self, quoted_str):
         if not self._fromstr:
             return quoted_str
-        if isinstance(self._fromstr, basestring):
+        if isinstance(self._fromstr, string_bytes_types):
             quote_char = self._fromstr
         else:
             quote_char = self._quote_char
@@ -2364,17 +2454,17 @@ class quoted_string(object):
             return quoted_str[1:-1]
         else:
             if not self._quiet:
-                print 'Warning, string <%s> does not start and end with <%s>'%(quoted_str, quote_char)
+                print('Warning, string <%s> does not start and end with <%s>'%(quoted_str, quote_char))
             return quoted_str
     def tostr(self, unquoted_str):
         if not self._tostr:
             return unquoted_str
-        if isinstance(self._tostr, basestring):
+        if isinstance(self._tostr, string_bytes_types):
             quote_char = self._tostr
         else:
             quote_char = self._quote_char
         if quote_char in unquoted_str:
-            raise ValueError, 'The given string already contains a quote :%s:'%quote_char
+            raise ValueError('The given string already contains a quote :%s:'%quote_char)
         return quote_char+unquoted_str+quote_char
 
 def protected_sep_split(input_str, sep=',', lengths=None, protect='"', clean=False):
@@ -2497,7 +2587,7 @@ class quoted_dict(quoted_list):
             skip_type = True
         else:
             l = []
-            for k,v in d.iteritems():
+            for k,v in d.items():
                 l.extend([k ,v])
         return super(quoted_dict,self).tostr(l, skip_type=skip_type)
 
@@ -2513,13 +2603,13 @@ class quoted_dict(quoted_list):
 
 class ChoiceBase(object):
     def __call__(self, input_str):
-        raise NotImplementedError, 'ChoiceBase subclass should overwrite __call__'
+        raise NotImplementedError('ChoiceBase subclass should overwrite __call__')
     def tostr(self, val):
-        raise NotImplementedError, 'ChoiceBase subclass should overwrite __tostr__'
+        raise NotImplementedError('ChoiceBase subclass should overwrite __tostr__')
     def __repr__(self):
-        raise NotImplementedError, 'ChoiceBase subclass should overwrite __repr__'
+        raise NotImplementedError('ChoiceBase subclass should overwrite __repr__')
     def __contains__(self, val):
-        raise NotImplementedError, 'ChoiceBase subclass should overwrite __contains__'
+        raise NotImplementedError('ChoiceBase subclass should overwrite __contains__')
 
 class ChoiceSimple(ChoiceBase):
     """ This turns a list into a ChoiceBase with a specific converter """
@@ -2592,13 +2682,13 @@ class ChoiceStrings(ChoiceBase):
         no_short = kwarg.pop('no_short', False)
         self.redirects = kwarg.pop('redirects', {})
         if kwarg != {}:
-            raise TypeError, 'ChoiceStrings only has quotes=False and no_short=False as keyword arguments'
+            raise TypeError('ChoiceStrings only has quotes=False and no_short=False as keyword arguments')
         self.values = values
         self.long = [v.lower() for v in values]
         if no_short:
             self.short = self.long
         else:
-            self.short = [v.translate(None, string.ascii_lowercase).lower() for v in values]
+            self.short = [translate_del_lower(v).lower() for v in values]
             # for short having '', use the long name instead
             # this happens for a string all in lower cap.
             self.short = [s if s!='' else l for s,l in zip(self.short, self.long)]
@@ -2607,14 +2697,14 @@ class ChoiceStrings(ChoiceBase):
                 if ':' in v:
                     v_s = v.split(':')
                     vl = [vi.lower() for vi in v_s]
-                    vs = [vi.translate(None, string.ascii_lowercase).lower() for vi in v_s]
+                    vs = [translate_del_lower(vi).lower() for vi in v_s]
                     extra[i] = vl, vs
             self.long_short = extra
     def find_in_long_short(self, val):
         if ':' not in val:
             return None
         val_s = val.split(':')
-        for i, v in self.long_short.iteritems():
+        for i, v in self.long_short.items():
             vl, vs = v
             if len(val_s) != len(vl):
                 continue
@@ -2652,7 +2742,7 @@ class ChoiceStrings(ChoiceBase):
         input_str = self.redirects.get(input_str, input_str)
         if self.quotes:
             if input_str[0] != '"' or input_str[-1] != '"':
-                raise ValueError, 'The value --%s-- is not quoted properly'%input_str
+                raise ValueError('The value --%s-- is not quoted properly'%input_str)
             return self.normalizelong(input_str[1:-1])
         return self.normalizelong(input_str)
     def tostr(self, input_choice):
@@ -2673,7 +2763,7 @@ class ChoiceStrings(ChoiceBase):
         # we have a list
         values = []
         for i in index:
-            if isinstance(i, basestring):
+            if isinstance(i, string_bytes_types):
                 i = self.index(i)
             values.append(self.values[i])
         return ChoiceStrings(*values, quotes=self.quotes)
@@ -2689,14 +2779,14 @@ class ChoiceSimpleMap(ChoiceBase):
     """
     def __init__(self, input_dict, filter=None, allow_keys=False):
         self.dict = input_dict
-        self.keys = input_dict.keys()
-        self.values = input_dict.values()
+        self.keys = list(input_dict.keys())
+        self.values = list(input_dict.values())
         self.filter = filter
         self.allow_keys = allow_keys
         if filter is not None:
             for x in self.keys:
                 if filter(x) != x:
-                    raise ValueError, "The input dict has at least one key where filter(key)!=key."
+                    raise ValueError("The input dict has at least one key where filter(key)!=key.")
     def __contains__(self, x):
         is_in = x in self.values
         if not is_in and self.allow_keys:
@@ -2722,8 +2812,8 @@ class ChoiceSimpleMap(ChoiceBase):
         else:
             return repr(self.values)
 
-Choice_bool_OnOff = ChoiceSimpleMap(dict(ON=True, OFF=False), filter=string.upper)
-Choice_bool_YesNo = ChoiceSimpleMap(dict(YES=True, NO=False), filter=string.upper)
+Choice_bool_OnOff = ChoiceSimpleMap(dict(ON=True, OFF=False), filter=string_upper)
+Choice_bool_YesNo = ChoiceSimpleMap(dict(YES=True, NO=False), filter=string_upper)
 
 class ChoiceIndex(ChoiceBase):
     """
@@ -2745,15 +2835,15 @@ class ChoiceIndex(ChoiceBase):
         if isinstance(list_or_dict, list):
             if self._normalize:
                 list_or_dict = [self.normalize_N(v) for v in list_or_dict]
-            self.keys = range(offset,offset+len(list_or_dict)) # instrument values
+            self.keys = list(range(offset,offset+len(list_or_dict))) # instrument values
             self.values = list_or_dict           # pyHegel values
             self.dict = dict(zip(self.keys, self.values))
         else: # list_or_dict is dict
             if self._normalize:
-                list_or_dict = {k:self.normalize_N(v) for k,v in list_or_dict.iteritems()}
+                list_or_dict = {k:self.normalize_N(v) for k,v in list_or_dict.items()}
             self.dict = list_or_dict
-            self.keys = list_or_dict.keys()
-            self.values = list_or_dict.values()
+            self.keys = list(list_or_dict.keys())
+            self.values = list(list_or_dict.values())
     @staticmethod
     def normalize_N(v):
         """
@@ -2813,7 +2903,7 @@ class ChoiceDevDep(ChoiceBase):
             val = self.dev.get()
         else:
             val = self.dev.getcache()
-        for k, v in self.choices.iteritems():
+        for k, v in self.choices.items():
             if isinstance(k, (tuple, ChoiceBase)) and val in k:
                 return v
             elif val == k:
@@ -2876,11 +2966,11 @@ class ChoiceDev(ChoiceBase):
         if key in self:
             if isinstance(choices, dict):
                 if key not in choices.keys() and key in choices.values():
-                    key = [k for k,v in choices.iteritems() if v == key][0]
+                    key = [k for k,v in choices.items() if v == key][0]
                 return key, choices[key]
             else:
                 return key
-        raise IndexError, 'Invalid index. choose among: %r'%choices
+        raise IndexError('Invalid index. choose among: %r'%choices)
     def __repr__(self):
         return repr(self._get_choices())
 
@@ -2890,7 +2980,7 @@ class ChoiceDevSwitch(ChoiceDev):
     be something other (a type different than in_base_type),
     in which case the other_conv function should convert it to the in_base_type.
     """
-    def __init__(self, dev, other_conv, sub_type=None, in_base_type=basestring):
+    def __init__(self, dev, other_conv, sub_type=None, in_base_type=string_bytes_types):
         self.other_conv = other_conv
         self.in_base_type = in_base_type
         super(ChoiceDevSwitch, self).__init__(dev, sub_type=sub_type)
@@ -3013,7 +3103,7 @@ class ChoiceMultiple(ChoiceBase):
                 raise KeyError_Choices('key %s is missing'%k)
             _general_check(val, lims=lims, msg_src='key %s'%k)
         if x != {}:
-            raise KeyError('The following keys in the dictionnary are incorrect: %r'%x.keys())
+            raise KeyError('The following keys in the dictionnary are incorrect: %r'%list(x.keys()))
         return True
     def __repr__(self):
         r = ''
@@ -3053,7 +3143,7 @@ class ChoiceMultipleDep(ChoiceBase):
         self.all_vals = all_vals
     def _get_choice(self):
         val = self.all_vals[self.key]
-        for k, v in self.choices.iteritems():
+        for k, v in self.choices.items():
             if isinstance(k, (tuple, ChoiceBase)) and val in k:
                 return v
             elif val == k:
@@ -3106,7 +3196,7 @@ class Dict_SubDevice(BaseDevice):
         lims = []
         for k in key:
             if k not in subtype.field_names:
-                raise IndexError, "The key '%s' is not present in the subdevice"%k
+                raise IndexError("The key '%s' is not present in the subdevice"%k)
             lims.append( subtype.fmts_lims[subtype.field_names.index(k)] )
         self._sub_lims = lims
         setget = subdevice._setget
@@ -3271,9 +3361,9 @@ class Lock_Visa(object):
             if exc.error_code != visa_wrap.constants.VI_ERROR_SESN_NLOCKED:
                 raise
         if n:
-            print 'Released Visa lock', n, 'time(s) (expected %i releases)'%expect
+            print('Released Visa lock', n, 'time(s) (expected %i releases)'%expect)
         else:
-            print 'Visa lock was not held (expected %i releases)'%expect
+            print('Visa lock was not held (expected %i releases)'%expect)
         self._count = 0
 
 
@@ -3308,7 +3398,7 @@ class _SharedStructure(object):
         self.data = somectype.from_buffer(self.buffer, counter_size)
         self._add_count()
         if _SharedStructure_debug:
-            print 'There are now %i users of %r'%(self._get_count(), tagname)
+            print('There are now %i users of %r'%(self._get_count(), tagname))
     def __getattr__(self, name):
         return getattr(self.data, name)
     def __setattr__(self, name, value):
@@ -3330,7 +3420,7 @@ class _SharedStructure(object):
         self._dec_count()
         count = self._get_count()
         if _SharedStructure_debug:
-            print 'Cleaned up mmap, counter now %i'%self._get_count()
+            print('Cleaned up mmap, counter now %i'%self._get_count())
         self.buffer.close()
         if count == 0 and os.name != 'nt':
             self._shared_obj.unlink()
@@ -3372,7 +3462,7 @@ class Keep_Alive(threading.Thread):
         with self.lck:
             self.last = time.time()
     #def __del__(self):
-    #    print 'cleaning up keep_alive thread.'
+    #    print('cleaning up keep_alive thread.')
 
 
 class visaInstrument(BaseInstrument):
@@ -3427,12 +3517,12 @@ class visaInstrument(BaseInstrument):
             if not skip_id_test:
                 idns = self.idn_split()
                 if not instruments_registry.check_instr_id(self.__class__, idns['vendor'], idns['model'], idns['firmware']):
-                    print 'WARNING: this particular instrument idn is not attached to this class: operations might misbehave.'
-                    #print self.__class__, idns
+                    print('WARNING: this particular instrument idn is not attached to this class: operations might misbehave.')
+                    #print(self.__class__, idns)
         if self._keep_alive_thread:
             self._keep_alive_thread.start()
     def __del__(self):
-        #print 'Destroying '+repr(self)
+        #print('Destroying '+repr(self))
         # no need to call self.visa.close()
         # because self.visa does that when it is deleted
         if self._keep_alive_thread:
@@ -3567,7 +3657,7 @@ class visaInstrument(BaseInstrument):
         if not CHECKING():
             self.visa.write(val, termination=termination)
         else:
-            if not isinstance(val, basestring):
+            if not isinstance(val, string_bytes_types):
                 raise ValueError(self.perror('The write val is not a string.'))
         self._last_rw_time.write_time = time.time()
         self._keep_alive_update()
@@ -3796,7 +3886,7 @@ class visaInstrumentAsync(visaInstrument):
             self._async_last_status_time = time.time()
             #sleep(0.01) # give some time for other handlers to run
             self._RQS_done.set()
-            #print 'Got it', vi
+            #print('Got it', vi)
         return visa_wrap.constants.VI_SUCCESS
     def _get_esr(self):
         if CHECKING():
@@ -3872,7 +3962,7 @@ class visaInstrumentAsync(visaInstrument):
                                visa_wrap.constants.VI_QUEUE)
         # We detect the end of acquisition using *OPC and status byte.
         if self._get_esr() & 0x01:
-            print 'Unread event byte!'
+            print('Unread event byte!')
         # A while loop is needed when National Instrument (NI) gpib autopoll is active
         # This is the default when using the NI Visa.
         n = 0
@@ -3885,7 +3975,7 @@ class visaInstrumentAsync(visaInstrument):
             else:
                 n += 1
         if n > 0:
-            print 'Unread(%i) status byte!'%n
+            print('Unread(%i) status byte!'%n)
         if self._async_polling:
             pass
         elif self._RQS_status != -1:
@@ -3906,7 +3996,7 @@ class visaInstrumentAsync(visaInstrument):
                 else:
                     raise
             if n>0:
-                print 'Unread(%i) event queue!'%n
+                print('Unread(%i) event queue!'%n)
         self._async_last_status = 0
         self._async_last_esr = 0
     @locked_calling
@@ -3932,7 +4022,7 @@ def _normalize_usb(usb_resrc):
     return 'USB0::0x%04X::0x%04X::%s::%i'%(manuf, model, serial, interfaceN), manuf, model
 
 def _normalize_gpib(gpib_resrc):
-    if isinstance(gpib_resrc, basestring):
+    if isinstance(gpib_resrc, string_bytes_types):
         gpib_resrc = gpib_resrc.upper()
         split = gpib_resrc.split('::')
         bus = 0
@@ -3972,14 +4062,14 @@ class visaAutoLoader(visaInstrument):
     if skip_usb is set to True, then the usb search is skipped
     """
     def __new__(cls, visa_addr, skip_usb=False, *args, **kwargs):
-        if not skip_usb and isinstance(visa_addr, basestring) and visa_addr.upper().startswith('USB'):
+        if not skip_usb and isinstance(visa_addr, string_bytes_types) and visa_addr.upper().startswith('USB'):
             usb, manuf, model = _normalize_usb(visa_addr)
             try:
                 cls = instruments_registry.find_usb(manuf, model)
             except KeyError:
                 pass
             else:
-                print 'Autoloading(USB) using instruments class "%s"'%cls.__name__
+                print('Autoloading(USB) using instruments class "%s"'%cls.__name__)
                 return cls(visa_addr, *args, **kwargs)
         idns = _get_visa_idns(visa_addr, *args, **kwargs)
         try:
@@ -3988,5 +4078,5 @@ class visaAutoLoader(visaInstrument):
             idn = '{vendor},{model},{firmware}'.format(**idns)
             raise RuntimeError('Could not find an instrument for: %s (%s)'%(visa_addr, idn))
         else:
-            print 'Autoloading using instruments class "%s"'%cls.__name__
+            print('Autoloading using instruments class "%s"'%cls.__name__)
             return cls(visa_addr, *args, **kwargs)
