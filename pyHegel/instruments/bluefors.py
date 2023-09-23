@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import socket
 import threading
@@ -41,6 +41,8 @@ from ..instruments_base import BaseInstrument, MemoryDevice, make_choice_list,\
                              ChoiceSimpleMap,  ChoiceIndex, Dict_SubDevice,_sleep_signal_context_manager
 from ..instruments_registry import register_instrument
 _wait = wait
+
+from ..comp2to3 import string_bytes_types, unicode_type, is_py2, is_py3
 
 #######################################################
 ##    Bluefors Valve
@@ -144,7 +146,7 @@ class bf_valves(BaseInstrument):
         s = socket.create_connection(addr, timeout=timeout)
         foo = s.recv(1024)
         if foo != '\x0c':
-            raise RuntimeError, 'Did not receive expected signal'
+            raise RuntimeError('Did not receive expected signal')
         self._socket = s
         super(bf_valves, self).__init__()
         self._keep_alive = keep_alive(keep_interval, s, self._lock_instrument)
@@ -164,15 +166,15 @@ class bf_valves(BaseInstrument):
         self._keep_alive.update_time()
         # check length or use sendall
         if n != len(command):
-            raise RuntimeError, 'Data was not completely sent: %i out of %i bytes'%(n, len(command))
+            raise RuntimeError('Data was not completely sent: %i out of %i bytes'%(n, len(command)))
         answer = ''
         while len(answer) == 0  or  answer[-1] != '\n':
             answer += self._socket.recv(1024)
         answer = answer[:-2] # remove trailing CR LF
         if answer[0] == 'E':
-            raise RuntimeError, 'Error: %s'%answer
+            raise RuntimeError('Error: %s'%answer)
         if expect:
-            if isinstance(expect, basestring):
+            if isinstance(expect, string_bytes_types):
                 expect = [expect]
             for e in expect:
                 e += ': '
@@ -180,7 +182,7 @@ class bf_valves(BaseInstrument):
                     answer = answer[len(e):]
                     break
             else: # not found
-                raise RuntimeError, 'Unexpected reply: %s'%answer
+                raise RuntimeError('Unexpected reply: %s'%answer)
         return answer
     def avail_names(self):
         """
@@ -188,7 +190,7 @@ class bf_valves(BaseInstrument):
         """
         return self.ask('names', 'S04').split(',')
     def _names_helper(self, val):
-        if isinstance(val, basestring) or val is None:
+        if isinstance(val, string_bytes_types) or val is None:
             return val
         return ','.join(val)
     def status(self, valves=None):
@@ -305,10 +307,10 @@ class bf_valves(BaseInstrument):
         Returns the values of the flow meter followed by all 6 pressure gages.
         """
         vals = self.gage_val()
-        if vals.keys() != self._gages_names:
+        if list(vals.keys()) != self._gages_names:
             raise RuntimeError('The keys is gages_vals are not in the expected format.')
         flow = self.flow()
-        return [flow] + vals.values()
+        return [flow] + list(vals.values())
     def _gage_getdev(self, p=None):
         """
         when p=0 returns the flow meter
@@ -332,7 +334,7 @@ class bf_valves(BaseInstrument):
         else:
             return (k, )
     def _all_status_getdev(self):
-        st = self.status().items()
+        st = list(self.status().items())
         st = sorted(st, key=self._status_sort_key_func)
         return dict_improved(st)
     def _create_devs(self):
@@ -404,7 +406,7 @@ if os.name == 'nt':
     class GUID(Structure):
         _fields_ = [("data1", DWORD), ("data2", WORD), ("data3", WORD), ("data4", BYTE*8)]
         def __init__(self, *args, **kwarg):
-            if len(args) == 1 and isinstance(args[0], basestring):
+            if len(args) == 1 and isinstance(args[0], string_bytes_types):
                 s = args[0].lstrip('{').rstrip('}').replace('-','')
                 args = (int(s[:8],16), int(s[8:12],16), int(s[12:16],16), tuple([int(s[16+i*2:16+i*2+2], 16) for i in range(8)]))
             super(GUID, self).__init__(*args, **kwarg)
@@ -501,7 +503,7 @@ if os.name == 'nt':
     def get_all_dev_instanceID(ClassGuid, Enumerator, Flags):
         devinfo = GetClassDevs(ClassGuid, Enumerator, 0, Flags)
         if devinfo == INVALID_HANDLE_VALUE:
-            raise RuntimeError, format_err()
+            raise RuntimeError(format_err())
         m=0
         dinfo = SP_DEVINFO_DATA()
         dinfo.cbSize = sizeof(SP_DEVINFO_DATA)
@@ -512,14 +514,14 @@ if os.name == 'nt':
                 err = get_last_error()
                 if err != ERROR_NO_MORE_ITEMS:
                     DestroyDeviceInfoList(devinfo)
-                    raise RuntimeError, 'EnumDeviceInfo '+format_err(err)
+                    raise RuntimeError('EnumDeviceInfo '+format_err(err))
                 break
             # Find required bufsize
             GetDeviceInstanceId(devinfo, dinfo, None, 0, bufsize)
             buf = create_string_buffer(bufsize.value)
             if not GetDeviceInstanceId(devinfo, dinfo, buf, bufsize, None):
                 DestroyDeviceInfoList(devinfo)
-                raise RuntimeError, 'GetDeviceInstanceId '+format_err()
+                raise RuntimeError('GetDeviceInstanceId '+format_err())
             res.append(buf.value)
             #print "m:%i instanceID:%r"%(m, buf.value)
             m += 1
@@ -534,10 +536,10 @@ if os.name == 'nt':
     USE_RESIZE = True
     def get_all_dev_interface(ClassGuid, Enumerator, Flags, search_interface=GUID_INTERFACE_USB_DEVICE):
         if not Flags & DIGCF_DEVICEINTERFACE:
-            raise ValueError, "The DIGCF_DEVICEINTERFACE flag is required here."
+            raise ValueError("The DIGCF_DEVICEINTERFACE flag is required here.")
         devinfo = GetClassDevs(ClassGuid, Enumerator, 0, Flags)
         if devinfo == INVALID_HANDLE_VALUE:
-            raise RuntimeError, format_err()
+            raise RuntimeError(format_err())
         m=0
         dinter = SP_DEVICE_INTERFACE_DATA()
         dinter.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA)
@@ -548,7 +550,7 @@ if os.name == 'nt':
                 err = get_last_error()
                 if err != ERROR_NO_MORE_ITEMS:
                     DestroyDeviceInfoList(devinfo)
-                    raise RuntimeError, 'EnumDeviceInterface '+format_err(err)
+                    raise RuntimeError('EnumDeviceInterface '+format_err(err))
                 break
             # Find required bufsize
             GetDeviceInterfaceDetail(devinfo, dinter, None, 0, bufsize, None)
@@ -567,7 +569,7 @@ if os.name == 'nt':
             # reference of this entry that can be used with GetDeviceInstanceId
             if not GetDeviceInterfaceDetail(devinfo, dinter, detailp, sizeof(detail), None, None):
                 DestroyDeviceInfoList(devinfo)
-                raise RuntimeError, 'GetDeviceInterfaceDetail '+format_err()
+                raise RuntimeError('GetDeviceInterfaceDetail '+format_err())
             if USE_RESIZE:
                 res.append(detail.get_string())
             else:
@@ -646,8 +648,7 @@ else: # Not windows
 
 import json
 import uuid
-import six
-if six.PY2:
+if is_py2:
     import Queue as queue
 else:
     import queue
@@ -789,7 +790,7 @@ set/get options for this type of device:
         para_name, mqtt_name, dev = predev
         val = kwargs.pop(para_name, None)
         if in_get and len(kwargs) != 0:
-                raise ValueError('Parameter invalid or not allowed in get: %s'%(kwargs.keys()))
+            raise ValueError('Parameter invalid or not allowed in get: %s'%(list(kwargs.keys())))
         if val is None:
             val = dev.get()
         else:
@@ -870,7 +871,7 @@ class bf_temperature_controller(BaseInstrument):
                                     'channel/listen':'To do on connect'}
         self._mqtt_listen_buffers = dict(meas=[None]*12, htrs=[None]*4, rsrcs=None, chs=[None]*12, last_junk=None)
         self._mqtt_hash_n = 0
-        self._mqtt_sender = unicode('pyHegel_' + uuid.uuid4().hex)
+        self._mqtt_sender = unicode_type('pyHegel_' + uuid.uuid4().hex)
         self._read_last_reply_buffer = queue.Queue(maxsize=1)
         self._read_last_meas_buffer = queue.Queue(maxsize=1)
         self._cals_map = None
@@ -973,7 +974,7 @@ class bf_temperature_controller(BaseInstrument):
         topic = message.topic
         payload = json.loads(message.payload)
         if 'hash' in payload and 'sender' in payload:
-            mid = unicode(self._mqtt_hash_n)
+            mid = unicode_type(self._mqtt_hash_n)
             if payload['hash'] != mid or payload['sender'] != self._mqtt_sender:
                 return
             else:
@@ -1292,7 +1293,7 @@ class bf_temperature_controller(BaseInstrument):
             raise RuntimeError('The calibration curve_no is already in use. You can use force=True to overwrite (BE CAREFUL)')
         if data is None:
             self.write('calibration-curve/remove', proto='post', calib_curve_nr=curve_no)
-        elif isinstance(data, basestring):
+        elif isinstance(data, string_bytes_types):
             with open(data) as f:
                 d = f.read()
             self.write('calibration-curve/file-upload', proto='post', calib_curve_nr=curve_no, file_contents=d)
@@ -1660,7 +1661,7 @@ class Bf_controller_listen_thread(threading.Thread):
         # instead of just returning. We add the control_frame=True option
         with ws.readlock:
             opcode, data = ws.recv_data(control_frame=True)
-        if six.PY3 and opcode == websocket.ABNF.OPCODE_TEXT:
+        if is_py3 and opcode == websocket.ABNF.OPCODE_TEXT:
             return data.decode("utf-8")
         elif opcode == websocket.ABNF.OPCODE_TEXT or opcode == websocket.ABNF.OPCODE_BINARY:
             return data
@@ -1671,7 +1672,7 @@ class Bf_controller_listen_thread(threading.Thread):
         # This print is needed on anaconda 2019.10 on windows 10 to prevent
         #  a windows error exeption when later trying to print in the thread (status_line)
         # Doing a print at the beginning of the thread fixes that problem.
-        #print 'Listen Thread started'
+        #print('Listen Thread started')
         while True:
             if self._stop:
                 return
@@ -1704,7 +1705,7 @@ class Bf_controller_listen_thread(threading.Thread):
     def put_cache(self, endpoint, js_data):
         if endpoint.startswith('ws/'):
             endpoint = endpoint[3:].rstrip('/')
-        path = js_data['data'].keys()[0]
+        path = list(js_data['data'].keys())[0]
         with self._lock:
             self._listen_cache[(endpoint, path)] = js_data
 
@@ -2224,7 +2225,7 @@ class bf_controller(BaseInstrument):
                 extra_ch = [extra_ch]
         ret = []
         for ch in extra_ch:
-            if isinstance(ch, (str, unicode)):
+            if isinstance(ch, string_bytes_types):
                 chn = self.find_temp_ch_num(ch)
                 if chn is None:
                     raise ValueError('Selected ch is not mapped: %s'%chn)
@@ -2279,7 +2280,7 @@ class bf_controller(BaseInstrument):
             is used to find the actual channel number.
             If scanning is disabled, the check channel needs to be the active channel, otherwise check is skipped.
         """
-        if isinstance(check_ch, (str, unicode)):
+        if isinstance(check_ch, string_bytes_types):
             check_ch = self.find_temp_ch_num(check_ch)
             if check_ch is None:
                 raise ValueError('Selected check_ch is not mapped')
