@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -26,10 +26,14 @@ This module contains some improved types:
  StructureImproved (ctypes Structure improvement)
  dict_improved  (OrderedDict improvement)
 """
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 from collections import OrderedDict
 from ctypes import Structure
+import string
+import keyword
+
+from .comp2to3 import string_types, string_bytes_types, Iterator, isidentifier, with_metaclass
 
 class _StructureImprovedMeta(Structure.__class__):
     # Using this metaclass will add a separate cache to each new subclass
@@ -38,7 +42,7 @@ class _StructureImprovedMeta(Structure.__class__):
         cls._names_cache = [] # every sub class needs to have its own cache
 
 
-class StructureImproved(Structure):
+class StructureImproved(with_metaclass(_StructureImprovedMeta, Structure)):
     """
     This adds to the way Structure works (structure elements are
     class attribute).
@@ -53,7 +57,6 @@ class StructureImproved(Structure):
     a fraction of the names.)
     """
     # TODO fix the problem of not being able to subclass (_fields_ does not habe all names)
-    __metaclass__ = _StructureImprovedMeta
     _names_cache = [] # This gets overwritten but metaclass so that all subclass have their own list
     def _get_names(self):
         if self._names_cache == []:
@@ -61,11 +64,11 @@ class StructureImproved(Structure):
         return self._names_cache
     _names_ = property(_get_names)
     def __getitem__(self, key):
-        if not isinstance(key, basestring):
+        if not isinstance(key, string_bytes_types):
             key = self._names_[key]
         return getattr(self, key)
     def __setitem__(self, key, value):
-        if not isinstance(key, basestring):
+        if not isinstance(key, string_bytes_types):
             key = self._names_[key]
         setattr(self, key, value)
     def __len__(self):
@@ -92,7 +95,7 @@ class StructureImproved(Structure):
         else:
             ret = '%s(%s)'%(self.__class__.__name__, ', '.join(strs))
         if show:
-            print ret
+            print(ret)
         else:
             return ret
 
@@ -124,14 +127,23 @@ class dict_improved(OrderedDict):
         super(dict_improved, self).__setattr__('_dict_improved__init_complete', False)
         super(dict_improved, self).__setattr__('_freeze', freeze)
         super(dict_improved, self).__setattr__('_allow_overwrite', allow_overwrite)
+        # Since we can only go through an iterator once, convert it to a list now
+        if isinstance(arg[0], Iterator):
+            arg = (list(arg[0]),) + arg[1:]
         # Now check the entries
         tmp = OrderedDict(*arg, **kwarg)
         for key in tmp.keys():
-            if not isinstance(key, basestring):
-                raise TypeError, "You can only use strings as keys."
+            self._check_valid_key(key)
         # input is ok so create the object
         super(dict_improved, self).__init__(*arg, **kwarg)
         self._dict_improved__init_complete = True
+    def _check_valid_key(self, key):
+        if not isinstance(key, string_bytes_types):
+            raise TypeError("You can only use strings as keys.")
+        if not isidentifier(key):
+            raise TypeError("You can only use valid string identifiers as keys.")
+        if keyword.iskeyword(key):
+            raise TypeError("You can only use strings that are not python keywords as keys.")
     def _set_freeze(self, val):
         """
         Change the freeze state. val is True or False
@@ -173,7 +185,7 @@ class dict_improved(OrderedDict):
     def __getitem__(self, key):
         if isinstance(key, list):
             return [self[k] for k in key]
-        if not isinstance(key, basestring):
+        if not isinstance(key, string_bytes_types):
             # assume we are using an integer index
             key = self.keys()[key]
             if isinstance(key, list): # it was a slice
@@ -184,14 +196,14 @@ class dict_improved(OrderedDict):
             for k in key:
                 del self[k]
             return
-        if not isinstance(key, basestring):
+        if not isinstance(key, string_bytes_types):
             # assume we are using an integer index
             key = self.keys()[key]
             if isinstance(key, list): # it was a slice
                 del self[key]
                 return
         if self._freeze and key in self._known_keys:
-            raise RuntimeError, "Modifying keys of dictionnary not allowed for this object."
+            raise RuntimeError("Modifying keys of dictionnary not allowed for this object.")
         super(dict_improved, self).__delitem__(key)
         self._known_keys.remove(key)
         delattr(self, key)
@@ -202,18 +214,19 @@ class dict_improved(OrderedDict):
             for k,v in zip(key, value):
                 self[k] = v
             return
-        if not isinstance(key, basestring):
+        if not isinstance(key, string_bytes_types):
             # assume we are using an integer index
             key = self.keys()[key]
             if isinstance(key, list): # it was a slice
                 self[key] = value
                 return
         if self._dict_improved__init_complete and self._freeze and key not in self._known_keys:
-            raise RuntimeError, "Modifying keys of dictionnary not allowed for this object."
+            raise RuntimeError("Modifying keys of dictionnary not allowed for this object.")
         if key not in self._known_keys:
+            self._check_valid_key(key)
             if hasattr(self, key):
                 if not self._allow_overwrite:
-                    raise RuntimeError, "Replacing existing attributes not allowed for this object."
+                    raise RuntimeError("Replacing existing attributes not allowed for this object.")
                 super(dict_improved, self).__setattr__(key+'_orig', getattr(self, key))
             # add entry so tab completion sees it
             super(dict_improved, self).__setattr__(key, 'Should never see this')
@@ -221,7 +234,7 @@ class dict_improved(OrderedDict):
         super(dict_improved, self).__setitem__(key, value)
     def clear(self):
         if self._freeze:
-            raise RuntimeError, "Modifying keys of dictionnary not allowed for this object."
+            raise RuntimeError("Modifying keys of dictionnary not allowed for this object.")
         keys = self._known_keys
         del self._known_keys[:]
         for k in keys:
@@ -243,7 +256,7 @@ class dict_improved(OrderedDict):
         else:
             ret = '%s(%s)'%(self.__class__.__name__, ', '.join(strs))
         if show:
-            print ret
+            print(ret)
         else:
             return ret
     def __repr__(self):
