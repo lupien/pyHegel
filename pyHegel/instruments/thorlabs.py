@@ -1,12 +1,37 @@
+# -*- coding: utf-8 -*-
+
+########################## Copyrights and license ############################
+#                                                                            #
+# Copyright 2021-2023  Pierre Fevrier                                        #
+#                      Christian Lupien <christian.lupien@usherbrooke.ca>    #
+#                                                                            #
+# This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
+#                                                                            #
+# pyHegel is free software: you can redistribute it and/or modify it under   #
+# the terms of the GNU Lesser General Public License as published by the     #
+# Free Software Foundation, either version 3 of the License, or (at your     #
+# option) any later version.                                                 #
+#                                                                            #
+# pyHegel is distributed in the hope that it will be useful, but WITHOUT     #
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or      #
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public        #
+# License for more details.                                                  #
+#                                                                            #
+# You should have received a copy of the GNU Lesser General Public License   #
+# along with pyHegel.  If not, see <http://www.gnu.org/licenses/>.           #
+#                                                                            #
+##############################################################################
+
+from __future__ import absolute_import, print_function, division
+
 import struct
 import numpy
-
-from pyHegel import instruments
 import time
-from pyHegel.instruments_base import visaInstrument, scpiDevice, ChoiceStrings, BaseDevice, \
-    visaInstrumentAsync, locked_calling, wait, ChoiceMultiple
-from pyHegel.instruments_registry import register_instrument
 
+from ..instruments_base import visaInstrument, scpiDevice, ChoiceStrings, BaseDevice, \
+                               visaInstrumentAsync, locked_calling, wait, ChoiceMultiple
+from ..instruments_registry import register_instrument
+from .logical import FunctionWrap
 
 @register_instrument('Thorlabs', 'PM100A', alias='PM100A Power Meter')
 class thorlabs_power_meter(visaInstrumentAsync):
@@ -209,7 +234,7 @@ class APTDevice(BaseDevice):
         if get_types is None:
             get_types = [float]*len(get_names)
         if set_id is None and req_id is None:
-            raise ValueError, 'At least one of set_id or req_id needs to be specified'
+            raise ValueError('At least one of set_id or req_id needs to be specified')
         BaseDevice.__init__(self, doc=doc, autoinit=autoinit, choices=ChoiceMultiple(get_names,get_types), get_has_check=True, multi=get_names,allow_kw_as_dict=True, allow_missing_dict=True, **kwarg)
         self._reqdev_p = req_id
         self._getdev_p = req_id
@@ -220,9 +245,9 @@ class APTDevice(BaseDevice):
 
     def _setdev(self, val, **kwarg):
         if self._setdev_p is None:
-            raise NotImplementedError, self.perror('This device does not handle _setdev')
+            raise NotImplementedError(self.perror('This device does not handle _setdev'))
 
-        #print val,kwarg
+        #print(val,kwarg)
         data = struct.pack('<'+self.get_fmt,*[val[k] for k in self.get_names])
         message = encodeAPT(self._setdev_p, data=data)
         self.instr.write(message)
@@ -245,7 +270,7 @@ class APTDevice(BaseDevice):
             elif len(to_return) ==1:
                 return ret[1+to_return[0][0]]
             else:
-                raise ValueError, 'the data requested by get not found in the specified data structure'
+                raise ValueError('the data requested by get not found in the specified data structure')
         else:
             #k = next(i for i, v in enumerate(self.get_names) if v == self.get_by_default)
             #return ret[1::]
@@ -464,7 +489,7 @@ class ThorlabsKDC101(visaInstrument):
 
         def scaled_get():
             return self.inc_to_deg(self.pos_counter.get()['counter'])
-        self.angle = instruments.FunctionWrap(
+        self.angle = FunctionWrap(
             setfunc=self.move_abs,
             getfunc=scaled_get,
             autoinit=False
