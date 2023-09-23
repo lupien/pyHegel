@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2018-2018  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2018-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -22,7 +22,7 @@
 ##############################################################################
 
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import scipy
@@ -426,7 +426,7 @@ class rigol_awg_dg812(visaInstrument):
 #            directory, filename = os.path.split(dest_file)
 #            ls = self.remote_ls(directory)
 #            if ls:
-#                ls = map(lambda s: s.lower(), ls)
+#                ls = list(map(lambda s: s.lower(), ls))
 #                if filename.lower() in ls:
 #                    raise RuntimeError('Destination file already exists. Will not overwrite.')
 #        if src_data is local_src_file is None:
