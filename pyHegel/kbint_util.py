@@ -2,7 +2,7 @@
 
 ########################## Copyrights and license ############################
 #                                                                            #
-# Copyright 2011-2015  Christian Lupien <christian.lupien@usherbrooke.ca>    #
+# Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
 #                                                                            #
 # This file is part of pyHegel.  http://github.com/lupien/pyHegel            #
 #                                                                            #
@@ -21,11 +21,14 @@
 #                                                                            #
 ##############################################################################
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import signal
 import time
 import sys
+
+# use absolute path here to allow running this script directly (instead of importing it)
+from pyHegel.comp2to3 import get_ident, is_py2
 
 def _sleep_delayed_signal_handler(signum, stack_frame):
     # replaces ipython 0.10 use of ctypes.pythonapi.PyThreadState_SetAsyncExc
@@ -44,18 +47,33 @@ def _sleep_delayed_signal_handler(signum, stack_frame):
 #    _Event.wait is used in _Timer.run
 #
 
+if is_py2:
+    def _empty_async():
+        # run this after changing the signal handler away from the iptyhon 0.10
+        # one, in order to remove any possible queued PyThreadState_SetAsyncExc
+        # exception
+        # This function can be interrupted by any exception, but probably
+        # by KeyboardInterrupt
+        # We need to use the same inner loop as for test_async below
+        # for the default check interval of 100, this functions
+        #  takes 5.5 us on reuletlab4
+        for i in range(sys.getcheckinterval()+50):
+            pass
+else:
+    def _empty_async():
+        # This is probably not needed after ipython 0.12
+        # In python 3 the AsyncExc seems to be immediate
+        # So this functions is probably not needed but just in case make a minimal loop
+        for i in range(2):
+            pass
 
-def _empty_async():
-    # run this after changing the signal handler away from the iptyhon 0.10
-    # one, in order to remove any possible queued PyThreadState_SetAsyncExc
-    # exception
-    # This function can be interrupted by any exception, but probably
-    # by KeyboardInterrupt
-    # We need to use the same inner loop as for test_async below
-    # for the default check interval of 100, this functions
-    #  takes 5.5 us on reuletlab4
-    for i in range(sys.getcheckinterval()+50):
-        pass
+if is_py2:
+    def set_SIGINT_signal(handler):
+        return signal.signal(signal.SIGINT, handler)
+else:
+    def set_SIGINT_signal(handler):
+        # Changing the handler is probably not needed in newer ipython (so also for recent python 3)
+            return None
 
 class _sleep_signal_context_manager():
     # This temporarily changes the context handler for SIGINT
@@ -70,22 +88,22 @@ class _sleep_signal_context_manager():
         try:
             try:
                 #old_sig = signal.signal(signal.SIGINT, _sleep_signal_handler)
-                self.old_sig = signal.signal(signal.SIGINT, signal.default_int_handler)
-            except ValueError, e: # occurs when not in main thread
-                #print 'Not installing handler because in secondary thread', e
+                self.old_sig = set_SIGINT_signal(signal.default_int_handler)
+            except ValueError as e: # occurs when not in main thread
+                #print('Not installing handler because in secondary thread', e)
                 self.old_sig = None
             _empty_async()
             return self # will be used for target in : with xxx as target
         except KeyboardInterrupt: # capture a break (possibly async)
             if self.old_sig: # we can get here with old_sig=None, it is rare but I have seen it
-                signal.signal(signal.SIGINT, self.old_sig)
+                set_SIGINT_signal(self.old_sig)
             raise
     def __exit__(self, exc_type, exc_value, exc_traceback):
         # exc_type, exc_value, exc_traceback are None if no exception occured
         if exc_type == KeyboardInterrupt:
             self.ctrlc_occured = True
         if self.old_sig is not None:
-            signal.signal(signal.SIGINT, self.old_sig)
+            set_SIGINT_signal(self.old_sig)
         if self.ctrlc_occured and self.absorb_ctrlc:
             return True # this will suppress the exception
 
@@ -137,8 +155,8 @@ class _delayed_signal_context_manager():
         try:
             try:
                 self.old_sig = signal.signal(signal.SIGINT, self.delayed_sigint_handler)
-            except ValueError, e: # occurs when not in main thread
-                #print 'Not installing handler because in secondary thread', e
+            except ValueError as e: # occurs when not in main thread
+                #print('Not installing handler because in secondary thread', e)
                 self.old_sig = None
             _empty_async()
             return self # will be used for target in : with xxx as target
@@ -167,8 +185,7 @@ class _delayed_signal_context_manager():
 if __name__ == "__main__":
     # tests of the kbint handling
     from ctypes import pythonapi, c_long, py_object
-    import thread
-    from .qt_wrap import QtCore, processEvents
+    from pyHegel.qt_wrap import QtCore, processEvents
     import dis
     def test_async(n_inner=200, n_repeat=1000):
         """ n_inner should be larger than check interval by at around 20.
@@ -177,23 +194,27 @@ if __name__ == "__main__":
             The other ones should be similar.
             Anything bigger is bad.
         """
-        check_interval =  sys.getcheckinterval()
-        print 'current check interval', check_interval
+        if is_py2:
+            check_interval =  sys.getcheckinterval()
+            print('current check interval', check_interval)
+        else:
+            check_interval = sys.getswitchinterval()
+            print('current switch interval', check_interval)
         result = []
         for i in range(n_repeat):
             j=-99
-            pythonapi.PyThreadState_SetAsyncExc(c_long(thread.get_ident()), py_object(KeyboardInterrupt))
             try:
+                pythonapi.PyThreadState_SetAsyncExc(c_long(get_ident()), py_object(KeyboardInterrupt))
                 for j in range(n_inner):
                     pass
             except KeyboardInterrupt:
                 result.append(j)
         for r in result:
             if r>check_interval:
-                print '  WARNING found: %i > check interval', r
+                print('  WARNING found: %i > check interval', r)
         return result
     def test_sleep_exc(timeout=10, newsleep=False):
-        print 'press CTRL-C in the next ', timeout,' seconds'
+        print('press CTRL-C in the next ', timeout,' seconds')
         try:
             try:
                 if newsleep:
@@ -201,22 +222,22 @@ if __name__ == "__main__":
                 else:
                     time.sleep(timeout)
             except IOError as exc:
-                print 'The timeout inner exception is IOError ', exc.errno
+                print('The timeout inner exception is IOError ', exc.errno)
             except KeyboardInterrupt:
-                print 'The timeout inner exception is KeyboardInterrupt'
+                print('The timeout inner exception is KeyboardInterrupt')
             except:
                 exc_type, exc_val, exc_traceback = sys.exc_info()
-                print 'The timeout inner exception is ', exc_type, ' with value', exc_val
+                print('The timeout inner exception is ', exc_type, ' with value', exc_val)
             _empty_async()
         except:
                 exc_type, exc_val, exc_traceback = sys.exc_info()
-                print 'Obtained a second, later exception: ', exc_type, ' with value', exc_val
+                print('Obtained a second, later exception: ', exc_type, ' with value', exc_val)
     def test_qtloop(timeout=10, with_context=False, raiseit=True):
         def inner_loop():
             to = time.time()
             while time.time()-to < timeout:
                 pass
-        print 'Press CTRL-C in the next ', timeout, ' seconds'
+        print('Press CTRL-C in the next ', timeout, ' seconds')
         try:
             QtCore.QTimer.singleShot(1, inner_loop)
             to = time.time()
@@ -227,39 +248,40 @@ if __name__ == "__main__":
                 else:
                     processEvents(max_time_ms = 20)
         except KeyboardInterrupt:
-            print 'The interrupt reached the python main thread'
+            print('The interrupt reached the python main thread')
         else:
-            print 'WARNING: the Qt event loop absorbed the exception'
+            print('WARNING: the Qt event loop absorbed the exception')
     def test_signal_absorb(timeout=10):
         def new_signal(sig, stack):
-            print 'Got Signal'
+            print('Got Signal')
         old_signal = signal.signal(signal.SIGINT, new_signal)
         _empty_async()
-        print 'Press CTRL-C many times in the next ', timeout, ' seconds'
+        print('Press CTRL-C many times in the next ', timeout, ' seconds')
         to = time.time()
         while time.time()-to < timeout:
             signal.signal(signal.SIGINT, new_signal)
         signal.signal(signal.SIGINT, old_signal)
-    print '------------- disassembly of _empty_async -----------------------'
+    print('------------- disassembly of _empty_async -----------------------')
     dis.dis(_empty_async)
-    print '------------- test_async -----------------------'
+    print('------------- test_async -----------------------')
+    print('  A value of -99 means the async signal had immediate effect.')
     async_result = test_async() # could do an histogram on this
-    print async_result
-    print '------------- test_sleep_exc -----------------------'
-    print '  inner that are not KeyboardInterrupt, or outer implies we need to use new sleep'
+    print(async_result)
+    print('------------- test_sleep_exc -----------------------')
+    print('  inner that are not KeyboardInterrupt, or outer implies we need to use new sleep')
     test_sleep_exc()
-    print '------------- test_sleep_exc new sleep -----------------------'
-    print '  if there was a problem with old sleep this should fix it (or change nothing)'
-    print '  i.e. the sleep should interrupt and produce only inner KeyboardInterrupt'
+    print('------------- test_sleep_exc new sleep -----------------------')
+    print('  if there was a problem with old sleep this should fix it (or change nothing)')
+    print('  i.e. the sleep should interrupt and produce only inner KeyboardInterrupt')
     test_sleep_exc(newsleep=True)
-    print '------------- test_qtloop -----------------------'
-    print '  if qt absorbs exception, we need to delay them, see next test'
+    print('------------- test_qtloop -----------------------')
+    print('  if qt absorbs exception, we need to delay them, see next test')
     test_qtloop()
-    print '------------- test_qtloop with context-----------------------'
+    print('------------- test_qtloop with context-----------------------')
     test_qtloop(with_context=True)
-    print '------------- test_signal_absorb-----------------------'
-    print '  python can absorb signals when changing signals'
-    print '  Therefore it is normal that not all (very few/any) CTRL-C produce a Got Signal'
+    print('------------- test_signal_absorb-----------------------')
+    print('  python can absorb signals when changing signals')
+    print('  Therefore it is normal that not all (very few/any) CTRL-C produce a Got Signal')
     # problem is the c codes resets the tripped signal when changing the signal
     # therefore, if a signal arrives during the change, it will not call the
     # python handler.
