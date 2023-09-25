@@ -1402,6 +1402,7 @@ class BaseInstrument(object):
             # don't overwrite what is assigned in subclasses
             self._lock_extra = Lock_Extra()
         self._async_mode = 'wait'
+        self._protect_device_assignments = True
         self._create_devs()
         self._async_local_data = threading.local()
         self._async_wait_check = True
@@ -1415,6 +1416,12 @@ class BaseInstrument(object):
     def __del__(self):
         if not (self._quiet_delete or self._quiet_load):
             print('Destroying '+repr(self))
+    def __setattr__(self, attrname, value):
+        #print('Settiung attr', attrname)
+        if hasattr(self, "_protect_device_assignments") and self._protect_device_assignments and \
+            hasattr(self, attrname) and isinstance(getattr(self, attrname), BaseDevice):
+            raise RuntimeError('You are not allowed to change a device by using assignment; use set(dev, val) instead of dev=val.')
+        super(BaseInstrument, self).__setattr__(attrname, value)
     def _async_select(self, devs):
         """ It receives a list of devices to help decide how to wait.
             The list entries can be in the form (dev, option_dict) or just dev
