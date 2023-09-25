@@ -451,8 +451,8 @@ class SignalHound_SM200C(BaseInstrument):
         """ Without a filename, get will use the quick save.
             You should use a full path for the filename.
             It is saved by the Spike software so uses its default directory
-            which is probably C:\Program Files\Signal Hound\Spike\
-            The Quick file save defaults to %USERPROFILE%\Documents\SignalHound
+            which is probably C:\\Program Files\\Signal Hound\\Spike\\
+            The Quick file save defaults to %USERPROFILE%\\Documents\\SignalHound
         """
         if filename is None:
             self.write(':SYSTem:IMAGe:SAVe:QUICk')

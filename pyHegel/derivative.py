@@ -43,7 +43,7 @@ from __future__ import absolute_import, print_function, division
 from numpy import diff
 from scipy.misc import central_diff_weights
 from scipy import signal, interpolate
-from scipy.ndimage import filters
+from scipy.ndimage import uniform_filter1d, gaussian_filter1d, convolve1d
 
 def D1(x, y, axis=-1):
     """ Simplest numerical derivative of order 1
@@ -93,7 +93,7 @@ def Dn(x, y, Np, ndiv=1, axis=-1, mode='strip', cval=0.):
     if mode=='strip':
         strip = True
         mode = 'reflect'
-    dy = filters.correlate1d(y, kernel, axis=axis, mode=mode, cval=cval)
+    dy = correlate1d(y, kernel, axis=axis, mode=mode, cval=cval)
     D = dy/dx**ndiv
     if strip:
         x, D = _do_strip(x, D, Np, axis=axis)
@@ -109,8 +109,8 @@ def Du(x, y, Np, ndiv=1, axis=-1, mode='strip', cval=0.):
     if mode == 'strip':
         strip = True
         mode = 'reflect'
-    y = filters.uniform_filter1d(y, Np, axis=axis, mode=mode, cval=cval)
-    #if Np%2 == 0: x -= (x[1]-x[0])/2 # or x = filters.uniform_filter1d(x, Np, axis=axis, mode='nearest')
+    y = uniform_filter1d(y, Np, axis=axis, mode=mode, cval=cval)
+    #if Np%2 == 0: x -= (x[1]-x[0])/2 # or x = uniform_filter1d(x, Np, axis=axis, mode='nearest')
     if strip:
         x, y = _do_strip(x, y, Np, axis=axis)
     Np = ndiv*2+1
@@ -127,7 +127,7 @@ def Dfilter(x, y, sigma, axis=-1, mode='reflect', cval=0.):
         cval is for 'constant'
     """
     dx = x[1]-x[0]
-    yf = filters.gaussian_filter1d(y, sigma, axis=axis, mode=mode, cval=cval, order=1)
+    yf = gaussian_filter1d(y, sigma, axis=axis, mode=mode, cval=cval, order=1)
     return x, yf/dx
     #return D1(x, yf, axis=axis)
 
@@ -149,6 +149,7 @@ def Dspline(x, y, sigma=None, s=None, k=3, n=1):
     tck = interpolate.splrep(x, y, k=k, s=s, **extra)
     return (x, interpolate.splev(x, tck, der=n))
 
+# all the following filters. are in scipy.ndimage (without filters.)
 # for 2d look at filters.sobel and filers.prewitt
 # other filters: filters.uniform_filter1d
 #                signal.spline_filter signal.cspline1d, signal.bspline

@@ -40,7 +40,7 @@ from matplotlib import pylab, rcParams, __version__ as mpl_version
 import dateutil
 from . import config
 
-from .comp2to3 import is_py3, string_types, string_bytes_types, unicode_type
+from .comp2to3 import is_py3, string_types, string_bytes_types, unicode_type, is_py2
 
 # same as in fullmpcanvas.py
 # follows new_figure_manager
@@ -52,7 +52,10 @@ else:
     from matplotlib.backends.backend_qt4 import FigureManagerQT
 
 from matplotlib.figure import Figure
-from distutils.version import LooseVersion
+if is_py2:
+    from distutils.version import LooseVersion as Version
+else:
+    from packaging.version import Version
 
 # see from mpl_toolkits.axes_grid1 import host_subplot
 # matplotlib/Examples/axes_grid/demo_parasite_axes2.py
@@ -63,8 +66,9 @@ host_subplot_class = host_subplot_class_factory(AA.Axes)
 
 # This problem affects Anaconda 5.2
 # see https://github.com/matplotlib/matplotlib/issues/12208
-if LooseVersion('2.2.0') <= mpl_version < LooseVersion('2.2.4') or \
-   mpl_version == LooseVersion('3.0.0'):
+Vmpl = Version(mpl_version)
+if Version('2.2.0') <= Vmpl < Version('2.2.4') or \
+   Vmpl == Version('3.0.0'):
        def transform_non_affine_wrapper(self, points):
            if not isinstance(points, np.ndarray):
                points = np.array(points)

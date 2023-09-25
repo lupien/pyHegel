@@ -188,7 +188,7 @@ def loadtxt_csv(filename, dtype=float, unpack=False, ndmin=0, skiprows=0, **kwar
                 skip_count += 1
                 continue
             try:
-                if line[-1] is '':
+                if line[-1] == '':
                     # some files have an ending , sep which produces an empty last field
                     line = line [:-1]
                 conv = list(map(dtype, line))

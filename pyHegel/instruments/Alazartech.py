@@ -36,7 +36,7 @@ from pyHegel.util import readfile
 
 from scipy import signal
 from scipy.fftpack import rfft, rfftfreq
-from scipy.ndimage.filters import uniform_filter1d
+from scipy.ndimage import uniform_filter1d
 
 from ctypes import c_uint8, c_uint16, c_long, c_int, c_uint, c_uint64, c_ubyte, POINTER, byref, create_string_buffer, Structure, Array
 

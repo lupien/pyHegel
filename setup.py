@@ -91,7 +91,7 @@ setup_dict = dict(name='pyHegel',
       zip_safe=False
       )
 
-requirements = [ 'ipython', 'numpy', 'scipy', 'matplotlib' ]
+requirements = [ 'ipython', 'numpy', 'scipy', 'matplotlib', 'packaging' ]
 setup_requires = []
 extras_require = {
         'visa': ['PyVISA']

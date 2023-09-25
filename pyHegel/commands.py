@@ -1051,7 +1051,7 @@ class _Sweep(instruments.BaseInstrument):
                            with the correct number of digit.
                            When used, sweep.next_file_i is auto incremented
                            to the next value
-                      The filename, when relative (does not start with / or \)
+                      The filename, when relative (does not start with / or \\)
                       is always combined with the path device.
                       The global variable sweep._lastnames is a list of the last
                       filenames used.
@@ -2540,7 +2540,7 @@ def rsrc_manager_reload(lib=None):
     ''  will load the default visa implementation ('visa32.dll' on windows)
     Other options, on windows, could be 'visa64.dll', 'nivisa64.dll' (for national instruments),
      'agvisa32.dll' for agilent/keysight (can also use 'ktvisa32.dll'). All those
-     are in directory \Windows\System32
+     are in directory \\Windows\\System32
     """
     instruments_base._load_resource_manager(lib)
 

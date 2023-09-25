@@ -34,10 +34,13 @@ import warnings as _warnings
 import os as _os
 from ctypes import byref as _byref
 from math import isinf as _isinf
-from distutils.version import LooseVersion
 
 from . import config
 from .comp2to3 import xrange, string_types, string_bytes_types, is_py2
+if is_py2:
+    from distutils.version import LooseVersion as Version
+else:
+    from packaging.version import Version
 
 #try_agilent_first = True
 try_agilent_first = config.pyHegel_conf.try_agilent_first
@@ -55,10 +58,10 @@ def is_version(lower=None, upper=None):
     """
     if lower is None and upper is None:
         raise RuntimeError('You need to specify at least one of upper or lower')
-    current_version = LooseVersion(version)
-    if current_version < LooseVersion(lower):
+    current_version = Version(version)
+    if current_version < Version(lower):
         return False
-    if current_version > LooseVersion(upper):
+    if current_version > Version(upper):
         return False
     return True
 
@@ -228,8 +231,8 @@ def _old_load_visa(path=None):
                 but listens to .pyvisarc
     for any other path, load it.
     On windows the usual path for 32bits can be
-        For National instrument: r'c:\Windows\system32\visa32.dll'
-        For Agilent: r'c:\Windows\system32\agvisa32.dll'
+        For National instrument: r'c:\\Windows\\system32\\visa32.dll'
+        For Agilent: r'c:\\Windows\\system32\\agvisa32.dll'
           (That is for agilent and NI installed at the same time)
     """
     if vpp43.visa_library._VisaLibrary__lib:
@@ -2449,11 +2452,11 @@ def _test_gpib_cross(instr1, hndlr1, instr2, hndlr2, manager, force=None):
     _test_wait(hndlr1)
     print('--Testing concurent SRQs')
     if hndlr1.count == 1 and hndlr2.count == 1:
-        print('Both devices produced 1 events separated by %f ms (sign of autoprobe). Both instruments are independent'%()
-                 (hndlr2.last-hndlr1.last)*1e3)
+        print('Both devices produced 1 events separated by %f ms (sign of autoprobe). Both instruments are independent'%(
+                 (hndlr2.last-hndlr1.last)*1e3))
     elif hndlr1.count == 5 and hndlr2.count == 5:
-        print('Both devices produced 5 events (sign of not autoprobe) . stb took %f ms, produced new event after %f ms.'%()
-                (after_stb-before_stb)*1e3, (last-after_stb)*1e3)
+        print('Both devices produced 5 events (sign of not autoprobe) . stb took %f ms, produced new event after %f ms.'%(
+                (after_stb-before_stb)*1e3, (last-after_stb)*1e3))
     elif hndlr1.count == 0 and hndlr2.count == 0:
         print('!! Both devices produced no events (sign of autoprobe needed but not enabled, or polling of srq missing the change because of fast auto serial poll)')
     else:

@@ -807,7 +807,7 @@ class agilent_SMU(visaInstrumentAsync):
     def _measZ_helper_get_quest(self, range, mode):
         """ mode is either Z, bias or level """
         cmu_slot = self._cmu_slot
-        if mode is 'Z':
+        if mode == 'Z':
             if range is None:
                 range = self.impedance_range.getcache()
             base = 'TC %i,'%cmu_slot
@@ -829,7 +829,7 @@ class agilent_SMU(visaInstrumentAsync):
 
     def _measZ_helper_ret_val(self, result_str, mode, cmu_slot):
         """ mode is either Z, bias or level """
-        if mode is 'Z':
+        if mode == 'Z':
             rets = result_str.split(',')
             value1, channel1, status1, type1 = self._parse_data(rets[0])
             value2, channel2, status2, type2 = self._parse_data(rets[1])
