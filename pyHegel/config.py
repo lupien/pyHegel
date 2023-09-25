@@ -23,14 +23,42 @@
 
 from __future__ import absolute_import, print_function, division
 
-import imp
 import glob
 import os
 import os.path
 from os.path import join as pjoin, isdir, isfile
 import re
+import sys
 
-from .comp2to3 import configparser
+from .comp2to3 import is_py2
+if is_py2:
+    from ConfigParser import SafeConfigParser as ConfigParser
+    from imp import load_source
+else:
+    from configparser import ConfigParser
+    import importlib.util
+    def load_source(name, path):
+        spec = importlib.util.spec_from_file_location(name, path)
+        init = False
+        if name in sys.modules:
+            module = sys.modules[name]
+        else:
+            init = True
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+        except:
+            if init:
+                try:
+                    del sys.modules[name]
+                except KeyError:
+                    pass
+            raise
+        # reorder import entries
+        module = sys.modules.pop(name)
+        sys.modules[name] = module
+        return module
 
 CONFIG_DIR = 'pyHegel'
 CONFIG_DOT_DIR = '.pyHegel'
@@ -158,19 +186,19 @@ def get_conf_dirs(skip_module_dir=False):
 
 
 def load_local_config():
-    # Note that imp.load_source, forces a reload of the file
+    # Note that load_source, forces a reload of the file
     # and adds the entry in sys.modules
     paths = [pjoin(d, LOCAL_CONFIG_FILE) for d in get_conf_dirs()]
     for p in paths:
         if isfile(p):
-            return imp.load_source(LOCAL_CONFIG, p)
+            return load_source(LOCAL_CONFIG, p)
     # no file found, so load the default template
     print('\n'+'-'*30)
     print('WARNING: using %s template. You should create your own %s file.'%(
             LOCAL_CONFIG, LOCAL_CONFIG_FILE))
     print('see the pyHegel/local_config_template.py for more information')
     print('-'*30+'\n')
-    return imp.load_source(LOCAL_CONFIG, DEFAULT_LOCAL_CONFIG_PATH)
+    return load_source(LOCAL_CONFIG, DEFAULT_LOCAL_CONFIG_PATH)
 
 
 def load_instruments(exclude=None):
@@ -195,12 +223,12 @@ def load_instruments(exclude=None):
             if name in loaded:
                 print('Skipping loading "%s" because a module with that name is already loaded from %s'%(f, loaded[name]))
             fullname = INSTRUMENTS_BASE+'.'+name
-            # instead of imp.load_source, could do
+            # instead of load_source, could do
             #  insert path in sys.path
             #   import (using importlib.import_module)
             #  remove inserted path
             # But that makes reloading more complicated
-            module = imp.load_source(fullname, f)
+            module = load_source(fullname, f)
             loaded[fullname] = f
             add_to_instruments(name)(module)
     return loaded
@@ -208,7 +236,7 @@ def load_instruments(exclude=None):
 
 class PyHegel_Conf(object):
     def __init__(self):
-        self.config_parser = configparser.SafeConfigParser()
+        self.config_parser = ConfigParser()
         paths = get_conf_dirs()
         paths = [pjoin(d, CONFIG_NAME) for d in paths]
         paths.append(DEFAULT_CONFIG_PATH)
