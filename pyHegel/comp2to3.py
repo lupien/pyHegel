@@ -92,7 +92,6 @@ if is_py3:
     import importlib
     import io
     from _thread import get_ident, error as thread_error
-    import configparser
     import builtins
     reload = importlib.reload
     string_types = (str,)
@@ -113,7 +112,6 @@ if is_py3:
 else:
     from StringIO import StringIO
     from thread import get_ident, error as thread_error
-    import ConfigParser as configparser
     import string
     import __builtin__
     reload = reload
