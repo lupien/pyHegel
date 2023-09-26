@@ -112,7 +112,8 @@ DEFAULT_USER_DIR = pjoin(USER_HOME, CONFIG_DOT_DIR)
 
 def get_windows_appdata(user=True):
     import ctypes
-    from ctypes.wintypes import HWND, HANDLE, HRESULT, DWORD, LPCSTR
+    from ctypes.wintypes import HWND, HANDLE, DWORD, LPCSTR
+    from ctypes import HRESULT
     from ctypes import c_int
     CSIDL_COMMON_APPDATA = 0x0023
     CSIDL_APPDATA = 0x001A # roaming
@@ -130,7 +131,8 @@ def get_windows_appdata(user=True):
     S_OK
     if ret != S_OK:
         raise RuntimeError('Unable to find windows default dir (HRESULT = %#0.8x)'%ret)
-    return pjoin(path.value, CONFIG_VENDOR, CONFIG_DIR)
+    path_unicode = path.value.decode(sys.getfilesystemencoding())
+    return pjoin(path_unicode, CONFIG_VENDOR, CONFIG_DIR)
 
 def get_env_user_dir(default_user):
     default_user = os.environ.get(CONFIG_ENV, default_user)
