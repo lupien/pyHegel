@@ -22,20 +22,23 @@ from __future__ import absolute_import
 import ctypes
 import os
 
+from .comp2to3 import is_py2
+
 INSTALL = False
+if is_py2:
+    import imp
+    #dirname = os.path.dirname(scipy.__file__)
+    dirname = os.path.dirname(imp.find_module('scipy')[1])
+    dirname = imp.find_module('scipy')[1]
+    config_file = os.path.join(dirname, '__config__.py')
 
-#dirname = os.path.dirname(scipy.__file__)
-dirname = os.path.dirname(imp.find_module('scipy')[1])
-dirname = imp.find_module('scipy')[1]
-config_file = os.path.join(dirname, '__config__.py')
-
-if os.path.exists(config_file):
-    with open(config_file, 'rb') as fid:
-        text = fid.read()
-    if 'mkl_blas' in text:
-        INSTALL = True
-#    if 'mkl_rt' in text:
-#        INSTALL = True
+    if os.path.exists(config_file):
+        with open(config_file, 'rb') as fid:
+            text = fid.read()
+        if b'mkl_blas' in text:
+            INSTALL = True
+    #    if 'mkl_rt' in text:
+    #        INSTALL = True
 
 def handler(sig):
     try:
@@ -57,10 +60,8 @@ def load_lib(name):
 
 def fix_problem():
     global basepath, routine
-    from comp2to3 import is_py2
     if not is_py2:
         raise RuntimeError('This is not needed in anything but python2. Use fix_problem_new instead.')
-    import imp
     # load numpy math and fortran libraries (but do not import numpy)
     basepath = imp.find_module('numpy')[1]
 
