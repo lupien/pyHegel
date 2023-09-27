@@ -36,11 +36,30 @@ from ctypes import byref as _byref
 from math import isinf as _isinf
 
 from . import config
-from .comp2to3 import xrange, string_types, string_bytes_types, is_py2
+from .comp2to3 import xrange, string_types, string_bytes_types, is_py2, fu, fb
 if is_py2:
     from distutils.version import LooseVersion as Version
 else:
     from packaging.version import Version
+
+
+"""
+   Observations for python 2 to 3 compatibility:
+       - the ctypes visa driver normally take bytes and return bytes.
+       - However, the pyVisa wrapper will accept unicode in place of bytes
+         and convert it to bytes using the ascii encoding if needed (ViString type
+         in pyvisa/ctwrapper/types.py).
+       - The raw pyVisa write and read include encoding parameters and a default
+         encoding and it always applies those conversions. This is since version 1.5 (was not in 1.4)
+       - The read_raw returns bytes. write_raw takes bytes but because of the ctypes
+         driver it also accepts unicode (converted using the ascii encoding, see above)
+       - Our wrapper overwrites the pyVisa read/write (which are in pyvisa/resources/messagebased.py)
+    So for 2-3 compatibility,
+       add encoding to older pyVisa (<=1.4)
+       add the encoding option to my read/write helpers
+       My write_helper wrapper conditionnaly convert to bytes
+       My read_helper converts on read to unicode but only for py3 and for non-raw.
+"""
 
 #try_agilent_first = True
 try_agilent_first = config.pyHegel_conf.try_agilent_first
@@ -331,9 +350,10 @@ def _strip_termination(input_str, termination=None):
     """ Similar to the one in pyvisa 1.4, except only removes CR, LF or CR+LF
         if present at the end of the string when None is used.
     """
-    CR = '\r'
-    LF = '\n'
+    CR = b'\r'
+    LF = b'\n'
     if termination:
+        termination = fb(termination)
         if input_str.endswith(termination):
             return input_str[:-len(termination)]
         else:
@@ -341,31 +361,43 @@ def _strip_termination(input_str, termination=None):
                            "termination characters", stacklevel=2)
     if input_str.endswith(CR+LF):
         return input_str[:-2]
-    elif input_str[-1] in (CR, LF):
+    elif input_str[-1:] in (CR, LF):
         return input_str[:-1]
     return input_str
 
-def _write_helper(self, message, termination='default'):
+def _write_helper(self, message, termination='default', encoding = None):
     # For old: improved termination handling, does not use the delay, matches new interface
-    # For new: overides the resource write to remove handling of encoding
+    # For new: overides the resource write to remove force conversion to unicode
     termination = self.write_termination if termination == 'default' else termination
+    encoding = self._encoding if encoding is None else encoding
+    if encoding == 'bytes':
+        # If somebody wants to use bytes for the read_helper in a query, we better handle
+        # that here. We can alwasy use byte data to bypass the conversion
+        encoding = 'ascii'
+    message = fb(message, encoding)
     if termination:
-        # termination could be unicode. This could force a conversion to unicode of message
-        # prevent that by forcing termination to str (for python2)
-        # This allows using the encoding attribute of the class
-        if message.endswith(str(termination)):
+        # convert to byte string so we can search and add it without error (especially in python 3)
+        # we already converted the message to bytes above.
+        termination = fb(termination)
+        if message.endswith(termination):
             _warnings.warn("write message already ends with "
                           "termination characters", stacklevel=2)
         else:
-            message += str(termination)
+            message += termination
     self.write_raw(message)
 
-def _read_helper(self, termination='default', chunk_size=None):
+def _read_helper(self, termination='default', encoding=None, chunk_size=None):
     # For old: improved termination handling, matches new interface
-    # For new: overides the resource read to remove handling of encoding and add stripping of termination
+    # For new: overides the resource read to remove force encoding and add stripping of termination
     #          It does not change the hardware termination handling
+    # Allows the use of "bytes" as an encoding to skip the conversion and return a byte instead.
     termination = self.read_termination if termination == 'default' else termination
-    return _strip_termination(self.read_raw(size=chunk_size), termination)
+    encoding = self._encoding if encoding is None else encoding
+    msg = _strip_termination(self.read_raw(size=chunk_size), termination)
+    if is_py2 or encoding == "bytes":
+        return msg
+    else:
+        return msg.decode(encoding)
 
 def _read_raw_n_all_helper(self, count, chunk_size=None):
     """ Read until count is obtained, possibly asking data in chunks of chunk (unless it is None)
@@ -384,17 +416,17 @@ def _read_raw_n_all_helper(self, count, chunk_size=None):
         n_read += n
     return result
 
-def _query_helper(self, message, termination='default', read_termination='default', write_termination='default', raw=False, chunk_size=None):
+def _query_helper(self, message, termination='default', read_termination='default', write_termination='default', encoding=None, raw=False, chunk_size=None):
     if termination != 'default':
         if read_termination == 'default':
             read_termination = termination
         if write_termination == 'default':
             write_termination = termination
-    self.write(message, termination=write_termination)
+    self.write(message, termination=write_termination, encoding=encoding)
     if raw:
         return self.read_raw(size=chunk_size)
     else:
-        return self.read(termination=read_termination, chunk_size=chunk_size)
+        return self.read(termination=read_termination, encoding=encoding, chunk_size=chunk_size)
 
 def _cleanup_timeout(timeout):
     if timeout is None or _isinf(timeout):
@@ -448,6 +480,7 @@ class old_Instrument(redirect_instr):
     LF = '\n'
     _read_termination = None
     _write_termination = CR + LF
+    _encoding = 'ascii'
     def __init__(self, manager, instr_instance, **kwargs):
         super(old_Instrument, self).__init__(instr_instance)
         self.resource_manager = manager
@@ -513,6 +546,12 @@ class old_Instrument(redirect_instr):
     @write_termination.setter
     def write_termination(self, value):
         self._write_termination = value
+    @property
+    def encoding(self):
+        return self._encoding
+    @encoding.setter
+    def encoding(self, encoding):
+        self._encoding = encoding
     flow_control = flow_control_helper
     def is_serial(self):
         return self.get_visa_attribute(constants.VI_ATTR_INTF_TYPE) == constants.VI_INTF_ASRL
