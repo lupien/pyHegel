@@ -3636,9 +3636,9 @@ class visaInstrument(BaseInstrument):
         if delta >0:
             sleep(delta)
     @locked_calling
-    def read(self, raw=False, count=None, chunk_size=None):
+    def read(self, raw=False, encoding=None, count=None, chunk_size=None):
         return self.read_unlocked(raw=raw, count=count, chunk_size=chunk_size)
-    def read_unlocked(self, raw=False, count=None, chunk_size=None):
+    def read_unlocked(self, raw=False, encoding=None, count=None, chunk_size=None):
         """ reads data.
             The default is to read until an end is received in chunk_size blocks
              (if chunk_size is not given, uses the default chunk_size)
@@ -3654,22 +3654,22 @@ class visaInstrument(BaseInstrument):
         elif raw:
             ret = self.visa.read_raw(size=chunk_size)
         else:
-            ret = self.visa.read(chunk_size=chunk_size)
+            ret = self.visa.read(encoding=encoding, chunk_size=chunk_size)
         self._last_rw_time.read_time = time.time()
         self._keep_alive_update()
         return ret
     @locked_calling
-    def write(self, val, termination='default'):
+    def write(self, val, termination='default', encoding=None):
         self._do_wr_wait()
         if not CHECKING():
-            self.visa.write(val, termination=termination)
+            self.visa.write(val, termination=termination, encoding=encoding)
         else:
             if not isinstance(val, string_bytes_types):
                 raise ValueError(self.perror('The write val is not a string.'))
         self._last_rw_time.write_time = time.time()
         self._keep_alive_update()
     @locked_calling
-    def ask(self, question, raw=False, chunk_size=None):
+    def ask(self, question, raw=False, encoding=None, chunk_size=None):
         """
         Does write then read.
         With raw=True, replaces read with a read_raw.
@@ -3678,8 +3678,8 @@ class visaInstrument(BaseInstrument):
         """
         # we prevent CTRL-C from breaking between write and read using context manager
         with _delayed_signal_context_manager():
-            self.write(question)
-            ret = self.read(raw=raw, chunk_size=chunk_size)
+            self.write(question, encoding=encoding)
+            ret = self.read(raw=raw, encoding=encoding, chunk_size=chunk_size)
         return ret
     def idn(self):
         return self.ask('*idn?')
