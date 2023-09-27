@@ -134,12 +134,18 @@ else:
     open = io.open
 
 open_utf8 = lambda *args, **kwargs: open(*args, encoding='utf-8')
-def fu(s):
-    """ Make sure string is unice """
+def fu(s, encoding='utf-8'):
+    """ Make sure string is unicode """
     if isinstance(s, bytes_type):
-        return s.decode('utf-8')
+        return s.decode(encoding)
     else:
         return s
+def fb(b, encoding='utf-8'):
+    """ Make sure string is byte """
+    if isinstance(b, unicode_type):
+        return b.encode(encoding)
+    else:
+        return b
 def write_unicode_byte(f, s):
     f.write(fu(s))
 
