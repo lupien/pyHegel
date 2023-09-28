@@ -371,12 +371,15 @@ bluefors_serial = {'0158748E':'BF0312-03',
                    '0149FBE6':'BF1211-01',
                    '01B88CCB':'BF0217-08',
                    '01B88CB8':'BF0217-09',
-                   '01E9E2CA':'SO01147.0010'}
+                   '01E9E2CA':'SO01147.0010',
+                   '01EF16D6':'SO01274.0010'}
 
 def get_bluefors_sn():
     lst = get_all_usb() # defined below
     for v,p,s in lst:
         if v == 0x3923 and p == 0x717a:
+            if is_py3:
+                s = s.decode('utf-8')
             return bluefors_serial.get(s, 'Unknown serial # (%s)'%s)
     return 'No fridge found'
 
@@ -582,11 +585,11 @@ if os.name == 'nt':
         all_usb = get_all_dev_instanceID(GUID_INTERFACE_USB_DEVICE, None, DIGCF_PRESENT|DIGCF_DEVICEINTERFACE)
         res = []
         for one_usb in all_usb:
-            lst = one_usb.split('\\')
+            lst = one_usb.split(b'\\')
             # When serialn contains &, it is a serial number invented by windows.
             # http://rtshiva.com/2009/05/19/usb-specification-and-windows-limitation-on-serial-numbers/
             serialn = lst[2]
-            ids = lst[1].split('&')
+            ids = lst[1].split(b'&')
             vid = ids[0][4:]
             pid = ids[1][4:]
             res.append((int(vid, 16), int(pid, 16), serialn))
@@ -887,12 +890,15 @@ class bf_temperature_controller(BaseInstrument):
         #mqtt.connect_async(address)
         # force a connect. If the server does not exist we will known now.
         mqtt.connect(address) # connect will finish when the loop is started.
-        mqtt.loop_start()
+        self._mqtt = mqtt
         self._requests_session = requests.Session()
         self._websockets_cache = dict()
-        self._mqtt_connected = True
-        self._mqtt = mqtt
         super(bf_temperature_controller, self).__init__(**kwargs)
+
+    def _finish_mqtt_start(self):
+        # needs to be done after the locks are created.
+        self._mqtt.loop_start()
+        self._mqtt_connected = True
 
     def init(self, full=False):
         with self._mqtt_lock:
@@ -1468,6 +1474,7 @@ class bf_temperature_controller(BaseInstrument):
         self.heater.set(val, outch=outch)
 
     def _create_devs(self):
+        self._finish_mqtt_start()
         self.current_ch = MemoryDevice(1, min=1, max=12)
         self.current_outch = MemoryDevice(1, min=1, max=4)
         self.statemachine = BlueforsDevice('statemachine', proto='post', choices=
