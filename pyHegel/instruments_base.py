@@ -648,6 +648,7 @@ if is_py2:
 else:
     _base_event = threading.Event
     _base_cond = threading.Condition
+    _VERBOSE = False
 
 class FastEvent(_base_event):
     def __init__(self, verbose=None):
@@ -710,6 +711,8 @@ class FastCondition(_base_cond):
 
     if not is_py2:
         def _note(self, format, *args):
+            if not _VERBOSE:
+                return
             format = format % args
             ident = get_ident()
             try:
