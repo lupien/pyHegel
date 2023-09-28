@@ -27,7 +27,6 @@ from __future__ import absolute_import, print_function, division
 import numpy as np
 import scipy
 import os.path
-import string
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\

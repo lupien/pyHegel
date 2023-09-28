@@ -26,7 +26,6 @@ from __future__ import absolute_import, print_function, division
 import numpy as np
 import scipy
 import os.path
-import string
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             BaseDevice, scpiDevice, MemoryDevice, ReadvalDev,\
@@ -2423,7 +2422,7 @@ class agilent_EXA_mode_noise_figure(agilent_EXA_mode_base):
         self.marker_x = devMkrOption(':CALCulate:NFIGure:MARKer{mkr}:X', str_type=float, trig=True)
         self.marker_y = devMkrOption(':CALCulate:NFIGure:MARKer{mkr}:Y', str_type=float, trig=True)
         self.marker_ref = devMkrOption(':CALCulate:NFIGure:MARKer{mkr}:REFerence', str_type=int, min=1, max=4)
-        self.marker_trace = devMkrOption(':CALCulate:NFIGure:MARKer{mkr}:TRACe', choices=ChoiceSimpleMap(dict(TRAC1=1, TRAC2=2), filter=string.upper))
+        self.marker_trace = devMkrOption(':CALCulate:NFIGure:MARKer{mkr}:TRACe', choices=ChoiceSimpleMap(dict(TRAC1=1, TRAC2=2), filter=string_upper))
         self.peak_search_continuous = devMkrOption('CALCulate:NFIGure:MARKer{mkr}:CPEak', str_type=bool)
         self.peak_search_type = scpiDevice(':CALCulate:NFIGure:MARKer:SEARch:TYPE', choices=ChoiceStrings('MINimum', 'MAXimum', 'PTPeak'))
         self.marker_coupled_en = scpiDevice(':CALCulate:NFIGure:MARKer:COUPle', str_type=bool)

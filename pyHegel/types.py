@@ -30,7 +30,6 @@ from __future__ import absolute_import, print_function, division
 
 from collections import OrderedDict
 from ctypes import Structure
-import string
 import keyword
 
 from .comp2to3 import string_types, string_bytes_types, Iterator, isidentifier, with_metaclass

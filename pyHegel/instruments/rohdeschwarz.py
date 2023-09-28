@@ -31,7 +31,6 @@ import numpy as np
 import scipy
 import os.path
 import time
-import string
 import functools
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
@@ -43,7 +42,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             locked_calling, quoted_list, quoted_dict, decode_complex128, Block_Codec
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
-from ..comp2to3 import string_bytes_types
+from ..comp2to3 import string_bytes_types, string_upper
 
 # The usb name can be (rs.idn_usb()):
 #    'Rohde & Schwarz GmbH & Co. KG'
@@ -1056,7 +1055,7 @@ class rs_rto_scope(visaInstrumentAsync):
                 choices=ChoiceMultiple(['x_start', 'x_stop', 'n_sample', 'n_sample_per_interval'],
                 [float, float, int, int]), autoinit=False)
 
-        self.roll_auto_en = scpiDevice('TIMebase:ROLL:ENABle', choices=ChoiceSimpleMap(dict(AUTO=True, OFF=False), filter=string.upper))
+        self.roll_auto_en = scpiDevice('TIMebase:ROLL:ENABle', choices=ChoiceSimpleMap(dict(AUTO=True, OFF=False), filter=string_upper))
         self.roll_auto_time = scpiDevice('TIMebase:ROLL:MTIMe', str_type=float, setget=True, auto_min_max=True)
         self.roll_is_active = scpiDevice(getstr='TIMebase:ROLL:STATe?', str_type=bool)
 

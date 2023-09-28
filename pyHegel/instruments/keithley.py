@@ -25,7 +25,6 @@ from __future__ import absolute_import, print_function, division
 
 import numpy as np
 import time
-import string
 from collections import OrderedDict
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
@@ -35,7 +34,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceMultiple
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
-from ..comp2to3 import string_bytes_types
+from ..comp2to3 import string_bytes_types, string_upper
 
 #hex(1510) = 0x05E6
 register_usb_name('Keithley Instruments Inc.', 0x05E6)
@@ -1498,7 +1497,7 @@ class keithley_2400_smu(visaInstrumentAsync):
         self.trace_feed = scpiDevice('TRACe:FEED', choices=ChoiceStrings('SENS1', 'CALC1', 'CALC2'))
         self.trace_npoints_storable = scpiDevice('TRACe:POINts', str_type=int, setget=True, min=1, max=2500)
         self.trace_npoints =  scpiDevice(getstr='TRACe:POINts:ACTUal?', str_type=int)
-        self.trace_en = scpiDevice('TRACe:FEED:CONTrol', choices=ChoiceSimpleMap(dict(NEXT=True, NEV=False), filter=string.upper))
+        self.trace_en = scpiDevice('TRACe:FEED:CONTrol', choices=ChoiceSimpleMap(dict(NEXT=True, NEV=False), filter=string_upper))
         self.trace_data = scpiDevice(getstr='TRACe:DATA?', str_type=_decode_block_auto, trig=True, autoinit=False)
 
         self._devwrap('fetch', autoinit=False, trig=True)

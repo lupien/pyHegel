@@ -26,7 +26,6 @@ from __future__ import absolute_import, print_function, division
 import numpy as np
 import time
 import types
-import string
 import weakref
 
 from ..instruments_base import visaInstrument, visaInstrumentAsync,\
