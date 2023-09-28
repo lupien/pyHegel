@@ -31,7 +31,8 @@ from ..instruments_base import visaInstrument,\
 
 from ..instruments_registry import register_instrument
 
-import string
+from ..comp2to3 import string_upper
+
 import numpy as np
 
 #######################################################
@@ -122,7 +123,8 @@ class qdevil_qdac_ii(visaInstrument):
         levels = get_append('SOURce:VOLTage:LAST?', float)
         ranges = get_append('SOURce:RANGe?', self.output_range.choices)
         filters = get_append('SOURce:FILTer?', self.output_filter.choices)
-        enhs = get_append('SOURce:RENHancement?', self.output_resolution_enhencement_en.choices)
+        #enhs = get_append('SOURce:RENHancement?', self.output_resolution_enhencement_en.choices)
+        enhs = get_append('SOURce:RENHancement?', bool)
         dc_modes =get_append('SOURce:VOLTage:MODE?', self.dc_mode.choices)
         slews = get_append('SOURce:VOLTage:SLEW?', float)
         measI_ranges = get_append('SENSe:RANGe?', self.measI_range.choices)
@@ -247,7 +249,7 @@ class qdevil_qdac_ii(visaInstrument):
         #self.level = devChannelOption('SOURce{ch}:VOLTage', 'SOURce{ch}:VOLTage:LAST?', str_type=float, setget=True)
         self._devwrap('level', setget=True)
         self.level_now = devChannelOption(getstr='SOURce{ch}:VOLTage?', str_type=float)
-        range_ch = ChoiceSimpleMap(dict(LOW=2., HIGH=10.), filter=string.upper)
+        range_ch = ChoiceSimpleMap(dict(LOW=2., HIGH=10.), filter=string_upper)
         #TODO we might need to cache all the ranges (not just current_channel) to speed up level check
         self.output_range = devChannelOption('SOURce{ch}:RANGe', choices=range_ch)
         self.output_filter = devChannelOption('SOURce{ch}:FILTer', choices=ChoiceStrings('DC', 'MEDium', 'HIGH'),
