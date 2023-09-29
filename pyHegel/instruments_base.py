@@ -42,7 +42,7 @@ from . import visa_wrap
 from . import instruments_registry
 from .types import dict_improved
 from .comp2to3 import is_py2, string_bytes_types, thread_error, get_ident, string_upper,\
-                        write_unicode_byte, fu
+                        write_unicode_byte, fu, fb
 if is_py2:
     translate_del_lower = lambda s: s.translate(None, string.ascii_lowercase)
 else:
@@ -2268,9 +2268,9 @@ def _decode_block_header(s):
        If the strings does not start with a block format
        returns a full slice (:), nbytes=-1, 0
     """
-    if len(s)==0 or s[0] != '#':
+    if len(s)==0 or s[0:1] != b'#':
         return slice(None), -1, 0
-    nh = int(s[1])
+    nh = int(s[1:2])
     if nh: # a value of 0 is possible
         nbytes = int(s[2:2+nh])
     else:
@@ -2285,9 +2285,9 @@ def _decode_block_base(s, skip=None):
         if lb < nb :
             raise IndexError('Missing data for decoding. Got %i, expected %i'%(lb, nb))
         elif lb > nb :
-            if lb-nb == 1 and (s[-1] in '\r\n'):
+            if lb-nb == 1 and (s[-1] in b'\r\n'):
                 return block[:-1]
-            elif lb-nb == 2 and s[-2:] == '\r\n':
+            elif lb-nb == 2 and s[-2:] == b'\r\n':
                 return block[:-2]
             raise IndexError('Extra data in for decoding. Got %i ("%s ..."), expected %i'%(lb, block[nb:nb+10], nb))
     elif skip:
@@ -2309,9 +2309,9 @@ def _encode_block_base(s):
     N_as_string = str(N)
     N_as_string_len = len(N_as_string)
     if N_as_string_len >= 10: # starting at 1G
-        header = '#0'
+        header = b'#0'
     else:
-        header = '#%i'%N_as_string_len + N_as_string
+        header = b'#%i'%N_as_string_len + fb(N_as_string)
     return header+s
 
 def _decode_block(s, t='<f8', sep=None, skip=None):
@@ -2343,10 +2343,10 @@ def _encode_block(v, sep=None):
     return _encode_block_base(s)
 
 def _decode_block_auto(s, t='<f8', skip=None):
-    if len(s) and s[0] == '#':
+    if len(s) and s[0:1] == b'#':
         sep = None
     else:
-        sep = ','
+        sep = b','
     return _decode_block(s, t, sep=sep, skip=skip)
 
 class Block_Codec(object):
