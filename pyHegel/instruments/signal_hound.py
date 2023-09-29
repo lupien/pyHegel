@@ -39,6 +39,8 @@ from ..instruments_base import BaseInstrument,\
                             _sleep_signal_context_manager, FastEvent, ProxyMethod
 from ..instruments_registry import register_instrument
 
+from ..comp2to3 import fb
+
 #register_usb_name('Agilent Technologies', 0x0957)
 
 #######################################################
@@ -52,7 +54,7 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
     def __init__(self, control, keep_alive=0):
         super(SignalHound_SM200C_listen_thread, self).__init__()
         self.control = control
-        self._stop = False
+        self.__stop = False
         self._last_entry = None
         self._last_10 = []
         self._lock = threading.Lock()
@@ -66,7 +68,7 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         print('deleting SignalHound_SM200C_listen_thread')
 
     def cancel(self):
-        self._stop = True
+        self.__stop = True
 
     def run(self):
         # This print is needed on anaconda 2019.10 on windows 10 to prevent
@@ -75,7 +77,7 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         print('Listen Thread started')
         readers = [self.control._socket]
         while True:
-            if self._stop:
+            if self.__stop:
                 return
             if len(self.control._read_extra):
                 rs = readers
@@ -89,7 +91,7 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
                 self.send_keep_alive()
 
     def send_keep_alive(self):
-        self.control.write('') # sends just a newline.
+        self.control.write(b'') # sends just a newline.
 
     def keep_alive_update(self):
         self._last_comm = time.time()
@@ -109,7 +111,7 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         with self._lock:
             ret = self._last_entry
             if ret is None:
-                ret = ('', -1)
+                ret = (b'', -1)
             self._last_entry = None
             self._last_entry_time = None
             self.data_available_event.clear()
@@ -122,7 +124,7 @@ class SignalHound_SM200C_listen_thread(threading.Thread):
         if self.data_available_event.wait(timeout):
             return self.get_last()
         else:
-            return ('', -2)
+            return (b'', -2)
 
     def wait(self, timeout=None):
         # we use a the context manager because join uses sleep.
@@ -183,11 +185,11 @@ class SignalHound_SM200C(BaseInstrument):
         self._helper_thread = None
         self._connect_socket(addr, port, timeout)
         s = weakref.proxy(self)
+        self.read_timeout = 3.
+        self._read_extra = b''
+        self._chunk_size = 2**16
         self._helper_thread = SignalHound_SM200C_listen_thread(s)
         self._helper_thread.start()
-        self.read_timeout = 3.
-        self._read_extra = ''
-        self._chunk_size = 2**16
         self._async_last_response = None
         self._async_max_count = 0
         self._async_current_count = 0
@@ -222,7 +224,7 @@ class SignalHound_SM200C(BaseInstrument):
     def write(self, val, termination='default'):
         if termination == 'default':
             termination = '\n'
-        self._socket.send(val+termination)
+        self._socket.send(fb(val)+fb(termination))
         self._keep_alive_update()
 
     @locked_calling
@@ -234,7 +236,7 @@ class SignalHound_SM200C(BaseInstrument):
         # we prevent CTRL-C from breaking between write and read using context manager
         with _delayed_signal_context_manager():
             self.write(question)
-            ret = self.read(chunk_size=chunk_size)
+            ret = self.read(chunk_size=chunk_size, raw=raw)
         return ret
 
     def _read_block(self, min_size=1, chunk_size=None):
@@ -257,7 +259,7 @@ class SignalHound_SM200C(BaseInstrument):
 
     def _read_n_or_nl(self, count=None, chunk_size=None):
         """ if count is None, read until newline. remove newline """
-        term = '\n'
+        term = b'\n'
         if count is None:
             data = self._read_extra
             while term not in data:
@@ -268,7 +270,7 @@ class SignalHound_SM200C(BaseInstrument):
         else:
             data = bytearray(count)
             d = self._read_extra
-            self._read_extra = ''
+            self._read_extra = b''
             n = 0
             while n < count:
                 left = count - n
@@ -283,7 +285,7 @@ class SignalHound_SM200C(BaseInstrument):
             return bytes(data)
 
     def _read(self, chunk_size=None):
-        term = '\n'
+        term = b'\n'
         read_f = lambda x=None: self._read_n_or_nl(x, chunk_size=chunk_size)
         data = read_f(1)
         if data.startswith(b'#'):
@@ -292,7 +294,7 @@ class SignalHound_SM200C(BaseInstrument):
             N = read_f(int(cnt))
             data += N
             data += read_f(int(N)+1)
-            if data[-1] != term:
+            if data[-1:] != term:
                 raise RuntimeError(self.perror('Did not receive expected termination character.'))
             data = bytes(data[:-1]) # remove newline and convert to byte string
         else:
@@ -300,17 +302,19 @@ class SignalHound_SM200C(BaseInstrument):
         return data
 
     @locked_calling
-    def read(self, timeout=None, chunk_size=None):
+    def read(self, timeout=None, chunk_size=None, raw=False):
         """ timeout can be 'infinite' """
         if self._helper_thread is None:
-            return self._read(chunk_size=chunk_size)
+            ret = self._read(chunk_size=chunk_size)
         else:
             if timeout is None:
                 timeout = self.read_timeout
             ret = self._helper_thread.get_next(timeout)[0]
-            if ret == '':
+            if ret == b'':
                 raise TimeoutError(self.perror('read timeout'))
-            return ret
+        if not raw:
+            ret = ret.decode('utf-8')
+        return ret
 
     def wait_after_trig(self, no_exc=False):
         try:
@@ -661,7 +665,7 @@ class SignalHound_SM200C(BaseInstrument):
         self.trace_npoints = devTraceOption(getstr=':TRACe:POINts?', str_type=int)
         self.trace_xstart = devTraceOption(getstr=':TRACe:XSTARt?', str_type=float)
         self.trace_xincrement = devTraceOption(getstr=':TRACe:XINCrement?', str_type=float)
-        self.get_trace = devTraceOption(getstr=':TRACe?', str_type=decode_float32, autoinit=False, trig=True)
+        self.get_trace = devTraceOption(getstr=':TRACe?', str_type=decode_float32, raw=True, autoinit=False, trig=True)
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         self._devwrap('noise_eq_bw')
