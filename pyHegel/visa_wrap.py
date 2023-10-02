@@ -832,6 +832,55 @@ def _get_instrument_list(self, use_aliases=True):
             result.append(resource_name)
     return result
 
+# Python, starting at 3.8 modified Library Loading (started to use LoadLibraryEx with flags
+#  see https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-loadlibraryexa
+#  see https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order
+#  see ctypes/__init__.py
+#
+# But on top of top conda took varying decisions.
+# In 3.8 They added options to change the loading with env variable
+#  CONDA_DLL_SEARCH_MODIFICATION_ENABLE
+# for imports.
+# In 3.8.6 (possibly) it also bypassed the ctypes load to use
+# flag LOAD_WITH_ALTERED_SEARCH_PATH
+# instead of LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
+# This made loading dll with ctypes work as before (using the PATH env variable)
+#
+# This changed in conda 3.10; ctypes now also uses Search flags by default
+# but the CONDA_DLL_SEARCH_MODIFICATION_ENABLE is still available.
+# Then in 3.11 it the overide is dropped.
+# For details about that look into
+#   https://github.com/AnacondaRecipes/python-feedstock/tree/master
+# In particular a file like ????-Add-CondaEcosystemModifyDllSearchPath.patch
+# in recipe/patches.
+# The above change can be seen in the remotes/origin/jjh_3.8.6 branch
+#  commit 4f766cc8132b9c15898216a0597411164bec542e
+#  Note that this diff rename the patch from 0022 to 0024 but the next patch renamed it 0022 (so use that for diff)
+#  see: https://github.com/AnacondaRecipes/python-feedstock/commit/4f766cc8132b9c15898216a0597411164bec542e
+
+# So considering the above, we try to add some directories to the search path when it is available
+# The directories are taken from a pyHegel.ini configuration entry.
+class Extra_dlls(object):
+    def __init__(self):
+        if hasattr(_os, 'add_dll_directory'):
+            self.paths = config.pyHegel_conf.visa_dll_paths
+        else:
+            self.paths = []
+        self.added_paths = []
+    def __enter__(self):
+        for p in self.paths:
+            try:
+                # Need try except because if p is not a proper directory, OSError or FileNotFountError
+                # are raised.
+                cookie = _os.add_dll_directory(p)
+            except OSError:
+                _warnings.warn('Warning: Path %s not add to search path because it is not valid.'%p)
+            else:
+                self.added_paths.append(cookie)
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        for p in self.added_paths:
+            p.close()
 
 class old_resource_manager(object):
     def __init__(self, path=None):
@@ -841,7 +890,8 @@ class old_resource_manager(object):
         with pyvisa <1.5.
         """
         self._is_agilent = None
-        _old_load_visa(path)
+        with Extra_dlls:
+            _old_load_visa(path)
     # The same as the first part of visa.get_instruments_list except for the close
     def list_resources(self, query='?*::INSTR'):
         resource_names = []
@@ -895,7 +945,8 @@ class old_resource_manager(object):
 
 class new_WrapResourceManager(redirect_instr):
     def __init__(self, new_rsrc_manager):
-        super(new_WrapResourceManager, self).__init__(new_rsrc_manager)
+        with Extra_dlls:
+            super(new_WrapResourceManager, self).__init__(new_rsrc_manager)
         self._is_agilent = None
     if is_version('1.5', '1.6.3'):
         additional_properties = ['flow_control']
