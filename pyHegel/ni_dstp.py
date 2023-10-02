@@ -20,8 +20,10 @@ import weakref
 import sys
 import pytz
 import calendar # for timegm (the inverse of time.gmtime)
-import six
-if six.PY2:
+
+from .comp2to3 import is_py2, is_py3
+
+if is_py2:
     import Queue as queue
 else:
     import queue
@@ -336,7 +338,7 @@ object_packing = {
     collections.OrderedDict: attribute_data_type
 }
 
-if six.PY2:
+if is_py2:
     # this does for python2 only the line in object_packing that is commented.:
     # type(1L): longint_type
     object_packing[long] = longint_type
@@ -500,7 +502,7 @@ def do_unpack(data_str, timestamp=True):
 NI_encoding = 'latin1'
 #NI_encoding = 'UTF8'
 def make_byte(s):
-    if six.PY3:
+    if is_py3:
         if isinstance(s, bytes):
             return s
         return s.encode(NI_encoding)
@@ -510,7 +512,7 @@ def make_byte(s):
     return s
 
 def make_str(s):
-    if six.PY3:
+    if is_py3:
         return s.decode(NI_encoding)
     else:
         return s
@@ -605,7 +607,7 @@ class Dstp_Client(object):
                 data = read_parse()
                 d, attrs, ts = data
             except socket.timeout:
-                if six.PY2:
+                if is_py2:
                     sys.exc_clear()
                 continue
             except Exception as exc:
@@ -635,7 +637,7 @@ class Dstp_Client(object):
             print('Error during del', e)
 
     def is_connection_ok(self):
-        if not self._thread.isAlive():
+        if not self._thread.is_alive():
             return False
         if time.time() - self._read_lasttime[0] > 60:
             # we should be receiving keepalive packets. If not, the other computer is probably down
