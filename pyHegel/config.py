@@ -252,6 +252,18 @@ class PyHegel_Conf(object):
     def try_agilent_first(self):
         return self.config_parser.getboolean('VISA', 'try_agilent_first')
     @property
+    def visa_dll_paths(self):
+        paths = self.config_parser.get('VISA', 'add_dll_paths').splitlines()
+        # clean up empties
+        paths = [p for p in paths if p != '']
+        return paths
+    @property
+    def extra_dll_paths(self):
+        paths = self.config_parser.get('Global', 'extra_dll_paths').splitlines()
+        # clean up empties
+        paths = [p for p in paths if p != '']
+        return paths
+    @property
     def timezone(self):
         return self.config_parser.get('traces', 'timezone')
 
