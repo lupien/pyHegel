@@ -874,7 +874,7 @@ class Extra_dlls(object):
                 # are raised.
                 cookie = _os.add_dll_directory(p)
             except OSError:
-                _warnings.warn('Warning: Path %s not add to search path because it is not valid.'%p)
+                _warnings.warn('Warning: Path %s not added to search path because it is not valid.'%p)
             else:
                 self.added_paths.append(cookie)
         return self
@@ -890,7 +890,7 @@ class old_resource_manager(object):
         with pyvisa <1.5.
         """
         self._is_agilent = None
-        with Extra_dlls:
+        with Extra_dlls():
             _old_load_visa(path)
     # The same as the first part of visa.get_instruments_list except for the close
     def list_resources(self, query='?*::INSTR'):
@@ -945,8 +945,7 @@ class old_resource_manager(object):
 
 class new_WrapResourceManager(redirect_instr):
     def __init__(self, new_rsrc_manager):
-        with Extra_dlls:
-            super(new_WrapResourceManager, self).__init__(new_rsrc_manager)
+        super(new_WrapResourceManager, self).__init__(new_rsrc_manager)
         self._is_agilent = None
     if is_version('1.5', '1.6.3'):
         additional_properties = ['flow_control']
@@ -1021,9 +1020,12 @@ def get_resource_manager(path=None):
         # The next line can produce ImportError
         return old_resource_manager(path)
     else:
+        def pyvisaRM(path):
+            with Extra_dlls():
+                return pyvisa.ResourceManager(path)
         if _os.name == 'nt' and path is None and try_agilent_first:
             try:
-                return new_WrapResourceManager(pyvisa.ResourceManager(agilent_path))
+                return new_WrapResourceManager(pyvisaRM(agilent_path))
             except (pyvisa.errors.LibraryError, UnicodeDecodeError):
                 # for UnicodeDecodeError see: https://github.com/hgrecco/pyvisa/issues/136
                 print('Unable to load Agilent visa library. Will try the default one (National Instruments?).')
@@ -1038,7 +1040,7 @@ def get_resource_manager(path=None):
         if path is None:
             path = ''
         try:
-            return new_WrapResourceManager(pyvisa.ResourceManager(path))
+            return new_WrapResourceManager(pyvisaRM(path))
         except (pyvisa.errors.LibraryError, UnicodeDecodeError, OSError, ValueError) as exc:
             # We get OSError when no libraries are found
             # We get ValueError since 1.9.1 if no NI dll is found
