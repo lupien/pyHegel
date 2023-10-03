@@ -155,7 +155,7 @@ class iceoxford_temperature_controller(visaInstrument):
         super(iceoxford_temperature_controller, self).write('TESTCONNECT')
 
     @locked_calling
-    def write(self, val, termination='default'):
+    def write(self, val, termination='default', encoding=None):
         if self._direct_con:
             vs = val.split('=', 1)
             if len(vs) == 1:
