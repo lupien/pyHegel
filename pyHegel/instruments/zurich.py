@@ -331,7 +331,10 @@ class zurich_UHF(BaseInstrument):
         By default will use the first zi device available.
         """
         global zi, ziu
-        import zhinst.ziPython as zi
+        try:
+            import zhinst.core as zi
+        except ImportError:
+            import zhinst.ziPython as zi
         import zhinst.utils as ziu
         timeout = 500 #ms
         # Note that deleting the _zi_daq frees up all the memory of
@@ -376,6 +379,8 @@ class zurich_UHF(BaseInstrument):
         elif zi_dev not in self._zi_devs:
             raise ValueError('Device "%s" is not available'%zi_dev)
         self._zi_dev = zi_dev
+        # since 22.08 sweep requires first setting the device
+        self._zi_sweep.set('device', zi_dev)
         self._current_mode = 'lia'
         super(zurich_UHF, self).__init__()
         self._async_select()
@@ -683,7 +688,7 @@ class zurich_UHF(BaseInstrument):
             return self._zi_daq.getDIO(question)
         elif t is None or t=='dict':
             # int(zhinst.ziPython.ziListEnum.settingsonly) is 8
-            flag = self._ziPython.ziListEnum.settingsonly if settings_only else self._ziPython.none
+            flag = self._ziPython.ziListEnum.settingsonly if settings_only else self._ziPython.ziListEnum.none
             src, pre = self._select_src(src)
             if pre == '':
                 #ret = self._flat_dict(src.get(question))
