@@ -33,7 +33,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceDevDep, ChoiceLimits,\
                             decode_float64, _decode_block_base, visa_wrap, locked_calling,\
                             wait, resource_info, ProxyMethod, float_as_fixed,\
-                            _fromstr_helper, _tostr_helper
+                            _fromstr_helper, _tostr_helper, np_frombuffer
 from ..types import dict_improved
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
@@ -1093,7 +1093,7 @@ class sr780_analyzer(visaInstrumentAsync):
         # TODO implement handling of nyquist and nichols plot which return 2 values per datapoint.
         # TODO handle waterfalls: dswb
         data = self.ask('DSPB? %s'%disp, raw=True)
-        ret = np.fromstring(data, np.float32)
+        ret = np_frombuffer(data, np.float32)
         if xaxis:
             ret = ret = np.asarray([self.get_xscale(), ret])
         return ret
