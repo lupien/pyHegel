@@ -40,12 +40,14 @@ class ProxyMethod(object):
 # This is based on code from https://github.com/coruus/pythonlabtools
 #   files: nati_dstp_basics.py, dstp.py and dstp_async.py
 
+if hasattr(np.ndarray, 'tobytes'):
+    np_tobytes =  lambda x, *args, **kwargs: x.tobytes(*args, **kwargs)
+else:
+    # For older python versions
+    np_tobytes =  lambda x, *args, **kwargs: x.tostring(*args, **kwargs)
+
 def pack_bytes(byte_list):
-    try:
-        return np.asarray(byte_list,dtype='uint8').tobytes()
-    except AttributeError:
-        # For older python versions
-        return np.asarray(byte_list,dtype='uint8').tostring()
+    return np_tobytes(np.asarray(byte_list,dtype='uint8'))
 
 array_type = pack_bytes([0, 8])
 composite_type = pack_bytes([1, 8])
@@ -221,7 +223,7 @@ def put_array(data_type, data):
             data = data2
         else:
             data = np.asarray(data, dtype=fmt[2])
-        data_str = data.tostring()
+        data_str = np_tobytes(data)
     if len(data_str)%2:
         data_str += b'\000'
     hdr_string = b''
