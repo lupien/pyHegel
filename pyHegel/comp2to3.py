@@ -134,21 +134,30 @@ else:
     open = io.open
 
 open_utf8 = lambda *args, **kwargs: open(*args, encoding='utf-8')
+
 def fu(s, encoding='utf-8'):
     """ Make sure string is unicode """
     if isinstance(s, bytes_type):
         return s.decode(encoding)
     else:
         return s
+
 def fb(b, encoding='utf-8'):
     """ Make sure string is byte """
     if isinstance(b, unicode_type):
         return b.encode(encoding)
     else:
         return b
+
 def write_unicode_byte(f, s):
     f.write(fu(s))
 
+def make_str(s, encoding='utf-8'):
+    """ returns str in python2 (bytes) and str in python3 (unicode) """
+    if is_py2:
+        return fb(s, encoding=encoding)
+    else:
+        return fu(s, encoding=encoding)
 
 # This is taken from the module six
 #  https://github.com/benjaminp/six/
