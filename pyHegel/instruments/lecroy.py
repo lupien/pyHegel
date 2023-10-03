@@ -32,7 +32,7 @@ from ..instruments_base import visaInstrumentAsync, visaInstrument,\
                             ChoiceBase, _general_check, _fromstr_helper, _tostr_helper,\
                             ChoiceStrings, ChoiceMultiple, ChoiceMultipleDep, Dict_SubDevice,\
                             KeyError_Choices, _decode_block_base, make_choice_list,\
-                            sleep, locked_calling
+                            sleep, locked_calling, np_frombuffer
 from ..instruments_registry import register_instrument
 
 from ..types import StructureImproved
@@ -494,13 +494,13 @@ class waveformdata(object):
         data2 = fullblock[ptr:ptr+w]
         data_type = [np.int8, np.int16][header.COMM_TYPE]
         if data1:
-            data1 = np.fromstring(data1, data_type)
+            data1 = np_frombuffer(data1, data_type)
         if data2:
-            data2 = np.fromstring(data1, data_type)
+            data2 = np_frombuffer(data1, data_type)
         if trigtime:
-            trigtime = np.fromstring(trigtime, [('trig_time', np.float64), ('time_offset', np.float64)])
+            trigtime = np_frombuffer(trigtime, [('trig_time', np.float64), ('time_offset', np.float64)])
         if ristime:
-            ristime = np.fromstring(ristime, np.float64)
+            ristime = np_frombuffer(ristime, np.float64)
         return waveformdataType(header, data1, data2, trigtime, ristime, usertext)
     def tostr(self, val):
         pass
