@@ -42,11 +42,21 @@ from . import visa_wrap
 from . import instruments_registry
 from .types import dict_improved
 from .comp2to3 import is_py2, string_bytes_types, thread_error, get_ident, string_upper,\
-                        write_unicode_byte, fu, fb
+                        write_unicode_byte, fu, fb, make_str
 if is_py2:
     translate_del_lower = lambda s: s.translate(None, string.ascii_lowercase)
 else:
     translate_del_lower = lambda s: s.translate(s.maketrans('', '', string.ascii_lowercase))
+
+try:
+    np_frombuffer = np.frombuffer
+except AttributeError:
+    # For old numpy version
+    np_frombuffer = np.fromstring
+if hasattr(np.ndarray, 'tobytes'):
+    np_tobytes =  lambda x, *args, **kwargs: x.tobytes(*args, **kwargs)
+else:
+    np_tobytes =  lambda x, *args, **kwargs: x.tostring(*args, **kwargs)
 
 rsrc_mngr = None
 
@@ -2325,8 +2335,8 @@ def _decode_block(s, t='<f8', sep=None, skip=None):
     """
     block = _decode_block_base(s, skip=skip)
     if sep is None or len(block) == 0:
-        return np.fromstring(block, t)
-    return np.fromstring(block, t, sep=sep)
+        return np_frombuffer(block, t)
+    return np.fromstring(make_str(block), t, sep=sep)
 
 def _encode_block(v, sep=None):
     """
@@ -2339,14 +2349,14 @@ def _encode_block(v, sep=None):
     if isinstance(v, string_bytes_types):
         s = v
     else:
-        s = np.asarray(v).tostring()
+        s = np_tobytes(np.asarray(v))
     return _encode_block_base(s)
 
 def _decode_block_auto(s, t='<f8', skip=None):
     if len(s) and s[0:1] == b'#':
         sep = None
     else:
-        sep = b','
+        sep = ','
     return _decode_block(s, t, sep=sep, skip=skip)
 
 class Block_Codec(object):
@@ -2382,9 +2392,9 @@ class Block_Codec_Raw(object):
     def __init__(self, dtype='<f8', sep=None):
         self._dtype = dtype
     def __call__(self, input_str):
-        return np.fromstring(input_str, self._dtype)
+        return np_frombuffer(input_str, self._dtype)
     def tostr(self, array):
-        return array.tostring()
+        return np_tobytes(array)
 
 decode_float64 = functools.partial(_decode_block_auto, t='<f8') # np.float64, little-endian
 decode_float32 = functools.partial(_decode_block_auto, t='<f4') # np.float32, little-endian
