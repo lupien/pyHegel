@@ -36,7 +36,8 @@ from . import qt_wrap  # This is used for reset_pyhegel command
 from .qt_wrap import QtCore, QtGui
 import numpy as np
 import matplotlib
-from matplotlib import pylab, rcParams, __version__ as mpl_version
+from matplotlib import pyplot, rcParams, __version__ as mpl_version
+from matplotlib.dates import date2num, num2date
 import dateutil
 from . import config
 
@@ -80,19 +81,43 @@ if Version('2.2.0') <= Vmpl < Version('2.2.4') or \
            BGT._transform_non_affine_cl_org = BGT.transform_non_affine
            BGT.transform_non_affine = transform_non_affine_wrapper
 
+SEC_PER_DAY = 3600*24.
+if Vmpl < Version('3.3.0'):
+    from matplotlib.dates import num2epoch, epoch2num
+else:
+    from matplotlib.dates import get_epoch
+    # epoch2num and num2epoch were deprated in matplotlib 3.3 and removed in 3.7
+    # The matplotlib epoch as aslo changed from 0000-12-31 to 1970-01-01
+    # and could be changed using set_epoch.
+    # now could use
+    def _get_epoch():
+        """ unix epoch offset in sec from current matplotlib offset """
+        return (np.datetime64('1970-01-01T00:00:00', 's') -  np.datetime64(get_epoch(), 's')).astype(float)
+    def epoch2num(e):
+        return (np.asarray(e) + _get_epoch()) / SEC_PER_DAY
+    def num2epoch(d):
+        return np.asarray(d)*SEC_PER_DAY - _get_epoch()
+
 def set_draggable(legend):
     try:
         legend.set_draggable(True)
     except AttributeError:
         legend.draggable()
 
+_plot_date_discouraged = False
+if Vmpl >= Version('3.5.0'):
+    _plot_date_discouraged = True
+    def _unixepoch2datetime64(x):
+        x = np.asarray(x) * 1e6
+        return x.astype('datetime64[us]')
+
 _figlist = []
 
 # set the timezone for proper display of date/time axis
 # to see available ones: import pytz; pytz.all_timezones
-#pylab.rcParams['timezone']='Canada/Eastern'
-pylab.rcParams['timezone'] = config.pyHegel_conf.timezone
-#pylab.rc('mathtext', fontset='stixsans')
+#rcParams['timezone']='Canada/Eastern'
+rcParams['timezone'] = config.pyHegel_conf.timezone
+#rc('mathtext', fontset='stixsans')
 
 """
 The figure handles many hot keys. They can be changed using rcParams (keymap...)
@@ -168,9 +193,9 @@ def time2date(x):
     """
     This is the same as epoch2num.
     It converts time in sec since epoch to matplotlib date format.
-    Can do the recerse with num2epoch
+    Can do the reverse with num2epoch
     """
-    return x/(24.*3600)+pylab.epoch2num(0)
+    return x/SEC_PER_DAY + epoch2num(0)
 
 def get_timezone_shift(x=None):
     """
@@ -195,13 +220,13 @@ def str_epoch2num(s):
     -0500. It also knows about EST and DST.
     """
     if isinstance(s, string_types):
-        # we replace pylab.datestr2num to better handle local timezone
+        # we replace pyplot.datestr2num to better handle local timezone
         dt = dateutil.parser.parse(s, tzinfos=_TZOFFSETS)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=dateutil.tz.tzlocal())
-        return pylab.date2num(dt)
+        return date2num(dt)
     else:
-        return pylab.epoch2num(s)
+        return epoch2num(s)
 
 def num2str(n, tz=False):
     """
@@ -210,9 +235,9 @@ def num2str(n, tz=False):
     """
     # could also use .isoformat
     if tz:
-        return pylab.num2date(n).strftime('%Y-%m-%d %H:%M:%S.%f %Z')
+        return num2date(n).strftime('%Y-%m-%d %H:%M:%S.%f %Z')
     else:
-        return pylab.num2date(n).strftime('%Y-%m-%d %H:%M:%S.%f')
+        return num2date(n).strftime('%Y-%m-%d %H:%M:%S.%f')
 
 def xlim_time(xmin=None, xmax=None, epoch=False):
     """
@@ -228,9 +253,9 @@ def xlim_time(xmin=None, xmax=None, epoch=False):
         xmin = str_epoch2num(xmin)
     if xmax is not None:
         xmax = str_epoch2num(xmax)
-    xmin, xmax = pylab.xlim(xmin, xmax)
+    xmin, xmax = pyplot.xlim(xmin, xmax)
     if epoch:
-        return pylab.num2epoch(xmin), pylab.num2epoch(xmax)
+        return num2epoch(xmin), num2epoch(xmax)
     else:
         return num2str(xmin), num2str(xmax)
 
@@ -321,22 +346,27 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
     def mykey_press(self, event):
         # TODO add a Rescale
         # based on FigureManagerBase.key_press
-        all = rcParams['keymap.all_axes']
+        try:
+            all_keys = rcParams['keymap.all_axes']
+        except KeyError:
+            all_keys = ['a']
         if event.inaxes is None:
             return
-        if (event.key.isdigit() and event.key!='0') or event.key in all:
+        if (event.key.isdigit() and event.key!='0') or event.key in all_keys:
               # if it was the axes, where the event was raised
-            if not (event.key in all):
+            if not (event.key in all_keys):
                 n = int(event.key)-1
             for i, a in enumerate(self.canvas.figure.get_axes()):
                 # consider axes, in which the event was raised
                 # FIXME: Why only this axes?
                 if event.x is not None and event.y is not None \
                        and a.in_axes(event):
-                    if event.key in all:
+                    if event.key in all_keys:
                         a.zorder = 0
+                        a.set_navigate(True)
                     else:
                         a.zorder = 1 if i==n else 0
+                        a.set_navigate(i==n)
 
     def setWindowTitle(self, title):
         self.set_window_title(title)
@@ -546,7 +576,10 @@ class Trace(TraceBase):
     def addPoint(self, x, ys):
         if self.time_mode:
             # convert from sec since epoch to matplotlib date format
-            x = time2date(x)
+            if _plot_date_discouraged:
+                x = _unixepoch2datetime64(x)
+            else:
+                x = time2date(x)
         if self.xs is None:
             self.xs = np.array([x])
         else:  self.xs = np.append(self.xs, x)
@@ -623,7 +656,10 @@ class Trace(TraceBase):
                 except TypeError:
                     lbl = 'data '+str(i)
                 if self.time_mode:
-                    plt = ax.plot_date(x, y, style, label=lbl)[0]
+                    if _plot_date_discouraged:
+                        plt = ax.plot(x, y, style, label=lbl)[0]
+                    else:
+                        plt = ax.plot_date(x, y, style, label=lbl)[0]
                 else:
                     plt = ax.plot(x, y, style, label=lbl)[0]
                 line_color = ax.lines[0].get_color()
@@ -860,18 +896,22 @@ def plot_time(x, *extrap, **extrak):
         xrotation: which rotates the x ticks (defautls to 10 deg)
         xticksize: changes x axis thick size (defaults to 9)
     """
-    # uses the timezone set by pylab.rcParams['timezone']
-    x = time2date(x)
     xrotation = extrak.pop('xrotation', 10)
     xticksize = extrak.pop('xticksize', 9)
-    ret = pylab.plot_date(x, *extrap, **extrak)
+    if _plot_date_discouraged:
+        x = _unixepoch2datetime64(x)
+        ret = pyplot.plot(x, *extrap, **extrak)
+    else:
+        # uses the timezone set by rcParams['timezone']
+        x = time2date(x)
+        ret = pyplot.plot_date(x, *extrap, **extrak)
     ax = ret[0].axes
     # Rotate axes ticks
     # could also use self.fig.autofmt_xdate()
     lbls = ax.get_xticklabels()
     for l in lbls:
         l.update(dict(rotation=xrotation, size=xticksize))
-    pylab.draw()
+    pyplot.draw()
     return ret
 
 def _plot_time_mouse(event):
@@ -931,9 +971,9 @@ def plot_time_stack(x, *ys, **kwargs):
         labels = [None]*Nr
     if len(labels) < Nr:
         labels = labels + [None]*(Nr-len(labels))
-    fig = pylab.gcf()
+    fig = pyplot.gcf()
     if len(fig.axes) < Nr:
-        fig1, axs1 = pylab.subplots(nrows=Nr, sharex=True, squeeze=True, gridspec_kw=dict(hspace=0), num=fig.number)
+        fig1, axs1 = pyplot.subplots(nrows=Nr, sharex=True, squeeze=True, gridspec_kw=dict(hspace=0), num=fig.number)
         xo = time2date(x[0])
         for ax in axs1[1:]:
             ax.yaxis.get_major_locator().set_params(prune='upper')
@@ -947,9 +987,9 @@ def plot_time_stack(x, *ys, **kwargs):
     else:
         fig1, axs1 = fig, fig.axes
     for i, (y, ax, lbls) in enumerate(zip(ys, axs1, labels)):
-        pylab.sca(ax)
+        pyplot.sca(ax)
         if i == 0 and title is not None:
-            pylab.title(title)
+            pyplot.title(title)
         if isinstance(y, (list, tuple)):
             y = np.asarray(y)
         lines = plot_time(x, y.T, *extra, **kwargs)
@@ -958,7 +998,7 @@ def plot_time_stack(x, *ys, **kwargs):
                 lbls = [lbls]
             for l, lbl in zip(lines, lbls):
                 l.set_label(lbl)
-            leg = pylab.legend()
+            leg = pyplot.legend()
             set_draggable(leg)
 
 
