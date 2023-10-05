@@ -618,7 +618,7 @@ def report(X,Y,pf,func=None, s=1., param=None, adjust=None, filter=None):
 
 # test/example routine
 if __name__ == "__main__":
-    from matplotlib.pylab import figure, clf, plot, legend, show, ylim
+    from matplotlib.pyplot import figure, clf, plot, legend, show, ylim
     #from pretty import pprint
     from pprint import pprint
     N=500

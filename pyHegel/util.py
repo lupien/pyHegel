@@ -86,7 +86,7 @@ try:
     pyPdf_loaded = True
 except ImportError:
     pyPdf_loaded = False
-import pylab
+import matplotlib.pyplot as plt
 import glob
 import csv
 import re
@@ -559,7 +559,7 @@ def savefig(filename, *args, **kwarg):
     if not savefig_enabled():
         print('Skipping savefig to', filename)
         return
-    pylab.savefig(filename, *args, **kwarg)
+    plt.savefig(filename, *args, **kwarg)
     _savefig_list.append(filename)
 
 #########################################################

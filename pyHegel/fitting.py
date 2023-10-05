@@ -33,7 +33,7 @@ import numpy as np
 import inspect
 from scipy.optimize import leastsq
 # see also scipy.optimize.curve_fit
-import matplotlib.pylab as plt
+import matplotlib.pyplot as plt
 import matplotlib.colors
 import matplotlib.text
 import collections
