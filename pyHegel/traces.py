@@ -197,6 +197,11 @@ def time2date(x):
     """
     return x/SEC_PER_DAY + epoch2num(0)
 
+if _plot_date_discouraged:
+    _time2date = _unixepoch2datetime64
+else:
+    _time2date = time2date
+
 def get_timezone_shift(x=None):
     """
     returns the timezone shift of x in seconds (UTC - local)
@@ -576,10 +581,7 @@ class Trace(TraceBase):
     def addPoint(self, x, ys):
         if self.time_mode:
             # convert from sec since epoch to matplotlib date format
-            if _plot_date_discouraged:
-                x = _unixepoch2datetime64(x)
-            else:
-                x = time2date(x)
+            x = _time2date(x)
         if self.xs is None:
             self.xs = np.array([x])
         else:  self.xs = np.append(self.xs, x)
@@ -590,7 +592,7 @@ class Trace(TraceBase):
     def setPoints(self, x, y):
         if self.time_mode:
             # convert from sec since epoch to matplotlib date format
-            x = time2date(x)
+            x = _time2date(x)
         self.xs = np.array(x)
         self.ys = np.array(y.T)
         self.update()
@@ -896,14 +898,12 @@ def plot_time(x, *extrap, **extrak):
         xrotation: which rotates the x ticks (defautls to 10 deg)
         xticksize: changes x axis thick size (defaults to 9)
     """
+    x = _time2date(x)
     xrotation = extrak.pop('xrotation', 10)
     xticksize = extrak.pop('xticksize', 9)
     if _plot_date_discouraged:
-        x = _unixepoch2datetime64(x)
         ret = pyplot.plot(x, *extrap, **extrak)
     else:
-        # uses the timezone set by rcParams['timezone']
-        x = time2date(x)
         ret = pyplot.plot_date(x, *extrap, **extrak)
     ax = ret[0].axes
     # Rotate axes ticks
@@ -974,7 +974,7 @@ def plot_time_stack(x, *ys, **kwargs):
     fig = pyplot.gcf()
     if len(fig.axes) < Nr:
         fig1, axs1 = pyplot.subplots(nrows=Nr, sharex=True, squeeze=True, gridspec_kw=dict(hspace=0), num=fig.number)
-        xo = time2date(x[0])
+        xo = _time2date(x[0])
         for ax in axs1[1:]:
             ax.yaxis.get_major_locator().set_params(prune='upper')
         for ax in axs1:
