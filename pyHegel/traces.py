@@ -55,15 +55,14 @@ else:
 from matplotlib.figure import Figure
 if is_py2:
     from distutils.version import LooseVersion as Version
+    # see from mpl_toolkits.axes_grid1 import host_subplot
+    # matplotlib/Examples/axes_grid/demo_parasite_axes2.py
+    #from mpl_toolkits.axes_grid1 import host_subplot
+    from mpl_toolkits.axes_grid1.parasite_axes import host_subplot_class_factory
+    import mpl_toolkits.axisartist as AA
+    host_subplot_class = host_subplot_class_factory(AA.Axes)
 else:
     from packaging.version import Version
-
-# see from mpl_toolkits.axes_grid1 import host_subplot
-# matplotlib/Examples/axes_grid/demo_parasite_axes2.py
-#from mpl_toolkits.axes_grid1 import host_subplot
-from mpl_toolkits.axes_grid1.parasite_axes import host_subplot_class_factory
-import mpl_toolkits.axisartist as AA
-host_subplot_class = host_subplot_class_factory(AA.Axes)
 
 # This problem affects Anaconda 5.2
 # see https://github.com/matplotlib/matplotlib/issues/12208
@@ -369,9 +368,20 @@ class TraceBase(FigureManagerQT, object): # FigureManagerQT is old style class s
                     if event.key in all_keys:
                         a.zorder = 0
                         a.set_navigate(True)
+                        if is_py3:
+                            a.patch.set_visible(i == 0)
                     else:
                         a.zorder = 1 if i==n else 0
                         a.set_navigate(i==n)
+                        if is_py3:
+                            # this is to prevent the background patch from overwriting the curves
+                            # keep the first axis patch visible only if it has not been
+                            # set to a higher zorder, otherwise enable the second axes background patch
+                            # By default only the first of the axes patch is visible.
+                            if (i == 0 and n > 0) or (i == 1 and n == 0):
+                                a.patch.set_visible(True)
+                            else:
+                                a.patch.set_visible(False)
 
     def setWindowTitle(self, title):
         self.set_window_title(title)
@@ -428,8 +438,11 @@ class ExtraDialog(QtGui.QDialog):
 class Trace(TraceBase):
     def __init__(self, width=9.00, height=7.00, dpi=72, time_mode = False, comment_func=None, wait_time=None):
         super(Trace, self).__init__(width=width, height=height, dpi=dpi)
-        ax = host_subplot_class(self.fig, 111)
-        self.fig.add_subplot(ax)
+        if is_py2:
+            ax = host_subplot_class(self.fig, 111)
+            self.fig.add_subplot(ax)
+        else:
+            ax = self.fig.subplots()
         self.offset = 50
         self.axs = [ax]
         self.xs = None
@@ -442,12 +455,18 @@ class Trace(TraceBase):
         self.wait_time = wait_time
         # could also use self.fig.autofmt_xdate()
         ax = self.axs[0]
-        tlabels = ax.axis['bottom'].major_ticklabels
         if time_mode:
-            tlabels.set_size(9)
-            tlabels.set_rotation(10)
-            tlabels.set_rotation_mode('default')
-            tlabels.set_verticalalignment('top')
+            if is_py2:
+                tlabels = ax.axis['bottom'].major_ticklabels
+                tlabels.set_size(9)
+                tlabels.set_rotation(10)
+                tlabels.set_rotation_mode('default')
+                tlabels.set_verticalalignment('top')
+            else:
+                # labelrotation could be a tuple (mode, angle), mode defaults to 'default'
+                # Also the verticalalignment seems to be hardcoded to 'top'
+                # the horizontal alignment would be changed with rcParams["xtick.alignment"]
+                ax.tick_params(axis='x', which='both', labelsize=9, labelrotation=10)
         self.canvas_resizeEvent_orig = self.canvas.resizeEvent
         self.canvas.resizeEvent = self.windowResize
         self.update()
@@ -611,7 +630,10 @@ class Trace(TraceBase):
         right = .95-(ndim-1)*rel_dx
         if right < .5:
             right = .5
-        self.fig.subplots_adjust(left=rel_dx*1.5, right=right)
+        left = rel_dx*1.5
+        if left >= right:
+            left = right - .01
+        self.fig.subplots_adjust(left=left, right=right)
         if draw:
             self.draw()
     def update(self):
@@ -629,16 +651,19 @@ class Trace(TraceBase):
             # cycle over all extra axes
             for i in range(ndim-1):
                 ax = host.twinx()
-                new_fixed_axis = ax.get_grid_helper().new_fixed_axis
-                ax.axis['right'] = new_fixed_axis(loc='right', axes=ax, offset=(offset*i,0))
-                axr = ax.axis['right']
-                axr.toggle(all=True)
-                # Now fix problem with offset string always on same spot for all right axes
-                axr._update_offsetText_orig = axr._update_offsetText
-                axr._offsetText_xshift = offset*i
-                axr._update_offsetText = functools.partial(_offsetText_helper, axr)
-                if ndim > 2:
-                    axr.offsetText.set_rotation(20)
+                if is_py2:
+                    new_fixed_axis = ax.get_grid_helper().new_fixed_axis
+                    ax.axis['right'] = new_fixed_axis(loc='right', axes=ax, offset=(offset*i,0))
+                    axr = ax.axis['right']
+                    axr.toggle(all=True)
+                    # Now fix problem with offset string always on same spot for all right axes
+                    axr._update_offsetText_orig = axr._update_offsetText
+                    axr._offsetText_xshift = offset*i
+                    axr._update_offsetText = functools.partial(_offsetText_helper, axr)
+                    if ndim > 2:
+                        axr.offsetText.set_rotation(20)
+                else:
+                    ax.spines['right'].set_position(('outward', offset*i))
                 self.axs.append(ax)
                 # add them to figure so selecting axes (press 1, 2, a) works properly
                 self.fig.add_axes(ax)
@@ -650,8 +675,14 @@ class Trace(TraceBase):
             self.crvs = []
             #self.ax.clear()
         x = self.xs
+        plot_kwargs = {}
+        if is_py3:
+            color_cycler = rcParams['axes.prop_cycle']()
         for i,(y,ax) in enumerate(zip(self.ys.T, self.axs)):
             style = '.-'
+            if is_py3:
+                line_color = next(color_cycler)['color']
+                plot_kwargs['color'] = line_color
             if self.first_update:
                 try:
                     lbl = self.legend_strs[i]
@@ -659,17 +690,21 @@ class Trace(TraceBase):
                     lbl = 'data '+str(i)
                 if self.time_mode:
                     if _plot_date_discouraged:
-                        plt = ax.plot(x, y, style, label=lbl)[0]
+                        plt = ax.plot(x, y, style, label=lbl, **plot_kwargs)[0]
                     else:
-                        plt = ax.plot_date(x, y, style, label=lbl)[0]
+                        plt = ax.plot_date(x, y, style, label=lbl, **plot_kwargs)[0]
                 else:
-                    plt = ax.plot(x, y, style, label=lbl)[0]
-                line_color = ax.lines[0].get_color()
+                    plt = ax.plot(x, y, style, label=lbl, **plot_kwargs)[0]
+                if is_py2:
+                    line_color = ax.lines[0].get_color()
                 ax.set_ylabel(lbl, color=line_color)
                 self.crvs.append(plt)
             else:
                 self.crvs[i].set_data(x, y)
-        leg = self.axs[0].legend(loc='upper left', bbox_to_anchor=(0, 1.10))
+        if is_py2:
+            leg = self.axs[0].legend(loc='upper left', bbox_to_anchor=(0, 1.10))
+        else:
+            leg = self.fig.legend(loc='upper left', bbox_to_anchor=(0.1, 0.98))
         set_draggable(leg)
         for ax in self.axs:
             ax.relim()
