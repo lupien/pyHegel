@@ -39,6 +39,8 @@ import matplotlib
 from matplotlib import pyplot, rcParams, __version__ as mpl_version
 from matplotlib.dates import date2num, num2date
 import dateutil
+import warnings
+
 from . import config
 
 from .comp2to3 import is_py3, string_types, string_bytes_types, unicode_type, is_py2
@@ -63,6 +65,11 @@ if is_py2:
     host_subplot_class = host_subplot_class_factory(AA.Axes)
 else:
     from packaging.version import Version
+    # The full warning is:
+    #   Toggling axes navigation from the keyboard is deprecated since 3.3 and will be removed two minor releases later.
+    # I ignore it because I recoded the handling so it keeps working.
+    warnings.filterwarnings('ignore', 'Toggling axes navigation from the keyboard is deprecated',
+                            matplotlib.MatplotlibDeprecationWarning)
 
 # This problem affects Anaconda 5.2
 # see https://github.com/matplotlib/matplotlib/issues/12208
