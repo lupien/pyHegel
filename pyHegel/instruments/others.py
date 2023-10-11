@@ -696,16 +696,16 @@ class pfeiffer_turbo_loop(threading.Thread):
     def __init__(self, master):
         super(pfeiffer_turbo_loop, self).__init__()
         self.master = master
-        self._stop = False
+        self.__stop = False
     def cancel(self):
-        self._stop = True
+        self.__stop = True
     def run(self):
         # empty buffer
         self.master.visa.flush(visa_wrap.constants.VI_IO_IN_BUF_DISCARD)
         # trow away first partial data
         self.master.read()
         while True:
-            if self._stop:
+            if self.__stop:
                 return
             string = self.master.read()
             res = self.master.parse(string)

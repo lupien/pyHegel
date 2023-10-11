@@ -1652,7 +1652,7 @@ class Bf_controller_listen_thread(threading.Thread):
     def __init__(self, control, ping_interval=120):
         super(Bf_controller_listen_thread, self).__init__()
         self.control = control
-        self._stop = False
+        self.__stop = False
         self._regular_cache = queue.Queue() # infinite size
         self._lock = threading.Lock()
         self._listen_cache = {}
@@ -1661,7 +1661,7 @@ class Bf_controller_listen_thread(threading.Thread):
         self.daemon = True # This will allow python to exit
 
     def cancel(self):
-        self._stop = True
+        self.__stop = True
 
     def recv(self, ws):
         # Have to replace the websocket recv because it will hang when the pong is received
@@ -1681,7 +1681,7 @@ class Bf_controller_listen_thread(threading.Thread):
         # Doing a print at the beginning of the thread fixes that problem.
         #print('Listen Thread started')
         while True:
-            if self._stop:
+            if self.__stop:
                 return
             readers = []
             ws_map = dict()

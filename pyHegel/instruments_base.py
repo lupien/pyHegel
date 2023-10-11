@@ -757,7 +757,7 @@ class asyncThread(threading.Thread):
     def __init__(self, operations, lock_instrument, lock_extra, init_ops, detect=None, delay=0., trig=None, cleanup=None):
         super(asyncThread, self).__init__()
         self.daemon = True
-        self._stop = False
+        self.__stop = False
         self._async_delay = delay
         self._async_trig = trig
         self._async_detect = detect
@@ -790,9 +790,9 @@ class asyncThread(threading.Thread):
             f(*args, **kwargs)
         delay = self._async_delay
         if delay and not CHECKING():
-            func = lambda: self._stop
+            func = lambda: self.__stop
             _retry_wait(func, timeout=delay, delay=0.1)
-        if self._stop:
+        if self.__stop:
             return
         try:
             if self._async_trig and not CHECKING():
@@ -800,9 +800,9 @@ class asyncThread(threading.Thread):
             #print('Thread ready to detect ', time.time()-t0)
             if self._async_detect is not None:
                 while not self._async_detect():
-                    if self._stop:
+                    if self.__stop:
                         break
-            if self._stop:
+            if self.__stop:
                 return
         finally:
             if self._async_cleanup and not CHECKING():
@@ -812,7 +812,7 @@ class asyncThread(threading.Thread):
             self.results.append(func(**kwarg))
         #print('Thread finished in ', time.time()-t0)
     def cancel(self):
-        self._stop = True
+        self.__stop = True
     def wait(self, timeout=None):
         # we use a the context manager because join uses sleep.
         with _sleep_signal_context_manager():
