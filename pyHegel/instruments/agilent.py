@@ -1494,7 +1494,7 @@ class agilent_EXA(visaInstrument):
     """
     def __new__(cls, *args, **kwargs):
         mode = kwargs.pop('mode', 'auto')
-        instance = super(agilent_EXA, cls).__new__(cls, *args, **kwargs)
+        instance = super(agilent_EXA, cls).__new__(cls)
         instance.__init__(*args, **kwargs)
         if mode != 'auto':
             instance.instrument_mode.set(mode)
