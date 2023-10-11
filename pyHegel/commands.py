@@ -2316,7 +2316,7 @@ def load(names=None, newnames=None):
             if kwargs != {}:
                 para = '%s, %s'%(para, kwargs)
             instr = instr.__name__
-            print('{:>10s}: {:25s} {:s}'.format(name, instr, para))
+            print('{:>10s}: {:25s} {:s}'.format(name, instr, str(para)))
         return
     if isinstance(names, string_types):
         # this always returns list
