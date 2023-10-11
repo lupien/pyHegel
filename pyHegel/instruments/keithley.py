@@ -900,7 +900,7 @@ class keithley_2450_smu(visaInstrumentAsync):
         self.readval = ReadvalDev(self.fetch)
         #self.alias = self.readval
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(keithley_2450_smu, self)._create_devs()
 
     def _src_level_getdev(self, mode=None):
         if mode is not None:

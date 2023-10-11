@@ -329,7 +329,7 @@ class sr830_lia(visaInstrument):
         self.readval = ReadvalDev(self.fetch)
         self.alias = self.readval
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(sr830_lia, self)._create_devs()
     def get_error(self):
         """
          returns a byte of bit flags
@@ -685,7 +685,7 @@ class sr865_lia(visaInstrument):
         self.readval = ReadvalDev(self.fetch)
         self.alias = self.readval
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(sr865_lia, self)._create_devs()
     def get_error(self):
         err = int(self.ask('ERRS?'))
         if err == 0:
@@ -784,7 +784,7 @@ class sr384_rf(visaInstrument):
         self.phase = scpiDevice('phas',str_type=float, min=-360, max=360) # deg, only change by 360
         self.mod_en = scpiDevice('modl', str_type=bool) # 0 is off, 1 is on
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(sr384_rf, self)._create_devs()
     def get_error(self):
         """
          Pops last error
@@ -1203,7 +1203,7 @@ class sr780_analyzer(visaInstrumentAsync):
         self.readval = ReadvalDev(self.fetch)
         self._devwrap('dump', autoinit=False)
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(sr780_analyzer, self)._create_devs()
     @locked_calling
     def get_xscale(self):
         # only works for fft
@@ -1509,4 +1509,4 @@ class sr_dc205(visaInstrument):
 
         self.alias = self.level
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(sr_dc205, self)._create_devs()

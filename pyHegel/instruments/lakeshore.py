@@ -192,7 +192,7 @@ class lakeshore_325(visaInstrument):
         self._devwrap('fetch', autoinit=False)
         self.alias = self.fetch
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(lakeshore_325, self)._create_devs()
 
 #######################################################
 ##    Lakeshore 336 Temperature controller
@@ -888,7 +888,7 @@ class lakeshore_336(visaInstrument):
         self._devwrap('fetch', autoinit=False)
         self.alias = self.fetch
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(lakeshore_336, self)._create_devs()
 
 
 #######################################################
@@ -1194,7 +1194,7 @@ class lakeshore_340(visaInstrument):
         self._devwrap('fetch', autoinit=False)
         self.alias = self.fetch
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(lakeshore_340, self)._create_devs()
 
 #######################################################
 ##    Lakeshore 224 Temperature monitor

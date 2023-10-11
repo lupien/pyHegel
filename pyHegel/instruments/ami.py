@@ -557,7 +557,7 @@ class AmericanMagnetics_model430(visaInstrument):
             #self.op_limit_temp = scpiDevice(getstr='OPLimit:TEMP?', str_type=float)
 
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(AmericanMagnetics_model430, self)._create_devs()
 
 # Master AMI current limit: CURR:LIM:AMI_MASTER?
 #  to change it (dangerous procedure): CONF:CURR:LIM:AMI_MASTER
@@ -605,7 +605,7 @@ class MagnetSimul(BaseInstrument):
         self._devwrap('rate_current')
         self._devwrap('field')
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(MagnetSimul, self)._create_devs()
 
 
 #######################################################
@@ -901,6 +901,6 @@ class AmericanMagnetics_vector(BaseInstrument):
         self.ramp_rate = MemoryDevice(1e-3, min=1e-6, max=1, doc='In unit of T/min')
         self._devwrap('ramp_rate')
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(AmericanMagnetics_vector, self)._create_devs()
 
 

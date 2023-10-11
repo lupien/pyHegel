@@ -344,7 +344,7 @@ class bf_valves(BaseInstrument):
         self._devwrap('gage')
         self._devwrap('all_status')
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(bf_valves, self)._create_devs()
 
 
 ###########################################################

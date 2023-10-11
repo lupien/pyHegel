@@ -362,7 +362,7 @@ class ScalingDevice(LogicalDevice):
         self._calc_first_n = calc_first_n
         self._keep_last_n = keep_last_n
         doc+= 'scale_factor=%g (initial)\noffset=%g\ninvert_trans=%s\ncalc_first_n=%s\nkeep_last_n=%s'%(scale_factor, offset, invert_trans, calc_first_n, keep_last_n)
-        super(type(self), self).__init__(basedev=basedev, doc=doc, setget=setget, **extrak)
+        super(ScalingDevice, self).__init__(basedev=basedev, doc=doc, setget=setget, **extrak)
         base_fmt = self._basedev.getformat(**self._basedev_kwarg)
         base_multi = base_fmt['multi']
         base_graph = base_fmt['graph']
@@ -474,7 +474,7 @@ class FunctionDevice(LogicalDevice):
             self._to_raw = to_raw
         else: # assume it is a function
             self.to_raw = to_raw
-        super(type(self), self).__init__(basedev=basedev, doc=doc, setget=setget, **extrak)
+        super(FunctionDevice, self).__init__(basedev=basedev, doc=doc, setget=setget, **extrak)
         if not only_val:
             self._format['multi'] = ['conv', 'raw']
             self._format['graph'] = [0]
@@ -556,7 +556,7 @@ class LimitDevice(LogicalDevice):
         if min is None or max is None:
             raise ValueError('min and max need to be specified for LimitDevice')
         doc+= 'min,max=%g,%g (initial)'%(min, max)
-        super(type(self), self).__init__(basedev=basedev, min=min, max=max, doc=doc, **extrak)
+        super(LimitDevice, self).__init__(basedev=basedev, min=min, max=max, doc=doc, **extrak)
         self._setdev_p = True # needed to enable BaseDevice Check, set (Checking mode)
         self._getdev_p = self._basedev._getdev_p # needed to enable Checking mode of BaseDevice get
     def set_limits(self, min=None, max=None):
@@ -587,7 +587,6 @@ class LimitDevice(LogicalDevice):
         basedev, base_kwarg = self._check_cache['gl']
         basedev.set(val, **base_kwarg)
     def _checkdev(self, val, **kwarg):
-        #super(type(self), self)._checkdev(val)
         super(LimitDevice, self)._checkdev(val)
         op = self._check_cache['fnct_str']
         ((basedev, base_kwarg),), kwarg = self._get_auto_list(kwarg, op=op)
@@ -686,7 +685,7 @@ class ExecuteDevice(LogicalDevice):
     def __init__(self, basedev, command, multi=None, doc='', **extrak):
         self._command = command
         doc+= 'command="%s"\n'%(command)
-        super(type(self), self).__init__(basedev=basedev, doc=doc, **extrak)
+        super(ExecuteDevice, self).__init__(basedev=basedev, doc=doc, **extrak)
         self._multi = multi
         if multi is not None:
             self._format['multi'] = multi
@@ -697,7 +696,7 @@ class ExecuteDevice(LogicalDevice):
         basefmt = basedev.getformat(**base_kwarg)
         self._format['file'] = True
         self._format['bin'] = basefmt['bin']
-        return super(type(self), self).getformat(**kwarg)
+        return super(ExecuteDevice, self).getformat(**kwarg)
     @locked_calling_dev
     def _current_config(self, dev_obj=None, options={}):
         head = ['Execute:: command="%s" basedev=%s'%(self._command, self._basedev.getfullname())]
@@ -746,7 +745,7 @@ class RThetaDevice(LogicalDevice):
        These can be overriden by the kw argument.
     """
     def __init__(self, baseX, baseY, xoffset=0., yoffset=0., doc='', **extrak):
-        super(type(self), self).__init__(basedevs=[baseX, baseY], doc=doc, **extrak)
+        super(RThetaDevice, self).__init__(basedevs=[baseX, baseY], doc=doc, **extrak)
         self._xoffset = xoffset
         self._yoffset = yoffset
         self._format['multi'] = ['R', 'ThetaDeg', 'raw_x', 'raw_y']
@@ -797,7 +796,7 @@ class PickSome(LogicalDevice):
             multi = False
         elif not isinstance(multi, list):
             multi = ['base-%i'%i for i in range(multi)]
-        super(type(self), self).__init__(basedev=basedev, doc=doc, multi=multi, **extrak)
+        super(PickSome, self).__init__(basedev=basedev, doc=doc, multi=multi, **extrak)
         self._selector = selector
         self._pick_cache_on_set = pick_cache_on_set
         self._getdev_p = True
@@ -849,7 +848,7 @@ class Average(LogicalDevice):
         show_repeats will count the number of repeats and print them
         """
         # Disable autoinit, to prevent long average being called when using force_get (sweep, ...)
-        super(type(self), self).__init__(basedev=basedev, doc=doc, multi=['avg', 'std'], autoget=False, autoinit=False, **extrak)
+        super(Average, self).__init__(basedev=basedev, doc=doc, multi=['avg', 'std'], autoget=False, autoinit=False, **extrak)
         self._filter_time = filter_time
         self._repeat_time = repeat_time
         self._show_repeats = show_repeats
@@ -1101,7 +1100,7 @@ class FunctionWrap(LogicalDevice):
         With autoget enable, and basedev_as_param True, then the getfunc function is called with the first argument
         being the list of basedev values.
         """
-        super(type(self), self).__init__(doc=doc, basedev=basedev, basedevs=basedevs, autoget=autoget, **extrak)
+        super(FunctionWrap, self).__init__(doc=doc, basedev=basedev, basedevs=basedevs, autoget=autoget, **extrak)
         self._setdev_p = setfunc
         self._getdev_p = getfunc
         self._checkfunc = checkfunc

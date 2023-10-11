@@ -415,7 +415,7 @@ class DataTranslation(BaseInstrument):
 
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(DataTranslation, self)._create_devs()
     def force_get(self):
         # Since user cannot change change values except without using this program
         # the cache are always up to date and this is not needed.

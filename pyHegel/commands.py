@@ -330,7 +330,7 @@ class _Clock(instruments.BaseInstrument):
         self._devwrap('time')
         self.alias = self.time
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(_Clock, self)._create_devs()
 clock = _Clock()
 
 

@@ -404,7 +404,7 @@ class iTest_be2102(visaInstrument):
         self.system_name = scpiDevice('SYSTem:NAME', str_type=quoted_string())
         #self._devwrap('level')
         self.alias = self.level
-        super(type(self),self)._create_devs()
+        super(iTest_be2102, self)._create_devs()
 
 
 
@@ -763,7 +763,7 @@ class iTest_be214x(visaInstrument):
         self.system_name = scpiDevice('SYSTem:NAME', str_type=quoted_string())
         #self._devwrap('level')
         self.alias = self.level
-        super(type(self),self)._create_devs()
+        super(iTest_be214x, self)._create_devs()
 
 # observations:
 #   OFF trigger_mode is a jump, not a ramp like for BE2102

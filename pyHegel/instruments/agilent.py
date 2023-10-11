@@ -195,7 +195,7 @@ class agilent_rf_33522A(visaInstrument):
 
         self.alias = self.freq
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(agilent_rf_33522A, self)._create_devs()
     def arb_sync(self):
         self.write('FUNCtion:ARBitrary:SYNChronize')
     def phase_sync(self):
@@ -462,7 +462,7 @@ class agilent_PowerMeter(visaInstrumentAsync):
         self.readval = ReadvalDev(self.fetch)
         self.alias = self.readval
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(agilent_PowerMeter, self)._create_devs()
 
 
 #######################################################
@@ -604,7 +604,7 @@ class agilent_rf_PSG(visaInstrument):
             """)
         self.alias = self.freq_cw
         # This needs to be last to complete creation
-        super(agilent_rf_PSG,self)._create_devs()
+        super(agilent_rf_PSG, self)._create_devs()
     def phase_sync(self):
         """
         Sets the current output phase as a zero reference.
@@ -649,7 +649,7 @@ class agilent_rf_MXG(agilent_rf_PSG):
         self.ampl_user_max_en = scpiDevice(':POWer:USER:ENABle', str_type=bool)
         self.freq_low_spurs_en = scpiDevice(':FREQuency:LSPurs:STATe', str_type=bool)
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(agilent_rf_MXG, self)._create_devs()
     def phase_sync(self):
         """
         Sets the current output phase as a zero reference.
@@ -1127,7 +1127,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
         self.trig_delayauto = scpiDevice('TRIGger:DELay:AUTO', str_type=bool)
         self.readval = ReadvalDev(self.fetch)
         self.alias = self.readval
-        super(type(self),self)._create_devs()
+        super(agilent_multi_34410A, self)._create_devs()
         # For INITiate: need to wait for completion of triggered measurement before calling it again
         # for trigger: *trg and visa.trigger seem to do the same. Can only be called after INItiate and
         #   during measurement.
@@ -1468,7 +1468,7 @@ class infiniiVision_3000(visaInstrumentAsync):
         self._devwrap('lasttrig_time', trig=False)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(infiniiVision_3000, self)._create_devs()
 
 
 #######################################################
@@ -3028,7 +3028,7 @@ class agilent_PNAL(visaInstrumentAsync):
         self._devwrap('fetch', autoinit=False, trig=True)
         self.readval = ReadvalDev(self.fetch)
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(agilent_PNAL, self)._create_devs()
 
 register_usb_name('PNA network analyser', 0x0957, 0x0118)
 
@@ -3501,7 +3501,7 @@ class agilent_FieldFox(agilent_PNAL):
             -mem:    when True, selects the memory trace instead of the active one.
             -xaxis:  when True(default), the first column of data is the xaxis
         """
-        return super(agilent_FieldFox,self)._fetch_getdev(ch=None, traces=traces, unit=unit, mem=mem, xaxis=xaxis)
+        return super(agilent_FieldFox, self)._fetch_getdev(ch=None, traces=traces, unit=unit, mem=mem, xaxis=xaxis)
     def _create_devs(self):
         # Similar commands to ENA or PNAL but without channels
         self.installed_options = scpiDevice(getstr='*OPT?', str_type=quoted_string())
@@ -3771,7 +3771,7 @@ class agilent_AWG(visaInstrumentAsync):
         #   Getting trace data this way seems very slow.
         self.segment_list = devChOption(getstr=':TRACE{ch}:CATalog?', doc='Returns a list of segment id, length')
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(agilent_AWG, self)._create_devs()
 
     @locked_calling
     def run(self, enable=True, ch=None):
@@ -3912,4 +3912,4 @@ class agilent_power_supply_E363x(visaInstrument):
         self.output_en = scpiDevice('OUTput', str_type=bool, setget=True) # setget just makes sure the ouput has been changed before returning
         self.output_track_en = scpiDevice('OUTput:TRACk', str_type=bool, doc='Output tracking will make P25V match N25V and vice versa')
         self._devwrap('status')
-        super(type(self),self)._create_devs()
+        super(agilent_power_supply_E363x, self)._create_devs()

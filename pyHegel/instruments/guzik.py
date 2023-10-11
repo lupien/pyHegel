@@ -643,7 +643,7 @@ class guzik_adp7104(BaseInstrument):
         self._devwrap('fetch', autoinit=False)
         self.alias = self.fetch
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(guzik_adp7104, self)._create_devs()
 
 # Tests results:
 #gz = instruments.guzik_adp7104()

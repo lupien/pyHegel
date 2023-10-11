@@ -118,7 +118,7 @@ class yokogawa_gs200(visaInstrument):
         self._devwrap('level', setget=True)
         self.alias = self.level
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(yokogawa_gs200, self)._create_devs()
     def _level_checkdev(self, val):
         rnge = 1.2*self.range.getcache()
         if self.function.getcache()=='CURR' and rnge>.2:
@@ -201,7 +201,7 @@ class colby_pdl_100a(visaInstrument):
         self._devwrap('delay_ps', min=0, max=20e3, setget=True)
         self.alias = self.delay_ps
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(colby_pdl_100a, self)._create_devs()
     def get_error(self):
         val = int(self.ask('ERR?'))
         err_str = self._errors_dict[val]
@@ -2018,7 +2018,7 @@ class delft_BIAS_DAC(visaInstrument):
         self._devwrap('level_all', setget=True, autoinit=False, multi=titles)
         self.alias = self.level
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(delft_BIAS_DAC, self)._create_devs()
 
 #######################################################
 ##    Micro Lambda Wireless MLBF filter
@@ -2218,7 +2218,7 @@ class micro_lambda_mlbf(BaseInstrument):
         self.alias = self.freq
         self.freq_MHz = ScalingDevice(self.freq, 1e-6, quiet_del=True)
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(micro_lambda_mlbf, self)._create_devs()
 
 # Above we use the UDP or USB connection protocol.
 # You can also connect using telnet.
@@ -2822,7 +2822,7 @@ class dummy(BaseInstrument):
         self._s11_loss = 3e3
         self.alias = self.current
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(dummy, self)._create_devs()
 
 
 #######################################################
@@ -2849,4 +2849,4 @@ class loop(BaseInstrument):
         self.loop5 = MemoryDevice(0.)
         self.alias = self.loop1
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(loop, self)._create_devs()

@@ -315,7 +315,7 @@ class rs_sgma(visaInstrument):
         # also: 'snam?'
         self.alias = self.freq
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(rs_sgma, self)._create_devs()
 
 
 #######################################################
@@ -1085,7 +1085,7 @@ class rs_rto_scope(visaInstrumentAsync):
         self.readval = ReadvalDev(self.fetch)
         self.alias = self.fetch
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(rs_rto_scope, self)._create_devs()
 
     def _decode_waveform_data(self, fromstr):
         form, bitp = self.set_format()
@@ -2219,7 +2219,7 @@ class rs_znb_network_analyzer(visaInstrumentAsync):
         self.readval = ReadvalDev(self.fetch)
         self.alias = self.fetch
         # This needs to be last to complete creation
-        super(type(self),self)._create_devs()
+        super(rs_znb_network_analyzer, self)._create_devs()
 
 # Data transfer:
 #   CALCulate:DATA:ALL?
