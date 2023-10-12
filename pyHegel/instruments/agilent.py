@@ -38,6 +38,8 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             ChoiceSimple, _retry_wait, Block_Codec, ChoiceSimpleMap
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
+from ..comp2to3 import fb
+
 register_usb_name('Agilent Technologies', 0x0957)
 register_usb_name('Keysight Technologies', 0x2A8D)
 
@@ -280,7 +282,7 @@ class agilent_rf_33522A(visaInstrument):
         data_str = _encode_block(src_data)
         # manually add terminiation to prevent warning if data already ends with termination
         self.write('MMEMory:DOWNload:FNAMe "%s"'%dest_file)
-        self.write('MMEMory:DOWNload:DATA %s\n'%data_str, termination=None)
+        self.write(b'MMEMory:DOWNload:DATA %s\n'%data_str, termination=None)
     @locked_calling
     def arb_load_file(self, filename, ch=None, clear=False, load=True):
         """
@@ -344,9 +346,10 @@ class agilent_rf_33522A(visaInstrument):
         if clear:
             self.clear_volatile_mem()
         if floats:
-            self.write(b'SOURce{ch}:DATA:ARBitrary {name},{data}\n'.format(ch=ch, name=name, data=data_str), termination=None)
+            scpi_path_base = 'SOURce{ch}:DATA:ARBitrary'
         else:
-            self.write(b'SOURce{ch}:DATA:ARBitrary:DAC {name},{data}\n'.format(ch=ch, name=name, data=data_str), termination=None)
+            scpi_path_base = 'SOURce{ch}:DATA:ARBitrary:DAC'
+        self.write(fb( (scpi_path_base + ' {name},').format(ch=ch, name=name)) + data_str + b'\n', termination=None)
         if load:
             self.arb_wave_seq.set(name)
 
