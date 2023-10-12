@@ -3858,7 +3858,6 @@ class keysight_M96xx_smu(visaInstrumentAsync):
         self.interlock_level = scpiDevice(':SYSTem:INTerlock:VOLTage', str_type=float, min=0, max=42)
 
         self.output_en = chOption('OUTPut{ch}', str_type=bool, extra_set_after_func=ProxyMethod(self._enabled_chs_cache_reset))
-        self.interlock_not_ok = scpiDevice(getstr='SYSTEM:INTerlock:TRIPped?', str_type=bool)
         self.output_filter_auto_en = chOption('OUTPut{ch}:FILTer:AUTO', str_type=bool)
         self.output_filter_freq = chOption('OUTPut{ch}:FILTer:FREQuency', str_type=float, min=31.830, max=31.831e3, doc='this is 1/2*pi*tc see output_filter_tc')
         self.output_filter_tc = chOption('OUTPut{ch}:FILTer:TCONstant', str_type=float, min=5e-6, max=5e-3, doc='this is 1/2*pi*freq see output_filter_freq')
