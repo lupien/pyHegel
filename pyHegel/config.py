@@ -237,7 +237,7 @@ def load_instruments(exclude=None):
     return loaded
 
 class Extra_dlls(object):
-    def __init__(self, paths=[]):
+    def __init__(self, paths=[], quiet=False):
         """ paths is a list of paths. They need to be valid. """
         if isinstance(paths, str):
             paths = [paths]
@@ -246,6 +246,7 @@ class Extra_dlls(object):
         else:
             self.paths = []
         self.added_paths = []
+        self.quiet = quiet
     def __enter__(self):
         for p in self.paths:
             try:
@@ -253,7 +254,8 @@ class Extra_dlls(object):
                 # are raised.
                 cookie = os.add_dll_directory(p)
             except OSError:
-                warnings.warn('Warning: Path %s not added to search path because it is not valid.'%p, stacklevel=2)
+                if not self.quiet:
+                    warnings.warn('Warning: Path %s not added to search path because it is not valid.'%p, stacklevel=2)
             else:
                 self.added_paths.append(cookie)
         return self
@@ -264,7 +266,7 @@ class Extra_dlls(object):
 class Addition_dll_search(object):
     def __init__(self):
         self.added_paths = {}
-    def add(self, path):
+    def add(self, path, quiet=False):
         # only for windows nt
         if os.name != 'nt':
             return
@@ -278,7 +280,8 @@ class Addition_dll_search(object):
                 try:
                     add_obj = os.add_dll_directory(path)
                 except OSError:
-                    warnings.warn('Warning: Path %s not added to search path because it is not valid.'%path)
+                    if not quiet:
+                        warnings.warn('Warning: Path %s not added to search path because it is not valid.'%path, stacklevel=2)
                     add_obj = None
             else:
                 add_obj = None
@@ -305,11 +308,11 @@ class Addition_dll_search(object):
                 os.environ['PATH'] = pathsep.join(env_path)
         else:
             self.added_paths[path] = (add_obj, already_in_path, count)
-    def add_paths(self, paths):
+    def add_paths(self, paths, quiet=False):
         for p in paths:
-            self.add(p)
+            self.add(p, quiet=quiet)
     def remove_all(self):
-        for p in self.added_paths:
+        for p in self.added_paths.copy():
             self.remove(p)
     def __del__(self):
         self.remove_all()
