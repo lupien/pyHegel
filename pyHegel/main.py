@@ -162,7 +162,16 @@ def main_start():
            IPython.terminal.interactiveshell.TerminalInteractiveShell.display_completions.default_value = 'readlinelike'
     except AttributeError: # display_completion not present
         pass
-    if sys.version_info[0] == 2 or IPython.version_info[0] < 8:
+    try:
+        from traitlets import version_info as trait_version
+    except ImportError:
+        exec_list = True
+    else:
+        if trait_version[0] < 5:
+            exec_list = True
+        else:
+            exec_list = False
+    if exec_list:
         IPython.start_ipython(argv=['--matplotlib=%s'%qt, '--InteractiveShellApp.exec_lines=%s'%start_code.split('\n')])
     else:
         IPython.start_ipython(argv=['--matplotlib=%s'%qt] + ['--InteractiveShellApp.exec_lines=%s'%c for c in start_code.split('\n')])
