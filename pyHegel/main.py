@@ -86,13 +86,21 @@ import scipy
 import scipy.constants
 import scipy.constants as C
 
-from pyHegel.commands import *
+from pyHegel.commands import _pylab, _init_pyHegel_globals
 _init_pyHegel_globals()
+_pylab()
+from pyHegel.commands import *
 fix_auto_suggestions()
 """
 
+# Need to use '' for string not "" otherwise it cause problems with the command line
+# Also cannot use if : with indents
+# Note that also, at least of ipython 8.15.0 (https://github.com/ipython/ipython/issues/14006) it says that
+#  Shell is already running a gui event loop for qt5. Call with no arguments to disable the current loop.
+# even on the first loop install. That is a display bug I cannot fix.
+# Bu here I prevent future display of the message
 _start_code = """
-get_ipython().run_line_magic('pylab', '%s')
+get_ipython().run_line_magic('matplotlib', '%s') if getattr(get_ipython(), 'pylab_gui_select', None) is None else None
 get_ipython().run_line_magic('autocall', '1') # smart
 """ + _base_start_code + """
 quiet_KeyboardInterrupt(True)

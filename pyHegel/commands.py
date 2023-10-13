@@ -37,6 +37,7 @@ import textwrap
 import threading
 import operator
 import numpy as np
+import warnings
 from gc import collect as collect_garbage
 
 from . import traces
@@ -56,7 +57,7 @@ from .instruments_base import _writevec as writevec, _normalize_usb, _normalize_
 from .util import _readfile_lastnames, _readfile_lastheaders, _readfile_lasttitles
 from .gui_tools import sleep
 from .comp2to3 import is_py3, warn_deprecation, comp_execfile, reload, string_types, string_bytes_types,\
-                        StringIO, open_utf8, fu
+                        StringIO, open_utf8, fu, builtins_set
 
 __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'instruments_registry',
            'util', 'help_pyHegel', 'reset_pyHegel', 'clock', 'sweep', 'sweep_multi', 'wait',
@@ -68,7 +69,8 @@ __all__ = ['collect_garbage', 'traces', 'instruments', 'instruments_base', 'inst
            'task', 'top', 'kill', '_init_pyHegel_globals', '_faster_timer', 'quiet_KeyboardInterrupt',
            'Loop_Control', '_Snap',
            'Sequencer', 'Seq_Wait_i', 'Seq_Wait', 'Seq_Func', 'Seq_Funcs', 'Seq_Keep_Going', 'Seq_End',
-           'rsrc_manager_reload', 'rsrc_manager_get_object', 'rsrc_manager_info', 'fix_auto_suggestions']
+           'rsrc_manager_reload', 'rsrc_manager_get_object', 'rsrc_manager_info', 'fix_auto_suggestions',
+           '_pylab']
 
 # not in __all__: local_config _globaldict
 #             _Clock _update_sys_path writevec _get_dev_kw _getheaders
@@ -125,6 +127,45 @@ def _init_pyHegel_globals(g=None, show_greet=True):
     instruments_base._globaldict = g
     if show_greet:
         _greetings()
+
+# replacement for %pylab which is now depracated
+# based on code from IPython core/magics/pylab.py, core/pylabtools.py and core/interactiveshell.py
+def _pylab():
+    global _globaldict
+    # It is required to use exec because import * cannot be done inside a function
+    clean = lambda ss: "\n".join([s[4:] for s in ss.splitlines()]) + '\n'
+    pylab_code = clean("""
+    import numpy
+    import matplotlib
+    from matplotlib import pylab, mlab, pyplot
+    np = numpy
+    plt = pyplot
+    from matplotlib.pylab import *
+    from numpy import *
+    try:
+        from IPython.core.pylabtools import figsize
+    except:
+        pass
+    try:
+        from IPython.core.pylabtools import getfigs
+    except:
+        pass
+    try:
+        from IPython.core.display import display
+    except:
+        pass
+    """)
+    ns = {}
+    exec(pylab_code, ns)
+    # get list of clobbered names
+    ignored = {'__builtins__', 'copy', 'get', 'record', 'load', 'spy',
+'trace'}
+    both = builtins_set(ns).intersection(_globaldict).difference(ignored)
+    clobbered = [ name for name in both if _globaldict[name] is not ns[name] ]
+    _globaldict.update(ns)
+    print("Populating the interactive namespace from numpy and matplotlib")
+    if clobbered:
+        warnings.warn("pylab import has clobbered these variables: %s"%clobbered)
 
 def _greetings():
     import pyHegel
