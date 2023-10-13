@@ -253,7 +253,7 @@ class Extra_dlls(object):
                 # are raised.
                 cookie = os.add_dll_directory(p)
             except OSError:
-                warnings.warn('Warning: Path %s not added to search path because it is not valid.'%p)
+                warnings.warn('Warning: Path %s not added to search path because it is not valid.'%p, stacklevel=2)
             else:
                 self.added_paths.append(cookie)
         return self
