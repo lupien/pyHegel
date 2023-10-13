@@ -860,27 +860,7 @@ def _get_instrument_list(self, use_aliases=True):
 
 # So considering the above, we try to add some directories to the search path when it is available
 # The directories are taken from a pyHegel.ini configuration entry.
-class Extra_dlls(object):
-    def __init__(self):
-        if hasattr(_os, 'add_dll_directory'):
-            self.paths = config.pyHegel_conf.visa_dll_paths
-        else:
-            self.paths = []
-        self.added_paths = []
-    def __enter__(self):
-        for p in self.paths:
-            try:
-                # Need try except because if p is not a proper directory, OSError or FileNotFountError
-                # are raised.
-                cookie = _os.add_dll_directory(p)
-            except OSError:
-                _warnings.warn('Warning: Path %s not added to search path because it is not valid.'%p)
-            else:
-                self.added_paths.append(cookie)
-        return self
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        for p in self.added_paths:
-            p.close()
+# The fix is the use of config.Extra_dlls below
 
 class old_resource_manager(object):
     def __init__(self, path=None):
@@ -890,7 +870,7 @@ class old_resource_manager(object):
         with pyvisa <1.5.
         """
         self._is_agilent = None
-        with Extra_dlls():
+        with config.Extra_dlls(config.pyHegel_conf.visa_dll_paths):
             _old_load_visa(path)
     # The same as the first part of visa.get_instruments_list except for the close
     def list_resources(self, query='?*::INSTR'):
@@ -1021,7 +1001,7 @@ def get_resource_manager(path=None):
         return old_resource_manager(path)
     else:
         def pyvisaRM(path):
-            with Extra_dlls():
+            with config.Extra_dlls(config.pyHegel_conf.visa_dll_paths):
                 return pyvisa.ResourceManager(path)
         if _os.name == 'nt' and path is None and try_agilent_first:
             try:

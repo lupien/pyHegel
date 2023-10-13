@@ -26,9 +26,10 @@ from __future__ import absolute_import, print_function, division
 import glob
 import os
 import os.path
-from os.path import join as pjoin, isdir, isfile
+from os.path import join as pjoin, isdir, isfile, pathsep
 import re
 import sys
+import warnings
 
 from .comp2to3 import is_py2
 if is_py2:
@@ -235,6 +236,83 @@ def load_instruments(exclude=None):
             add_to_instruments(name)(module)
     return loaded
 
+class Extra_dlls(object):
+    def __init__(self, paths=[]):
+        """ paths is a list of paths. They need to be valid. """
+        if isinstance(paths, str):
+            paths = [paths]
+        if hasattr(os, 'add_dll_directory'):
+            self.paths = paths
+        else:
+            self.paths = []
+        self.added_paths = []
+    def __enter__(self):
+        for p in self.paths:
+            try:
+                # Need try except because if p is not a proper directory, OSError or FileNotFountError
+                # are raised.
+                cookie = os.add_dll_directory(p)
+            except OSError:
+                warnings.warn('Warning: Path %s not added to search path because it is not valid.'%p)
+            else:
+                self.added_paths.append(cookie)
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        for p in self.added_paths:
+            p.close()
+
+class Addition_dll_search(object):
+    def __init__(self):
+        self.added_paths = {}
+    def add(self, path):
+        # only for windows nt
+        if os.name != 'nt':
+            return
+        if path in self.added_paths:
+            # already added, just increase count
+            add_obj, already_in_path, count = self.added_paths[path]
+            count += 1
+        else:
+            count = 1
+            if hasattr(os, 'add_dll_directory'):
+                try:
+                    add_obj = os.add_dll_directory(path)
+                except OSError:
+                    warnings.warn('Warning: Path %s not added to search path because it is not valid.'%path)
+                    add_obj = None
+            else:
+                add_obj = None
+            env_path = os.environ['PATH'].split(pathsep)
+            if path in env_path:
+                already_in_path = True
+            else:
+                already_in_path = False
+                env_path.append(path)
+                os.environ['PATH'] = pathsep.join(env_path)
+        self.added_paths[path] = (add_obj, already_in_path, count)
+    def remove(self, path):
+        if path not in self.added_paths:
+            raise RuntimeError('Removing a path that was not added by this class: %s'%path)
+        add_obj, already_in_path, count = self.added_paths[path]
+        count -= 1
+        if count == 0:
+            del self.added_paths[path]
+            if add_obj is not None:
+                add_obj.close()
+            if not already_in_path:
+                env_path = os.environ['PATH'].split(pathsep)
+                env_path.remove(path)
+                os.environ['PATH'] = pathsep.join(env_path)
+        else:
+            self.added_paths[path] = (add_obj, already_in_path, count)
+    def add_paths(self, paths):
+        for p in paths:
+            self.add(p)
+    def remove_all(self):
+        for p in self.added_paths:
+            self.remove(p)
+    def __del__(self):
+        self.remove_all()
 
 class PyHegel_Conf(object):
     def __init__(self):
@@ -268,3 +346,5 @@ class PyHegel_Conf(object):
         return self.config_parser.get('traces', 'timezone')
 
 pyHegel_conf = PyHegel_Conf()
+additional_dll_search = Addition_dll_search()
+additional_dll_search.add_paths(pyHegel_conf.extra_dll_paths)
