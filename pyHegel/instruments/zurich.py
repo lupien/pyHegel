@@ -67,7 +67,7 @@ def _check_zi_python_version(*arg, **kwarg):
     try:
         python_ver, python_rev = _get_zi_python_version(*arg, **kwarg)
     except RuntimeError as e:
-        if e.message == _error_connection_invalid:
+        if e.args[0] == _error_connection_invalid:
             # We get this when the server does not accept the connection because the client is too old
             python_ver, python_rev = '0.0', 0
         else:
@@ -347,11 +347,11 @@ class zurich_UHF(BaseInstrument):
         try:
             self._zi_daq = zi.ziDAQServer(host, port, APIlevel)
         except RuntimeError as e:
-            if e.message == _error_connection_invalid:
+            if e.args[0] == _error_connection_invalid:
                 # we are probably using the wrong version, check that.
                 _check_zi_python_version(host=host, port=port)
             # This message does not seem to occur anymore: 14.08 15.05
-            if e.message == 'ZIAPIException with status code: 32778. Unable to connect socket':
+            if e.args[0] == 'ZIAPIException with status code: 32778. Unable to connect socket':
                 raise RuntimeError('Unable to connect to server. Either you have the wrong host/port '
                                    'or the server is not running. On Windows you need to start (from start menu): '
                                    'Zurich Instrument/LabOne Servers/LabOne Data Server UHF (make sure that at least '

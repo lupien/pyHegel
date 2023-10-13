@@ -526,7 +526,7 @@ class Lock_Instruments(threading._RLock):
                 self.release()
                 n += 1
         except RuntimeError as exc:
-            if exc.message != "cannot release un-acquired lock":
+            if exc.args[0] != "cannot release un-acquired lock":
                 raise
         if n:
             print('Released Intrument lock', n, 'time(s)')
@@ -535,7 +535,7 @@ class Lock_Instruments(threading._RLock):
         try:
             self._RLock__block.release()
         except thread_error as exc:
-            if exc.message != 'release unlocked lock':
+            if exc.args[0] != 'release unlocked lock':
                 raise
         else:
             print('Inner lock was still locked, now released.')
@@ -644,7 +644,7 @@ class release_lock_context(object):
                 self.instr._lock_release()
                 self.n += 1
         except RuntimeError as exc:
-            if exc.message != "cannot release un-acquired lock":
+            if exc.args[0] != "cannot release un-acquired lock":
                 raise
         return self
     def __exit__(self, exc_type, exc_value, exc_traceback):
