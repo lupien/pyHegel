@@ -26,13 +26,12 @@ from __future__ import absolute_import, print_function, division
 import os.path
 import sys
 import numpy as np
-
-
 from ..instruments_base import BaseInstrument, scpiDevice, ChoiceIndex,\
                             wait_on_event, BaseDevice, MemoryDevice, ReadvalDev,\
                             _retry_wait, locked_calling, CHECKING
 
 from ..instruments_registry import register_instrument, add_to_instruments
+from .. import config
 
 clr = None
 Int32 = None
@@ -48,7 +47,7 @@ _delayed_imports_done = False
 def _delayed_imports():
     global _delayed_imports_done
     if not _delayed_imports_done:
-        global clr, Int32, Int64, IntPtr, Marshal, OlBase, OlException
+        global clr, Int32, Int64, IntPtr, Marshal, OlBase, OlException, _assembly_Version
         try:
             import clr
             from System import Int32, Int64, IntPtr
@@ -62,6 +61,7 @@ def _delayed_imports():
                 _datatranslation_dir += ' (32-bit)'
             if _datatranslation_dir not in sys.path:
                 sys.path.append(_datatranslation_dir)
+            clr.AddReference('OpenLayers.Base')
             import OpenLayers.Base as OlBase
             from OpenLayers.Base import OlException
             _assembly_Version = OlBase.Utility.AssemblyVersion.ToString()
@@ -113,10 +113,18 @@ class Ol_Device(scpiDevice):
 
 class Ol_ChoiceIndex(ChoiceIndex):
     def __init__(self, OlDataType, normalize=False):
-        values = list(OlDataType.GetNames(OlDataType))
-        names = list(OlDataType.GetValues(OlDataType))
+        enum_type = eval(OlDataType)
+        self.enum_type_name = OlDataType
+        values = list(enum_type.GetNames(enum_type))
+        names = list(enum_type.GetValues(enum_type))
+        if not isinstance(values[0], int):
+            self._pythonnet3 = True
+            noconv = True
+        else:
+            self._pythonnet3 = False
+            noconv = False
         d = dict(zip(names, values))
-        super(Ol_ChoiceIndex, self).__init__(d, normalize=normalize)
+        super(Ol_ChoiceIndex, self).__init__(d, normalize=normalize, noconv=noconv)
     def __getitem__(self, key_val):
         """ For a key this returns the value. For value it returns the corresponding key.
             It checks for keys First. This should be ok as long as keys and values
@@ -126,7 +134,17 @@ class Ol_ChoiceIndex(ChoiceIndex):
             return super(Ol_ChoiceIndex, self).__getitem__(key_val)
         else:
             return self.keys[self.index(key_val)]
-
+    def __call__(self, input_enum):
+        if self._pythonnet3:
+            return self[input_enum]
+        else:
+            return super(Ol_ChoiceIndex, self).__call__(input_enum)
+    def tostr(self, input_choice):
+        val = super(Ol_ChoiceIndex, self).tostr(input_choice)
+        if self._pythonnet3:
+            # instead of int(val), could use val.value__
+            val = '{}({})'.format(self.enum_type_name, int(val))
+        return val
 
 #######################################################
 ##    DataTranslation instrument
@@ -167,14 +185,15 @@ class DataTranslation(BaseInstrument):
         self._num_in = dev.GetNumSubsystemElements(OlBase.SubsystemType.AnalogInput)
         if self._num_in < 1:
             raise ValueError('No input available for %s'%name)
-        self._coupling_type = Ol_ChoiceIndex(OlBase.CouplingType)
-        self._cursrc_type = Ol_ChoiceIndex(OlBase.ExcitationCurrentSource)
-        self._dataflow_type = Ol_ChoiceIndex(OlBase.DataFlow)
-        self._io_type = Ol_ChoiceIndex(OlBase.IOType)
-        self._sync_type = Ol_ChoiceIndex(OlBase.SynchronizationModes)
-        self._trig_type = Ol_ChoiceIndex(OlBase.TriggerType)
-        self._buffer_state = Ol_ChoiceIndex(OlBase.OlBuffer.BufferState)
-        self._sub_state = Ol_ChoiceIndex(OlBase.SubsystemBase.States)
+        self._coupling_type = Ol_ChoiceIndex("OlBase.CouplingType")
+        self._cursrc_type = Ol_ChoiceIndex("OlBase.ExcitationCurrentSource")
+        self._dataflow_type = Ol_ChoiceIndex("OlBase.DataFlow")
+        self._io_type = Ol_ChoiceIndex("OlBase.IOType")
+        self._sync_type = Ol_ChoiceIndex("OlBase.SynchronizationModes")
+        self._trig_type = Ol_ChoiceIndex("OlBase.TriggerType")
+        self._ref_trig_type = Ol_ChoiceIndex("OlBase.ReferenceTriggerType")
+        self._buffer_state = Ol_ChoiceIndex("OlBase.OlBuffer.BufferState")
+        self._sub_state = Ol_ChoiceIndex("OlBase.SubsystemBase.States")
 
         # We hard code the first element here. TODO check _num_in
         ai = dev.AnalogInputSubsystem(0)
@@ -199,7 +218,7 @@ class DataTranslation(BaseInstrument):
                              'type': self._trig_type[ai.Trigger.TriggerType],
                              'threshold_ch': ai.Trigger.ThresholdTriggerChannel}
         self.in_ref_trig_info = {'level': ai.ReferenceTrigger.Level,
-                                 'type': self._trig_type[ai.ReferenceTrigger.TriggerType],
+                                 'type': self._ref_trig_type[ai.ReferenceTrigger.TriggerType],
                                  'threshold_ch': ai.ReferenceTrigger.ThresholdTriggerChannel,
                                  'post_count':ai.ReferenceTrigger.PostTriggerScanCount}
         all_channels = [ai.SupportedChannels[i] for i in range(ai.SupportedChannels.Count)]
@@ -401,7 +420,7 @@ class DataTranslation(BaseInstrument):
                                               min=0, max=self.in_info['Nchan'])
         # The reference trigger will stop acquisition after ScanCount
         # It does not handle TTL
-        self.in_reftrig_mode = Ol_Device('_analog_in.ReferenceTrigger.TriggerType', choices=self._trig_type)
+        self.in_reftrig_mode = Ol_Device('_analog_in.ReferenceTrigger.TriggerType', choices=self._ref_trig_type)
         self.in_reftrig_level =  Ol_Device('_analog_in.ReferenceTrigger.Level',
                                               str_type=float,
                                               min=self.in_info['volt_range'][0], max=self.in_info['volt_range'][1])
