@@ -35,7 +35,7 @@ from ..instruments_base import visaInstrument, visaInstrumentAsync,\
                             decode_float64, decode_float64_avg, decode_float64_meanstd,\
                             decode_uint16_bin, _decode_block_base, _decode_block_auto, decode_float64_2col,\
                             decode_complex128, sleep, locked_calling, visa_wrap, _encode_block,\
-                            ChoiceSimple, _retry_wait, Block_Codec, ChoiceSimpleMap
+                            ChoiceSimple, _retry_wait, Block_Codec, ChoiceSimpleMap, ProxyMethod
 from ..instruments_registry import register_instrument, register_usb_name, register_idn_alias
 
 from ..comp2to3 import fb
@@ -1068,7 +1068,7 @@ class agilent_multi_34410A(visaInstrumentAsync):
                     Sense:data is raw sensor value.
                     """)
                     #For PTPeak, see init_resets_ptp device to decide when resets are done (or use ptp_clear func).
-            self.ptp_clear = self._ptp_clear
+            self.ptp_clear = ProxyMethod(self._ptp_clear)
             self._devwrap('secondary_fetch', autoinit=False, trig=True)
 
         if not model_new:
