@@ -32,8 +32,10 @@ from __future__ import absolute_import, print_function, division
 import threading as _threading
 import warnings as _warnings
 import os as _os
+import ctypes
 from ctypes import byref as _byref
 from math import isinf as _isinf
+import time
 
 from . import config
 from .comp2to3 import xrange, string_types, string_bytes_types, is_py2, fu, fb
@@ -68,6 +70,103 @@ old_interface = True       # True when pyvisa versons < 1.5
 version = "1.4"
 
 _agilent_visa = False
+
+_python_signal_handler = None
+_signal_hndl_type = None
+_windows_hndl_type = None
+_SIGINT = None
+_Gen_CTRL_C = None
+_set_windows_handler = None
+_windows_ctrl_handler = None
+_init_func_type = None
+_time_init_func = None
+
+def _ctrl_handler(code):
+    """ This does the same thing as the basic microsoft crt signal handler for the CTRL-C handler """
+    # C:\Program Files (x86)\Windows Kits\10\Source\10.0.19041.0\ucrt\misc\signal.cpp
+    if code == 0: # CTRL-C
+        # another option would be ctypes.pythonapi.PyErr_SetInterrupt()
+        # but in python 3 this misses setting the Event required to stop a time.sleep
+        # To test can lool at: ctypes.pythonapi.PyOS_InterruptOccurred()
+        _python_signal_handler(_SIGINT)
+    # Let other handlers run
+    return False
+
+def init_keysight_CTRL_C_breaking():
+    global _python_signal_handler, _windows_hndl_type, _signal_hndl_type,\
+           _SIGINT, _Gen_CTRL_C, _set_windows_handler, _windows_ctrl_handler,\
+           _init_func_type, _time_init_func
+    if _os.name != 'nt':
+        return
+    if _python_signal_handler is not None:
+        return
+    from signal import SIGINT as _SIGINT
+    k32 = ctypes.cdll.kernel32
+    _signal_hndl_type = ctypes.CFUNCTYPE(None, ctypes.c_int)
+    _windows_hndl_type = ctypes.CFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.DWORD)
+    # Setup PyOS_getsig
+    getsig = ctypes.pythonapi.PyOS_getsig
+    getsig.argtypes = [ctypes.c_int]
+    getsig.restype = _signal_hndl_type
+    # Get python signal handler
+    _python_signal_handler = ctypes.pythonapi.PyOS_getsig(_SIGINT)
+    # Setup GenerateConsoleCtrlEvent as _Gen_CTRL_C
+    gen = k32.GenerateConsoleCtrlEvent
+    gen.argtypes =  [ctypes.wintypes.DWORD, ctypes.wintypes.DWORD]
+    gen.restype = ctypes.wintypes.BOOL
+    _Gen_CTRL_C = lambda : gen(0, 0) # first 0 means CTRL-C
+    # Setup SetConsoleCtrlHandler specific call as _set_windows_handler
+    # and wrap _ctrl_handler with ctypes as _windows_ctrl_handler
+    set_hndlr = k32.SetConsoleCtrlHandler
+    set_hndlr.argtypes = [_windows_hndl_type, ctypes.wintypes.BOOL]
+    set_hndlr.restype = ctypes.wintypes.BOOL
+    _windows_ctrl_handler = _windows_hndl_type(_ctrl_handler)
+    _set_windows_handler = lambda : set_hndlr(_windows_ctrl_handler, True)
+    if is_py2:
+        # we need to find the time module init function
+        _init_func_type = ctypes.PYFUNCTYPE(None)
+        class Inittab(ctypes.Structure):
+            _fields_ = [('name', ctypes.c_char_p), ('init_func', _init_func_type)]
+        pInittab = ctypes.POINTER(Inittab)
+        inittab = pInittab.in_dll(ctypes.pythonapi, 'PyImport_Inittab')
+        i = 0
+        while True:
+            if inittab[i] is None:
+                break
+            if inittab[i].name == 'time':
+                _time_init_func = inittab[i].init_func
+                break
+            i += 1
+
+# For at least Keysight IO libs 2023 update 1 (18.3.29517.2)
+# When loading a usn device, the CTRL-C handling gets broken
+# The problem is probably in
+#  C:\Program Files\Keysight\IO Libraries Suite\drivers\ioUsb48832.dll
+# that calls SetConsoleCtrlHandler with a handler that overrides all previous handlers.
+# This problem was reported to Keysight on 2023-10-24 (by CL)
+# To fix it, we need to install a new handler that will do the same as the
+# windows crt signal handler, which is call the python signal handler.
+# In python 2.7 that is not enough since the time module also adds a handler
+# To enable the breaking of sleep. The only way to fix that, I think, is to
+# reinitialize the time module (that is where the handler is set).
+# Hopefully that does not break anything.
+def fix_keysight_CTRL_C_breaking():
+     if _os.name != 'nt':
+         return
+     try:
+         _Gen_CTRL_C()
+         time.sleep(.01)
+     except KeyboardInterrupt:
+         # No problem, skip fixing
+         #print('CTRL-C handling is fine, no need to fix it.')
+         return
+     #print('CTRL-C handling is BROKEN, fixing it!')
+     # check if needed
+     _set_windows_handler()
+     if is_py2:
+         _time_init_func()
+     _warnings.warn('Fixing the keysight CTRL-C problem', stacklevel=2)
+
 
 def is_version(lower=None, upper=None):
     """
@@ -482,7 +581,9 @@ class old_Instrument(redirect_instr):
     _write_termination = CR + LF
     _encoding = 'ascii'
     def __init__(self, manager, instr_instance, **kwargs):
+        init_keysight_CTRL_C_breaking()
         super(old_Instrument, self).__init__(instr_instance)
+        fix_keysight_CTRL_C_breaking()
         self.resource_manager = manager
         for k,v in kwargs.items():
             setattr(self, k, v)
@@ -652,7 +753,9 @@ class new_Instrument(redirect_instr):
     #def __del__(self):
     #    print('Deleting instrument', self.resource_name)
     def __init__(self, manager, instr_instance, **kwargs):
+        init_keysight_CTRL_C_breaking()
         super(new_Instrument, self).__init__(instr_instance)
+        fix_keysight_CTRL_C_breaking()
         self.resource_manager = manager
         for k,v in kwargs.items():
             setattr(self, k, v)
