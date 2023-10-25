@@ -120,7 +120,6 @@ If none are loaded, a default set is tried in order.
 
 from __future__ import absolute_import, print_function, division
 
-import sip
 import sys
 import time
 import types
@@ -166,6 +165,10 @@ def load_Qt4():
     QtCore.Signal = QtCore.pyqtSignal
     QtCore.Slot = QtCore.pyqtSlot
 
+    # since PyQt v5.11, need to open sip after importing PyQt5 (or import PyQt5.sip)
+    # This sip import used to be at the top of this module and would fail when qt_wrap
+    # was imported before importing PyQt5
+    import sip
     version = sip.getapi('QString')
     api = 'pyqt4' if version == 1 else 'pyqt4v2'
 
