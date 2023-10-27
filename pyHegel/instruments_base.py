@@ -42,7 +42,7 @@ from . import visa_wrap
 from . import instruments_registry
 from .types import dict_improved
 from .comp2to3 import is_py2, string_bytes_types, thread_error, get_ident, string_upper,\
-                        write_unicode_byte, fu, fb, make_str
+                        write_unicode_byte, fu, fb, make_str, get_terminal_size
 if is_py2:
     translate_del_lower = lambda s: s.translate(None, string.ascii_lowercase)
 else:
@@ -270,8 +270,12 @@ class MainStatusLine(object):
             entries = list(self.users.values())
         entries = sorted(entries, key=lambda x: x[0], reverse=True) # sort on decreasing priority only
         outstr = ' '.join([e[1] for e in entries if e[1] != '']) # join the non-empty status
-        outstr = outstr if len(outstr)<=72 else outstr[:69]+'...'
-        sys.stdout.write('\r%-72s'%outstr)
+        # limit to terminal size -5
+        cols = get_terminal_size().columns - 5
+        if cols < 10:
+            cols = 72 # the previous with that was used
+        outstr = outstr if len(outstr)<=cols else outstr[:cols-3]+'...'
+        sys.stdout.write('\r%-*s'%(cols, outstr))
         sys.stdout.flush()
 
 mainStatusLine = MainStatusLine()
