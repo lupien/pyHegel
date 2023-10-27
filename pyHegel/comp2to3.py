@@ -65,7 +65,73 @@ if is_py2:
     def open_universal(name, mode, *args):
         mode += 'U'
         return open(name, mode, *args)
-
+    #
+    # Do the equivalent of  shutil.get_terminal_size
+    #
+    class Term_Size(object):
+        def __init__(self, cols=80, rows=24):
+            self.columns = cols
+            self.lines = rows
+        def __repr__(self):
+            return "Term_Size(columns=%d, lines=%i)"%(self.columns, self.lines)
+    import os
+    import ctypes
+    if os.name == 'nt':
+        import ctypes.wintypes as wt
+        import msvcrt
+        class COORD(ctypes.Structure):
+            _fields_ = [('X', wt.SHORT), ('Y', wt.SHORT)]
+        class CONSOLE_SCREEN_BUFFER(ctypes.Structure):
+            _fields_ = [('dwSize', COORD), ('dwCursorPosition', COORD),
+                        ('wAttributes', wt.WORD), ('srWindow', wt.SMALL_RECT),
+                        ('dwMaximumWindowSize', COORD)]
+        GetConsoleScreenBufferInfo = ctypes.windll.kernel32.GetConsoleScreenBufferInfo
+        GetConsoleScreenBufferInfo.restype = wt.BOOL
+        GetConsoleScreenBufferInfo.argstype = [wt.HANDLE, ctypes.POINTER(CONSOLE_SCREEN_BUFFER)]
+        def _get_terminal_size(fd):
+            # This could genere IOError
+            hndl = msvcrt.get_osfhandle(fd)
+            csb = CONSOLE_SCREEN_BUFFER()
+            if not GetConsoleScreenBufferInfo(hndl, ctypes.byref(csb)):
+                return 0, 0
+            #return csb.dwSize.X, csb.dwSize.Y # The Y size is the size of the buffer not the screen
+            return csb.srWindow.Right - csb.srWindow.Left + 1, csb.srWindow.Bottom - csb.srWindow.Top + 1
+    else:
+        try:
+            from termios import TIOCGWINSZ
+            from fcntl import ioctl
+        except ImportError:
+            _get_terminal_size = lambda fd: (0, 0)
+        else:
+            class Term_ioctl_size(ctypes.Structure):
+                _fields_ = [('ws_row', ctypes.c_ushort), ('ws_col', ctypes.c_ushort),
+                            ('ws_xpixel', ctypes.c_ushort), ('ws_ypixel', ctypes.c_ushort)]
+            def _get_terminal_size(fd):
+                size = Term_ioctl_size()
+                # this could generate an IOError
+                ioctl(fd, TIOCGWINSZ, size, True)
+                return size.ws_col, size.ws_row
+    # this is based on the python 3 version of shutil.get_terminal_size
+    def get_terminal_size(fallback=(80, 24)):
+        try:
+            columns = int(os.environ['COLUMNS'])
+        except (KeyError, ValueError):
+            columns = 0
+        try:
+            lines = int(os.environ['LINES'])
+        except (KeyError, ValueError):
+            lines = 0
+        if columns <= 0 or lines <= 0:
+            try:
+                fd = sys.__stdout__.fileno()
+                term_size = _get_terminal_size(fd)
+            except (IOError, AttributeError):
+                term_size = 0, 0
+            if columns <= 0:
+                columns = term_size[0] or fallback[0]
+            if lines <= 0:
+                lines = term_size[1] or fallback[1]
+        return Term_Size(columns, lines)
 
 if is_py3:
     from collections import namedtuple
@@ -108,6 +174,7 @@ if is_py3:
     isidentifier = lambda s: s.isidentifier()
     inspect_getargspec = py3_inspect_getargspec
     open_universal = open
+    from shutil import get_terminal_size
 
 else:
     from StringIO import StringIO
