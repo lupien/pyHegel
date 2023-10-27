@@ -101,7 +101,7 @@ def init_keysight_CTRL_C_breaking():
     if _python_signal_handler is not None:
         return
     from signal import SIGINT as _SIGINT
-    k32 = ctypes.cdll.kernel32
+    k32 = ctypes.windll.kernel32
     _signal_hndl_type = ctypes.CFUNCTYPE(None, ctypes.c_int)
     _windows_hndl_type = ctypes.CFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.DWORD)
     # Setup PyOS_getsig
@@ -155,7 +155,10 @@ def fix_keysight_CTRL_C_breaking():
          return
      try:
          _Gen_CTRL_C()
-         time.sleep(.01)
+         # need to wait long enough for the CTRL-C to propagate
+         # I initially tried with 0.01 but that was not enough
+         # And this wait should not happen to often so increase it to 0.5
+         time.sleep(.5)
      except KeyboardInterrupt:
          # No problem, skip fixing
          #print('CTRL-C handling is fine, no need to fix it.')
