@@ -295,6 +295,7 @@ def reset_pyHegel():
     reload(traces.qt_wrap)
     reload(traces)
     reload(instruments_base.visa_wrap)
+    reload(instruments_base._types)
     instruments_registry.clean_instruments()
     reload(instruments_registry)
     reload(instruments_base)

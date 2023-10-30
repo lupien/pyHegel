@@ -40,6 +40,7 @@ from .kbint_util import _sleep_signal_context_manager, _delayed_signal_context_m
 
 from . import visa_wrap
 from . import instruments_registry
+from . import types as _types
 from .types import dict_improved
 from .comp2to3 import is_py2, string_bytes_types, thread_error, get_ident, string_upper,\
                         write_unicode_byte, fu, fb, make_str, get_terminal_size
