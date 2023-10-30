@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 ########################## Copyrights and license ############################
 #                                                                            #
 # Copyright 2011-2023  Christian Lupien <christian.lupien@usherbrooke.ca>    #
@@ -35,10 +33,12 @@ from .logical import ScalingDevice
 from ..types import dict_improved
 
 
+import threading
 import time
 import numpy as np
 from numpy import sign, abs, sqrt, sin, cos, pi, arctan2
 from scipy.optimize import brentq
+from scipy.spatial.transform import Rotation
 
 from ..comp2to3 import string_bytes_types
 
@@ -115,8 +115,8 @@ class AmericanMagnetics_model430(visaInstrument):
         self._conf_supply_cache = None
         self._conf_magnet_cache = None
         self._coil_constant = 0. # always in T/A
-        self._max_ramp_rate = max_ramp_rate
-        self._min_ramp_rate = min_ramp_rate
+        self._max_ramp_rate = max_ramp_rate # in A/s
+        self._min_ramp_rate = min_ramp_rate # in A/s
         self._orig_target_cache = None
         self._last_state = None
         super(AmericanMagnetics_model430, self).__init__(visa_addr, **kwargs)
@@ -365,9 +365,11 @@ class AmericanMagnetics_model430(visaInstrument):
         elif stay_states == 'heating_persistent_switch':
             prog_base = 'Magnet Heating switch: {time}/%.1f'%conf['persistent_switch_heat_time']
         elif self._last_state == 'ramp':
-            prog_base = 'Magnet Ramping {current:.3f}/%.3f A'%self.current_target.getcache()
+            prog_base = 'Magnet Ramping {current:.3f}/%.3f A at %4f A/%s'% \
+                (self.current_target.getcache(), self.ramp_rate_current.getcache()['rate'], self.ramp_rate_unit.get())
         else: # zeroing field
-            prog_base = 'Magnet Ramping {current:.3f}/0 A'
+            prog_base = 'Magnet Ramping {current:.3f}/%.3f A at %4f A/%s'% \
+                (self.current_target.getcache(), self.ramp_rate_current.getcache()['rate'], self.ramp_rate_unit.get())
         if isinstance(stay_states, string_bytes_types):
             stay_states = [stay_states]
         with release_lock_context(self):
@@ -508,7 +510,7 @@ class AmericanMagnetics_model430(visaInstrument):
         self.current = scpiDevice(getstr='current:supply?', str_type=float, doc='This is the current output by the supply. See also current_magnet.')
         self.current_magnet = scpiDevice(getstr='current:magnet?', str_type=float, doc='This is the current in the magnet even when in persistent mode. See also current.')
         self.current_target = scpiDevice('CONFigure:CURRent:TARGet', 'CURRent:TARGet?', str_type=float, setget=True)
-        #self.field = scpiDevice(getstr='field:magnet?', str_type=float,
+        #self.field = scpiDevice(getstr='FIELD:MAGnet?', str_type=float,
         #                        doc='This is the field in the magnet even when in persistent mode (units are T or kG depending on field_unit device). See also current_magnet')
         self.field_unit = scpiDevice('CONFigure:FIELD:UNITS', 'FIELD:UNITS?', choices=ChoiceIndex(['kG', 'T']))
         #self.field_target = scpiDevice('CONFigure:FIELD:TARGet', 'FIELD:TARGet?', str_type=float, doc='Units are in kG or T depending on field_unit device.')
@@ -564,30 +566,78 @@ class AmericanMagnetics_model430(visaInstrument):
 
 @register_instrument('pyHegel_Instrument', 'magnet_simul', '1.0')
 class MagnetSimul(BaseInstrument):
+    """ This simulate a magnet device.
     """
-    TODO
-    """
-    def __init__(self, max_field=5., max_rate=0.184*0.0779, field_A_const=0.0779):
-        """ field in T, current in A, time in s """
+    id = 0
+    def __init__(self, max_field=5., max_rate=0.184, field_A_const=0.0779):
+        """ max_field in T, max_rate in A/s, field_A_const in T/A """
+        MagnetSimul.id += 1
         self._last_field = (0, time.time())
+        self._coil_constant = field_A_const # in T/A
         self._max_field = abs(max_field)
+        self._max_current = self._max_field/self._coil_constant
         self._max_rate = abs(max_rate)
-        self._field_A_const = field_A_const
+        self._max_ramp_rate = max_rate # in A/s
+        self._min_ramp_rate = 1e-4
         super(MagnetSimul, self).__init__(self)
+        self.ramp_rate_current.set({'rate': 0.1, 'max_current':1})
+
     def _current_getdev(self):
-        return self.field.get()/self._field_A_const
-    def _rate_current_getdev(self):
-        return self.rate.get()/self._field_A_const
-    def _field_getdev(self):
+        return self.field_T.get()/self._coil_constant
+
+    def _ramp_rate_field_checkdev_helper(self, unit=None, index=None):
+        if unit not in ['sec', 'min', None]:
+            raise ValueError(self.perror("Invalid unit, should be 'sec' or 'min' or None"))
+        if unit is not None:
+            # set unit here (don't use setcache otherwise ramp_rate_current.set will not do the unit set internally)
+            # It will not be repeated in ramp_rate_current.set because the value is only set if different than the cache
+            self.ramp_rate_unit.set(unit)
+
+    def _ramp_rate_current_checkdev(self, val, unit=None):
+        self._ramp_rate_field_checkdev_helper(unit)
+        BaseDevice._checkdev(self.ramp_rate_current, val)
+
+    def _ramp_rate_current_getdev(self, unit=None):
+        if unit is None:
+            unit = self.ramp_rate_unit.get()
+        ratesec = self.rate.get() if unit=='sec' else self.rate.get()*60
+        return dict_improved([('rate', ratesec), ('max_current', self.upper_bound.get())])
+
+    def _ramp_rate_current_setdev(self, val, unit=None):
+        """ Requires a dictionnary with rate and max_current """
+        unit = unit if unit is not None else self.ramp_rate_unit.get()
+        rate, max_current = val.get('rate', None), val.get('max_current', None)
+        if rate is not None:
+            ratesec = val['rate'] if unit=='sec' else val['rate']*60
+            self.rate.set(ratesec)
+        if max_current is not None:
+            self.upper_bound.set(val['max_current'])
+
+    def _ramp_rate_field_T_setdev(self, val, unit=None):
+        """ Same as ramp_rate_current but with rate and max_field"""
+        scale = self._coil_constant
+        nval = dict_improved(rate=val['rate']/scale, max_current=val['max_field']/scale)
+        self.ramp_rate_current.set(nval, unit=unit)
+
+    def _ramp_rate_field_T_getdev(self, unit=None):
+        val = self.ramp_rate_current.get(unit=unit)
+        scale = self._coil_constant
+        rval = dict_improved(rate=val['rate']*scale, max_field=val['max_current']*scale)
+        return rval
+
+    def _field_T_getdev(self):
         now = time.time()
         f, last = self._last_field
-        mode = self.mode.get()
+        mode = self.state.get()
         if mode == 'hold':
             new_f = f
         elif mode == 'ramp':
-            sp = self.field_setpoint.get()
+            sp = self.field_target_T.get()
+            if sp==f:
+                self.state.set('hold')
             direction = sign(sp - f)
-            new_f = f + direction*self.rate.get()*(now-last)
+            rate_T = self.rate.get()*self._coil_constant
+            new_f = f + direction*rate_T*(now-last)
             if (new_f-sp)*direction > 0:
                 new_f = sp
             if abs(new_f) > self._max_field:
@@ -596,14 +646,57 @@ class MagnetSimul(BaseInstrument):
             raise RuntimeError("Invalid mode")
         self._last_field = (new_f, now)
         return new_f
+
+    def _ramping_helper(self, quiet=False):
+        rate = self.ramp_rate_field_T.get()['rate']
+        prog_base = 'Magnet Ramping {field:.4f}/%.4f T at %4f T/s'%(self.field_target_T.getcache(), rate)
+        with release_lock_context(self):
+            if not quiet:
+                with mainStatusLine.new(priority=MagnetSimul.id, timed=1) as progress:
+                    while self.state.get() == 'ramp':
+                        wait(1)
+                        progress(prog_base.format(field=self.field.get()))
+
+    def _ramp_field_T_setdev(self, val, return_persistent='auto', wait=None, quiet=False, no_wait_end=False):
+        """ simulate ramping to val (in T) at self.rate """
+        self.state.set('ramp')
+        self.field_target_T.set(val)
+        self._ramping_helper(quiet=quiet)
+
+    def _ramp_field_T_checkdev(self, val, quiet=None):
+        BaseDevice._checkdev(self.ramp_field_T, val)
+
+    def _ramp_current_setdev(self, val, return_persistent='auto', wait=None, quiet=False, no_wait_end=False):
+        print(val*self._coil_constant)
+        self._ramp_field_T_setdev(self, val*self._coil_constant)
+
     def _create_devs(self):
-        self.field_setpoint = MemoryDevice(0., min=-self._max_field, max=self._max_field)
-        #self.field = MemoryDevice(0.)
-        self.rate = MemoryDevice(self._max_rate, min=0., max=self._max_rate)
-        self.mode = MemoryDevice('hold', choices=['hold', 'ramp'])
-        self._devwrap('current')
-        self._devwrap('rate_current')
-        self._devwrap('field')
+        cc = self._coil_constant
+        self.field_unit = MemoryDevice('T', choices=ChoiceIndex(['kG', 'T']))
+        self.ramp_rate_unit = MemoryDevice('sec', choices=ChoiceIndex(['sec', 'min']))
+        self.state = MemoryDevice('hold', choices=['hold', 'ramp'])
+        #self.field = MemoryDevice(0., doc='simulated field (always in T)')
+        self.rate = MemoryDevice(self._max_rate, min=0., max=self._max_rate, doc='simulated rate (always in A/s)')
+        self.upper_bound = MemoryDevice(0, min=0., max=self._max_current, doc='simulated upped bound (always in A)')
+        self._devwrap('current') # current output of the "supply"
+        self._devwrap('field_T')
+
+        self.field_target_T = MemoryDevice(0., min=-self._max_field, max=self._max_field, doc='field setpoint in T')
+
+        rmin, rmax = self._min_ramp_rate, self._max_ramp_rate
+        rate_lim = ChoiceDevDep(self.ramp_rate_unit, dict(min=ChoiceLimits(min=rmin*60, max=rmax*60), sec=ChoiceLimits(min=rmin, max=rmax)))
+        #self._devwrap('ramp_rate_current',
+        #             choices=ChoiceMultiple(['rate', 'max_current'], [(float, rate_lim), (float, (1e-4, None))]))
+        #self.ramp_rate_current = MemoryDevice(choices=ChoiceMultiple(['rate', 'max_current'], [(float, rate_lim), (float, (1e-4, None))]))
+        self._devwrap('ramp_rate_current')
+
+        rTmin, rTmax = np.array([rmin, rmax])*self._coil_constant
+        rate_T_lim = ChoiceDevDep(self.ramp_rate_unit, dict(min=ChoiceLimits(min=rTmin*60, max=rTmax*60), sec=ChoiceLimits(min=rTmin, max=rTmax)))
+        self._devwrap('ramp_rate_field_T',
+                      choices=ChoiceMultiple(['rate', 'max_field'], [(float, rate_T_lim), (float, (0, None))]),
+                      allow_kw_as_dict=True, allow_missing_dict=True, allow_val_as_first_dict=True)
+        self._devwrap('ramp_current', autoinit=False, doc='Ramp to val in A')
+        self._devwrap('ramp_field_T', autoinit=False, doc='Ramp to val in T')
         # This needs to be last to complete creation
         super(MagnetSimul, self)._create_devs()
 
@@ -612,10 +705,10 @@ class MagnetSimul(BaseInstrument):
 ##    American Magnetics, Inc. Vector magnet
 #######################################################
 
-def length(self, xyz):
+def length(xyz):
     return sqrt(xyz[0]**2 + xyz[1]**2 + xyz[2]**2)
 
-def to_cartesian(self, rtp, deg=True):
+def to_cartesian(rtp, deg=True):
     r, t, p = rtp
     if deg:
         t = t*pi/180
@@ -625,7 +718,7 @@ def to_cartesian(self, rtp, deg=True):
     z = r * cos(t)
     return np.array([x, y, z])
 
-def to_spherical(self, xyz, deg=True, no_phi=False):
+def to_spherical(xyz, deg=True, no_phi=False):
     x, y, z = xyz
     r = length(xyz)
     if no_phi:
@@ -636,11 +729,11 @@ def to_spherical(self, xyz, deg=True, no_phi=False):
             xy = y
             p = z*0. + pi/2
         else:
-            raise ValueError('Asking for no_phi, but data has x and y ! =0')
+            raise ValueError('Asking for no_phi, but data has x and y != 0')
     else:
         xy = sqrt(x**2 + y**2)
-        p = arctan2(y, x)
-    t = arctan2(xy, z)
+        p = np.arctan2(y, x)
+    t = np.arctan2(xy, z)
     if deg:
         t *= 180/pi
         p *= 180/pi
@@ -669,8 +762,40 @@ class AmericanMagnetics_vector(BaseInstrument):
                  produce an unacceptable condition.
         max_vector_field is the maximum field when more than one magnet is on.
         With this instrument, fields are always Tesla. Rates are always T/min
+        methods:
+        - linspace_rotation
+        - linspace_plane
+        - stop_ramping
+        devices:
+        - sequence
+        - ramp_to
+        - ramp_to_index
+        - ramp_wait_after
+        To use sequence in a sweep, set: start=0, stop=nb_points-1, npts=np_points
+        The sweep file will contain sequence index and not field values. To write them, use out=[vec.fieldx, vec.fieldy, vec.fieldz] (or vec.fields but it will create a new file for each point).
+        It is recommended to use updown='alternate' to reduce the sweep time.
+        Example usage:
+        mx = instruments.AmericanMagnetics_model430('tcpip::A6013_X-AX.local::7180::socket')
+        my = instruments.AmericanMagnetics_model430('tcpip::A5072_Y-AX.local::7180::socket')
+        mz = instruments.AmericanMagnetics_model430('tcpip::A6021_Z-AX.local::7180::socket')
+        mag = instruments.AmericanMagnetics_vector(mx, my, mz)
+        pts = mag.linspace_plane((0.1,0,0),(0,0.0707,0.0707))
+        mag.sequence.set(pts.T)
+        mag.ramp_to_index.set(0)
+        mag.stop_ramping()
+        sweep mag.ramp_to_index, 0, mag.nb_points-1, mag.nb_points, out=[mag.fieldx, mag.fieldy, mag.fieldz]
         """
         if magnet_x == magnet_y == magnet_z == None:
+            # for testing
+            self._max_vector_field = max_vector_field
+            self._magnets = [None]*3
+            self._magnets_enable = [True]*3
+            mnmx = dict(min_field=[-1]*3, max_field=[1]*3,
+                        min_field_global=0, max_field_global=1,
+                        min_rate_global=0, max_rate_global=1)
+            self._magnets_lims = dict_improved(mnmx)
+            super(AmericanMagnetics_vector, self).__init__(**kwargs)
+            return
             raise ValueError('At least one of the magnet needs to be specified.')
         # TODO could also check for same address. Not required because it is not possible to open the same magnet twice right now.
         if magnet_x is not None and magnet_x in ( magnet_y, magnet_z):
@@ -688,23 +813,23 @@ class AmericanMagnetics_vector(BaseInstrument):
                 min_field_global=np.nan, max_field_global=np.nan,
                 min_rate_global=np.nan, max_rate_global=np.nan)
         current_rate = [np.nan]*3
-        def adjust_mnmx1(func, base, val, index=None):
+        def adjust_mnmx1(func, base_str, val, index=None):
             if index is not None:
-                mnmx[base][i] = val
-            s = base+'_global'
-            mnmx[s] = func(mnmx[s], val)
+                mnmx[base_str][i] = val
+            s = base_str+'_global'
+            mnmx[s] = func((mnmx[s], val))
         for i, (magnet, name) in enumerate(zip(self._magnets, self._magnets_name)):
             if magnet:
                 self._magnets_enable[i] = True
                 if not isinstance(magnet, (AmericanMagnetics_model430, MagnetSimul)):
                     raise ValueError('magnet%s_ is of the wrong type (should be AmericanMagnetics_model430)'%name)
-                if magnet.ramp_rate_segment_count.get() > 1:
+                if hasattr(magnet, 'ramp_rate_segment_count') and magnet.ramp_rate_segment_count.get() > 1:
                     raise ValueError('magnet%s_ should only have one ramp_rate segment.'%name)
-                adjust_mnmx1(max, 'min_field', magnet.field_target_T.min, i)
-                adjust_mnmx1(min, 'max_field', magnet.field_target_T.max, i)
-                adjust_mnmx1(max, 'min_rate', magnet.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].min)
-                adjust_mnmx1(min, 'max_rate', magnet.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].max)
-                current_rate[i] = magnet.ramp_rate_field_T.get(unit='min')
+                adjust_mnmx1(np.nanmax, 'min_field', magnet.field_target_T.min, i)
+                adjust_mnmx1(np.nanmin, 'max_field', magnet.field_target_T.max, i)
+                adjust_mnmx1(np.nanmax, 'min_rate', magnet.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].min)
+                adjust_mnmx1(np.nanmin, 'max_rate', magnet.ramp_rate_field_T.choices.fmts_lims[0].choices['min'].max)
+                current_rate[i] = magnet.ramp_rate_field_T.get(unit='min')['rate']
         self._magnets_lims = dict_improved(mnmx)
         super(AmericanMagnetics_vector, self).__init__(**kwargs)
         min_current_rate = min(current_rate)
@@ -715,29 +840,46 @@ class AmericanMagnetics_vector(BaseInstrument):
     def _ramp_rate_check(self, val):
         for magnet in self._magnets:
             if magnet:
-                magnet.ramp_rate_filed_T.check(val, unit='min')
+                magnet.ramp_rate_field_T.check(val, unit='min')
     def _ramp_rate_setdev(self, val):
         for magnet in self._magnets:
             if magnet:
-                magnet.ramp_rate_filed_T.set(val, unit='min')
-    def _ramp_rate_getdev(self, val):
+                magnet.ramp_rate_field_T.set(val, unit='min')
+    def _ramp_rate_getdev(self):
+        return [m.ramp_rate_field_T.get() for m in self._magnets if m]
+
+    def _field_target_getdev(self):
+        return [m.field_target_T.get()[0] for m in self._magnets]
+
+    def _state_getdev(self):
+        return [m.state.get() for m in self._magnets]
+
+    def _field_T_getdev(self):
+        return [m.field_T.get() for m in self._magnets]
+    def _fieldx_T_getdev(self):
+        if self._magnet_x is not None:
+            return self._magnet_x.field_T.get()
+    def _fieldy_T_getdev(self):
+        if self._magnet_y is not None:
+            return self._magnet_y.field_T.get()
+    def _fieldz_T_getdev(self):
+        if self._magnet_z is not None:
+            return self._magnet_z.field_T.get()
+
+    def _ramp_wait_after_setdev(self, val):
         for magnet in self._magnets:
             if magnet:
-                # return first value
-                return magnet.ramp_rate_filed_T.get(val)[0]
-
-    def _field_getformat(self, unit='rect'):
-        pass
-    def _field_getdev(self, unit='rect'):
-        pass
+                magnet.ramp_wait_after.set(val)
+    def _ramp_wait_after_getdev(self):
+        return [m.ramp_wait_after.get() for m in self._magnets]
 
     # actually need to set different rates to go in a straight line.
 
     def _clean_up(self, xyz):
-        xyz = np.where(np.abs(xyz) < _Abs_Tol, 0)
+        xyz = np.where(np.abs(xyz) < _Abs_Tol, 0, xyz)
         return xyz
     def _check(self, xyz):
-        #xyz = self._clean_up(xyz)
+        """ Make sure xyz is reachable. """
         all_zeros = [ np.all(f==0.) for f in xyz ]
         for f, enable in zip(xyz, self._magnets_enable):
             if not enable and np.any(f != 0.):
@@ -749,39 +891,47 @@ class AmericanMagnetics_vector(BaseInstrument):
             if np.any(xyz[i] > mx) or np.any(xyz[i] < mn):
                 raise ValueError(self.perror('Requested field bigger than axis min/max'))
         else:
-            r = self._length(xyz)
-            if r > self._max_vector_field:
-                raise ValueError(self.perror('Requested field bigger than max_vector_field'))
+            r = length(xyz)
+            if r > mg_lims.max_field_global:
+                raise ValueError(self.perror('Requested field bigger than max_vector_field. Max is ' + str(mg_lims.max_field_global)))
 
-    def _calculate_sequence(self, start, stop, only_rotation=False):
+    def _calculate_sequence(self, start, stop=None, only_rotation=False, rotation_axis=None, rotation_angle=None):
         # TODO use max_error to calculate a sequence between the 2 points.
         # Find the points and the rates that will satisfy the requirement.
         # Here find the theoretical path.
+        # start and stop in cartesian coordinates.
+        # rotation_axis and rotation_angle are used when stop is not set and only_rotation is True.
         # Later we will have to check the real path using the real ramp_rate to check we stay within the error.
         # Also decice if start is real field or starting target.
         start = self._clean_up(start)
-        stop = self._clean_up(stop)
-        self._check(stop)
+        if stop is not None:
+            stop = self._clean_up(stop)
+            self._check(stop)
         max_error = self.max_error.get()
-        if only_rotation:
+        if only_rotation and stop is not None:
             start_rtp = to_spherical(start)
             r = start_rtp[0]
             stop_rtp = to_spherical(stop)
-            if approx_equal(r, stop_rtp[0]):
+            if not approx_equal(r, stop_rtp[0]):
                 raise ValueError(self.perror('Requested a pure rotation, but start/stop change the magnitude.'))
             th_phi = self._find_rotation_sequence(r, start_rtp[1:], stop_rtp[1:], max_error)
             all_points_rtp = np.concatenate( (np.full((len(th_phi), 1), r), th_phi), axis=1)
-            all_points = np.concatenate( (start, to_cartesian(all_points_rtp.T)), axis=1)
+            all_points = np.concatenate( (start.reshape(3,1), to_cartesian(all_points_rtp.T)), axis=1)
+        elif only_rotation and stop is None:
+            # "linspace" mode: return self.np_point from start rotating around the rotation_axis by the rotation_angle.
+            if rotation_axis is None or rotation_angle is None:
+                raise ValueError(self.perror('max_error is set to -1, "rotation_axis" and "rotation_angle" must be set.'))
+            all_points = self._linspace_rotation(start, rotation_axis, rotation_angle)
         else:
             all_points = np.array([start, stop]).T
-        dif = np.diff(all_points)
+        dif = abs(np.diff(all_points))
         max_ramp_rate = self.ramp_rate.get()
-        ramp_time = np.max(dif, axis=0, keep_dims=True)/max_ramp_rate
-        ramp_rates = dif/ramp_time
+        ramp_time = np.max(dif, axis=0, keepdims=True)/max_ramp_rate
+        ramp_rates = np.where(ramp_time != 0, dif/ramp_time, 0)
         return all_points, dif, ramp_rates, max_error
 
 
-    def _rotation_max_error_internal(xyz_start, xyz_end, r):
+    def _rotation_max_error_internal(self, xyz_start, xyz_end, r):
         L = length(xyz_end - xyz_start)
         return r - sqrt(r**2 - (L/2.)**2)
 
@@ -801,6 +951,8 @@ class AmericanMagnetics_vector(BaseInstrument):
         return self._rotation_max_error_internal(xyz_start, xyz_end, abs(r))
 
     def _find_rotation_sequence(self, r, th_phi_start, th_phi_end, max_error, shortest=False):
+        th_phi_start = np.array(th_phi_start)
+        th_phi_end = np.array(th_phi_end)
         if shortest:
             # normalize the start/end
             th_phi_start = to_spherical(to_cartesian([r]+list(th_phi_start)))
@@ -827,7 +979,7 @@ class AmericanMagnetics_vector(BaseInstrument):
             unit12 = np.dot(unit1, unit2)
             rot_angle = np.arccos(unit12)
             unit_perp = normalize(unit2 - unit1*unit12)
-            froot = lambda x: self._rotation_max_error_xyz([r,0,0], [r*cos(rot_angle*x), r*sin(rot_angle*x),0]) - max_error
+            froot = lambda x: self._rotation_max_error_xyz(np.array([r,0,0]), np.array([r*cos(rot_angle*x), r*sin(rot_angle*x),0])) - max_error
             root, sol = brentq(froot, 0., 1., xtol=1e-6, maxiter=1000, full_output=True, disp=False)
             if not sol.converged:
                 raise RuntimeError('Something went wrong finding the rotation sequence. (%r)'%sol)
@@ -841,17 +993,50 @@ class AmericanMagnetics_vector(BaseInstrument):
         # xyz_s = r*(unit1*cos(rt) + unit_perp*sin(rt))
         return th_phi
 
-    def _ramp_it_helper(self, target, last=False):
+    def _ramp_it_helper(self, target, last=False, with_status=True):
         if last:
             print('Last ramp')
-        print('Going to:', target)
-        
-        
+        spx, spy, spz = target
+        rx, ry, rz = [val[0] for val in self.ramp_rate.get()]
+        #print('Going to: %s, at %s'%(target, [m.ramp_rate_field_T.get()['rate'] for m in self._magnets]))
+        prog_base = 'Magnet Ramping: x: {Bx:.4f}/%.4f, y: {By:.4f}/%.4f, z: {Bz:.4f}/%.4f at (%.4f, %.4f, %.4f) T/min'%(spx, spy, spz, rx,ry,rz)
+        mx, my, mz = self._magnets
+        self.thread = None
+        def ramp_to(target, wait_after, stop_event): # function for the threads
+            #print('ramping thread started.')
+            for i, m in enumerate(self._magnets):
+                m.ramp_field_T.set(target[i], quiet=True, no_wait_end=True)
+            while [m.is_stable() for m in self._magnets] != [True]*3:
+                if stop_event.is_set():
+                    for m in self._magnets: # stopping ramp
+                        m.set_state('pause')
+                    #print('ramping thread stopped.\n')
+                    return
+                if [m.is_stable() for m in self._magnets] == [True]*3:
+                    break
+                continue
+            #print('ramping done')
+            wait(wait_after, progress_base='')
+            return
+
+        self.stop_ramping_event = threading.Event() # event to tell the thread to stop there: mag.stop_ramping_event.set()
+        self.thread = threading.Thread(target=ramp_to, args=(target, max(self.ramp_wait_after.get()), self.stop_ramping_event,))
+        self.thread.start()
+        if with_status:
+            with mainStatusLine.new(priority=10, timed=1) as progress:
+                while self.thread.is_alive:
+                    wait(.1)
+                    progress(prog_base.format(Bx=mx.field_T.get(), By=my.field_T.get(), Bz=mz.field_T.get()))
+                    if 'quench' in [m.state.get() for m in self._magnets]:
+                        raise RuntimeError(self.perror('The magnet QUENCHED!!!'))
+                    if self.all_stable():
+                        break
+
     def _ramp_it_rtp(self, start, stop, only_rotation=True):
         """ only_rotation can be True, False or 'auto'
               in which case it will be True if r is unchanged between start/stop.
         """
-        if approx_equal(start[0], stop(0)):
+        if approx_equal(start[0], stop[0]):
             if only_rotation == 'auto':
                 only_rotation = True
         elif only_rotation == True:
@@ -860,25 +1045,30 @@ class AmericanMagnetics_vector(BaseInstrument):
             only_rotation = False
         start_xyz = to_cartesian(start)
         stop_xyz = to_cartesian(stop)
-        self._ramp_it_xyz(start_xyz, stop, only_rotation)
+        self._ramp_it_xyz(start_xyz, stop_xyz, only_rotation)
 
     def _line_max_error(self, dif, rate):
         dif_pos = abs(dif)
         t_first = min(dif_pos/rate)
-        delta = length(real_rate*t_first - dif_pos)
+        delta = length(rate*t_first - dif_pos)
         return delta
 
-
-    def _ramp_it_xyz(self, start, stop, only_rotation=False):
-        all_points, difs, ramp_rates, max_error = self._calculate_sequence(start, stop, only_rotation)
+    def _ramp_it_xyz(self, start, stop=None, only_rotation=False, rotation_axis=None, rotation_angle=None, ignore_error=False):
+        all_points, difs, ramp_rates, max_error = self._calculate_sequence(start, stop, only_rotation, rotation_axis, rotation_angle)
+        all_points, difs, ramp_rates = all_points.T, difs.T, ramp_rates.T
         N = len(difs)
         for i, (point, dif, rate) in enumerate(zip(all_points[1:], difs, ramp_rates)):
             is_last = i == N-1
-            # set ramp rate (making sure it is accepted)
+            # set ramp rate TODO:(making sure it is accepted)
+            for m_i, magnet in enumerate(self._magnets):
+                val = {}
+                val['max_field'] = abs(point[m_i])
+                if rate[m_i] != 0: val['rate'] = rate[m_i]
+                magnet.ramp_rate_field_T.set(val)
             # get real ramp rate
             real_rate = np.array([1.,1.,1.])
             delta = self._line_max_error(dif, real_rate)
-            if delta > max_error:
+            if delta > max_error and not ignore_error:
                 start = all_points[i]
                 N2 = np.ceil(delta/max_error)
                 dif_n = dif/N2
@@ -886,20 +1076,137 @@ class AmericanMagnetics_vector(BaseInstrument):
                 prev = start
                 for j, target in enumerate(targets):
                     is_last2 = is_last and j == N2 - 1
-                    self.ramp_it_helper(target, is_last2)
+                    self._ramp_it_helper(target, is_last2)
                     print('Iter i,j=%i,%i  error=%.8f'%(i,j, self._line_max_error(target-prev, real_rate)))
                     prev = target
             else:
-                self.ramp_it_helper(point, is_last)
+                self._ramp_it_helper(point, is_last)
                 print('Iter i=%i  error=%.8f'%(i, self._line_max_error(point-all_points[0], real_rate)))
             if only_rotation:
                 print('rotation error=%.8f'%(self._rotation_max_error_xyz(all_points[0], point)))
 
-        
+    def linspace_rotation(self, xyz_start, axis, angle, num=None):
+        """ Return evenly spaced points from start to start rotated by angle around the unit_axis.
+            If num is not set, it uses self.nb_points, if it is set, it update self.nb_points
+            xyz in cartesian and angle in degrees.
+        """
+        if num is not None:
+            self.nb_points.set(num)
+        else:
+            num = self.nb_points.get()
+        angle_step_rad = np.radians(angle/(num-1))
+        rotation_step = Rotation.from_rotvec(np.array(axis)*angle_step_rad)
+        sequence = np.empty((3,num))
+        for i in range(num):
+            sequence[0,i], sequence[1,i], sequence[2,i] = xyz_start
+            xyz_start = rotation_step.apply(xyz_start)
+        #self.sequence.set(sequence.T)
+        return sequence
+
+    def linspace_plane(self, xyz_start, xyz_finish, num=None, shortest=True):
+        """ Return evenly spaced points from start to finish on the plane define by (start,finish,origin).
+            They must not be aligned.
+            If num is not set, it uses self.nb_points, if it is set, it update self.nb_points
+            xyz in cartesian and angle in degrees.
+        """
+        axis = np.cross(xyz_start, xyz_finish)
+        axis = axis / np.sqrt(np.sum(axis**2))
+        angle = np.arccos(np.dot(xyz_start, xyz_finish)/(length(xyz_start)*length(xyz_finish)))
+        angle = np.degrees(angle)
+        if shortest==False:
+            angle -= 360
+        if approx_equal(angle,180):
+            raise ValueError("Vectors must define a plane with the origin, they may not be aligned.")
+        sequence = self.linspace_rotation(xyz_start, axis, angle, num)
+        lstart, lfinish = length(xyz_start), length(xyz_finish)
+        if approx_equal(lstart, lfinish):
+            return sequence
+        scaling_factors = np.linspace(lstart, lfinish, self.nb_points.get())/lstart
+        sequence *= scaling_factors
+        return sequence
+
+    def _ramp_rate_straight_line(self, xyz_start, xyz_finish):
+        """ returns the ramp_rate needed to got in a straight line from start to finish """
+        ramp_rate_max = self.ramp_rate_straight_line.get()
+        ramp_rate_min = self._magnets_lims['min_rate_global']
+        rates = [None, None, None]
+        deltas = abs(np.array(xyz_finish) - np.array(xyz_start))
+        id_delta_max = np.argmax(deltas)
+        time_max = deltas[id_delta_max]/ramp_rate_max
+        for i in range(3):
+            if i == id_delta_max:
+                rates[i] = ramp_rate_max
+            else:
+                ramp_rate = deltas[i]/time_max
+                rates[i] = ramp_rate if ramp_rate > ramp_rate_min else ramp_rate_min
+        return rates
+
+    def _ramp_to_index_checkdev(self, point_index=None, **kwargs):
+        if point_index < 0 or point_index > len(self.sequence.get()):
+            raise ValueError('Index out of range. The sequence has a length of: %d'%len(self._sequence.get()))
+        BaseDevice._checkdev(self.ramp_to, point_index)
+    def _ramp_to_index_getdev(self):
+        return # for iprint to work
+    def _ramp_to_index_setdev(self, point_index=None, **kwargs):
+        if point_index is None:
+            point_index = self.current_index.get()+1
+        target = self.sequence.get()[int(point_index)]
+        self.ramp_to.set(target, **kwargs)
+        self.current_index.set(point_index)
+
+    def _ramp_to_checkdev(self, target, straight_line=True, with_status=True):
+        BaseDevice._checkdev(self.ramp_to_index, target)
+    def _ramp_to_getdev(self):
+        return # for iprint to work
+    def _ramp_to_setdev(self, target, straight_line=True, with_status=True):
+        target = self._clean_up(target)
+        self._check(target)
+        if straight_line:
+            ramps = self._ramp_rate_straight_line(self.field_T.get(), target)
+            for m, ramp in zip(self._magnets, ramps):
+                m.ramp_rate_field_T.set(ramp)
+        self._ramp_it_helper(target, with_status=with_status)
+
+    def all_stable(self):
+        return True if [m.is_stable() for m in self._magnets] == [True]*3 else False
+
+    def stop_ramping(self):
+        if not hasattr(self, 'thread') or not self.thread.isAlive():
+            raise ValueError('Magnet is not ramping.')
+        self.stop_ramping_event.set()
+
+    def _sequence_checkdev(self, arr):
+        if 3 not in arr.shape:
+            raise ValueError('The sequence must be an array of shape (nbpts,3) (or (3,nbpts)).')
+        BaseDevice._checkdev(self.sequence, arr)
+    def _sequence_setdev(self, arr):
+        if arr.shape[0] == 3:
+            arr = arr.T
+        self.nb_points.set(arr.shape[0])
+        self._sequence.set(arr)
+    def _sequence_getdev(self):
+        return self._sequence.get()
+
     def _create_devs(self):
-        self.max_error = MemoryDevice(1e-3, min=1e-6, max=1e3)
-        self.ramp_rate = MemoryDevice(1e-3, min=1e-6, max=1, doc='In unit of T/min')
-        self._devwrap('ramp_rate')
+        self.ramp_rate_straight_line = MemoryDevice(0.1, min=self._magnets_lims['min_rate_global'],
+                                                    max=self._magnets_lims['max_rate_global'],
+                                                    doc='Max ramp_rate to use when going in straight line; in T/min')
+        self.max_error = MemoryDevice(1e-3, min=-1, max=1e3)
+        self.nb_points = MemoryDevice(10, doc='Number of points.')
+        self.current_index = MemoryDevice(-1, doc='The current position on sequence_points.\n -1 by default.')
+        self._sequence = MemoryDevice([])
+        self._devwrap('sequence', doc='Sequence of point to follow.\n The format is: [[x0, y0, z0], ..., [xn, yn, zn]].')
+        self._devwrap('ramp_rate', doc='In T/min')
+        self._devwrap('field_target')
+        self._devwrap('field_T')
+        self._devwrap('fieldx_T')
+        self._devwrap('fieldy_T')
+        self._devwrap('fieldz_T')
+        self._devwrap('state')
+        self._devwrap('ramp_to_index', doc='Ramp to the corresponding value at sequence[index].\n If the value is None, ramp to current_index+1 and update current_index.')
+        self._devwrap('ramp_to', doc='Ramp to coordinates: [x, y, z].')
+        self._devwrap('ramp_wait_after')
+        self.alias = self.ramp_to_index
         # This needs to be last to complete creation
         super(AmericanMagnetics_vector, self)._create_devs()
 
