@@ -127,7 +127,7 @@ class dict_improved(OrderedDict):
         super(dict_improved, self).__setattr__('_freeze', freeze)
         super(dict_improved, self).__setattr__('_allow_overwrite', allow_overwrite)
         # Since we can only go through an iterator once, convert it to a list now
-        if isinstance(arg[0], Iterator):
+        if len(arg)>=1 and isinstance(arg[0], Iterator):
             arg = (list(arg[0]),) + arg[1:]
         # Now check the entries
         tmp = OrderedDict(*arg, **kwarg)
