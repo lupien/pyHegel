@@ -2851,9 +2851,10 @@ class loop(BaseInstrument):
         # This needs to be last to complete creation
         super(loop, self)._create_devs()
 
-@register_instrument('pyHegel_Instrument', 'virtual_instr', '1.0')
-class virtual_instr(BaseInstrument):
-    """ This is define a virtual instrument.
+@register_instrument('pyHegel_Instrument', 'virtual_gates_instr', '1.0')
+class virtual_gates_instr(BaseInstrument):
+    """ This defines a virtual instrument that correct entries using a matrix between real and
+    virtual devices. Often used to correct coupled gate voltages.
     Useful devices:
         - '<virt_dev_name>' (created for each vdev in the virt_names parameters, with the according name)
         - virtual
@@ -2880,12 +2881,12 @@ class virtual_instr(BaseInstrument):
         self._real_devs = real_devs
         self._virt_devs = []
 
-        super(virtual_instr, self).__init__(**kwargs)
+        super(virtual_gates_instr, self).__init__(**kwargs)
         self.setMatrix(matrix, is_cc)
         self._update_virt() # init virtual values
 
     def idn(self):
-        return 'pyHegel_Instrument,virtual_instr,00000,1.0'
+        return 'pyHegel_Instrument,virtual_gates_instr,00000,1.0'
 
     def setMatrix(self, matrix, is_cc=True):
         matrix = np.array(matrix)
@@ -2994,4 +2995,4 @@ class virtual_instr(BaseInstrument):
         self.realdevs = MemoryDevice(self._real_devs, doc='set not supported.')
 
         # This needs to be last to complete creation
-        super(virtual_instr ,self)._create_devs()
+        super(virtual_gates_instr ,self)._create_devs()
