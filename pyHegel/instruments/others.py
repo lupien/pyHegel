@@ -693,28 +693,28 @@ class MagnetController_SMC(visaInstrument):
 #######################################################
 
 class pfeiffer_turbo_loop(threading.Thread):
-    def __init__(self, master):
+    def __init__(self, main):
         super(pfeiffer_turbo_loop, self).__init__()
-        self.master = master
+        self.main = main
         self.__stop = False
     def cancel(self):
         self.__stop = True
     def run(self):
         # empty buffer
-        self.master.visa.flush(visa_wrap.constants.VI_IO_IN_BUF_DISCARD)
+        self.main.visa.flush(visa_wrap.constants.VI_IO_IN_BUF_DISCARD)
         # trow away first partial data
-        self.master.read()
+        self.main.read()
         while True:
             if self.__stop:
                 return
-            string = self.master.read()
-            res = self.master.parse(string)
+            string = self.main.read()
+            res = self.main.parse(string)
             if res is None:
                 continue
             param, data = res
-            #self.master._alldata_lock.acquire()
-            self.master._alldata[param] = data, time.time()
-            #self.master._alldata_lock.release()
+            #self.main._alldata_lock.acquire()
+            self.main._alldata[param] = data, time.time()
+            #self.main._alldata_lock.release()
     def wait(self, timeout=None):
         # we use a the context manager because join uses sleep.
         with _sleep_signal_context_manager():

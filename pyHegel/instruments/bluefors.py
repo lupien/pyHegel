@@ -1514,22 +1514,22 @@ class bf_temperature_controller(BaseInstrument):
                                                             name=BfChoiceLimits(),
                                                             use_non_default_timeconstants=BfChoiceLimits(), wait_time=BfChoiceLimits(min=1), meas_time=BfChoiceLimits(min=5)),
                                                        readonly_fields=['coupled_heater_nr']))
-        self.heater_manual_power = Dict_SubDevice(self.heater, 'power', force_default='slave')
-        self.heater_en = Dict_SubDevice(self.heater, 'active', force_default='slave')
-        self.heater_setpoint = Dict_SubDevice(self.heater, 'setpoint', force_default='slave')
-        self.heater_max_power = Dict_SubDevice(self.heater, 'max_power', force_default='slave')
-        self.channel_exc_mode = Dict_SubDevice(self.channel, 'excitation_mode', force_default='slave')
-        self.channel_exc_vmax = Dict_SubDevice(self.channel, 'excitation_vmax_range', force_default='slave')
-        self.channel_exc_current = Dict_SubDevice(self.channel, 'excitation_current_range', force_default='slave')
-        self.channel_en = Dict_SubDevice(self.channel, 'active', force_default='slave')
+        self.heater_manual_power = Dict_SubDevice(self.heater, 'power', force_default='subdevice')
+        self.heater_en = Dict_SubDevice(self.heater, 'active', force_default='subdevice')
+        self.heater_setpoint = Dict_SubDevice(self.heater, 'setpoint', force_default='subdevice')
+        self.heater_max_power = Dict_SubDevice(self.heater, 'max_power', force_default='subdevice')
+        self.channel_exc_mode = Dict_SubDevice(self.channel, 'excitation_mode', force_default='subdevice')
+        self.channel_exc_vmax = Dict_SubDevice(self.channel, 'excitation_vmax_range', force_default='subdevice')
+        self.channel_exc_current = Dict_SubDevice(self.channel, 'excitation_current_range', force_default='subdevice')
+        self.channel_en = Dict_SubDevice(self.channel, 'active', force_default='subdevice')
         self._devwrap('enabled_chs')
         self._devwrap('enabled_outchs')
         self._devwrap('heater_relation')
         self._devwrap('heater_pid', multi=['P', 'I', 'D'], allow_kw_as_dict=True, choices=EmptyChoice( ['P', 'I', 'D']))
         self.heater_pid.type = self.heater_pid.choices # needed for Dict_SubDevice
-        self.heater_P = Dict_SubDevice(self.heater_pid, 'P', force_default='slave')
-        self.heater_I = Dict_SubDevice(self.heater_pid, 'I', force_default='slave')
-        self.heater_D = Dict_SubDevice(self.heater_pid, 'D', force_default='slave')
+        self.heater_P = Dict_SubDevice(self.heater_pid, 'P', force_default='subdevice')
+        self.heater_I = Dict_SubDevice(self.heater_pid, 'I', force_default='subdevice')
+        self.heater_D = Dict_SubDevice(self.heater_pid, 'D', force_default='subdevice')
         self._devwrap('fetch')
         self.alias = self.fetch
         # This needs to be last to complete creation
