@@ -44,8 +44,8 @@ necessarily very large. It depends on the complexity of the instruments, and
 the number of their features you want to provide control over.
 
 The communications to many instruments can use the standard VISA library using
-the python bindings of PyVISA (https://pyvisa.readthedocs.org/en/master/). It
-is not a requirement of pyHegel, but it is needed for most instruments. This
+the python bindings of PyVISA (https://pyvisa.readthedocs.io/en/latest/index.html).
+It is not a requirement of pyHegel, but it is needed for most instruments. This
 allows to communicate with standard instruments using GPIB, USB (usbtmc),
 LAN(VXI-11) and serial (RS232).
 
@@ -94,7 +94,7 @@ Requirements
 - some other packages depending on the instruments.
 
 An easy way to obtain most of these on windows is to intall the Anaconda Distribution
-(https://www.anaconda.com/distribution/). That includes python, numpy, scipy and matplotlib.
+(https://www.anaconda.com/download#downloads). That includes python, numpy, scipy and matplotlib.
 Others like PyVISA and PyPDF2 can be installed can be install from the command line using::
 
     pip install pyVisa
