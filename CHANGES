@@ -1,6 +1,24 @@
 pyHegel Changelog
 =================
 
+2.0.0 (2023-11-01)
+------------------
+
+- Conversion to allow compatibility between python 2 and 3. Tested with python 2.7 (many versions) and
+  python 3.7 to 3.11
+- includes some bug fixes.
+
+1.2.0 (2023-09-15)
+------------------
+
+- Added more instruments, and bugfixes
+
+1.1.0 (2019-04-15)
+------------------
+
+- Added more instruments, and bugfixes
+- Added pyHegel/gui/ScientificSpinBox.py
+
 1.0.0 (unreleased)
 ------------------
 
