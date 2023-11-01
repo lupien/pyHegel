@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<settings lang="auto" icon_size="0">
+    <console buffer_rows="1500">
+        <colors>
+            <color id="0" r="0" g="0" b="0"/>
+            <color id="1" r="0" g="0" b="128"/>
+            <color id="2" r="0" g="150" b="0"/>
+            <color id="3" r="0" g="150" b="150"/>
+            <color id="4" r="170" g="25" b="25"/>
+            <color id="5" r="128" g="0" b="128"/>
+            <color id="6" r="128" g="128" b="0"/>
+            <color id="7" r="192" g="192" b="192"/>
+            <color id="8" r="128" g="128" b="128"/>
+            <color id="9" r="0" g="100" b="255"/>
+            <color id="10" r="0" g="255" b="0"/>
+            <color id="11" r="0" g="255" b="255"/>
+            <color id="12" r="255" g="50" b="50"/>
+            <color id="13" r="255" g="0" b="255"/>
+            <color id="14" r="255" g="255" b="0"/>
+            <color id="15" r="255" g="255" b="255"/>
+        </colors>
+    </console>
+    <appearance>
+        <position save_size="1"/>
+    </appearance>
+    <behavior>
+        <copy_paste copy_on_select="1"/>
+    </behavior>
+    <hotkeys use_scroll_lock="1">
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="83" command="settings"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="112" command="help"/>
+        <hotkey ctrl="0" shift="0" alt="1" extended="0" code="115" command="exit"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="112" command="newtab1"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="113" command="newtab2"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="114" command="newtab3"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="115" command="newtab4"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="116" command="newtab5"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="117" command="newtab6"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="118" command="newtab7"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="119" command="newtab8"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="120" command="newtab9"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="121" command="newtab10"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="122" command="newtab11"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="123" command="newtab12"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="49" command="switchtab1"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="50" command="switchtab2"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="51" command="switchtab3"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="52" command="switchtab4"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="53" command="switchtab5"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="54" command="switchtab6"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="55" command="switchtab7"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="56" command="switchtab8"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="57" command="switchtab9"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="48" command="switchtab10"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="9" command="nexttab"/>
+        <hotkey ctrl="1" shift="1" alt="0" extended="0" code="9" command="prevtab"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="movetableft"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="movetabright"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="87" command="closetab"/>
+        <hotkey ctrl="1" shift="1" alt="0" extended="0" code="82" command="renametab"/>
+		<hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="clonetab"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="1" code="34" command="nextview"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="1" code="33" command="prevview"/>
+        <hotkey ctrl="0" shift="0" alt="1" extended="1" code="37" command="leftview"/>
+        <hotkey ctrl="0" shift="0" alt="1" extended="1" code="39" command="rightview"/>
+        <hotkey ctrl="0" shift="0" alt="1" extended="1" code="38" command="topview"/>
+        <hotkey ctrl="0" shift="0" alt="1" extended="1" code="40" command="bottomview"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="dechsize"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="inchsize"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="decvsize"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="incvsize"/>
+        <hotkey ctrl="1" shift="1" alt="0" extended="0" code="87" command="closeview"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="detachview"/>
+		<hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="maximizeview"/>
+		<hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="restoreview"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="attach"/>
+        <hotkey ctrl="1" shift="1" alt="0" extended="0" code="79" command="splithoriz"/>
+        <hotkey ctrl="1" shift="1" alt="0" extended="0" code="69" command="splitvert"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="splitswap"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="clone"/>
+		<hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="moveinnewtab"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="122" command="fullscreen"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="96" command="zoom100"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="107" command="zoominc"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="109" command="zoomdec"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="71" command="groupall"/>
+        <hotkey ctrl="1" shift="1" alt="0" extended="0" code="71" command="ungroupall"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="0" code="84" command="grouptab"/>
+        <hotkey ctrl="1" shift="1" alt="0" extended="0" code="84" command="ungrouptab"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="clear"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="1" code="45" command="copy"/>
+        <hotkey ctrl="1" shift="1" alt="0" extended="0" code="65" command="selectall"/>
+        <hotkey ctrl="1" shift="0" alt="0" extended="1" code="46" command="clear_selection"/>
+        <hotkey ctrl="0" shift="1" alt="0" extended="1" code="45" command="paste"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="paste_selection"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="stopscroll"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="resumescroll"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="textselleft"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="textselright"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="textseltop"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="textselbottom"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="textselhome"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="textselend"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="textselpageup"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="textselpagedown"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="colselleft"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="colselright"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="colseltop"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="colselbottom"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="colselhome"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="colselend"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="colselpageup"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="colselpagedown"/>
+        <hotkey ctrl="0" shift="1" alt="0" extended="1" code="38" command="scrollrowup"/>
+        <hotkey ctrl="0" shift="1" alt="0" extended="1" code="40" command="scrollrowdown"/>
+        <hotkey ctrl="0" shift="1" alt="0" extended="1" code="33" command="scrollpageup"/>
+        <hotkey ctrl="0" shift="1" alt="0" extended="1" code="34" command="scrollpagedown"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="scrollcolleft"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="scrollcolright"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="scrollpageleft"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="scrollpageright"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="find"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="findnext"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="findprev"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="switchtransparency"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="alwaysontop"/>
+        <hotkey ctrl="1" shift="1" alt="0" extended="0" code="112" command="dumpbuffer"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="cmdMenu1"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="cmdMenu2"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="cmdMenu3"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="cmdSnippets"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="ctrlC"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="wspload"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="wspsave"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="fwdmouse"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="externalcmd1"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="externalcmd2"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="externalcmd3"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="externalcmd4"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="externalcmd5"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="externalcmd6"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="externalcmd7"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="externalcmd8"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="externalcmd9"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="externalcmd10"/>
+        <hotkey ctrl="0" shift="0" alt="0" extended="0" code="0" command="activate" win="0"/>
+    </hotkeys>
+    <external_commands>
+    </external_commands>
+    <mouse>
+        <actions>
+            <action ctrl="1" shift="0" alt="0" button="1" name="copy"/>
+            <action ctrl="0" shift="0" alt="0" button="1" name="select"/>
+            <action ctrl="0" shift="0" alt="0" button="0" name="select_column"/>
+            <action ctrl="0" shift="0" alt="0" button="3" name="paste"/>
+            <action ctrl="1" shift="0" alt="0" button="1" name="drag"/>
+            <action ctrl="0" shift="0" alt="0" button="4" name="link"/>
+            <action ctrl="0" shift="0" alt="0" button="2" name="menu"/>
+            <action ctrl="0" shift="0" alt="0" button="0" name="menu2"/>
+            <action ctrl="0" shift="0" alt="0" button="0" name="menu3"/>
+            <action ctrl="0" shift="0" alt="0" button="0" name="snippets"/>
+        </actions></mouse>
+    <snippets dir=""/>
+    <tabs>
+        <tab title="pyHegel (anaconda3 py2)" use_default_icon="0">
+            <console shell="C:\Anaconda3\python.exe C:\Anaconda3\cwp.py C:\Anaconda3\envs\py2 C:\Anaconda3\envs\py2\Scripts\pyHegel.exe" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="pyHegel (anaconda3)" use_default_icon="0">
+            <console shell="C:\Anaconda3\python.exe C:\Anaconda3\cwp.py C:\Anaconda3 C:\Anaconda3\Scripts\pyHegel.exe" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="pyHegel (anaconda2)" use_default_icon="0">
+            <console shell="C:\Anaconda2\python.exe C:\Anaconda2\cwp.py C:\Anaconda2 C:\Anaconda2\Scripts\pyHegel.exe" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="ipython2(pylab) py2" use_default_icon="0">
+            <console shell="C:\Anaconda3\python.exe C:\Anaconda3\cwp.py C:\Anaconda3\envs\py2 C:\Anaconda3\envs\py2\Scripts\ipython.exe --pylab --TerminalInteractiveShell.display_completions=readlinelike" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="ipython3(pylab)" use_default_icon="0">
+            <console shell="C:\Anaconda3\python.exe C:\Anaconda3\cwp.py C:\Anaconda3 C:\Anaconda3\Scripts\ipython.exe --pylab --TerminalInteractiveShell.display_completions=readlinelike" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="ipython2(pylab)" use_default_icon="0">
+            <console shell="C:\Anaconda2\python.exe C:\Anaconda2\cwp.py C:\Anaconda2 C:\Anaconda2\Scripts\ipython.exe --pylab --TerminalInteractiveShell.display_completions=readlinelike" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="ipython2 py2" use_default_icon="0">
+            <console shell="C:\Anaconda3\python.exe C:\Anaconda3\cwp.py C:\Anaconda3\envs\py2 C:\Anaconda3\envs\py2\Scripts\ipython.exe --TerminalInteractiveShell.display_completions=readlinelike" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="ipython3" use_default_icon="0">
+            <console shell="C:\Anaconda3\python.exe C:\Anaconda3\cwp.py C:\Anaconda3 C:\Anaconda3\Scripts\ipython.exe --TerminalInteractiveShell.display_completions=readlinelike" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="ipython2" use_default_icon="0">
+            <console shell="C:\Anaconda2\python.exe C:\Anaconda2\cwp.py C:\Anaconda2 C:\Anaconda2\Scripts\ipython.exe --TerminalInteractiveShell.display_completions=readlinelike" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="Anaconda py2 prompt" use_default_icon="0">
+			<console shell="%windir%\System32\cmd.exe &quot;/K&quot; C:\Anaconda3\Scripts\activate.bat C:\Anaconda3\envs\py2" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="Anaconda3 prompt" use_default_icon="0">
+			<console shell="%windir%\System32\cmd.exe &quot;/K&quot; C:\Anaconda3\Scripts\activate.bat C:\Anaconda3" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="Anaconda2 prompt" use_default_icon="0">
+			<console shell="%windir%\System32\cmd.exe &quot;/K&quot; C:\Anaconda2\Scripts\activate.bat C:\Anaconda2" init_dir="%USERPROFILE%" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+        <tab title="ConsoleZ" use_default_icon="0">
+            <console shell="" init_dir="" priority="2" run_as_user="0" user="" net_only="0" run_as_admin="0"/>
+        </tab>
+    </tabs>
+</settings>
