@@ -84,7 +84,7 @@ pdf files (using pyPDF or PyPDF2), perform non-linear and polynomial fits
 Requirements
 ------------
 
-- Python (tested on 2.7, does not work on 3.x)
+- Python (works in 2.7 and 3.7 and above)
 - numpy
 - scipy
 - matplotlib
@@ -109,11 +109,15 @@ in a readlike fashion. You can start your own ipython with those options like th
 
     ipython --pylab --TerminalInteractiveShell.display_completions=readlinelike --autocall=1
 
+In newer ipython, I add the equivalent of the following parameter::
+
+    --TerminalInteractiveShell.autosuggestions_provider=None
+
 To have an improved windows console, you can install ConsoleZ
 (https://github.com/cbucher/console). I provide a starting console.xml config file
 in extra/console.xml. It can be copied to %USERPROFILE%\\AppData\\Roaming\\Console\\console.xml
 then the different tabs can be modified/removed depending on your personal setup.
-(It presumes anaconda is installed in C:\\Anaconda2 or C:\\Anaconda3 and that for 3 it the python2
+(It presumes anaconda is installed in C:\\Anaconda2 or C:\\Anaconda3 and that for 3 that the python2
 is in C:\\Anaconda3\\envs\\py2)
 
 Installation
